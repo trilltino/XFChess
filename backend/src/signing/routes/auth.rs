@@ -111,6 +111,35 @@ pub(crate) async fn authed_wallet(
     Ok(claims.sub)
 }
 
+/// Authenticates the caller via `authed_wallet`, then requires that identity
+/// to exactly match `claimed_wallet` — the shared chokepoint for "this route
+/// acts on behalf of exactly one wallet, no relaying, no exceptions" (KYC
+/// submission, Lichess linking). This is a strictly narrower check than
+/// `record_move`'s participant-aware relay logic (`routes::main::record_move`
+/// — a game's host legitimately submits moves for BOTH players, so that one
+/// stays a bespoke on-chain-participation check, not this). Before this
+/// helper existed, `submit_kyc` and `init_oauth` each hand-rolled the same
+/// six lines independently — exactly the kind of per-route reinvention that
+/// let `record_move`'s equivalent check regress unnoticed earlier in this
+/// project's history. New routes with this "caller == the one wallet this
+/// acts on" shape should call this instead of rewriting it again.
+pub(crate) async fn require_caller_owns_wallet(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+    claimed_wallet: &str,
+) -> Result<String, (StatusCode, String)> {
+    let wallet = authed_wallet(state, headers).await?;
+    if wallet != claimed_wallet {
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!(
+                "Authenticated wallet {wallet} does not match the wallet this request claims to act on ('{claimed_wallet}')"
+            ),
+        ));
+    }
+    Ok(wallet)
+}
+
 /// Creates the authentication router.
 pub fn auth_routes() -> Router<AppState> {
     Router::new()
@@ -370,7 +399,26 @@ async fn link_wallet(
             )
         })?;
 
-    // 3. Link Wallet
+    // 3. Refuse to silently re-point an already-linked account to a
+    // different wallet. `link_wallet`'s UPDATE has no concept of "this
+    // account already has an identity" — letting it succeed here would
+    // silently detach this email/username from its current wallet (and
+    // whatever KYC/CACF/session history sits under that wallet string,
+    // none of which is reconciled anywhere) and re-attach the account to a
+    // new one, with no history or explicit consent step. Linking a wallet
+    // for the first time (the common case: an email-first account that
+    // never had one) is unaffected — this only blocks a SECOND link to a
+    // DIFFERENT wallet.
+    if !user.0.is_empty() && user.0 != req.wallet {
+        return Err((
+            StatusCode::CONFLICT,
+            "This account is already linked to a different wallet and cannot be re-linked \
+             automatically. Contact support if you need to change the linked wallet."
+                .to_string(),
+        ));
+    }
+
+    // 4. Link Wallet
     state
         .store
         .link_wallet(&req.email, &req.wallet)
@@ -556,25 +604,15 @@ struct ProfileOnChain {
     pub username_set: bool,
 }
 
-/// POST /auth/sync-profile — reads the caller's on-chain PlayerProfile PDA
-/// and returns its status. This is the single source of truth wallet-ui and
-/// the game client should both route on: whether an on-chain profile exists
-/// at all, whether a username has been chosen, and whether the account is
-/// KYC-verified (`is_verified`). "No profile yet" / "no username yet" are
-/// normal states for a new wallet, not errors — this always returns 200
-/// (barring a genuine auth/RPC failure) so callers can branch on the fields
-/// instead of on HTTP status. Requires a valid Bearer JWT. Safe to retry —
-/// idempotent; also mirrors the username into SQLite as a side effect once
-/// one is set on-chain.
-async fn sync_profile(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // 1. Validate JWT → wallet pubkey
-    let wallet = authed_wallet(&state, &headers).await?;
-    let wallet = &wallet;
-
-    // 2. Derive PlayerProfile PDA  (seeds: ["profile", wallet_bytes])
+/// Fetches and borsh-decodes the caller's on-chain `PlayerProfile`, or
+/// `None` if the account doesn't exist yet — a normal state for a wallet
+/// that hasn't wagered/initialized on-chain yet, not an error. Shared by
+/// `sync_profile` and `set_username`'s on-chain-precedence guard (see the
+/// latter's doc comment for why both need the same read).
+async fn fetch_onchain_profile(
+    state: &AppState,
+    wallet: &str,
+) -> Result<Option<ProfileOnChain>, (StatusCode, String)> {
     let wallet_pk = Pubkey::from_str(wallet).map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
@@ -592,23 +630,13 @@ async fn sync_profile(
         &program_id,
     );
 
-    // 3. Fetch account data from Solana RPC (uses SOLANA_RPC_URL — correct in prod).
-    // No account at this PDA yet is a normal "not registered" state, not an error.
     let rpc =
         solana_client::nonblocking::rpc_client::RpcClient::new(state.config.solana_rpc_url.clone());
     let account = match rpc.get_account(&profile_pda).await {
         Ok(account) => account,
-        Err(_) => {
-            return Ok(Json(serde_json::json!({
-                "has_profile": false,
-                "username_set": false,
-                "is_verified": false,
-                "username": null,
-            })));
-        }
+        Err(_) => return Ok(None),
     };
 
-    // 4. Borsh-decode: skip 8-byte Anchor discriminator then deserialise
     if account.data.len() < 9 {
         return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -621,8 +649,36 @@ async fn sync_profile(
             format!("Failed to decode profile: {e}"),
         )
     })?;
+    Ok(Some(profile))
+}
 
-    // 5. If a username is set, mirror it into SQLite as the canonical value.
+/// POST /auth/sync-profile — reads the caller's on-chain PlayerProfile PDA
+/// and returns its status. This is the single source of truth wallet-ui and
+/// the game client should both route on: whether an on-chain profile exists
+/// at all, whether a username has been chosen, and whether the account is
+/// KYC-verified (`is_verified`). "No profile yet" / "no username yet" are
+/// normal states for a new wallet, not errors — this always returns 200
+/// (barring a genuine auth/RPC failure) so callers can branch on the fields
+/// instead of on HTTP status. Requires a valid Bearer JWT. Safe to retry —
+/// idempotent; also mirrors the username into SQLite as a side effect once
+/// one is set on-chain.
+async fn sync_profile(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let wallet = authed_wallet(&state, &headers).await?;
+    let wallet = &wallet;
+
+    let Some(profile) = fetch_onchain_profile(&state, wallet).await? else {
+        return Ok(Json(serde_json::json!({
+            "has_profile": false,
+            "username_set": false,
+            "is_verified": false,
+            "username": null,
+        })));
+    };
+
+    // If a username is set, mirror it into SQLite as the canonical value.
     if profile.username_set && !profile.username.is_empty() {
         state
             .store
@@ -1002,8 +1058,19 @@ struct SetUsernameReq {
     username: String,
 }
 
-/// PATCH /auth/username — updates the display username in SQLite for the JWT's wallet.
-/// Checks availability then writes. Does not touch the on-chain account.
+/// PATCH /auth/username — updates the display username in SQLite for the
+/// JWT's wallet. Checks availability then writes. Does not touch the
+/// on-chain account, which is exactly the problem once one exists:
+/// `resolveExistingUsername` (wallet-ui) and this web app's `ProfileStep`
+/// both prefer the on-chain `PlayerProfile.username` once `username_set` is
+/// true, so an off-chain-only rename at that point would silently apply to
+/// a field neither surface ever displays again — the player sees "success"
+/// here while nothing anywhere actually shows the new name. Once the
+/// on-chain username is set, a rename must go through the on-chain path
+/// (re-submit `init_profile`/`init-profile-sponsored-tx` with the new name,
+/// which the player signs) instead. Before that point — the common case,
+/// since on-chain profile init is deferred to the player's first wager —
+/// this off-chain path is the only one that exists and works as before.
 async fn set_username(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -1016,6 +1083,17 @@ async fn set_username(
             StatusCode::BAD_REQUEST,
             "Username must be 3-20 characters".to_string(),
         ));
+    }
+
+    if let Some(onchain) = fetch_onchain_profile(&state, &wallet).await? {
+        if onchain.username_set && !onchain.username.is_empty() {
+            return Err((
+                StatusCode::CONFLICT,
+                "On-chain username is already set — update it via the on-chain profile flow \
+                 (re-submit init_profile with the new name) instead of this off-chain-only route."
+                    .to_string(),
+            ));
+        }
     }
 
     if state.store.username_taken(&req.username).await {

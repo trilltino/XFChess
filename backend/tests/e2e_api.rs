@@ -19,6 +19,7 @@ use tower::ServiceExt; // for `oneshot`
 
 use backend::db::repository::GameRepository;
 use backend::infrastructure::{build_app_router, initialize_pools, run_migrations};
+use backend::signing::identity::IdentityVault;
 use backend::signing::storage::tournament::TournamentStore;
 use backend::signing::storage::SessionStore;
 use backend::signing::{AppState, SigningConfig};
@@ -53,11 +54,12 @@ fn test_config() -> SigningConfig {
         vps_authority_key: None,
         kyc_authority_key: None,
         link_authority_key: None,
-        treasury_authority_key: None,
+        treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
         admin_token: Some("test-admin-token".into()),
         tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
         usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
         lichess_client_id: String::new(),
+        allowed_origins: vec![],
     }
 }
 
@@ -126,7 +128,12 @@ async fn spawn_app() -> TestApp {
         .expect("init pools");
     run_migrations(&pools).await.expect("run migrations");
 
-    let session_store = SessionStore::new(pools.session_pool.clone());
+    // Only used below to create/migrate tables via `.init()` — the vault
+    // itself doesn't matter since AppState::new builds the real store this
+    // test actually reads/writes through.
+    let schema_vault =
+        IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
+    let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await.expect("session store init");
 
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
@@ -170,6 +177,47 @@ async fn metrics_endpoint_exposes_worker_counters() {
     assert!(
         body.contains("xfchess_settlement_stale_delegated_gauge"),
         "missing stale-delegation gauge (persistency plan Phase 5 monitoring)"
+    );
+    assert!(
+        body.contains("xfchess_auth_unconfigured_relay_rejected_total"),
+        "missing unconfigured-relay auth rejection counter"
+    );
+}
+
+// multi_thread flavor: detailed_health_check's Solana RPC check runs the
+// blocking RpcClient inside spawn_blocking (block_in_place), same reason as
+// offchain_username_does_not_imply_onchain_profile above.
+#[tokio::test(flavor = "multi_thread")]
+async fn health_detailed_reports_real_memory_and_disk_state() {
+    let app = spawn_app().await;
+    let (status, body) = app.get("/health/detailed").await;
+    // "degraded" (e.g. the RPC check failing against this test's unreachable
+    // RPC URL) still returns 200 — only "critical" returns 503.
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let checks = body["checks"].as_array().expect("checks array");
+    let find = |name: &str| {
+        checks
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("no '{name}' check in {checks:?}"))
+    };
+
+    let memory = find("memory");
+    assert_eq!(memory["status"], "ok", "memory check: {memory}");
+    let memory_msg = memory["message"].as_str().unwrap_or_default();
+    assert!(
+        memory_msg.contains('%'),
+        "memory check should report a real usage percentage, not the old \
+         hardcoded placeholder string: {memory_msg}"
+    );
+
+    let disk = find("disk_space");
+    let disk_msg = disk["message"].as_str().unwrap_or_default();
+    assert!(
+        disk_msg.contains('%'),
+        "disk check should report a real usage percentage on every OS \
+         (including Windows), not the old always-warning placeholder: {disk_msg}"
     );
 }
 
@@ -465,6 +513,252 @@ async fn login_rejects_stale_timestamp() {
     );
 }
 
+/// `link_wallet`'s `UPDATE users_v2 SET wallet = ? WHERE email = ?` has no
+/// concept of "this account already has a wallet" — before this fix it would
+/// silently re-point an email account from one wallet to another, orphaning
+/// whatever KYC/CACF history sat under the old wallet string with nothing to
+/// reconcile it. First-time linking must still work; a second link to a
+/// DIFFERENT wallet must now be rejected.
+#[tokio::test]
+async fn link_wallet_rejects_repointing_an_already_linked_account() {
+    let app = spawn_app().await;
+    let email = "linktest@example.com";
+    let password = "correct horse battery staple";
+
+    let (status, body) = app
+        .post_json(
+            "/api/auth/register-email",
+            &json!({ "email": email, "password": password, "username": "linktester" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "register-email: {body}");
+
+    let first_wallet = Keypair::new();
+    let first_wallet_pk = first_wallet.pubkey().to_string();
+    let ts = now_secs();
+    let sig = first_wallet
+        .sign_message(format!("xfchess:link:{ts}").as_bytes())
+        .to_string();
+
+    let (status, body) = app
+        .post_json(
+            "/api/auth/link-wallet",
+            &json!({
+                "email": email, "password": password,
+                "wallet": first_wallet_pk, "signature": sig, "timestamp": ts,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "first link should succeed: {body}");
+
+    // Re-linking the SAME wallet again (e.g. a retried request) must still work.
+    let ts2 = now_secs();
+    let sig2 = first_wallet
+        .sign_message(format!("xfchess:link:{ts2}").as_bytes())
+        .to_string();
+    let (status, body) = app
+        .post_json(
+            "/api/auth/link-wallet",
+            &json!({
+                "email": email, "password": password,
+                "wallet": first_wallet_pk, "signature": sig2, "timestamp": ts2,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "re-linking the same wallet: {body}");
+
+    // Linking a DIFFERENT wallet must now be rejected.
+    let second_wallet = Keypair::new();
+    let second_wallet_pk = second_wallet.pubkey().to_string();
+    let ts3 = now_secs();
+    let sig3 = second_wallet
+        .sign_message(format!("xfchess:link:{ts3}").as_bytes())
+        .to_string();
+    let (status, body) = app
+        .post_json(
+            "/api/auth/link-wallet",
+            &json!({
+                "email": email, "password": password,
+                "wallet": second_wallet_pk, "signature": sig3, "timestamp": ts3,
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "linking a second, different wallet must be rejected: {body}"
+    );
+
+    // Confirm the account still resolves to the FIRST wallet, not the second.
+    let (status, body) = app
+        .post_json(
+            "/api/auth/login",
+            &json!({
+                "wallet": first_wallet_pk,
+                "signature": first_wallet
+                    .sign_message(format!("xfchess:login:{}", now_secs()).as_bytes())
+                    .to_string(),
+                "timestamp": now_secs(),
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the original linked wallet must still be able to log in: {body}"
+    );
+}
+
+/// `GET /api/auth/lichess/init` used to accept `wallet_pubkey` as a bare
+/// query param — only CSRF-protected via the `state` round trip through
+/// Lichess, not actually bound to the caller's own wallet. It now requires
+/// a Bearer JWT matching `wallet_pubkey`.
+#[tokio::test]
+async fn lichess_init_requires_auth_and_rejects_wallet_mismatch() {
+    let app = spawn_app().await;
+    let kp = Keypair::new();
+    let wallet = kp.pubkey().to_string();
+    let stranger_wallet = Keypair::new().pubkey().to_string();
+
+    // No Authorization header at all.
+    let (status, _) = app
+        .get(&format!("/api/auth/lichess/init?wallet_pubkey={wallet}"))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "unauthenticated lichess/init must be rejected"
+    );
+
+    // Log in as `wallet`.
+    let (status, body) = app
+        .post_json("/api/auth/siws-challenge", &json!({ "wallet": wallet }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "challenge: {body}");
+    let nonce = body["nonce"].as_str().expect("nonce").to_string();
+    let sig = kp
+        .sign_message(format!("xfchess:siws:{nonce}").as_bytes())
+        .to_string();
+    let (status, body) = app
+        .post_json(
+            "/api/auth/siws-verify",
+            &json!({ "wallet": wallet, "signature": sig, "nonce": nonce }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "verify: {body}");
+    let token = body["token"].as_str().expect("token").to_string();
+
+    // A valid JWT for `wallet` trying to init a Lichess link for a
+    // DIFFERENT wallet must be rejected.
+    let (status, _) = app
+        .send_auth(
+            "GET",
+            &format!("/api/auth/lichess/init?wallet_pubkey={stranger_wallet}"),
+            Some(&token),
+            None,
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a valid JWT for one wallet must not init a Lichess link for a different wallet"
+    );
+
+    // The authenticated wallet's own request passes the auth gate (fails
+    // later with SERVICE_UNAVAILABLE since LICHESS_CLIENT_ID is unset in
+    // this test config — proves the auth check specifically, not the whole
+    // flow, which needs real Lichess OAuth config to complete).
+    let (status, _) = app
+        .send_auth(
+            "GET",
+            &format!("/api/auth/lichess/init?wallet_pubkey={wallet}"),
+            Some(&token),
+            None,
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "own-wallet request should clear the auth gate and fail only on missing Lichess config"
+    );
+}
+
+/// `POST /api/kyc/submit` used to accept `wallet_pubkey` as a bare,
+/// unauthenticated field — anyone could submit PII attributed to an
+/// arbitrary wallet with zero proof of ownership. It now requires a Bearer
+/// JWT and rejects a submission whose body `wallet_pubkey` doesn't match the
+/// authenticated wallet, closing that gap the same way `record_move` was
+/// fixed earlier for a different route.
+#[tokio::test]
+async fn kyc_submit_requires_auth_and_rejects_wallet_mismatch() {
+    let app = spawn_app().await;
+    let kp = Keypair::new();
+    let wallet = kp.pubkey().to_string();
+    let stranger_wallet = Keypair::new().pubkey().to_string();
+
+    let kyc_body = |wallet_pubkey: &str| {
+        json!({
+            "wallet_pubkey": wallet_pubkey,
+            "country": "GB",
+            "full_name": "Test Player",
+            "dob": "1990-01-01",
+            "residence": "1 Test Street",
+            "tax_id": "AB123456C",
+        })
+    };
+
+    // No Authorization header at all — must be rejected outright.
+    let (status, _) = app.post_json("/api/kyc/submit", &kyc_body(&wallet)).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "unauthenticated KYC submission must be rejected"
+    );
+
+    // Log in as `wallet`, then try to submit KYC for a DIFFERENT wallet.
+    let (status, body) = app
+        .post_json("/api/auth/siws-challenge", &json!({ "wallet": wallet }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "challenge: {body}");
+    let nonce = body["nonce"].as_str().expect("nonce").to_string();
+    let sig = kp
+        .sign_message(format!("xfchess:siws:{nonce}").as_bytes())
+        .to_string();
+    let (status, body) = app
+        .post_json(
+            "/api/auth/siws-verify",
+            &json!({ "wallet": wallet, "signature": sig, "nonce": nonce }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "verify: {body}");
+    let token = body["token"].as_str().expect("token").to_string();
+
+    let (status, _) = app
+        .send_auth(
+            "POST",
+            "/api/kyc/submit",
+            Some(&token),
+            Some(&kyc_body(&stranger_wallet)),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a valid JWT for one wallet must not submit KYC for a different wallet"
+    );
+
+    // Submitting KYC for the AUTHENTICATED wallet succeeds.
+    let (status, body) = app
+        .send_auth(
+            "POST",
+            "/api/kyc/submit",
+            Some(&token),
+            Some(&kyc_body(&wallet)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "own-wallet KYC submission: {body}");
+}
+
 /// The off-chain (SQLite `users.username`, set via `PATCH /api/auth/username`)
 /// and on-chain (`PlayerProfile.username_set`) registration states are
 /// completely independent — this is the exact combination that was untested
@@ -567,9 +861,10 @@ impl Drop for RelaySharedSecretGuard {
 }
 
 /// Dual-accept guard on the signing endpoints: a valid per-user JWT *or* the
-/// legacy relay secret is accepted; neither → 401. JWT callers are also
-/// authorized per-wallet on session creation. All RELAY_SHARED_SECRET handling
-/// is kept in this one test to avoid racing the process-global env var.
+/// legacy relay secret is accepted; neither → 401 (fail-closed). JWT callers
+/// are also authorized per-wallet on session creation and move submission.
+/// All RELAY_SHARED_SECRET handling is kept in this one test to avoid racing
+/// the process-global env var.
 #[tokio::test]
 async fn dual_accept_auth_guards_signing_endpoints() {
     let _guard = RELAY_TEST_LOCK.lock().unwrap();
@@ -646,19 +941,45 @@ async fn dual_accept_auth_guards_signing_endpoints() {
         "own-wallet session must pass authz"
     );
 
-    // (f) Secret genuinely unset + no auth at all → the guard fails OPEN
-    // (`require_relay_or_jwt`'s "neither configured" branch in
-    // auth_middleware.rs), not closed. This is the property the persistency
-    // plan depends on: gameplay-critical routes must never hard-require
-    // backend auth, so the game is still playable if the JWT/relay-secret
-    // layer is entirely unconfigured. Regressing this to a 401 would
-    // silently turn an optional auth layer into a mandatory backend gate.
+    // (f) Secret genuinely unset + no auth at all → the guard fails CLOSED.
+    // The game client fetches a JWT automatically on every wallet connection
+    // (see `src/multiplayer/network/vps/client.rs`), so an unconfigured
+    // relay secret is a fallback, not the primary flow — a missing/invalid
+    // credential must never be treated as an unauthenticated pass-through.
     std::env::remove_var("RELAY_SHARED_SECRET");
     let (status, _) = app.post_json("/move/record", &move_body).await;
-    assert_ne!(
+    assert_eq!(
         status,
         StatusCode::UNAUTHORIZED,
-        "fail-open: unset secret + no JWT must not be rejected by the auth guard"
+        "fail-closed: unset secret + no JWT must be rejected by the auth guard"
+    );
+
+    // (g) Valid JWT for wallet A, but mover_wallet in the body names wallet B,
+    // for a game_id neither wallet is verifiably part of → rejected. A
+    // credential authenticating one wallet must not be usable to submit a
+    // move for a game it has no on-chain relationship to. (This is NOT the
+    // same as "caller must equal mover_wallet" — see
+    // `record_move_allows_a_genuine_participant_to_relay_the_other_players_move`
+    // in signing::routes::main's own test module for the case this must
+    // *allow*: a game's host relays moves for both players, so caller and
+    // mover_wallet routinely differ for one side's moves. This test only
+    // proves the reject side, since a fake game_id can't be seeded with real
+    // on-chain participants from here.)
+    let _relay_secret_g = RelaySharedSecretGuard::set("e2e-relay-secret");
+    let mismatched_move_body = json!({
+        "game_id": 1,
+        "move_uci": "e2e4",
+        "next_fen": "x",
+        "nonce": 1,
+        "mover_wallet": other,
+    });
+    let (status, _) = app
+        .send_auth("POST", "/move/record", Some(&token), Some(&mismatched_move_body))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "JWT for a wallet with no on-chain relationship to this game must 403"
     );
 }
 
@@ -681,4 +1002,46 @@ async fn admin_route_requires_api_key() {
         )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// `treasury_refund` must never sign or submit a transaction itself — see
+/// `bin/treasury_signer.rs`'s module doc. It should validate, audit-log, and
+/// hand back the CLI command for an operator to run on an isolated host,
+/// never a `signature` field (there's nothing to sign with — this process
+/// holds no treasury secret key at all, only the public key).
+#[tokio::test]
+async fn treasury_refund_never_signs_in_process() {
+    let app = spawn_app().await;
+    let wallet = Keypair::new().pubkey().to_string();
+
+    let req = Request::builder()
+        .uri("/admin/treasury/refund")
+        .method("POST")
+        .header("content-type", "application/json")
+        .header("X-API-Key", "dev")
+        .body(Body::from(
+            serde_json::to_vec(&json!({
+                "wallet": wallet,
+                "lamports": 1_000_000,
+                "reason": "test refund",
+                "admin_token": "test-admin-token",
+            }))
+            .unwrap(),
+        ))
+        .unwrap();
+    let (status, body) = app.send(req).await;
+
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert_eq!(body["status"], "awaiting_manual_execution");
+    assert!(
+        body.get("signature").is_none(),
+        "no signature should ever come from this process: {body}"
+    );
+    let command = body["run_on_isolated_host"]
+        .as_str()
+        .expect("run_on_isolated_host string");
+    assert!(
+        command.contains("treasury_signer"),
+        "should hand the operator the isolated-host command: {command}"
+    );
 }

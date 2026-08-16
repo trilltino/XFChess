@@ -318,6 +318,7 @@ pub fn game_over_popup_system(
     mut commands: Commands,
     mut popup_queue: ResMut<crate::ui::menus::popup::GamePopupQueue>,
     tokio_runtime: Option<Res<crate::multiplayer::TokioRuntime>>,
+    player_identity: Res<crate::states::main_menu::PlayerIdentity>,
     #[cfg(feature = "solana")] sol_usd_rate: Option<
         Res<crate::multiplayer::solana::wager_rate::SolUsdRate>,
     >,
@@ -826,11 +827,17 @@ pub fn game_over_popup_system(
 
     if save_pgn {
         let pgn_text = cached_pgn.pgn_string.clone();
-        // Save under the active local profile's own subfolder so each
-        // profile's PGN history stays separate; falls back to the shared
+        // Save under this instance's own active profile subfolder so each
+        // profile's PGN history stays separate. Uses the in-memory
+        // `PlayerIdentity` (set once at profile pick time) rather than
+        // re-reading the shared `profiles.json` `active` field from disk —
+        // that file is shared across every local instance on the machine
+        // (e.g. two windows running a same-PC P2P match), so whichever
+        // instance last activated a profile would silently steal every
+        // other instance's save target. Falls back to the shared
         // `Documents/xfchess/` folder if no profile is active yet.
-        let dir = match crate::multiplayer::network::identity::load_active_profile() {
-            Some(name) => crate::multiplayer::network::identity::profile_pgn_dir(&name),
+        let dir = match player_identity.username.as_deref() {
+            Some(name) => crate::multiplayer::network::identity::profile_pgn_dir(name),
             None => dirs::document_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("xfchess"),

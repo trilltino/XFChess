@@ -156,7 +156,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
             signing_state.clone(),
             crate::telemetry::telemetry_middleware,
         ))
-        .layer(cors_layer())
+        .layer(cors_layer(&signing_state.config.allowed_origins))
         // Correlation IDs: accept an inbound x-request-id or mint a UUID, include it in
         // the request span (so every log line within the request carries it), and echo
         // it on the response so clients/support can quote it.
@@ -185,20 +185,20 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         ))
 }
 
-/// CORS layer built from the `ALLOWED_ORIGINS` env var (comma-separated list of
-/// origins, e.g. `https://xfchess.com,https://www.xfchess.com`).
+/// CORS layer built from `SigningConfig::allowed_origins` (parsed from the
+/// `ALLOWED_ORIGINS` env var — comma-separated list, e.g.
+/// `https://xfchess.com,https://www.xfchess.com`).
 ///
-/// If `ALLOWED_ORIGINS` is unset/empty we fall back to permissive (any origin) —
-/// convenient for local dev, but **ALLOWED_ORIGINS must be set in production**.
-fn cors_layer() -> tower_http::cors::CorsLayer {
+/// If `allowed_origins` is empty we fall back to permissive (any origin) —
+/// convenient for local dev. `SigningConfig::validate` refuses to start in
+/// production with an empty list, so a production process reaching this
+/// function always has a real allow-list.
+fn cors_layer(allowed_origins: &[String]) -> tower_http::cors::CorsLayer {
     use axum::http::{header, HeaderValue, Method};
     use tower_http::cors::{AllowOrigin, CorsLayer};
 
-    let origins: Vec<HeaderValue> = std::env::var("ALLOWED_ORIGINS")
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+    let origins: Vec<HeaderValue> = allowed_origins
+        .iter()
         .filter_map(|s| s.parse::<HeaderValue>().ok())
         .collect();
 

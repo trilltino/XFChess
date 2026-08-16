@@ -185,11 +185,11 @@ pub async fn detailed_health_check(State(state): State<AppState>) -> impl IntoRe
     (status_code, Json(response))
 }
 
-/// `GET /api/debug/tx/{signature}` — inspects an on-chain transaction.
-/// Currently always returns `success: true` with empty logs and no account
-/// changes for any signature: the underlying `solana::debug_transaction` is a
-/// stub (RPC transaction-status client types aren't wired up in this build).
-/// Only signature parse errors (400) and RPC-fetch failures (404) are real.
+/// `GET /api/debug/tx/{signature}` — inspects an on-chain transaction via a
+/// real `getTransaction` RPC call. `success`/`error`/`logs`/`account_changes`
+/// reflect what actually happened on-chain, not a hardcoded default. Returns
+/// 400 on an unparseable signature, 404 if the RPC can't find the transaction
+/// (not yet confirmed, wrong cluster, or genuinely unknown).
 pub async fn debug_transaction_endpoint(
     Path(signature): Path<String>,
     State(state): State<AppState>,
@@ -293,66 +293,101 @@ async fn check_feepayer_pool(state: &AppState) -> (Option<String>, String) {
     }
 }
 
+/// Reports usage of whichever disk holds the current working directory (where
+/// the session/vault SQLite files and PID file live) — the mount that
+/// actually matters for this process staying up. Cross-platform via
+/// `sysinfo`, replacing the old Unix-only `df` shell-out (which silently
+/// reported "warning" on every Windows dev box regardless of real usage).
 async fn check_disk_space() -> (Option<String>, String) {
-    // Check disk space using system command
-    #[cfg(unix)]
-    {
-        use std::process::Command;
-        match Command::new("df").args(["-h", "/"]).output() {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let lines: Vec<&str> = stdout.lines().collect();
-                if lines.len() >= 2 {
-                    let parts: Vec<&str> = lines[1].split_whitespace().collect();
-                    if parts.len() >= 5 {
-                        let usage = parts[4];
-                        let usage_percent = usage.trim_end_matches('%').parse::<u32>().unwrap_or(0);
+    use sysinfo::Disks;
 
-                        if usage_percent > 90 {
-                            (
-                                Some(format!("Disk usage: {}", usage)),
-                                "critical".to_string(),
-                            )
-                        } else if usage_percent > 80 {
-                            (
-                                Some(format!("Disk usage: {}", usage)),
-                                "warning".to_string(),
-                            )
-                        } else {
-                            (Some(format!("Disk usage: {}", usage)), "ok".to_string())
-                        }
-                    } else {
-                        (
-                            Some("Could not parse disk info".to_string()),
-                            "warning".to_string(),
-                        )
-                    }
-                } else {
-                    (
-                        Some("Could not get disk info".to_string()),
-                        "warning".to_string(),
-                    )
-                }
-            }
-            Err(e) => (
-                Some(format!("Error checking disk: {}", e)),
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            return (
+                Some(format!("Could not determine working directory: {e}")),
                 "error".to_string(),
-            ),
+            )
         }
-    }
+    };
 
-    #[cfg(not(unix))]
-    {
-        (
-            Some("Disk check not available on Windows".to_string()),
+    let disks = Disks::new_with_refreshed_list();
+    // Pick the disk whose mount point is the longest prefix of `cwd` — the
+    // most specific match (e.g. a separate /data mount over the root disk).
+    let best = disks
+        .list()
+        .iter()
+        .filter(|d| cwd.starts_with(d.mount_point()))
+        .max_by_key(|d| d.mount_point().as_os_str().len());
+
+    let Some(disk) = best else {
+        return (
+            Some("No disk found containing the working directory".to_string()),
             "warning".to_string(),
-        )
+        );
+    };
+
+    let total = disk.total_space();
+    if total == 0 {
+        return (
+            Some("Disk reported zero total space".to_string()),
+            "warning".to_string(),
+        );
+    }
+    let used = total.saturating_sub(disk.available_space());
+    let usage_percent = (used as f64 / total as f64) * 100.0;
+    let msg = format!(
+        "Disk usage: {:.1}% ({} used of {} on {})",
+        usage_percent,
+        format_bytes(used),
+        format_bytes(total),
+        disk.mount_point().display()
+    );
+
+    if usage_percent > 90.0 {
+        (Some(msg), "critical".to_string())
+    } else if usage_percent > 80.0 {
+        (Some(msg), "warning".to_string())
+    } else {
+        (Some(msg), "ok".to_string())
     }
 }
 
+fn format_bytes(bytes: u64) -> String {
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
+    format!("{:.2} GB", bytes as f64 / GB)
+}
+
+/// Real resident-memory check via `sysinfo`, replacing the old placeholder
+/// that always reported "ok" regardless of actual memory pressure.
 async fn check_memory() -> (Option<String>, String) {
-    // This is a placeholder - in production you'd use sysinfo crate
-    (Some("Memory check available".to_string()), "ok".to_string())
+    use sysinfo::System;
+
+    let mut sys = System::new();
+    sys.refresh_memory();
+    let total = sys.total_memory();
+    if total == 0 {
+        return (
+            Some("Could not determine total system memory".to_string()),
+            "warning".to_string(),
+        );
+    }
+    let used = sys.used_memory();
+    let usage_percent = (used as f64 / total as f64) * 100.0;
+    let msg = format!(
+        "Memory usage: {:.1}% ({} used of {})",
+        usage_percent,
+        format_bytes(used),
+        format_bytes(total)
+    );
+
+    if usage_percent > 90.0 {
+        (Some(msg), "critical".to_string())
+    } else if usage_percent > 80.0 {
+        (Some(msg), "warning".to_string())
+    } else {
+        (Some(msg), "ok".to_string())
+    }
 }
 
 #[cfg(test)]

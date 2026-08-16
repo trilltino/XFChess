@@ -31,8 +31,50 @@ const API_BASE = `http://localhost:${BRIDGE_PORT}`;
 // Tauri sidecar spawned it. main.rs must match this exact format.
 document.title = `XFChess #${BRIDGE_PORT}`;
 
+// Phantom/Solflare's page-injected `provider` proxies every call through a
+// content script to the extension's background service worker. When that
+// relay is broken (MV3 background asleep and failing to wake, or the
+// content script itself never injected into this specific popup window —
+// surfaces in DevTools as "Could not establish connection. Receiving end
+// does not exist") the injected provider methods don't reject, they just
+// never resolve. Without this wrapper `provider.connect()` hangs forever:
+// the "Connect" button's spinner never clears and no error ever reaches
+// setError, so the user has no signal anything went wrong and no way to
+// retry short of closing and reopening the whole popup.
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out — try closing this window and reopening it.`)),
+      ms,
+    );
+    p.then((v) => { clearTimeout(timer); resolve(v); },
+           (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Session correlation — a fresh `sid` is minted by Tauri every time it opens
+// this popup (see begin_session/open_wallet_popup_with_step in
+// tauri/src/main.rs) and passed in the URL. Reading it back here and
+// stamping it on every request (as X-Session-Id, forwarded by the bridge to
+// the backend as x-request-id) means one login/sign attempt's Chrome-spawn
+// log lines, this page's own console output, and the backend's request logs
+// all carry the same id end to end. A direct `npm run dev` load (or an old
+// cached page with no `sid`) falls back to a locally-minted id so logging
+// still works, it just won't correlate with anything outside this page.
+const SESSION_ID =
+  new URLSearchParams(window.location.search).get("sid") ||
+  `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+function logLifecycle(event: string, detail?: unknown) {
+  // eslint-disable-next-line no-console
+  console.log(`[Lifecycle sid=${SESSION_ID}] ${event}`, detail ?? "");
+}
+
 async function apiGet<T = unknown>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`);
+  const resp = await fetch(`${API_BASE}${path}`, {
+    headers: { "X-Session-Id": SESSION_ID },
+  });
   if (!resp.ok) throw new Error(`GET ${path} failed: ${resp.status}`);
   return resp.json() as Promise<T>;
 }
@@ -45,7 +87,7 @@ async function apiGet<T = unknown>(path: string): Promise<T> {
 // fall back to window.close() if the bridge itself is unreachable.
 async function closePopup() {
   try {
-    await fetch(`${API_BASE}/hide`, { method: "POST" });
+    await fetch(`${API_BASE}/hide`, { method: "POST", headers: { "X-Session-Id": SESSION_ID } });
   } catch {
     window.close();
   }
@@ -99,10 +141,50 @@ async function ensureDevnet(provider: any, kind: string | null): Promise<void> {
   }
 }
 
-async function apiPost<T = unknown>(path: string, body?: unknown): Promise<T> {
+// `ensureDevnet` above is unavoidably best-effort: neither Phantom's nor
+// Solflare's `switchNetwork`/`setCluster` calls expose a documented way to
+// verify the switch actually took (no stable `provider.network`/`.cluster`
+// readback across versions), and every branch already swallows its own
+// errors silently. Live repro (see global_session_manager.rs's
+// `establish_global_session` doc comment, which cross-references this): a
+// Solflare popup rejected a devnet transaction with "current network
+// devnet, but this transaction is for mainnet" — Solflare's own message
+// text, not ours — with no user action involved, meaning the switch call
+// either silently failed or hadn't taken effect yet when signTransaction
+// ran. Rather than gate signing on an unverifiable readback (which risks
+// false-positive lockouts on wallet versions this was never tested
+// against), detect that specific failure shape reactively and turn it into
+// an actionable message instead of the wallet's own confusing raw text —
+// see the two call sites below.
+export function isNetworkMismatchError(e: any): boolean {
+  const msg = String(e?.message ?? e ?? "").toLowerCase();
+  const mentionsNetwork = msg.includes("network") || msg.includes("cluster");
+  const mentionsClusterNames = msg.includes("devnet") || msg.includes("mainnet");
+  const mentionsMismatch =
+    msg.includes("mismatch") || msg.includes("but this transaction is for") || msg.includes("wrong network");
+  return mentionsNetwork && mentionsClusterNames && mentionsMismatch;
+}
+
+export const NETWORK_MISMATCH_MESSAGE =
+  "Your wallet extension is set to the wrong Solana network. Switch it to Devnet " +
+  "(open the extension → network/cluster settings → Devnet), then try again.";
+
+// `token` is optional because most `apiPost` call sites hit unauthenticated
+// bridge routes (e.g. `/token`, `/api/game/launch`) — but any route proxied
+// through to a `authed_wallet`-gated backend endpoint (init-profile-tx,
+// broadcast-tx, ...) needs a Bearer token forwarded, or the Tauri bridge's
+// `forward_client_headers` (tauri/src/main.rs) has nothing to forward and
+// the backend 401s with "Missing Authorization header." Omitting it here was
+// a real, reproduced bug for `init-profile-tx`/`broadcast-tx` specifically —
+// every other authenticated call site in this file already builds its own
+// raw `fetch` with the header by hand (see the `/api/auth/username` PATCH
+// above `ProfileStep.submit`) rather than going through this helper.
+async function apiPost<T = unknown>(path: string, body?: unknown, token?: string | null): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json", "X-Session-Id": SESSION_ID };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const resp = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!resp.ok) {
@@ -112,6 +194,63 @@ async function apiPost<T = unknown>(path: string, body?: unknown): Promise<T> {
   const ct = resp.headers.get("content-type") ?? "";
   if (ct.includes("application/json")) return resp.json() as Promise<T>;
   return null as T;
+}
+
+// Detects the specific on-chain rejection a stale blockhash produces
+// ("Blockhash not found" from simulation, RPC error -32002) so a broadcast
+// failure caused by *that* — as opposed to a real rejection (insufficient
+// funds, program error, network down) — can be retried instead of just
+// failing outright. `refreshBlockhash` closes most of this gap by fetching
+// as late as possible, but it can't do anything about a human who takes
+// their time approving inside the wallet extension itself: that delay
+// happens strictly *after* the refresh, so the freshly-fetched blockhash can
+// still expire before the signed transaction is actually broadcast.
+export function isStaleBlockhashError(e: any): boolean {
+  const msg = String(e?.message ?? e ?? "").toLowerCase();
+  return msg.includes("blockhash not found") || msg.includes("-32002");
+}
+
+/**
+ * Overwrites `tx`'s blockhash with a freshly-fetched one, in place, right
+ * before signing. The blockhash a backend route baked in at build time
+ * (e.g. /api/auth/init-profile-tx) can go stale by the time a real human
+ * finishes clicking through the wallet extension's own approval popup —
+ * Solana blockhashes are only valid ~60-90s, with no upper bound on how
+ * long that click takes. Reproduced live: broadcast-tx 502ing with "RPC
+ * response error -32002: Transaction simulation failed: Blockhash not
+ * found" even though signing itself had already succeeded. Best-effort: on
+ * any failure, leaves `tx` untouched and lets the caller's existing
+ * error/retry path handle it exactly as before this existed.
+ */
+export async function refreshBlockhash(tx: web3.Transaction | web3.VersionedTransaction): Promise<boolean> {
+  try {
+    const resp = await fetch(`${API_BASE}/api/fresh-blockhash`, { headers: { "X-Session-Id": SESSION_ID } });
+    if (!resp.ok) {
+      apiPost("/api/debug-log", { msg: `refreshBlockhash: bridge responded ${resp.status}` }).catch(() => {});
+      return false;
+    }
+    const { blockhash } = await resp.json();
+    if (typeof blockhash !== "string" || !blockhash) {
+      apiPost("/api/debug-log", { msg: "refreshBlockhash: response had no blockhash string" }).catch(() => {});
+      return false;
+    }
+    if (tx instanceof web3.VersionedTransaction) {
+      tx.message.recentBlockhash = blockhash;
+    } else {
+      tx.recentBlockhash = blockhash;
+    }
+    return true;
+  } catch (e: any) {
+    // Best-effort by design — caller proceeds with whatever blockhash it
+    // already had rather than blocking the sign flow entirely — but this
+    // used to be completely silent even on failure, which is exactly the
+    // kind of gap that made the original stale-blockhash bug hard to
+    // distinguish from "refreshed, but the user still took too long to
+    // approve in their wallet extension." Now both failure modes are
+    // distinguishable from the Tauri console.
+    apiPost("/api/debug-log", { msg: `refreshBlockhash: threw ${e?.message || e}` }).catch(() => {});
+    return false;
+  }
 }
 
 /**
@@ -132,7 +271,7 @@ interface ProfileStatus {
 async function fetchProfileStatus(token: string): Promise<ProfileStatus> {
   const resp = await fetch(`${API_BASE}/api/auth/sync-profile`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, "X-Session-Id": SESSION_ID },
   });
   if (!resp.ok) throw new Error(`sync-profile failed: ${resp.status}`);
   return resp.json();
@@ -140,7 +279,7 @@ async function fetchProfileStatus(token: string): Promise<ProfileStatus> {
 
 async function fetchMe(token: string): Promise<{ username: string }> {
   const resp = await fetch(`${API_BASE}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, "X-Session-Id": SESSION_ID },
   });
   if (!resp.ok) throw new Error(`auth/me failed: ${resp.status}`);
   return resp.json();
@@ -458,17 +597,36 @@ function WalletStep({
       // sharing one real browser profile (each window is its own bridge
       // origin by port, but the extension's own trust memory isn't
       // necessarily scoped that finely).
-      const resp: any = await provider.connect();
+      logLifecycle("WALLET_CONNECT_START", { wallet: walletName });
+      const resp: any = await withTimeout(
+        provider.connect(),
+        30000,
+        `${WALLET_META[walletName].label} connection`,
+      );
       // Phantom: publicKey is on the response object
       // Solflare: publicKey is on the provider after connect, not on resp
       pubkey = resp?.publicKey?.toBase58?.()
         ?? resp?.publicKey?.toString?.()
         ?? provider.publicKey?.toBase58?.()
         ?? provider.publicKey?.toString?.();
+      logLifecycle("WALLET_CONNECTED", { pubkey });
+      // Nudge cluster as early as possible in the session — the first
+      // automatic signing popup for a fresh wallet is usually the global
+      // quick-sign-session authorize (see integration/systems.rs's
+      // `authorize_global_session_if_needed`, which fires the moment a
+      // profile is detected), so by the time that popup exists this has
+      // already had its one best-effort chance to run instead of racing it.
+      await ensureDevnet(provider, walletName);
       // Signs raw bytes — no "utf8" arg to avoid Phantom>=0.16 off-chain prefix.
       signRaw = async (msg: string): Promise<string> => {
         const bytes = new TextEncoder().encode(msg);
-        const { signature: sig } = await provider.signMessage(bytes);
+        logLifecycle("SIGN_REQUEST_START");
+        const { signature: sig } = await withTimeout<{ signature: Uint8Array }>(
+          provider.signMessage(bytes),
+          60000,
+          `${WALLET_META[walletName].label} signature`,
+        );
+        logLifecycle("SIGNATURE_RECEIVED");
         return bs58.encode(sig);
       };
 
@@ -478,7 +636,10 @@ function WalletStep({
       const _walletUsername = localStorage.getItem("xfchess_username") ?? "";
 
       // Check registration status first — avoids redundant signing requests.
-      const checkResp = await fetch(`${API_BASE}/api/auth/check-wallet/${pubkey}`);
+      logLifecycle("BACKEND_VERIFY", { path: "check-wallet" });
+      const checkResp = await fetch(`${API_BASE}/api/auth/check-wallet/${pubkey}`, {
+        headers: { "X-Session-Id": SESSION_ID },
+      });
       const isRegistered = checkResp.ok;
 
       let auth: AuthResponse;
@@ -504,10 +665,18 @@ function WalletStep({
       // believing the wallet was connected and unlocking wagered play.
       await apiPost("/wallet", { pubkey, username: _walletUsername });
 
+      logLifecycle("TX_COMPLETE", { pubkey });
       onAuth(auth.token, auth.username, pubkey);
 
       onContinue(pubkey, provider ?? null);
     } catch (e: any) {
+      // Provider errors (Phantom/Solflare) are usually plain {code, message}
+      // objects, not real Errors — console.error(e) alone often prints
+      // "Unexpected error" with no stack. Log every field we can find so a
+      // failure is actually diagnosable from DevTools instead of just
+      // surfacing the same generic string in the UI.
+      console.error("[WalletStep] connect failed:", e, JSON.stringify(e, Object.getOwnPropertyNames(e)));
+      logLifecycle("FAILED", { message: e?.message || String(e) });
       setError(e.message || String(e));
     } finally {
       setConnecting(null);
@@ -583,7 +752,12 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
   // Auto-close a couple seconds after showing the welcome message — the
   // game is already running, nothing further needs the popup open.
   useEffect(() => {
-    const timer = setTimeout(() => { onComplete(); }, 2500);
+    const timer = setTimeout(() => {
+      apiPost("/api/debug-log", { msg: `SplashStep: auto-closing after 2.5s, username="${username}"` }).catch(
+        () => {},
+      );
+      onComplete();
+    }, 2500);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -632,9 +806,10 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   const resolveAndHide = async (signedB64: string) => {
     await fetch(`${API_BASE}/resolved`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Session-Id": SESSION_ID },
       body: JSON.stringify({ signed: signedB64 }),
     });
+    sessionStorage.removeItem("xfchess_auto_attempted_tx");
     setPendingTx(null);
     setPendingLabel(null);
     setError(null);
@@ -700,18 +875,27 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
       // `handleConnect` and `ProfileStep` already do.
       if (!provider.publicKey) {
         try {
-          await provider.connect({ onlyIfTrusted: true });
+          await withTimeout(provider.connect({ onlyIfTrusted: true }), 15000, "Wallet reconnect");
         } catch {
-          await provider.connect();
+          await withTimeout(provider.connect(), 30000, "Wallet connection");
         }
       }
       const txBytes = Buffer.from(txB64, "base64");
       const tx = deserializeTx(txBytes);
+      await refreshBlockhash(tx);
       await ensureDevnet(provider, localStorage.getItem("xfchess_wallet_provider"));
-      const signed = await provider.signTransaction(tx);
+      logLifecycle("SIGN_REQUEST_START");
+      const signed = await withTimeout<web3.VersionedTransaction | web3.Transaction>(
+        provider.signTransaction(tx),
+        60000,
+        "Wallet signature",
+      );
+      logLifecycle("SIGNATURE_RECEIVED");
       await resolveAndHide(Buffer.from(signed.serialize()).toString("base64"));
+      logLifecycle("TX_COMPLETE");
     } catch (e: any) {
-      setError(e.message || String(e));
+      logLifecycle("FAILED", { message: e?.message || String(e) });
+      setError(isNetworkMismatchError(e) ? NETWORK_MISMATCH_MESSAGE : e.message || String(e));
     } finally {
       setSigning(false);
     }
@@ -729,13 +913,26 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         setPendingTx(data.tx);
         setPendingLabel(typeof data.label === "string" && data.label ? data.label : null);
         const secret = sessionStorage.getItem("xfchess_session_key");
+        // Persisted (not just the in-memory ref) so a popup reload mid-sign
+        // — the exact "browser refresh during signing" case — doesn't
+        // forget an attempt already made: the bridge's SSE stream re-emits
+        // the SAME still-pending tx immediately on reconnect (see
+        // get_pending_stream in tauri/src/main.rs), and a fresh mount's
+        // useRef would read that as brand new, firing a second competing
+        // signTransaction() call while the extension might already have a
+        // native approval prompt open for the first one. Cleared once the
+        // tx actually resolves (see resolveAndHide) or a fresh, different
+        // tx shows up.
+        const alreadyAttempted = sessionStorage.getItem("xfchess_auto_attempted_tx") === data.tx;
         if (secret) {
           handleAutoSign(data.tx, secret);
-        } else if (getConnectedProvider() && autoAttempted.current !== data.tx) {
+        } else if (getConnectedProvider() && autoAttempted.current !== data.tx && !alreadyAttempted) {
           autoAttempted.current = data.tx;
+          sessionStorage.setItem("xfchess_auto_attempted_tx", data.tx);
           signWithExtension(data.tx);
         }
       } else if (!data.tx) {
+        sessionStorage.removeItem("xfchess_auto_attempted_tx");
         setPendingTx(null);
         setPendingLabel(null);
       }
@@ -812,6 +1009,12 @@ function ProfileStep({
   defaultHandle?: string;
   requireOnchain?: boolean;
 }) {
+  useEffect(() => {
+    apiPost("/api/debug-log", {
+      msg: `ProfileStep mounted — requireOnchain=${requireOnchain} defaultHandle="${defaultHandle}"`,
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [handle, setHandle] = useState(defaultHandle || localStorage.getItem("xfchess_username") || "");
   const [country, setCountry] = useState("");
   const [dob, setDob] = useState("");
@@ -827,6 +1030,7 @@ function ProfileStep({
     setSaving(true);
     setError(null);
     try {
+      const token = localStorage.getItem("xfchess_token");
       if (requireOnchain) {
         const walletPubkey =
           pubkey ?? localStorage.getItem("xfchess_wallet_pubkey") ?? localStorage.getItem("xfchess_wallet");
@@ -840,40 +1044,98 @@ function ProfileStep({
         }
         if (!provider.publicKey) {
           try {
-            await provider.connect({ onlyIfTrusted: true });
+            await withTimeout(provider.connect({ onlyIfTrusted: true }), 15000, "Wallet reconnect");
           } catch {
-            await provider.connect();
+            await withTimeout(provider.connect(), 30000, "Wallet connection");
           }
         }
 
+        if (!token) {
+          throw new Error("Not signed in — reopen from the game client and try again.");
+        }
         const dateOfBirth = Math.floor(new Date(`${dob}T00:00:00Z`).getTime() / 1000);
-        const built = await apiPost<{ tx_b64: string; profile_pda: string }>("/api/auth/init-profile-tx", {
-          username: handle,
-          country: country.trim().toUpperCase(),
-          date_of_birth: dateOfBirth,
-        });
+        const built = await apiPost<{ tx_b64: string; profile_pda: string }>(
+          "/api/auth/init-profile-tx",
+          {
+            username: handle,
+            country: country.trim().toUpperCase(),
+            date_of_birth: dateOfBirth,
+          },
+          token,
+        );
 
         const txBytes = Buffer.from(built.tx_b64, "base64");
         const tx = web3.Transaction.from(txBytes);
-        let signed: web3.Transaction;
-        try {
-          await ensureDevnet(provider, localStorage.getItem("xfchess_wallet_provider"));
-          signed = await provider.signTransaction(tx);
-        } catch {
-          throw new Error("Signature rejected — try again to finish on-chain setup.");
+
+        // Up to 2 attempts total: `refreshBlockhash` already fetches as late
+        // as possible (right before signing), but it can't account for how
+        // long the user themselves takes to click "Approve" inside the
+        // wallet extension — that delay happens strictly after the refresh,
+        // so the freshly-fetched blockhash can still expire before broadcast
+        // by the time a slower approval comes back. A stale-blockhash
+        // rejection specifically (not a real one — insufficient funds,
+        // program error, actual rejection) gets exactly one automatic retry:
+        // fetch a new blockhash and ask for a fresh signature again, rather
+        // than failing outright and forcing the player to close and restart
+        // the whole ProfileStep form from scratch.
+        const MAX_ATTEMPTS = 2;
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          let signed: web3.Transaction;
+          try {
+            await refreshBlockhash(tx);
+            await ensureDevnet(provider, localStorage.getItem("xfchess_wallet_provider"));
+            logLifecycle("SIGN_REQUEST_START", { attempt });
+            signed = await withTimeout(provider.signTransaction(tx), 60000, "Wallet signature");
+            logLifecycle("SIGNATURE_RECEIVED");
+          } catch (e: any) {
+            if (isNetworkMismatchError(e)) throw new Error(NETWORK_MISMATCH_MESSAGE);
+            throw new Error("Signature rejected — try again to finish on-chain setup.");
+          }
+          const signedB64 = Buffer.from(signed.serialize()).toString("base64");
+          try {
+            await apiPost<{ signature: string }>(
+              "/api/auth/broadcast-tx",
+              { tx_b64: signedB64 },
+              token,
+            );
+            logLifecycle("TX_COMPLETE", { attempt });
+            break;
+          } catch (e: any) {
+            if (isStaleBlockhashError(e) && attempt < MAX_ATTEMPTS) {
+              apiPost("/api/debug-log", {
+                msg: `ProfileStep broadcast-tx: stale blockhash on attempt ${attempt}, retrying with a fresh signature`,
+              }).catch(() => {});
+              continue;
+            }
+            throw e;
+          }
         }
-        const signedB64 = Buffer.from(signed.serialize()).toString("base64");
-        await apiPost<{ signature: string }>("/api/auth/broadcast-tx", { tx_b64: signedB64 });
       }
 
-      const token = localStorage.getItem("xfchess_token");
       if (token) {
-        const r = await fetch(`${API_BASE}/api/auth/username`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ username: handle }),
-        });
-        if (!r.ok) throw new Error(await r.text().catch(() => "Failed to save username"));
+        if (requireOnchain) {
+          // The on-chain init_profile submitted above already set this exact
+          // handle as PlayerProfile.username — PATCH /auth/username now
+          // rejects with 409 once an on-chain username is set (it would
+          // otherwise write a redundant off-chain copy that could later
+          // diverge from the on-chain value on some future rename, which
+          // neither surface would ever display again — see the backend's
+          // doc comment on `set_username`). Force the SQLite mirror via
+          // sync-profile instead, which reads the value we just wrote
+          // on-chain rather than re-asserting it off-chain.
+          await fetchProfileStatus(token).catch(() => { /* best-effort mirror */ });
+        } else {
+          const r = await fetch(`${API_BASE}/api/auth/username`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+              "X-Session-Id": SESSION_ID,
+            },
+            body: JSON.stringify({ username: handle }),
+          });
+          if (!r.ok) throw new Error(await r.text().catch(() => "Failed to save username"));
+        }
       }
       localStorage.setItem("xfchess_username", handle);
       onComplete(handle);
@@ -962,7 +1224,20 @@ function Onboarding() {
   // to actually submit the on-chain init_profile tx here — the normal
   // first-login path reaches "profile" via handleAuth/handleWalletContinue
   // with no such param, and stays off-chain-only by design.
-  const [requireOnchain] = useState<boolean>(
+  //
+  // This is mutable (not the one-shot `useState` it used to be) because the
+  // URL alone can't be trusted as the ongoing signal: `open_profile_step`
+  // re-shows an *already-open* popup window without navigating it (see
+  // `open_in_browser`'s reuse path in tauri/src/main.rs) specifically so a
+  // signing request doesn't cost a full respawn — which means a popup that
+  // was first opened via a plain `?sid=...` URL and is later re-shown for a
+  // `?step=profile` request never actually sees that URL change.
+  // `handleAuth` and the needs-profile-step poll below both flip this to
+  // `true` directly (via `setRequireOnchain`) once they learn — from the
+  // server's one-shot `needs_profile_step` flag, not the stale URL — that
+  // *this* session needs the on-chain submission, regardless of what the
+  // popup's address bar still says.
+  const [requireOnchain, setRequireOnchain] = useState<boolean>(
     () => new URLSearchParams(window.location.search).get("step") === "profile",
   );
   const [username, setUsername] = useState<string>(
@@ -980,6 +1255,27 @@ function Onboarding() {
   // that used to cover this async check.
   useEffect(() => {
     setReady(true);
+    // Tells Tauri this page has actually mounted and can respond to
+    // anything — see api_ready/mark_session_ready in tauri/src/main.rs.
+    // Before this, the only readiness signal was the OS window-title poll,
+    // which proves the Chrome window exists but says nothing about whether
+    // React has taken over the page yet.
+    logLifecycle("REACT_READY");
+    apiPost("/api/ready", { sid: SESSION_ID }).catch(() => { /* bridge unreachable — nothing to report to */ });
+    // A fresh log line every time this effect runs, i.e. every time the App
+    // component actually mounts — proves whether a given popup show/hide
+    // cycle was a real reuse (no new mount) or a hidden respawn (React state
+    // reset even though the OS-level window handle looked "reused").
+    apiPost("/api/debug-log", {
+      msg: `App mounted — initial step="${step}", url="${window.location.href}"`,
+    }).catch(() => {});
+    // Surfaces which backend this session is actually talking to, in this
+    // page's own console, so a prod/local mismatch (see get_backend_url's
+    // doc comment in tauri/src/main.rs) is visible here instead of only
+    // showing up as an unexplained 502 later.
+    apiGet<{ url: string; explicit: boolean }>("/api/backend-url")
+      .then((r) => logLifecycle("BACKEND_TARGET", r))
+      .catch(() => { /* bridge unreachable */ });
   }, []);
 
   // Fallback when this popup has no wallet in its own localStorage yet the
@@ -1006,13 +1302,41 @@ function Onboarding() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Poll for profile-step requests from the game client (e.g. "Wagered PVP" clicked)
+  // Poll for profile-step requests from the game client (e.g. "Wagered PVP" clicked).
+  //
+  // Used to only run while `step === "splash"`, on the assumption that's the
+  // only state a popup could be sitting idle in. Real bug this caused: a
+  // returning-session `handleAuth` call that resolves an existing off-chain
+  // username closes the popup directly (see the `needsProfile === false`
+  // branch above) WITHOUT ever moving `step` off its initial `"wallet"` —
+  // there was no reason to, since at that moment nothing needed ProfileStep.
+  // If the game client's `open_profile_step()` request (setting this same
+  // flag) arrives *after* that — a real, common race, since the game client
+  // only learns it needs an on-chain profile once the wallet is already
+  // connected — the flag gets set correctly, but this poll was never running
+  // (step stuck at "wallet", not "splash"), so it just sat there forever,
+  // unread, and every future re-show of the reused popup landed back on the
+  // plain Wallet Sign-In screen with no way to ever reach ProfileStep again.
+  // Only genuinely unsafe to run this poll during "sign" (an in-progress
+  // transaction signature shouldn't be yanked away mid-flow); every other
+  // step is safe to redirect out of the instant the flag says to.
   useEffect(() => {
-    if (step !== "splash") return;
+    if (step === "sign") return;
     const interval = setInterval(async () => {
       try {
         const r = await apiGet<{ needs_profile: boolean }>("/api/needs-profile-step");
-        if (r.needs_profile) setStep("profile");
+        if (r.needs_profile) {
+          apiPost("/api/debug-log", {
+            msg: `needs-profile-step poll: flag was set (was on step="${step}") — setStep(profile), requireOnchain=true`,
+          }).catch(() => {});
+          // Same fix as handleAuth's flag check: this poll only running means
+          // the game client specifically needs the on-chain profile created,
+          // not just the off-chain handle this session may already have —
+          // without this, ProfileStep would render in its off-chain-only mode
+          // and never actually submit init_profile.
+          setRequireOnchain(true);
+          setStep("profile");
+        }
       } catch { /* ignore — bridge may not be running */ }
     }, 1500);
     return () => clearInterval(interval);
@@ -1065,36 +1389,44 @@ function Onboarding() {
     // `user` here may just be the throwaway pubkey-slice placeholder
     // WalletStep sends as a required-but-unchosen value on first
     // registration (see handleConnect's register call) — never treat it
-    // as a real display name directly. But for a returning player, `user`
-    // is exactly what /api/auth/login already read out of the same DB row
-    // sync-profile/auth-me would re-derive — trust it immediately rather
-    // than re-verifying over the network first. A transient hiccup in the
-    // on-chain RPC read (fetchProfileStatus) or the off-chain lookup
-    // (fetchMe) must never override a value we already know is good, or a
-    // returning player gets re-asked to pick a handle every time devnet RPC
-    // has a bad moment. Only the registration placeholder itself falls
-    // through to the slower on-chain/off-chain resolution below.
-    const registrationPlaceholder = nextPubkey.slice(0, 8);
-    if (user && user !== registrationPlaceholder) {
-      localStorage.setItem("xfchess_username", user);
-      setUsername(user);
-      handleGameLaunch(nextPubkey, user);
-      // Splash's "Welcome, X" is onboarding feedback for a first-ever login —
-      // a returning session already knows who it is, so just close and drop
-      // the player straight into the game instead of an extra screen+delay.
-      if (wasReturningSession) {
-        closePopup();
-      } else {
-        setStep("splash");
-      }
-      return;
-    }
+    // as a real display name directly.
+    //
+    // There used to be a "fast path" here that skipped straight to
+    // closePopup/splash whenever `user` (the off-chain username /api/auth/login
+    // returns) was already a real, non-placeholder value — on the assumption
+    // that an off-chain username implies the player is fully set up. That
+    // assumption is wrong: a player can have an off-chain username (set by a
+    // prior ProfileStep attempt) while the ON-CHAIN PlayerProfile was never
+    // actually created — e.g. if the on-chain init_profile transaction failed
+    // partway (auth/blockhash issues, rejected signature, closed popup mid-flow).
+    // The fast path never checked on-chain state at all, so it closed the
+    // popup immediately every time, the player never saw ProfileStep again,
+    // and the on-chain profile was permanently stuck at "missing" — a wallet
+    // in that state could never complete setup again. Confirmed live via
+    // debug-log instrumentation: `user="val"`, a real off-chain username, was
+    // hitting the fast path on every single reconnect while the game client
+    // kept reporting NoProfile forever. Always resolving through the
+    // on-chain-aware path below (same one that already existed for the
+    // placeholder case) is the only version of this check that's actually
+    // correct — the extra network round trip is a fully acceptable cost
+    // compared to silently soft-locking an account.
 
     // resolveExistingUsername checks both the on-chain PlayerProfile
     // (sync-profile) and the off-chain account username (auth/me, set by a
     // prior ProfileStep completion that hasn't been followed by a wager
     // yet), excluding that same placeholder — so a returning player with a
     // chosen handle but no on-chain profile isn't asked to pick a new one.
+    // That's the right behavior for an ordinary reconnect (on-chain profile
+    // creation is deliberately deferred to first-wager-attempt by design —
+    // see ProfileStep's module doc). It is NOT the right behavior when the
+    // game client specifically opened this popup because it's blocking a
+    // wager on that exact missing on-chain profile — closing the popup here
+    // would silently strand the player in the exact soft-locked state this
+    // fix exists for. `needsOnchainRightNow` below is the one-shot
+    // server-side signal (`s.needs_profile_step`, set by
+    // `POST /api/open-profile-step`) that distinguishes the two: unlike the
+    // popup's own URL, it reflects what THIS specific open was actually for,
+    // regardless of whether the window was freshly navigated or reused.
     let resolvedUser = user;
     let needsProfile = true;
     try {
@@ -1106,9 +1438,22 @@ function Onboarding() {
         setUsername(resolvedUser);
         needsProfile = false;
       }
+      if (needsProfile === false && !status.username_set) {
+        const flagResp = await apiGet<{ needs_profile: boolean }>("/api/needs-profile-step");
+        if (flagResp.needs_profile) {
+          apiPost("/api/debug-log", {
+            msg: "handleAuth: off-chain username resolved, but needs-profile-step flag was set — forcing ProfileStep(requireOnchain)",
+          }).catch(() => {});
+          setRequireOnchain(true);
+          needsProfile = true;
+        }
+      }
     } catch { /* on-chain lookup failed — fall through to profile step */ }
 
     if (needsProfile) {
+      apiPost("/api/debug-log", { msg: "handleAuth: needsProfile=true — setStep(profile)" }).catch(
+        () => {},
+      );
       // No real username yet — make sure nothing (this session's state,
       // or a stale value from a previous wallet's session) pre-fills the
       // handle field with something that looks chosen but isn't. Clearing
@@ -1121,6 +1466,9 @@ function Onboarding() {
       setUsername("Player");
       setStep("profile");
     } else {
+      apiPost("/api/debug-log", {
+        msg: `handleAuth: needsProfile=false, resolvedUser="${resolvedUser}" — ${wasReturningSession ? "closePopup" : "setStep(splash)"}`,
+      }).catch(() => {});
       handleGameLaunch(nextPubkey, resolvedUser);
       if (wasReturningSession) {
         closePopup();

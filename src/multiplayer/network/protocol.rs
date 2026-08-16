@@ -146,16 +146,25 @@ pub enum NetworkMessage {
         game_id: u64,
         from_node: String,
         from_wallet: String,
+        /// The inviter's chosen profile name — lets the recipient's opponent
+        /// panel show a real name instead of falling back to "Player"/
+        /// "Opponent". See `P2PConnectionState::opponent_display_name`.
+        from_display: String,
     },
     InviteResponse {
         game_id: u64,
         accepted: bool,
+        /// The responder's chosen profile name, mirroring `from_display`
+        /// above so the host learns the joiner's name too.
+        display_name: String,
     },
     GameStart {
         game_id: u64,
         white_player: String,
         black_player: String,
         initial_fen: String,
+        white_display: String,
+        black_display: String,
     },
     GameStateBroadcast {
         game_id: u64,

@@ -44,6 +44,7 @@ dotenvy = "0.15"
 dirs = "5"
 reqwest = { workspace = true }
 open = "5"
+uuid = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [

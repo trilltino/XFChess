@@ -130,6 +130,27 @@ function AppContent() {
     }, []);
 
 
+    // `xfchess_token`/`xfchess_username`/`xfchess_wallet` in localStorage are
+    // written by SignIn.tsx's wallet-connect flow and never invalidated on
+    // disconnect (the disconnect button below only calls the wallet-adapter's
+    // disconnect()). If the user later reconnects with a *different* wallet
+    // without an explicit disconnect in between (e.g. switching the active
+    // account inside Phantom), `wallet.publicKey` changes but the cached JWT
+    // still authenticates the OLD wallet — any code reading
+    // localStorage.getItem('xfchess_token') alongside the newly-connected
+    // publicKey (SignIn.tsx's ProfileStep does exactly this) would then act
+    // under a mismatched identity. Clear the stale identity the moment a
+    // connected pubkey stops matching what was cached for it.
+    useEffect(() => {
+        if (!connected || !publicKey) return;
+        const cachedWallet = localStorage.getItem('xfchess_wallet');
+        if (cachedWallet && cachedWallet !== publicKey.toBase58()) {
+            localStorage.removeItem('xfchess_token');
+            localStorage.removeItem('xfchess_username');
+            localStorage.removeItem('xfchess_wallet');
+        }
+    }, [connected, publicKey]);
+
     useEffect(() => {
         let isMounted = true;
         const load = async () => {
@@ -221,7 +242,13 @@ function AppContent() {
                             }}
                         />
                         {connected ? (
-                            <button onClick={() => { disconnect(); setIsMenuOpen(false); }} title="Disconnect wallet" aria-label="Disconnect wallet" className="btn-secondary disconnect-btn" style={{ height: '44px', width: '44px', padding: '0', borderRadius: '4px', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <button onClick={() => {
+                                disconnect();
+                                localStorage.removeItem('xfchess_token');
+                                localStorage.removeItem('xfchess_username');
+                                localStorage.removeItem('xfchess_wallet');
+                                setIsMenuOpen(false);
+                            }} title="Disconnect wallet" aria-label="Disconnect wallet" className="btn-secondary disconnect-btn" style={{ height: '44px', width: '44px', padding: '0', borderRadius: '4px', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <X size={24} />
                             </button>
                         ) : (

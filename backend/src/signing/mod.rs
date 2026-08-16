@@ -15,7 +15,6 @@
 //!
 //! - `auth`: JWT token issuance and verification
 //! - `blinks`: Solana Blinks API for tournament registration
-//! - `cacf`: CACF compliance (UK, Brazil, Germany, Canada)
 //! - `config`: Environment configuration
 //! - `feepayer`: Fee-payer keypair pool for transactions
 //! - `identity`: Identity vault for encrypted KYC data
@@ -26,16 +25,17 @@
 //!   replaced the old *move-relay* use of `p2p_relay`'s raw message/poll
 //!   endpoints (the lobby JOIN_ACK handshake still uses them directly)
 //! - `solana`: Solana instruction builders and RPC helpers
-//! - `storage`: SQLite-backed data stores
+//! - `storage`: SQLite-backed data stores, including CACF compliance status
+//!   (`storage::vault::{save_cacf, cacf_can_wager}`) for regulated
+//!   jurisdictions (UK, Brazil, Germany, Canada) — the actual enforcement
+//!   path used by `routes::kyc`; a separate, richer `cacf` module used to
+//!   exist here too but was never wired to any route and has been removed
 //! - `swiss`: Swiss pairing tournament system
-//! - `relayer`: Relayer routes
-//! - `tee_relayer`: Tee Relayer routes
 //! - `auth_ws`: WebSocket authentication
 
 pub mod anticheat_enqueue;
 pub mod auth;
 pub mod blinks;
-pub mod cacf;
 pub mod config;
 pub mod elo_cache;
 pub mod feepayer;
@@ -48,13 +48,8 @@ pub mod social;
 pub mod solana;
 pub mod storage;
 pub mod swiss;
-pub mod tee_relayer;
 pub mod tournament_gossip;
 pub mod ws_subscriber;
-pub mod relayer {
-    //! Re-export relayer routes from the routes module.
-    pub use crate::signing::routes::relayer::*;
-}
 pub mod auth_ws;
 
 use crate::signing::auth_ws::handle_auth_websocket;
@@ -97,9 +92,11 @@ pub struct AppState {
     pub vps_authority: Arc<Keypair>,
     pub kyc_authority: Arc<Keypair>,
     pub link_authority: Arc<Keypair>,
-    /// Signs `withdraw_treasury` (platform-fee payouts / manual refunds).
-    /// Must correspond to `treasury_authority::ID` in the on-chain program.
-    pub treasury_authority: Arc<Keypair>,
+    /// Public key only — the treasury-withdrawal secret key is deliberately
+    /// never loaded by this process. See `bin/treasury_signer.rs`'s module
+    /// doc for why, and `routes::admin::treasury_refund` for how a
+    /// withdrawal request is logged here without ever being signed here.
+    pub treasury_authority_pubkey: Pubkey,
     pub tournament_store: Arc<TournamentStore>,
     pub swiss_service: Arc<SwissService>,
     pub tournament_gossip: Arc<TournamentGossipService>,
@@ -165,15 +162,24 @@ const _: () = {
 
 /// Loads an authority keypair from an env var value that's either a JSON
 /// keypair file path or a raw base58-encoded secret key.
-pub fn load_keypair_from_env_value(val: &str) -> Keypair {
+///
+/// Returns `Err` on a malformed/unreadable keyfile or bad base58 rather than
+/// silently falling back to a freshly generated keypair — callers decide
+/// whether that's fatal (production) or a warn-and-generate dev convenience
+/// (see `AppState::new`'s use of this).
+pub fn load_keypair_from_env_value(val: &str) -> Result<Keypair, String> {
     if std::path::Path::new(val).exists() {
-        let bytes: Vec<u8> = std::fs::read_to_string(val)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        Keypair::try_from(bytes.as_slice()).unwrap_or_else(|_| Keypair::new())
+        let contents = std::fs::read_to_string(val)
+            .map_err(|e| format!("could not read keyfile '{val}': {e}"))?;
+        let bytes: Vec<u8> = serde_json::from_str(&contents)
+            .map_err(|e| format!("keyfile '{val}' is not a valid JSON keypair array: {e}"))?;
+        Keypair::try_from(bytes.as_slice())
+            .map_err(|e| format!("keyfile '{val}' does not contain a valid ed25519 keypair: {e}"))
     } else {
-        Keypair::from_base58_string(val)
+        // Panics on malformed base58, same as before this function returned a
+        // Result — the JSON-keyfile path above is what previously swallowed
+        // errors silently, so that's the one that needed a graceful Result.
+        Ok(Keypair::from_base58_string(val))
     }
 }
 
@@ -184,15 +190,22 @@ impl AppState {
         vault_pool: sqlx::SqlitePool,
         tournament_store: Arc<TournamentStore>,
     ) -> Self {
-        let store = Arc::new(storage::SessionStore::new(pool.clone()));
+        // Built before `store` — session keypairs are encrypted at rest using
+        // the same AES-256-GCM vault as KYC PII (see `storage::SessionStore`'s
+        // doc comment for why a stolen SQLite backup shouldn't also be a
+        // stolen signing key).
+        let identity_vault =
+            identity::IdentityVault::new(&config.identity_encryption_key, &config.identity_salt)
+                .expect("Failed to initialize IdentityVault from env config");
+
+        let store = Arc::new(storage::SessionStore::new(
+            pool.clone(),
+            identity_vault.clone(),
+        ));
         let feepayer = Arc::new(feepayer::FeepayerPool::from_base58_list(
             &config.fee_payer_keys,
         ));
         let jwt = Arc::new(auth::JwtIssuer::new(&config.jwt_secret));
-
-        let identity_vault =
-            identity::IdentityVault::new(&config.identity_encryption_key, &config.identity_salt)
-                .expect("Failed to initialize IdentityVault from env config");
 
         let p2p_relay = Arc::new(p2p_relay::create_relay_state());
 
@@ -211,43 +224,57 @@ impl AppState {
             routes::matchmaking::SharedMatchmakingState::new(elo_cache.clone(), pool.clone());
 
         // Parse authority keys — accepts either a JSON file path or a base58 string.
-        let load_keypair = load_keypair_from_env_value;
-
-        let vps_authority = Arc::new(
-            config
-                .vps_authority_key
-                .as_deref()
-                .map(load_keypair)
-                .unwrap_or_else(|| {
-                    warn!("[VPS] No vps_authority_key provided, using random fallback");
+        // `config.validate()` (called before `AppState::new` — see server.rs) already
+        // hard-exits in production when any of these env vars is unset, so by the
+        // time we're here a production process is guaranteed to have all four set.
+        // This helper is the second line of defense: a *malformed* keyfile (present
+        // but unparseable) would slip past that presence check, so it's fatal here
+        // too under `is_production()` rather than silently becoming a fresh random
+        // key. Outside production, both "unset" and "malformed" remain a
+        // warn-and-generate dev convenience.
+        let is_production = config.is_production();
+        let resolve_authority = |name: &str, key: &Option<String>| -> Keypair {
+            match key.as_deref().map(load_keypair_from_env_value) {
+                Some(Ok(kp)) => kp,
+                Some(Err(e)) if is_production => {
+                    panic!("[VPS] {name} is set but invalid in production, refusing to start: {e}")
+                }
+                Some(Err(e)) => {
+                    warn!("[VPS] {name} is set but invalid ({e}), using random fallback");
                     Keypair::new()
-                }),
-        );
-
-        let kyc_authority = Arc::new(
-            config
-                .kyc_authority_key
-                .as_deref()
-                .map(load_keypair)
-                .unwrap_or_else(|| {
-                    warn!("[VPS] No kyc_authority_key provided, using random fallback");
+                }
+                None if is_production => {
+                    panic!("[VPS] {name} not provided in production — this should have been caught by SigningConfig::validate()")
+                }
+                None => {
+                    warn!("[VPS] No {name} provided, using random fallback");
                     Keypair::new()
-                }),
-        );
+                }
+            }
+        };
 
-        let link_authority = Arc::new(config.link_authority_key.as_deref()
-            .map(load_keypair)
-            .unwrap_or_else(|| {
-                warn!("[VPS] No link_authority_key provided, using random fallback — external ELO linking will fail on-chain");
-                Keypair::new()
-            }));
-
-        let treasury_authority = Arc::new(config.treasury_authority_key.as_deref()
-            .map(load_keypair)
-            .unwrap_or_else(|| {
-                warn!("[VPS] No treasury_authority_key provided, using random fallback — withdraw_treasury / refunds will fail on-chain");
-                Keypair::new()
-            }));
+        let vps_authority = Arc::new(resolve_authority(
+            "vps_authority_key",
+            &config.vps_authority_key,
+        ));
+        let kyc_authority = Arc::new(resolve_authority(
+            "kyc_authority_key",
+            &config.kyc_authority_key,
+        ));
+        let link_authority = Arc::new(resolve_authority(
+            "link_authority_key",
+            &config.link_authority_key,
+        ));
+        // Not loaded via `resolve_authority` — no secret key involved. See
+        // `treasury_authority_pubkey`'s field doc.
+        let treasury_authority_pubkey =
+            Pubkey::from_str(&config.treasury_authority_pubkey).unwrap_or_else(|e| {
+                panic!(
+                    "Invalid treasury_authority_pubkey in config ({}): {e} — \
+                     this should have been caught by SigningConfig::validate()",
+                    config.treasury_authority_pubkey
+                )
+            });
 
         // Log which pubkey each authority key actually resolved to. These
         // must match the corresponding hardcoded `Pubkey` constants in
@@ -257,11 +284,12 @@ impl AppState {
         // with UnauthorizedAccess — a mismatch here is otherwise invisible
         // until a real transaction hits the RPC.
         tracing::info!(
-            "[VPS] Authority pubkeys — vps: {}, kyc: {}, link: {}, treasury: {}",
+            "[VPS] Authority pubkeys — vps: {}, kyc: {}, link: {}, treasury: {} (pubkey only, \
+             signing key never loaded here — see bin/treasury_signer.rs)",
             vps_authority.pubkey(),
             kyc_authority.pubkey(),
             link_authority.pubkey(),
-            treasury_authority.pubkey(),
+            treasury_authority_pubkey,
         );
 
         // Initialize Swiss service and attach Braid hub
@@ -317,7 +345,7 @@ impl AppState {
             vps_authority,
             kyc_authority,
             link_authority,
-            treasury_authority,
+            treasury_authority_pubkey,
             tournament_store,
             swiss_service,
             tournament_gossip,
@@ -400,9 +428,6 @@ pub fn build_router(state: AppState) -> Router<AppState> {
             "/identity",
             crate::signing::routes::identity::identity_routes(),
         )
-        // Relayer infrastructure
-        .merge(relayer::routes())
-        .merge(tee_relayer::routes())
         // WebSocket route for authentication sync
         .route("/ws/auth", get(handle_auth_websocket))
         // Global persistent session delegation — all public. `prepare`/`activate`

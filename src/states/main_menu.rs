@@ -873,7 +873,7 @@ fn sync_bridge_pubkey_to_solana(
         ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
     >,
 ) {
-    use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
+    use crate::multiplayer::solana::integration::state::{DEVNET_RPC_URL, ProfileStatus};
 
     let Some(ref mut state) = solana_state else {
         return;
@@ -890,6 +890,45 @@ fn sync_bridge_pubkey_to_solana(
         }
     }
     drop(bridge_data);
+
+    // A wallet switch (the user changes the active account in Phantom/
+    // Solflare, or connects a different wallet in the bridge popup) must
+    // invalidate every identity-dependent field cached here — without this,
+    // `mover_wallet` computation, `SessionInfo.player_pubkey`, and every PDA
+    // derivation elsewhere in `src/multiplayer/solana` keep using the OLD
+    // wallet for the rest of the process's life, since this resource was
+    // otherwise never reset once set (confirmed during the identity audit:
+    // this function and `initialize_solana_integration` both only ever SET
+    // `wallet_pubkey` once and had no invalidation path at all). Mostly
+    // fails safe today (on-chain signer checks reject a stale derivation),
+    // but produces exactly the confusing "why is it asking me to sign in
+    // again" class of bug — clearing eagerly here turns that into a clean
+    // one-time re-sync instead.
+    if let Some(current) = state.wallet_pubkey {
+        if let Some(ref pubkey_str) = poller.known_pubkey {
+            if let Ok(new_pubkey) = pubkey_str.parse::<solana_sdk::pubkey::Pubkey>() {
+                if new_pubkey != current {
+                    info!(
+                        "[WalletBridge] Wallet switched {} -> {} — clearing cached identity state",
+                        current, new_pubkey
+                    );
+                    state.wallet_pubkey = None;
+                    state.session_keypair = None;
+                    state.global_session_keypair = None;
+                    state.global_session_active = false;
+                    state.global_session_setup_in_progress = false;
+                    state.global_session_unavailable_reason = None;
+                    state.opponent_pubkey = None;
+                    state.profile_status = ProfileStatus::Unknown;
+                    state.checking_profile = false;
+                    state.pending_profile_check = None;
+                    state.cached_elo = 0;
+                    state.cached_display_name = None;
+                    state.handshake_completed = false;
+                }
+            }
+        }
+    }
 
     // Only set pubkey once — avoid overwriting if already set by other path.
     if state.wallet_pubkey.is_some() {

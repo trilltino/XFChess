@@ -10,7 +10,8 @@ use tokio::sync::oneshot;
 
 use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
 use crate::solana::instructions::{
-    accept_draw_ix, authorize_session_key_ix, create_game_ix, join_game_ix, offer_draw_ix,
+    accept_draw_ix, authorize_session_key_ix, claim_timeout_ix, create_game_ix, join_game_ix,
+    offer_draw_ix,
     GAME_SEED, PROGRAM_ID as SOLANA_PROGRAM_ID,
 };
 
@@ -370,6 +371,45 @@ async fn async_accept_draw(
     Ok(())
 }
 
+/// Fire-and-forget: claim victory on-chain for an on-chain (wagered/
+/// competitive) game whose opponent has gone silent. Permissionless — this
+/// bridges the client's own fast local abandonment detection
+/// (`crate::ui::game::game_ui`'s disconnect grace banner, which already ends
+/// the *local* game via `FlagTimeoutEvent`) into an actual on-chain
+/// resolution, since nothing else calls this instruction: not the client, and
+/// the ER crank (`crank_time_check`) only runs for games that were delegated
+/// to begin with. If the inactivity window
+/// (`lifecycle::clock::inactivity_window_seconds` on-chain) hasn't genuinely
+/// elapsed yet, this fails harmlessly with `TimeoutNotExpired` — callers
+/// should only invoke this once their own local abandonment flow has already
+/// fired, which happens well after that window in practice.
+pub fn spawn_claim_timeout(rpc_url: String, wallet_pubkey: Pubkey, game_id: u64) {
+    let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            if let Err(e) = async_claim_timeout(rpc_url, wallet_pubkey, program_id, game_id).await
+            {
+                error!("[TIMEOUT] claim_timeout on-chain tx failed: {e}");
+            }
+        })
+        .detach();
+}
+
+async fn async_claim_timeout(
+    rpc_url: String,
+    wallet_pubkey: Pubkey,
+    program_id: Pubkey,
+    game_id: u64,
+) -> Result<(), String> {
+    use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
+
+    let ix = claim_timeout_ix(program_id, game_id, wallet_pubkey)
+        .map_err(|e| format!("build claim_timeout_ix: {e}"))?;
+    let sig = sign_and_send_via_tauri(&rpc_url, wallet_pubkey, &[ix], &[], "Claiming timeout")?;
+    info!("[TIMEOUT] claim_timeout confirmed on-chain: {sig}");
+    Ok(())
+}
+
 /// Spawn a game-info lookup on `IoTaskPool` (returns wager_lamports + game_id).
 pub fn spawn_lookup_game(
     rpc_url: String,
@@ -655,7 +695,8 @@ async fn async_create_game_via_global_session(
     session_keypair_bytes: Vec<u8>,
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::global_session_manager::{
-        build_global_create_game_ix, find_global_session_pda,
+        build_global_create_game_ix, check_global_session_can_afford_wager,
+        find_global_session_pda,
     };
     use crate::solana::instructions::WAGER_ESCROW_SEED;
     use solana_sdk::signature::{Keypair, Signer};
@@ -668,6 +709,13 @@ async fn async_create_game_via_global_session(
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
+
+    // Catch an under-funded quick-sign session before spending a transaction
+    // fee on a doomed submit — the on-chain spending_limit/max_wager caps are
+    // self-declared, not balance-aware, so they alone don't guarantee the
+    // vault can actually cover this wager. See
+    // `check_global_session_can_afford_wager`'s doc comment.
+    check_global_session_can_afford_wager(&rpc_url, &session_pda, wager_lamports)?;
 
     // Mirrors the on-chain settlement gate (`match_type != MatchType::Free`,
     // see `lifecycle/settlement.rs`) — a Free match never gets charged the
@@ -924,7 +972,7 @@ async fn async_join_game_via_global_session(
     session_keypair_bytes: Vec<u8>,
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::global_session_manager::{
-        build_global_join_game_ix, find_global_session_pda,
+        build_global_join_game_ix, check_global_session_can_afford_wager, find_global_session_pda,
     };
     use crate::solana::instructions::{PROFILE_SEED, WAGER_ESCROW_SEED};
     use solana_sdk::signature::{Keypair, Signer};
@@ -969,6 +1017,22 @@ async fn async_join_game_via_global_session(
     let white_player = Pubkey::from(white_bytes);
     let white_profile_pda =
         Pubkey::find_program_address(&[PROFILE_SEED, white_player.as_ref()], &program_id).0;
+
+    // Same pinned offset as `WAGER_OFFSET` elsewhere in this file
+    // (`wager_amount_offset_is_212` on-chain test) — the game account we
+    // just fetched already tells us the wager this join is committing to, no
+    // extra RPC round trip needed for the affordability check below.
+    const WAGER_AMOUNT_OFFSET: usize = 8 + 212;
+    let wager_lamports = if game_data.len() >= WAGER_AMOUNT_OFFSET + 8 {
+        u64::from_le_bytes(
+            game_data[WAGER_AMOUNT_OFFSET..WAGER_AMOUNT_OFFSET + 8]
+                .try_into()
+                .unwrap_or_default(),
+        )
+    } else {
+        0
+    };
+    check_global_session_can_afford_wager(&rpc_url, &session_pda, wager_lamports)?;
 
     let ix = build_global_join_game_ix(
         &program_id,

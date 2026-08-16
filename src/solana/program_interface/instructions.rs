@@ -424,6 +424,38 @@ pub fn accept_draw_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Resul
     })
 }
 
+/// Build a `claim_timeout` instruction. Permissionless — `caller` need not be
+/// a player in the game (mirrors on-chain `ClaimTimeout`, which only checks
+/// `caller` as a signer, not against `game.white`/`game.black`). Awards
+/// victory to whichever side didn't go silent; errors on-chain with
+/// `TimeoutNotExpired` if the inactivity window
+/// (`lifecycle::clock::inactivity_window_seconds`) hasn't actually elapsed.
+///
+/// On-chain signature:
+/// ```ignore
+/// pub fn claim_timeout(ctx, game_id: u64)
+/// ```
+///
+/// Accounts (order matches `ClaimTimeout`):
+///   0. game    (mut, seeds=["game", game_id])
+///   1. caller  (signer) — need not be a player in the game
+pub fn claim_timeout_ix(program_id: Pubkey, game_id: u64, caller: Pubkey) -> Result<Instruction> {
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+
+    let mut data = anchor_discriminator("claim_timeout").to_vec();
+    data.extend_from_slice(&game_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(game_pda, false),
+            AccountMeta::new_readonly(caller, true),
+        ],
+        data,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // authorize_session_key
 // ---------------------------------------------------------------------------

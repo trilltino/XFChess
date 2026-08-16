@@ -29,12 +29,30 @@ pub struct LinkExternalElo<'info> {
     /// CHECK: We just need their pubkey to form the seed and verify authority.
     pub player: AccountInfo<'info>,
 
-    /// CHECK: The external-elo linking authority (VPS backend signer).
+    /// Claims (or verifies existing ownership of) this Lichess username's
+    /// uniqueness lock — see `LichessUsernameRecord`'s own doc comment for
+    /// why this exists. `init_if_needed` because the first link for a given
+    /// Lichess username creates the record; a re-sync of an already-linked
+    /// account reuses the same one.
     #[account(
+        init_if_needed,
+        payer = link_authority,
+        space = LichessUsernameRecord::LEN,
+        seeds = [LICHESS_USERNAME_SEED, username.as_bytes()],
+        bump
+    )]
+    pub lichess_username_record: Account<'info, LichessUsernameRecord>,
+
+    /// CHECK: The external-elo linking authority (VPS backend signer).
+    /// `mut` because it pays for `lichess_username_record` on first link.
+    #[account(
+        mut,
         signer,
         address = crate::constants::link_authority::ID @ GameErrorCode::UnauthorizedAccess
     )]
     pub link_authority: AccountInfo<'info>,
+
+    pub system_program: Program<'info, System>,
 }
 
 /// Records the Lichess username and blitz/rapid/bullet ratings (converted to
@@ -68,6 +86,24 @@ pub fn handler(
         !username.is_empty() && username.len() <= 30,
         GameErrorCode::InvalidUsername
     );
+
+    // Claim (or verify ownership of) the Lichess-username uniqueness
+    // record — same first-claimant-wins model `account_ix::profile::handler`
+    // already uses for local usernames via `UsernameRecord`. Must happen
+    // before writing `profile.lichess_username` below so a rejected claim
+    // (someone else already linked this exact Lichess handle) never leaves
+    // the profile in a half-updated state.
+    let record = &mut ctx.accounts.lichess_username_record;
+    if record.owner == Pubkey::default() {
+        record.owner = ctx.accounts.player.key();
+        record.created_at = Clock::get()?.unix_timestamp;
+    } else {
+        require!(
+            record.owner == ctx.accounts.player.key(),
+            GameErrorCode::UsernameTaken
+        );
+    }
+
     let blitz_centiscale = crate::elo::rating::external_to_centiscale(blitz_rating)?;
     let rapid_centiscale = crate::elo::rating::external_to_centiscale(rapid_rating)?;
     let bullet_centiscale = crate::elo::rating::external_to_centiscale(bullet_rating)?;

@@ -68,9 +68,15 @@ const KycPage = () => {
       return;
     }
 
+    const token = localStorage.getItem('xfchess_token');
+    if (!token) {
+      setError('Please sign in with your wallet before submitting KYC.');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await submitKyc(form);
+      await submitKyc(form, token);
       setSuccess('KYC details submitted successfully. You can now return to wagering setup.');
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : 'KYC submission failed.');

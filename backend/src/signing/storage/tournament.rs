@@ -175,6 +175,13 @@ pub struct TournamentRecord {
     /// True once the on-chain prize distribution crank has paid the winners.
     #[serde(default)]
     pub prizes_distributed: bool,
+    /// True once an admin has explicitly approved release for a prize pool
+    /// above `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` — see
+    /// `tasks::tournament_scheduler::spawn_prize_distributor`. Pools at or
+    /// below the threshold distribute automatically and never need this;
+    /// irrelevant (and never checked) once `prizes_distributed` is true.
+    #[serde(default)]
+    pub prize_release_approved: bool,
     /// Public spectator broadcast delay in seconds (0 = live). Stamped onto
     /// each match's game row so the public feed can't be used to ghost.
     #[serde(default)]
@@ -220,6 +227,7 @@ impl TournamentRecord {
             created_at: chrono::Utc::now().timestamp(),
             kyc_required: false,
             prizes_distributed: false,
+            prize_release_approved: false,
             broadcast_delay_secs: 0,
         }
     }
@@ -275,6 +283,7 @@ impl TournamentRecord {
             created_at: chrono::Utc::now().timestamp(),
             kyc_required,
             prizes_distributed: false,
+            prize_release_approved: false,
             broadcast_delay_secs: 0,
         }
     }
@@ -779,6 +788,7 @@ impl Default for TournamentRecord {
             created_at: chrono::Utc::now().timestamp(),
             kyc_required: false,
             prizes_distributed: false,
+            prize_release_approved: false,
             broadcast_delay_secs: 0,
         }
     }

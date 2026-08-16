@@ -204,6 +204,31 @@ impl IdentityVault {
     /// # Returns
     /// The decrypted plaintext string, or an error on failure
     pub fn decrypt(&self, blob: &[u8]) -> Result<String, String> {
+        let plaintext = self.decrypt_bytes(blob)?;
+        String::from_utf8(plaintext).map_err(|e| format!("Invalid UTF-8: {}", e))
+    }
+
+    /// Byte-native variant of [`Self::encrypt`] — for binary payloads (e.g. a
+    /// raw ed25519 keypair) rather than UTF-8 text. Same [Nonce][Ciphertext]
+    /// BLOB shape, so `encrypt`/`encrypt_bytes` output is interchangeable
+    /// with `decrypt`/`decrypt_bytes` as long as the caller matches the
+    /// plaintext type back up.
+    pub fn encrypt_bytes(&self, plaintext: &[u8]) -> Result<Vec<u8>, String> {
+        let cipher = Aes256Gcm::new(&self.encryption_key.into());
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng); // 12-bytes
+
+        let ciphertext = cipher
+            .encrypt(&nonce, plaintext)
+            .map_err(|e| format!("Encryption failed: {}", e))?;
+
+        let mut result = nonce.to_vec();
+        result.extend(ciphertext);
+        Ok(result)
+    }
+
+    /// Byte-native variant of [`Self::decrypt`] — returns raw plaintext bytes
+    /// instead of requiring valid UTF-8.
+    pub fn decrypt_bytes(&self, blob: &[u8]) -> Result<Vec<u8>, String> {
         if blob.len() < 12 {
             return Err("Invalid ciphertext blob length".into());
         }
@@ -214,11 +239,9 @@ impl IdentityVault {
             .expect("Nonce must be exactly 12 bytes");
         let nonce = Nonce::from(nonce_arr);
 
-        let plaintext = cipher
+        cipher
             .decrypt(&nonce, ciphertext)
-            .map_err(|e| format!("Decryption failed: {}", e))?;
-
-        String::from_utf8(plaintext).map_err(|e| format!("Invalid UTF-8: {}", e))
+            .map_err(|e| format!("Decryption failed: {}", e))
     }
 
     /// Validates identity fields based on country-specific rules.

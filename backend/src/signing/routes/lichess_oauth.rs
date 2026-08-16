@@ -81,7 +81,19 @@ static PKCE_STATES: Lazy<Arc<Mutex<HashMap<String, PkceState>>>> =
 /// Lichess matches it by exact string equality at token-exchange time. This
 /// route is nested under `/api` (see `backend/src/signing/mod.rs`), so the
 /// path here must include that prefix.
-const REDIRECT_URI: &str = "http://178.104.55.19/api/auth/lichess/callback";
+///
+/// Was previously the bare IP over plain HTTP
+/// (`http://178.104.55.19/api/auth/lichess/callback`) — a leftover from
+/// before the TLS/domain migration. `ops/nginx/nginx.conf` (the config
+/// `deploy.ps1` actually installs, not the older IP-only `nginx-http.conf`)
+/// unconditionally 301s port 80 to HTTPS on the same host, and its
+/// certificate covers `xfchess.com`, not the raw IP — so Lichess's redirect
+/// back to that old URL hit a certificate-hostname mismatch before the
+/// callback page ever loaded, breaking the entire link flow. Whoever
+/// updates this must also update the matching `redirect_uri` registered in
+/// XFChess's app settings on Lichess's own OAuth developer dashboard —
+/// Lichess rejects the auth request outright if the two don't match exactly.
+const REDIRECT_URI: &str = "https://xfchess.com/api/auth/lichess/callback";
 
 /// Creates the Lichess OAuth routes router.
 pub fn lichess_oauth_routes() -> Router<AppState> {
@@ -95,10 +107,31 @@ pub fn lichess_oauth_routes() -> Router<AppState> {
 
 /// GET /api/auth/lichess/init?wallet_pubkey=...
 /// Generates PKCE params, stores state, returns the Lichess authorize URL.
+///
+/// Requires a valid Bearer JWT whose wallet matches `wallet_pubkey`. Before
+/// this, `wallet_pubkey` was only CSRF-protected via the `state` param
+/// round-tripping through Lichess — the Lichess OAuth identity itself is
+/// genuinely verified server-side (see `exchange_code`), but nothing
+/// verified that the wallet asking to receive that link was actually the
+/// caller's own. Anyone who could trigger this flow (a genuine, unrelated
+/// action — no exploit needed) could link their real Lichess account, and
+/// the external ELO it seeds, to an arbitrary victim wallet.
 async fn init_oauth(
     State(state): State<AppState>,
     Query(req): Query<InitRequest>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<InitResponse>, (StatusCode, String)> {
+    crate::signing::routes::auth::require_caller_owns_wallet(
+        &state,
+        &headers,
+        &req.wallet_pubkey,
+    )
+    .await
+    .map_err(|(status, msg)| {
+        warn!("[LichessOAuth] {msg}");
+        (status, "wallet_pubkey must match the authenticated wallet".to_string())
+    })?;
+
     // Validate wallet pubkey
     let _ = Pubkey::from_str(&req.wallet_pubkey).map_err(|e| {
         (

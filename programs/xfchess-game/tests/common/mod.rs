@@ -17,7 +17,9 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::{Transaction, TransactionError},
 };
-use xfchess_game::state::{Game, GameResult, GameStatus, GameType, MatchType, SessionDelegation};
+use xfchess_game::state::{
+    Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile, SessionDelegation,
+};
 
 /// Filename (without extension) of the built program `.so`.
 pub const PROGRAM: &str = "xfchess_game";
@@ -29,6 +31,10 @@ pub const MAGIC_CONTEXT: &str = "MagicContext1111111111111111111111111111111";
 
 pub fn game_pda(game_id: u64) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &xfchess_game::ID)
+}
+
+pub fn profile_pda(player: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[b"profile", player.as_ref()], &xfchess_game::ID)
 }
 
 pub fn sd_pda(game_id: u64, player: &Pubkey) -> (Pubkey, u8) {
@@ -379,4 +385,15 @@ pub async fn fetch_game(ctx: &mut ProgramTestContext, game_id: u64) -> Game {
         .unwrap()
         .expect("game account missing");
     Game::try_deserialize(&mut &acc.data[..]).unwrap()
+}
+
+/// Read back a `PlayerProfile` account from the bank.
+pub async fn fetch_profile(ctx: &mut ProgramTestContext, player: &Pubkey) -> PlayerProfile {
+    let acc = ctx
+        .banks_client
+        .get_account(profile_pda(player).0)
+        .await
+        .unwrap()
+        .expect("profile account missing");
+    PlayerProfile::try_deserialize(&mut &acc.data[..]).unwrap()
 }

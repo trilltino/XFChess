@@ -495,6 +495,30 @@ const PRIZE_DISTRIBUTION_TICK: Duration = Duration::from_secs(60);
 /// analysis lag must not freeze payouts indefinitely.
 const PRIZE_HOLD_WINDOW_SECS: i64 = 15 * 60;
 
+/// Default prize-pool size (lamports) above which the crank refuses to pay
+/// out automatically and instead waits for a human admin to call
+/// `POST /admin/tournament/{id}/approve-prize-release`. Unlike the anti-cheat
+/// hold window, this gate never times out on its own — a large payout stays
+/// held indefinitely until someone explicitly approves it. Overridable via
+/// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS`.
+const DEFAULT_PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS: u64 = 5_000_000_000; // 5 SOL
+
+fn prize_auto_release_threshold_lamports() -> u64 {
+    std::env::var("PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS)
+}
+
+/// True if `prize_pool` exceeds `threshold` and hasn't been explicitly
+/// approved yet — i.e. the crank should hold distribution pending
+/// `POST /admin/tournament/{id}/approve-prize-release`. Pulled out as a pure
+/// function (mirrors `anticheat_gate`) so the threshold logic is testable
+/// without spinning up the whole background loop.
+fn awaiting_prize_release_approval(prize_pool: u64, approved: bool, threshold: u64) -> bool {
+    prize_pool > threshold && !approved
+}
+
 /// Anti-cheat gate decision for a completed tournament.
 enum PrizeGate {
     /// Analysis still pending and we're inside the hold window.
@@ -637,6 +661,21 @@ pub fn spawn_prize_distributor(
                     }
                     PrizeGate::Proceed { flagged } => flagged,
                 };
+
+                if awaiting_prize_release_approval(
+                    t.prize_pool,
+                    t.prize_release_approved,
+                    prize_auto_release_threshold_lamports(),
+                ) {
+                    worker_metrics::PRIZE_DISTRIBUTION_AWAITING_APPROVAL_TOTAL
+                        .fetch_add(1, Ordering::Relaxed);
+                    warn!(
+                        "[prize-distributor] Tournament {} prize pool ({} lamports) exceeds the \
+                         auto-release threshold — held pending POST /admin/tournament/{}/approve-prize-release",
+                        t.tournament_id, t.prize_pool, t.tournament_id
+                    );
+                    continue;
+                }
 
                 use solana_sdk::pubkey::Pubkey;
                 use std::str::FromStr;
@@ -912,6 +951,62 @@ mod tests {
         assert!(
             matches!(gate, PrizeGate::Hold),
             "inside the hold window, pending analysis must hold distribution"
+        );
+    }
+
+    #[test]
+    fn small_prize_pool_never_needs_approval() {
+        assert!(!awaiting_prize_release_approval(1_000_000, false, 5_000_000_000));
+        assert!(!awaiting_prize_release_approval(1_000_000, true, 5_000_000_000));
+    }
+
+    #[test]
+    fn large_unapproved_prize_pool_is_held() {
+        assert!(awaiting_prize_release_approval(
+            10_000_000_000,
+            false,
+            5_000_000_000
+        ));
+    }
+
+    #[test]
+    fn large_approved_prize_pool_proceeds() {
+        assert!(!awaiting_prize_release_approval(
+            10_000_000_000,
+            true,
+            5_000_000_000
+        ));
+    }
+
+    #[test]
+    fn threshold_boundary_is_exclusive() {
+        // Exactly at the threshold: still auto-releases (only pools that
+        // *exceed* the threshold need approval).
+        assert!(!awaiting_prize_release_approval(
+            5_000_000_000,
+            false,
+            5_000_000_000
+        ));
+        assert!(awaiting_prize_release_approval(
+            5_000_000_001,
+            false,
+            5_000_000_000
+        ));
+    }
+
+    /// Serializes the one test that mutates the process-global
+    /// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` env var.
+    static PRIZE_THRESHOLD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn threshold_env_var_overrides_default() {
+        let _guard = PRIZE_THRESHOLD_ENV_LOCK.lock().unwrap();
+        std::env::set_var("PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS", "123");
+        assert_eq!(prize_auto_release_threshold_lamports(), 123);
+        std::env::remove_var("PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS");
+        assert_eq!(
+            prize_auto_release_threshold_lamports(),
+            DEFAULT_PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS
         );
     }
 

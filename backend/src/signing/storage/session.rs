@@ -3,6 +3,7 @@
 //! This module provides SQLite-backed storage for game sessions,
 //! including session keypair management and user authentication.
 
+use crate::signing::identity::IdentityVault;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sqlx::SqlitePool;
 use std::str::FromStr;
@@ -38,15 +39,24 @@ impl SessionEntry {
 }
 
 /// SQLite-backed session store that persists across server restarts.
+///
+/// Session keypairs (`sessions.keypair`) are encrypted at rest with
+/// `vault`'s AES-256-GCM key before being written, and decrypted on read —
+/// the raw ed25519 secret is never stored in plaintext, so a leaked SQLite
+/// backup or a copy of the file for local debugging is no longer a direct
+/// signing-key leak for every game active at copy time.
 #[derive(Clone)]
 pub struct SessionStore {
     pool: SqlitePool,
+    vault: IdentityVault,
 }
 
 impl SessionStore {
-    /// Creates a new SessionStore with the provided database pool.
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    /// Creates a new SessionStore with the provided database pool and
+    /// at-rest encryption vault (reuses the same vault as KYC PII — see
+    /// `AppState::new`).
+    pub fn new(pool: SqlitePool, vault: IdentityVault) -> Self {
+        Self { pool, vault }
     }
 
     /// Returns a clone of the underlying pool for use in repositories.
@@ -453,6 +463,10 @@ impl SessionStore {
         let pubkey = kp.pubkey();
         let keypair_bytes = kp.to_bytes();
         let wallet_str = wallet_pubkey.to_string();
+        let encrypted = self
+            .vault
+            .encrypt_bytes(&keypair_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to encrypt session keypair: {e}"))?;
 
         sqlx::query(
             r#"
@@ -461,7 +475,7 @@ impl SessionStore {
             "#,
         )
         .bind(game_id as i64)
-        .bind(&keypair_bytes[..])
+        .bind(&encrypted[..])
         .bind(wallet_str)
         .execute(&self.pool)
         .await
@@ -489,6 +503,34 @@ impl SessionStore {
         keypair_bytes: [u8; 64],
     ) -> anyhow::Result<()> {
         let wallet_str = wallet_pubkey.to_string();
+
+        // Guard against silently repointing an in-use session's recorded
+        // owner: `game_id` is client-generated, so a collision with an
+        // existing row should be vanishingly rare — but the UPSERT below
+        // previously overwrote `wallet` unconditionally on ANY conflict,
+        // decoupling a session's recorded owner from whoever actually holds
+        // it (see the identity audit: this was a real invariant-violation
+        // gap, not just theoretical). Reject instead of silently
+        // reassigning when an ACTIVE row already exists under a DIFFERENT
+        // wallet; a re-call for the SAME wallet (retry, idempotent re-track)
+        // still proceeds exactly as before.
+        if let Some((existing_wallet, active)) =
+            sqlx::query_as::<_, (String, i64)>("SELECT wallet, active FROM sessions WHERE game_id = ?")
+                .bind(game_id as i64)
+                .fetch_optional(&self.pool)
+                .await?
+        {
+            if active != 0 && existing_wallet != wallet_str {
+                anyhow::bail!(
+                    "session for game {game_id} is already active under a different wallet"
+                );
+            }
+        }
+
+        let encrypted = self
+            .vault
+            .encrypt_bytes(&keypair_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to encrypt session keypair: {e}"))?;
         sqlx::query(
             r#"
             INSERT INTO sessions (game_id, keypair, wallet, active, is_global)
@@ -497,7 +539,7 @@ impl SessionStore {
             "#,
         )
         .bind(game_id as i64)
-        .bind(&keypair_bytes[..])
+        .bind(&encrypted[..])
         .bind(wallet_str)
         .execute(&self.pool)
         .await
@@ -506,6 +548,25 @@ impl SessionStore {
             anyhow::anyhow!("Failed to insert session: {}", e)
         })?;
         Ok(())
+    }
+
+    /// Decrypts a `sessions.keypair` column value, transparently falling
+    /// back to treating it as legacy plaintext if decryption fails and the
+    /// blob is exactly 64 bytes (the old unencrypted format) — rows written
+    /// before at-rest encryption was added stay readable rather than needing
+    /// a blocking migration; every session created or updated after this
+    /// point is encrypted going forward, and per-game sessions are
+    /// short-lived, so old plaintext rows age out naturally.
+    fn decrypt_keypair_column(&self, blob: &[u8]) -> Option<[u8; 64]> {
+        let bytes = match self.vault.decrypt_bytes(blob) {
+            Ok(plaintext) => plaintext,
+            Err(_) if blob.len() == 64 => blob.to_vec(),
+            Err(e) => {
+                tracing::error!("Failed to decrypt session keypair: {e}");
+                return None;
+            }
+        };
+        bytes.try_into().ok()
     }
 
     /// Retrieves a session entry by game ID.
@@ -518,8 +579,7 @@ impl SessionStore {
         .await
         .ok()?;
 
-        let mut keypair_bytes = [0u8; 64];
-        keypair_bytes.copy_from_slice(&row.0);
+        let keypair_bytes = self.decrypt_keypair_column(&row.0)?;
 
         let wallet_pubkey = Pubkey::from_str(&row.1).ok()?;
         let active = row.2 != 0;
@@ -653,5 +713,147 @@ impl SessionStore {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solana_sdk::signer::Signer;
+
+    async fn test_store() -> SessionStore {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite pool");
+        let vault = IdentityVault::new(&"1".repeat(64), &"2".repeat(64)).expect("test vault");
+        let store = SessionStore::new(pool, vault);
+        store.init().await.expect("init");
+        store
+    }
+
+    #[tokio::test]
+    async fn session_keypair_is_encrypted_at_rest() {
+        let store = test_store().await;
+        let wallet = Keypair::new().pubkey();
+        let session_pubkey = store.create(1, wallet).await.expect("create session");
+
+        // Read the raw column directly, bypassing `get()`'s decryption — this
+        // is what a stolen SQLite backup would actually contain.
+        let (raw,): (Vec<u8>,) = sqlx::query_as("SELECT keypair FROM sessions WHERE game_id = 1")
+            .fetch_one(&store.pool)
+            .await
+            .expect("raw row");
+
+        assert_ne!(
+            raw.len(),
+            64,
+            "encrypted blob (nonce + ciphertext + AEAD tag) must not be the \
+             same length as a raw plaintext keypair"
+        );
+        // The nonce/ciphertext framing means the plaintext pubkey bytes
+        // shouldn't appear verbatim in the stored blob either.
+        assert!(
+            !raw.windows(32).any(|w| w == session_pubkey.to_bytes()),
+            "raw stored bytes must not contain the plaintext pubkey"
+        );
+
+        // But the store's own decrypt path must still recover it correctly —
+        // this is the round-trip the game's record_move flow depends on.
+        let entry = store.get(1).await.expect("get session");
+        assert_eq!(entry.session_pubkey(), session_pubkey);
+    }
+
+    #[tokio::test]
+    async fn legacy_plaintext_keypair_rows_still_decode() {
+        let store = test_store().await;
+        let wallet = Keypair::new().pubkey();
+        let kp = Keypair::new();
+        let expected_pubkey = kp.pubkey();
+
+        // Simulate a row written before at-rest encryption existed: raw
+        // 64-byte plaintext, not a [nonce][ciphertext] blob.
+        sqlx::query(
+            "INSERT INTO sessions (game_id, keypair, wallet, active) VALUES (?1, ?2, ?3, 0)",
+        )
+        .bind(2i64)
+        .bind(&kp.to_bytes()[..])
+        .bind(wallet.to_string())
+        .execute(&store.pool)
+        .await
+        .expect("insert legacy row");
+
+        let entry = store
+            .get(2)
+            .await
+            .expect("legacy plaintext row should still decode");
+        assert_eq!(entry.session_pubkey(), expected_pubkey);
+    }
+
+    #[tokio::test]
+    async fn create_with_keypair_is_also_encrypted_at_rest() {
+        let store = test_store().await;
+        let wallet = Keypair::new().pubkey();
+        let kp = Keypair::new();
+        let expected_pubkey = kp.pubkey();
+
+        store
+            .create_with_keypair(3, wallet, kp.to_bytes())
+            .await
+            .expect("create_with_keypair");
+
+        let (raw,): (Vec<u8>,) = sqlx::query_as("SELECT keypair FROM sessions WHERE game_id = 3")
+            .fetch_one(&store.pool)
+            .await
+            .expect("raw row");
+        assert_ne!(raw.len(), 64, "global-session keypair must be encrypted too");
+
+        let entry = store.get(3).await.expect("get session");
+        assert_eq!(entry.session_pubkey(), expected_pubkey);
+    }
+
+    /// The `ON CONFLICT(game_id) DO UPDATE SET ... wallet = excluded.wallet`
+    /// upsert used to overwrite `wallet` unconditionally on any `game_id`
+    /// collision, decoupling a session's recorded owner from whoever
+    /// actually holds it. A re-call for the SAME wallet (retry/idempotent
+    /// re-track) must still succeed; a different wallet claiming an already
+    /// active game_id must be rejected.
+    #[tokio::test]
+    async fn create_with_keypair_rejects_repointing_an_active_sessions_wallet() {
+        let store = test_store().await;
+        let wallet_a = Keypair::new().pubkey();
+        let wallet_b = Keypair::new().pubkey();
+        let kp = Keypair::new();
+
+        store
+            .create_with_keypair(7, wallet_a, kp.to_bytes())
+            .await
+            .expect("first create_with_keypair should succeed");
+
+        // Re-tracking the SAME wallet for the same game_id is a no-op retry
+        // and must still succeed.
+        store
+            .create_with_keypair(7, wallet_a, kp.to_bytes())
+            .await
+            .expect("re-tracking the same wallet must still succeed");
+
+        // A DIFFERENT wallet claiming the same, still-active game_id must
+        // be rejected rather than silently repointing the session.
+        let err = store
+            .create_with_keypair(7, wallet_b, kp.to_bytes())
+            .await
+            .expect_err("a different wallet must not silently take over an active session");
+        assert!(
+            err.to_string().contains("different wallet"),
+            "unexpected error: {err}"
+        );
+
+        // The session must still record the ORIGINAL wallet, not `wallet_b`.
+        let (recorded_wallet,): (String,) =
+            sqlx::query_as("SELECT wallet FROM sessions WHERE game_id = 7")
+                .fetch_one(&store.pool)
+                .await
+                .expect("raw row");
+        assert_eq!(recorded_wallet, wallet_a.to_string());
     }
 }

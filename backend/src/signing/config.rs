@@ -3,7 +3,9 @@
 //! This module loads configuration from environment variables for RPC endpoints,
 //! program IDs, JWT secrets, and fee-payer keys.
 
+use solana_sdk::pubkey::Pubkey;
 use std::env;
+use std::str::FromStr;
 
 /// Configuration structure for the signing service.
 ///
@@ -42,14 +44,19 @@ pub struct SigningConfig {
     pub kyc_authority_key: Option<String>,
     /// Base58 encoded external-elo linking authority private key
     pub link_authority_key: Option<String>,
-    /// Base58 encoded treasury-withdrawal authority private key. Signs
-    /// `withdraw_treasury` (platform-fee payouts / manual refunds). Must
-    /// correspond to `treasury_authority::ID` in the on-chain program.
-    pub treasury_authority_key: Option<String>,
+    /// Public key of the treasury-withdrawal authority — NOT a secret; the
+    /// private key is deliberately never loaded by this process. Must match
+    /// `treasury_authority::ID` in the on-chain program. `withdraw_treasury`
+    /// signing happens exclusively via the standalone `treasury_signer`
+    /// binary, run by an operator on a separate, minimally-networked host —
+    /// see that binary's module doc for why. Defaults to the deployed
+    /// devnet/mainnet treasury authority's pubkey; override with
+    /// `TREASURY_AUTHORITY_PUBKEY` only for a different deployment.
+    pub treasury_authority_pubkey: String,
     /// Admin token for protected endpoints (POST /admin/dispute/resolve, etc.)
     pub admin_token: Option<String>,
     /// Tournament entry-fee recipient pubkey — a *different* address from
-    /// `treasury_authority_key` above (that one is the withdraw-authority
+    /// `treasury_authority_pubkey` above (that one is the withdraw-authority
     /// signer; this one just receives entry fees directly). Deliberately
     /// distinctly named to avoid the two being conflated — see
     /// docs/plans/identity-implementation-plan.md.
@@ -58,6 +65,12 @@ pub struct SigningConfig {
     pub usdc_mint_pubkey: String,
     /// Lichess OAuth client ID (from lichess.org/account/oauth/app)
     pub lichess_client_id: String,
+    /// Comma-separated list of allowed CORS origins (e.g.
+    /// `https://xfchess.com,https://www.xfchess.com`). Empty outside
+    /// production means "allow any origin" (dev convenience) — see
+    /// `infrastructure::router::cors_layer`. Must be non-empty in production;
+    /// enforced by [`Self::validate`].
+    pub allowed_origins: Vec<String>,
 }
 
 impl SigningConfig {
@@ -66,6 +79,15 @@ impl SigningConfig {
     /// stays fully gated regardless of this flag.
     pub fn is_devnet(&self) -> bool {
         self.solana_rpc_url.contains("devnet")
+    }
+
+    /// True when `APP_ENV=production`. Gates whether missing/invalid secrets
+    /// (authority keys, JWT secret, CORS origins, ...) are a hard startup
+    /// failure or a warn-and-continue dev convenience — see [`Self::validate`].
+    pub fn is_production(&self) -> bool {
+        env::var("APP_ENV")
+            .map(|v| v.eq_ignore_ascii_case("production"))
+            .unwrap_or(false)
     }
 
     /// Loads configuration from environment variables.
@@ -83,9 +105,12 @@ impl SigningConfig {
     /// - `VPS_AUTHORITY_KEY` - Base58 VPS authority key
     /// - `KYC_AUTHORITY_KEY` - Base58 KYC authority key
     /// - `LINK_AUTHORITY_KEY` - Base58 external-elo linking authority key
+    /// - `TREASURY_AUTHORITY_PUBKEY` - Public key only (never the secret —
+    ///   see `treasury_signer` bin); defaults to the deployed treasury pubkey
     /// - `TOURNAMENT_FEE_RECIPIENT` - Host treasury pubkey for entry fees
     /// - `USDC_MINT` - USDC mint address (devnet or mainnet)
     /// - `LICHESS_CLIENT_ID` - Lichess OAuth client ID
+    /// - `ALLOWED_ORIGINS` - Comma-separated CORS allow-list (required in production)
     ///
     /// # Returns
     /// A fully configured `SigningConfig` struct
@@ -124,13 +149,21 @@ impl SigningConfig {
             vps_authority_key: env::var("VPS_AUTHORITY_KEY").ok(),
             kyc_authority_key: env::var("KYC_AUTHORITY_KEY").ok(),
             link_authority_key: env::var("LINK_AUTHORITY_KEY").ok(),
-            treasury_authority_key: env::var("TREASURY_AUTHORITY_KEY").ok(),
+            treasury_authority_pubkey: env::var("TREASURY_AUTHORITY_PUBKEY")
+                .unwrap_or_else(|_| "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string()),
             admin_token: env::var("ADMIN_TOKEN").ok(),
             tournament_fee_recipient: env::var("TOURNAMENT_FEE_RECIPIENT")
                 .unwrap_or_else(|_| "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string()),
             usdc_mint_pubkey: env::var("USDC_MINT")
                 .unwrap_or_else(|_| "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".to_string()),
             lichess_client_id: env::var("LICHESS_CLIENT_ID").unwrap_or_default(),
+            allowed_origins: env::var("ALLOWED_ORIGINS")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect(),
         }
     }
 
@@ -142,9 +175,7 @@ impl SigningConfig {
     /// - otherwise (dev/local) → problems are **warnings** so `just backend` still runs
     ///   with the throwaway placeholders from the justfile.
     pub fn validate(&self) -> Result<(), String> {
-        let prod = env::var("APP_ENV")
-            .map(|v| v.eq_ignore_ascii_case("production"))
-            .unwrap_or(false);
+        let prod = self.is_production();
 
         let zero64 = "0".repeat(64);
         let one64 = "1".repeat(64);
@@ -190,6 +221,29 @@ impl SigningConfig {
             problems
                 .push("FEE_PAYER_KEYS empty — backend cannot pay transaction fees in production");
         }
+        if prod && self.vps_authority_key.is_none() {
+            problems.push(
+                "VPS_AUTHORITY_KEY not set — refusing to generate a random fallback in production",
+            );
+        }
+        if prod && self.kyc_authority_key.is_none() {
+            problems.push(
+                "KYC_AUTHORITY_KEY not set — refusing to generate a random fallback in production",
+            );
+        }
+        if prod && self.link_authority_key.is_none() {
+            problems.push(
+                "LINK_AUTHORITY_KEY not set — refusing to generate a random fallback in production",
+            );
+        }
+        if Pubkey::from_str(&self.treasury_authority_pubkey).is_err() {
+            problems.push("TREASURY_AUTHORITY_PUBKEY is not a valid base58 pubkey");
+        }
+        if prod && self.allowed_origins.is_empty() {
+            problems.push(
+                "ALLOWED_ORIGINS empty — refusing to allow any origin (CORS) in production",
+            );
+        }
 
         if problems.is_empty() {
             return Ok(());
@@ -206,6 +260,105 @@ impl SigningConfig {
             }
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Serialises the tests below — they all mutate the process-global
+    /// `APP_ENV` var, same reasoning as `RELAY_TEST_LOCK` in `tests/e2e_api.rs`.
+    static APP_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn base_config() -> SigningConfig {
+        SigningConfig {
+            port: 8090,
+            solana_rpc_url: "https://api.devnet.solana.com".into(),
+            solana_mainnet_rpc_url: None,
+            er_rpc_url: "https://devnet-eu.magicblock.app/".into(),
+            magic_router_rpc_url: "https://devnet-router.magicblock.app".into(),
+            program_id: "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into(),
+            jwt_secret: "a".repeat(32),
+            identity_encryption_key: "a".repeat(64),
+            identity_salt: "b".repeat(64),
+            fee_payer_keys: vec!["dummy".into()],
+            vps_authority_key: Some("dummy".into()),
+            kyc_authority_key: Some("dummy".into()),
+            link_authority_key: Some("dummy".into()),
+            treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".into(),
+            admin_token: None,
+            tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
+            usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
+            lichess_client_id: String::new(),
+            allowed_origins: vec!["https://xfchess.com".into()],
+        }
+    }
+
+    #[test]
+    fn missing_authority_key_is_fine_outside_production() {
+        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        std::env::remove_var("APP_ENV");
+        let mut config = base_config();
+        config.vps_authority_key = None;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn missing_authority_key_is_fatal_in_production() {
+        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        std::env::set_var("APP_ENV", "production");
+        let mut config = base_config();
+        config.vps_authority_key = None;
+        let result = config.validate();
+        std::env::remove_var("APP_ENV");
+        let err = result.expect_err("missing VPS_AUTHORITY_KEY must be fatal in production");
+        assert!(err.contains("VPS_AUTHORITY_KEY"));
+    }
+
+    #[test]
+    fn all_authority_keys_present_passes_in_production() {
+        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        std::env::set_var("APP_ENV", "production");
+        let result = base_config().validate();
+        std::env::remove_var("APP_ENV");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn invalid_treasury_pubkey_is_fatal_in_production() {
+        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        std::env::set_var("APP_ENV", "production");
+        let mut config = base_config();
+        config.treasury_authority_pubkey = "not-a-real-pubkey".into();
+        let result = config.validate();
+        std::env::remove_var("APP_ENV");
+        let err = result.expect_err("an invalid TREASURY_AUTHORITY_PUBKEY must fail validate()");
+        assert!(err.contains("TREASURY_AUTHORITY_PUBKEY"));
+    }
+
+    #[test]
+    fn missing_allowed_origins_is_fatal_in_production() {
+        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        std::env::set_var("APP_ENV", "production");
+        let mut config = base_config();
+        config.allowed_origins = vec![];
+        let result = config.validate();
+        std::env::remove_var("APP_ENV");
+        let err = result.expect_err("empty ALLOWED_ORIGINS must be fatal in production");
+        assert!(err.contains("ALLOWED_ORIGINS"));
+    }
+
+    #[test]
+    fn is_production_reflects_app_env() {
+        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        std::env::set_var("APP_ENV", "production");
+        assert!(base_config().is_production());
+        std::env::set_var("APP_ENV", "development");
+        assert!(!base_config().is_production());
+        std::env::remove_var("APP_ENV");
+        assert!(!base_config().is_production());
     }
 }
 

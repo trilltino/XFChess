@@ -105,6 +105,21 @@ pub static PRIZE_DISTRIBUTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static PRIZE_DISTRIBUTION_HELD_TOTAL: AtomicU64 = AtomicU64::new(0);
 /// Prize places skipped because the winner had a flagged verdict.
 pub static PRIZE_DISTRIBUTION_FLAGGED_TOTAL: AtomicU64 = AtomicU64::new(0);
+/// Distribution ticks deferred because the prize pool exceeds
+/// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` and no admin has approved release
+/// yet (`POST /admin/tournament/{id}/approve-prize-release`). Distinct from
+/// `PRIZE_DISTRIBUTION_HELD_TOTAL` (anti-cheat pending) — this is a deliberate
+/// human-in-the-loop gate on large payouts, not a transient hold.
+pub static PRIZE_DISTRIBUTION_AWAITING_APPROVAL_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+/// Requests to a session-signing endpoint (`require_relay_or_jwt`) rejected
+/// specifically because `RELAY_SHARED_SECRET` is unset/empty and no valid JWT
+/// was presented — i.e. the deployment itself is unconfigured, not just an
+/// individual caller sending a bad credential. Should be 0 on any properly
+/// configured production deployment; a nonzero rate is a misconfiguration
+/// alert, not routine traffic noise.
+pub static AUTH_UNCONFIGURED_RELAY_REJECTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 // ── Exchange rates (RateCache) ──────────────────────────────────────────────
 /// Both the primary and secondary rate sources failed on the same refresh —
@@ -227,7 +242,13 @@ pub fn render_prometheus() -> String {
          xfchess_rates_sanity_rejected_total {}\n\
          # HELP xfchess_rates_source_divergence_total Refreshes where primary/secondary rate sources disagreed beyond threshold\n\
          # TYPE xfchess_rates_source_divergence_total counter\n\
-         xfchess_rates_source_divergence_total {}\n",
+         xfchess_rates_source_divergence_total {}\n\
+         # HELP xfchess_auth_unconfigured_relay_rejected_total Session-signing requests rejected because RELAY_SHARED_SECRET is unset and no valid JWT was presented (misconfiguration signal)\n\
+         # TYPE xfchess_auth_unconfigured_relay_rejected_total counter\n\
+         xfchess_auth_unconfigured_relay_rejected_total {}\n\
+         # HELP xfchess_prize_distribution_awaiting_approval_total Distribution ticks deferred for a large prize pool awaiting manual admin approval\n\
+         # TYPE xfchess_prize_distribution_awaiting_approval_total counter\n\
+         xfchess_prize_distribution_awaiting_approval_total {}\n",
         c(&SETTLEMENT_TICKS_TOTAL),
         c(&SETTLEMENT_TICK_MILLIS),
         c(&SETTLEMENT_GAMES_SCANNED_TOTAL),
@@ -264,5 +285,7 @@ pub fn render_prometheus() -> String {
         c(&RATES_FETCH_FAILED_TOTAL),
         c(&RATES_SANITY_REJECTED_TOTAL),
         c(&RATES_SOURCE_DIVERGENCE_TOTAL),
+        c(&AUTH_UNCONFIGURED_RELAY_REJECTED_TOTAL),
+        c(&PRIZE_DISTRIBUTION_AWAITING_APPROVAL_TOTAL),
     )
 }

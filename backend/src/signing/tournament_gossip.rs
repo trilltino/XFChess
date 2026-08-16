@@ -51,23 +51,38 @@ impl TournamentGossipService {
         }
     }
 
-    /// Initialize the database for message persistence
+    /// Initialize the database for message persistence. Was previously a
+    /// no-op in practice: nothing called it (see `server.rs`, which now
+    /// does), and its `CREATE TABLE` embedded an inline `INDEX` clause —
+    /// valid MySQL syntax, not SQLite — which silently failed via the
+    /// trailing `.ok()`, so the table was never actually created even on
+    /// the rare path that did call this.
     pub async fn init_db(&mut self, pool: SqlitePool) {
-        // Create gossip message log table
-        sqlx::query(
+        if let Err(e) = sqlx::query(
             r#"CREATE TABLE IF NOT EXISTS tournament_gossip_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tournament_id INTEGER NOT NULL,
                 round INTEGER NOT NULL,
                 message_type TEXT NOT NULL,
                 message_json TEXT NOT NULL,
-                timestamp INTEGER NOT NULL,
-                INDEX idx_tournament_round (tournament_id, round)
+                timestamp INTEGER NOT NULL
             )"#,
         )
         .execute(&pool)
         .await
-        .ok();
+        {
+            warn!("[gossip] Failed to create tournament_gossip_log table: {e}");
+            return;
+        }
+
+        if let Err(e) = sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_tournament_gossip_round ON tournament_gossip_log (tournament_id, round)",
+        )
+        .execute(&pool)
+        .await
+        {
+            warn!("[gossip] Failed to create tournament_gossip_log index: {e}");
+        }
 
         self.db_pool = Some(pool);
         info!("[gossip] Message persistence initialized");
@@ -360,5 +375,50 @@ mod tests {
         // Empty string is now valid since we use String
         assert!(parse_node_id("").is_ok());
         assert!(parse_node_id("valid_node_id").is_ok());
+    }
+
+    /// Regression test for the bug this fixes: `init_db`'s `CREATE TABLE`
+    /// used to embed an inline `INDEX` clause (valid MySQL, not SQLite),
+    /// which silently failed via a trailing `.ok()` — so the table was never
+    /// actually created and every persisted message was a silent no-op.
+    #[tokio::test]
+    async fn init_db_persists_and_replays_missed_messages() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite pool");
+        let tournament_store = TournamentStore::new(pool.clone()).await;
+        let mut gossip = TournamentGossipService::new(tournament_store, None);
+
+        gossip.init_db(pool).await;
+        assert!(
+            gossip.db_pool.is_some(),
+            "init_db should succeed against a real SQLite pool, not silently no-op"
+        );
+
+        let msg = SwissMessage::BracketFired {
+            tournament_id: 42,
+            player_count: 8,
+            started_at: 1_700_000_000,
+        };
+        gossip.persist_message(42, &msg).await;
+
+        let missed = gossip.get_missed_messages(42, 0).await;
+        assert_eq!(
+            missed.len(),
+            1,
+            "a message persisted via a working init_db should be replayable for a late joiner"
+        );
+        match &missed[0] {
+            SwissMessage::BracketFired {
+                tournament_id,
+                player_count,
+                ..
+            } => {
+                assert_eq!(*tournament_id, 42);
+                assert_eq!(*player_count, 8);
+            }
+            other => panic!("unexpected message variant: {other:?}"),
+        }
     }
 }

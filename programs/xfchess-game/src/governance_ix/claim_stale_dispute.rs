@@ -4,6 +4,10 @@
 //! are never locked by platform inaction. Each player gets their full stake back
 //! (`pot / 2 == wager`), the challenger's bond is refunded (no fault was ruled),
 //! and the game is set to `Settled` so `finalize_game` cannot re-process it.
+//!
+//! Same deliberate exclusion as `resolve.rs`: never touches ELO/profile
+//! stats. A dispute nobody ever ruled on is even less of a basis for a
+//! rating change than a resolved one.
 
 use crate::common::escrow;
 use crate::constants::*;

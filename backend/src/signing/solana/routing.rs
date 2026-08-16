@@ -191,11 +191,12 @@ mod tests {
             vps_authority_key: None,
             kyc_authority_key: None,
             link_authority_key: None,
-            treasury_authority_key: None,
+            treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
             admin_token: None,
             tournament_fee_recipient: String::new(),
             usdc_mint_pubkey: String::new(),
             lichess_client_id: String::new(),
+            allowed_origins: vec![],
         }
     }
 }

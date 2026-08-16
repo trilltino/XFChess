@@ -18,6 +18,9 @@ pub const PROFILE_SEED: &[u8] = b"profile"; // Derives a player's on-chain profi
 pub const USERNAME_SEED: &[u8] = b"username"; // Derives the uniqueness-lock account for a chosen username
 
 #[constant]
+pub const LICHESS_USERNAME_SEED: &[u8] = b"lichess_username"; // Derives the uniqueness-lock account for a linked Lichess username
+
+#[constant]
 pub const FRIENDSHIP_SEED: &[u8] = b"friendship"; // Derives the Friendship PDA per undirected wallet pair (canonical sorted order)
 
 #[constant]

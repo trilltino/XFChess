@@ -1636,6 +1636,26 @@ async fn set_round_deadline(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+/// POST /admin/tournament/:id/approve-prize-release — manual sign-off required
+/// before `spawn_prize_distributor` will pay out a prize pool above
+/// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` (see `tasks::tournament_scheduler`).
+/// Idempotent: re-approving an already-approved or already-paid tournament is
+/// a harmless no-op. `require_api_key`-gated like every other admin route in
+/// this file.
+async fn approve_prize_release(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let updated = state
+        .tournament_store
+        .update(id, |t| t.prize_release_approved = true)
+        .await;
+    if !updated {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 /// POST /admin/tournament/:id/import-players-csv — bulk-import players from CSV body.
 /// CSV format: one wallet address per line (or comma-separated), skips empty lines.
 async fn import_players_csv(
@@ -1696,6 +1716,7 @@ pub fn admin_tournament_routes() -> Router<AppState> {
         .route("/{id}/reseed", post(reseed_players))
         .route("/{id}/set-round-deadline", post(set_round_deadline))
         .route("/{id}/import-players-csv", post(import_players_csv))
+        .route("/{id}/approve-prize-release", post(approve_prize_release))
 }
 
 // ── Item 7: Tournament session routing ───────────────────────────────────────

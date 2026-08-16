@@ -107,9 +107,8 @@ pub fn finish_by_timeout_if_expired(game: &mut Game, now: i64) -> Result<bool> {
         return Ok(false);
     }
 
-    let time_elapsed = (now - game.updated_at) as u64;
-    let time_limit = game.base_time_seconds.saturating_mul(3);
-    if time_elapsed <= time_limit {
+    let time_elapsed = now - game.updated_at;
+    if time_elapsed <= clock::inactivity_window_seconds(game) {
         return Ok(false);
     }
 
@@ -235,7 +234,7 @@ mod tests {
         let mut game = active_game();
         let black = game.black;
 
-        finish_by_timeout(&mut game, 10).unwrap();
+        finish_by_timeout(&mut game, 100).unwrap();
 
         assert_eq!(game.status, GameStatus::Finished);
         assert_eq!(game.result, GameResult::Winner(black));
@@ -251,7 +250,7 @@ mod tests {
         game.turn = 2;
         let white = game.white;
 
-        finish_by_timeout(&mut game, 10).unwrap();
+        finish_by_timeout(&mut game, 100).unwrap();
 
         assert_eq!(game.status, GameStatus::Finished);
         assert_eq!(game.result, GameResult::Winner(white));
@@ -259,7 +258,7 @@ mod tests {
 
     #[test]
     fn timeout_rejects_before_inactivity_window_elapses() {
-        let mut game = active_game(); // base_time_seconds: 1 -> window = 3s
+        let mut game = active_game(); // timed game -> fixed 90s window
         game.updated_at = 100;
 
         let err = finish_by_timeout(&mut game, 102).unwrap_err();
@@ -284,8 +283,8 @@ mod tests {
             manual.turn = turn;
             let mut cranked = manual.clone();
 
-            finish_by_timeout(&mut manual, 10).unwrap();
-            let resolved = finish_by_timeout_if_expired(&mut cranked, 10).unwrap();
+            finish_by_timeout(&mut manual, 100).unwrap();
+            let resolved = finish_by_timeout_if_expired(&mut cranked, 100).unwrap();
 
             assert!(
                 resolved,
@@ -304,6 +303,30 @@ mod tests {
         let resolved = finish_by_timeout_if_expired(&mut game, 102).unwrap();
 
         assert!(!resolved);
+        assert_eq!(game.status, GameStatus::Active);
+    }
+
+    #[test]
+    fn timeout_accepts_just_past_the_fixed_90s_window_for_timed_games() {
+        let mut game = active_game(); // base_time_seconds: 1 -> still "timed"
+        game.updated_at = 100;
+
+        finish_by_timeout(&mut game, 100 + super::clock::TIMED_GAME_INACTIVITY_WINDOW_SECONDS + 1)
+            .unwrap();
+
+        assert_eq!(game.status, GameStatus::Finished);
+    }
+
+    #[test]
+    fn untimed_games_keep_the_24h_window_not_the_short_timed_one() {
+        let mut game = active_game();
+        game.base_time_seconds = 0;
+        game.updated_at = 100;
+
+        // Well past the 90s timed-game window, nowhere near 24h.
+        let err = finish_by_timeout(&mut game, 100 + 3_600).unwrap_err();
+
+        assert_eq!(err, GameErrorCode::TimeoutNotExpired.into());
         assert_eq!(game.status, GameStatus::Active);
     }
 }

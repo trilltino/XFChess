@@ -231,6 +231,7 @@ fn handle_connect_to_peer(
     mut events: MessageReader<ConnectToPeerEvent>,
     mut connection_state: ResMut<P2PConnectionState>,
     network_state: Res<OnlineNetworkState>,
+    player_identity: Res<crate::states::main_menu::PlayerIdentity>,
 ) {
     for event in events.read() {
         // Guard: don't re-connect if already connecting/connected/in-game
@@ -310,6 +311,7 @@ fn handle_connect_to_peer(
                         game_id,
                         from_node: our_node_id,
                         from_wallet: "pvp_player".to_string(), // Simplified for PvP
+                        from_display: player_identity.display_name().to_string(),
                     };
 
                     if let Err(e) = tx.send(invite) {
@@ -354,6 +356,7 @@ fn handle_network_events(
     mut game_started: MessageWriter<GameStartedEvent>,
     mut core_mode: ResMut<crate::core::GameMode>,
     mut ai_config: ResMut<crate::game::ai::ChessAIResource>,
+    player_identity: Res<crate::states::main_menu::PlayerIdentity>,
     #[cfg(feature = "solana")] mut solana_sync: Option<
         ResMut<crate::multiplayer::solana::addon::SolanaGameSync>,
     >,
@@ -383,6 +386,7 @@ fn handle_network_events(
                                 game_id,
                                 from_node: our_node_id,
                                 from_wallet: "pvp_player".to_string(), // Simplified for PvP
+                                from_display: player_identity.display_name().to_string(),
                             };
 
                             if let Err(e) = tx.send(invite) {
@@ -417,11 +421,14 @@ fn handle_network_events(
             NetworkEvent::MessageReceived(msg) => {
                 match msg {
                     NetworkMessage::GameInvite {
-                        game_id, from_node, ..
+                        game_id,
+                        from_node,
+                        from_display,
+                        ..
                     } => {
                         info!(
-                            "Received game invite from {} for game {}",
-                            from_node, game_id
+                            "Received game invite from {} ({}) for game {}",
+                            from_node, from_display, game_id
                         );
 
                         if connection_state.is_host {
@@ -432,11 +439,16 @@ fn handle_network_events(
                             connection_state.peer_node_id = Some(from_node.clone());
                             connection_state.game_id = Some(*game_id);
                             connection_state.status = P2PConnectionStatus::Connected;
+                            if !from_display.is_empty() {
+                                connection_state.opponent_display_name =
+                                    Some(from_display.clone());
+                            }
 
                             if let Some(tx) = &network_state.message_sender {
                                 let response = NetworkMessage::InviteResponse {
                                     game_id: *game_id,
                                     accepted: true,
+                                    display_name: player_identity.display_name().to_string(),
                                 };
                                 if let Err(e) = tx.send(response) {
                                     error!("Failed to send invite acceptance: {}", e);
@@ -458,6 +470,10 @@ fn handle_network_events(
                             connection_state.game_id = Some(*game_id);
                             connection_state.status = P2PConnectionStatus::Connected;
                             connection_state.player_color = Some(PieceColor::Black);
+                            if !from_display.is_empty() {
+                                connection_state.opponent_display_name =
+                                    Some(from_display.clone());
+                            }
 
                             // Subscribe to game-specific topic for move traffic
                             if let Some(sub_tx) = &network_state.subscription_sender {
@@ -470,10 +486,18 @@ fn handle_network_events(
                         }
                     }
 
-                    NetworkMessage::InviteResponse { game_id, accepted } => {
+                    NetworkMessage::InviteResponse {
+                        game_id,
+                        accepted,
+                        display_name,
+                    } => {
                         if connection_state.game_id == Some(*game_id) {
                             if *accepted {
                                 info!("Host accepted invite for game {}", game_id);
+                                if !display_name.is_empty() {
+                                    connection_state.opponent_display_name =
+                                        Some(display_name.clone());
+                                }
 
                                 if let Some(tx) = &network_state.message_sender {
                                     let local_str = connection_state
@@ -488,12 +512,15 @@ fn handle_network_events(
                                     // Host (peer) is White; joiner (us) is Black
                                     let white_player = peer_str.clone();
                                     let black_player = local_str.clone();
+                                    let my_display = player_identity.display_name().to_string();
 
                                     let start_msg = NetworkMessage::GameStart {
                                         game_id: *game_id,
                                         white_player: white_player.clone(),
                                         black_player: black_player.clone(),
                                         initial_fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string(),
+                                        white_display: display_name.clone(),
+                                        black_display: my_display,
                                     };
 
                                     let _ = tx.send(start_msg);
@@ -550,6 +577,8 @@ fn handle_network_events(
                         white_player,
                         black_player,
                         initial_fen: _,
+                        white_display,
+                        black_display,
                     } => {
                         if connection_state.game_id == Some(*game_id) {
                             if connection_state.drive_game_start {
@@ -557,6 +586,21 @@ fn handle_network_events(
                                     "Game {} started! White: {}, Black: {}",
                                     game_id, white_player, black_player
                                 );
+                                // The opponent's display name for our own color was
+                                // already captured earlier in the handshake (from
+                                // GameInvite/InviteResponse); this message is the
+                                // first point the *other* side's name arrives, so
+                                // fill it in here too if it's still unset.
+                                if connection_state.opponent_display_name.is_none() {
+                                    let opponent_name = match connection_state.player_color {
+                                        Some(PieceColor::White) => black_display.clone(),
+                                        _ => white_display.clone(),
+                                    };
+                                    if !opponent_name.is_empty() {
+                                        connection_state.opponent_display_name =
+                                            Some(opponent_name);
+                                    }
+                                }
                                 connection_state.status = P2PConnectionStatus::InGame;
                                 *core_mode = crate::core::GameMode::OnlineMultiplayer;
                                 ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
@@ -605,6 +649,7 @@ fn handle_accept_invite(
     mut events: MessageReader<AcceptInviteEvent>,
     connection_state: ResMut<P2PConnectionState>,
     network_state: Res<OnlineNetworkState>,
+    player_identity: Res<crate::states::main_menu::PlayerIdentity>,
 ) {
     for event in events.read() {
         if connection_state.game_id == Some(event.game_id) {
@@ -612,6 +657,7 @@ fn handle_accept_invite(
                 let response = NetworkMessage::InviteResponse {
                     game_id: event.game_id,
                     accepted: true,
+                    display_name: player_identity.display_name().to_string(),
                 };
 
                 if let Err(e) = tx.send(response) {
@@ -650,6 +696,7 @@ fn handle_reject_invite(
                 let response = NetworkMessage::InviteResponse {
                     game_id: event.game_id,
                     accepted: false,
+                    display_name: String::new(),
                 };
 
                 if let Err(e) = tx.send(response) {

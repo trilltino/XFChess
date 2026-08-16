@@ -1155,7 +1155,8 @@ fn establish_global_session(
 ) -> Result<Keypair, String> {
     use crate::multiplayer::solana::global_session_manager::{
         build_authorize_global_session_ix, build_revoke_global_session_ix,
-        build_withdraw_global_session_ix, find_global_session_pda, global_session_is_live_onchain,
+        build_withdraw_global_session_ix, find_global_session_pda,
+        global_session_account_exists, global_session_is_live_onchain,
         AuthorizeGlobalSessionArgs, GlobalSessionKeyManager,
     };
     use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
@@ -1212,8 +1213,37 @@ fn establish_global_session(
         );
     }
 
+    // Fund-leak fix: an account that exists but is no longer "live" (past
+    // its 30-day duration, or `games_remaining` hit 0) is NOT caught by
+    // `needs_revoke_first` above — the on-chain re-auth guard happily lets a
+    // plain re-authorize through in that state. Before this check, that meant
+    // every natural re-auth silently deposited a fresh amount on top of
+    // whatever balance the expired/exhausted session left behind, with no
+    // withdraw ever firing — an unbounded, compounding stranded balance.
+    // Reclaim it in the same signature as the fresh authorize whenever the
+    // account exists at all and doesn't already need a revoke first (the
+    // `needs_revoke_first` branch below handles reclaiming for the live case).
+    let stale_balance_to_reclaim =
+        !needs_revoke_first && global_session_account_exists(rpc_url, &session_pda);
+    if stale_balance_to_reclaim {
+        info!(
+            "[GLOBAL_SESSION] Prior session account exists but is expired/exhausted — reclaiming its balance in the same re-authorize transaction"
+        );
+    }
+
     let authorize_result = if needs_revoke_first {
         Err("GlobalSessionAlreadyActive (pre-flight check)".to_string())
+    } else if stale_balance_to_reclaim {
+        let withdraw_ix =
+            build_withdraw_global_session_ix(&program_id, &wallet_pubkey, &session_pda);
+        sign_and_send_via_tauri(
+            rpc_url,
+            wallet_pubkey,
+            &[withdraw_ix, authorize_ix.clone(), fund_ix.clone()],
+            &[],
+            "Setting up one-time quick-sign session",
+        )
+        .map(|_| ())
     } else {
         sign_and_send_via_tauri(
             rpc_url,

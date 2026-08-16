@@ -815,6 +815,7 @@ pub fn handle_network_events(
                             game_id: _,
                             from_node,
                             from_wallet,
+                            ..
                         } => {
                             info!(
                                 "Received GameInvite from {} (wallet: {})",
@@ -832,7 +833,9 @@ pub fn handle_network_events(
                                 },
                             );
                         }
-                        NetworkMessage::InviteResponse { game_id, accepted } => {
+                        NetworkMessage::InviteResponse {
+                            game_id, accepted, ..
+                        } => {
                             info!(
                                 "Received InviteResponse for game {}: accepted={}",
                                 game_id, accepted
@@ -849,6 +852,7 @@ pub fn handle_network_events(
                             white_player,
                             black_player,
                             initial_fen,
+                            ..
                         } => {
                             info!(
                                 "Received GameStart for game {}: {} vs {}",

@@ -1276,6 +1276,13 @@ pub fn rematch_offer_ui(
 
 // ── Opponent disconnect popup ──────────────────────────────────────────────────
 
+/// How long the disconnect banner counts down before auto-flagging the
+/// opponent. Was 60s when opponent-gone detection itself could take up to
+/// ~19s (4s presence heartbeat + 15s TTL) — now that detection is push-based
+/// (see `braid_transport`/`social.rs` presence changes) and reliably sub-5s,
+/// this can be much shorter while still giving a real reconnect a fair shot.
+const DISCONNECT_GRACE_PERIOD_SECS: u64 = 20;
+
 /// Resource tracking opponent disconnect state.
 #[derive(Resource, Default)]
 pub struct OpponentDisconnectState {
@@ -1292,7 +1299,7 @@ impl OpponentDisconnectState {
             .unwrap_or(0)
     }
     pub fn remaining_secs(&self) -> u64 {
-        60u64.saturating_sub(self.elapsed_secs())
+        DISCONNECT_GRACE_PERIOD_SECS.saturating_sub(self.elapsed_secs())
     }
 }
 
@@ -1362,6 +1369,12 @@ pub fn opponent_disconnect_ui(
     mut timeout_writer: bevy::prelude::MessageWriter<crate::game::events::FlagTimeoutEvent>,
     current_turn: Res<crate::game::resources::CurrentTurn>,
     first_move_deadline: Res<crate::game::resources::FirstMoveDeadline>,
+    #[cfg(feature = "solana")] solana_wallet: Option<
+        Res<crate::multiplayer::solana::addon::SolanaWallet>,
+    >,
+    #[cfg(feature = "solana")] solana_sync: Option<
+        Res<crate::multiplayer::solana::addon::SolanaGameSync>,
+    >,
 ) {
     use crate::multiplayer::network::p2p::P2PConnectionStatus;
     if game_over.is_game_over() {
@@ -1427,6 +1440,27 @@ pub fn opponent_disconnect_ui(
             flagged_player: flagged.to_string(),
             remote: false,
         });
+
+        // Bridge the fast local abandonment call into an actual on-chain
+        // resolution for wagered/competitive games — see
+        // `crate::multiplayer::solana::lobby::spawn_claim_timeout`'s doc
+        // comment for why nothing else calls this. Permissionless: fails
+        // harmlessly with `TimeoutNotExpired` if the on-chain inactivity
+        // window hasn't elapsed yet (it always has by the time this local
+        // grace period expires).
+        #[cfg(feature = "solana")]
+        if let (Some(wallet_pubkey), Some(game_id), Some(rpc_url)) = (
+            solana_wallet.as_ref().and_then(|w| w.pubkey),
+            solana_sync.as_ref().and_then(|s| s.game_id),
+            solana_sync.as_ref().map(|s| s.rpc_url.clone()),
+        ) {
+            crate::multiplayer::solana::lobby::spawn_claim_timeout(
+                rpc_url,
+                wallet_pubkey,
+                game_id,
+            );
+        }
+
         return;
     }
 

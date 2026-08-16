@@ -127,6 +127,21 @@ path = "tests/global_session_settlement_tests.rs"
 name = "claim_timeout_tests"
 path = "tests/claim_timeout_tests.rs"
 
+# Proves finalize_game's K=32 ELO update actually mutates the right
+# PlayerProfile accounts through the real instruction, not just that the
+# pure calculate_elo_update formula is correct in isolation — previously
+# untested at every level above the math itself.
+[[test]]
+name = "elo_settlement_tests"
+path = "tests/elo_settlement_tests.rs"
+
+# Proves LichessUsernameRecord enforces one-Lichess-username-per-wallet
+# through the real instruction — link_external_elo previously had no
+# on-chain uniqueness protection at all.
+[[test]]
+name = "link_external_elo_tests"
+path = "tests/link_external_elo_tests.rs"
+
 [dev-dependencies]
 tokio = { workspace = true }
 solana-program-test = { workspace = true }
