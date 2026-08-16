@@ -319,17 +319,36 @@ async fn http_server(
   }
 
   // POST /wallet — wallet-ui posts {"pubkey":"<base58>","username":"<name>"} on wallet connect
+  //
+  // A present-but-empty `username` is a deliberate, explicit "this wallet is
+  // confirmed to have no username yet" — distinct from the field being
+  // absent, which means the caller has no opinion and the existing cached
+  // value (if any) should be left alone. Collapsing those two cases (as the
+  // old `if !username.is_empty()` guard did) meant an empty string was
+  // silently ignored, so a stale username left over from an entirely
+  // different wallet's earlier session in this same shared browser profile
+  // could never be cleared — the game client's poller kept showing it as
+  // "already known" for whichever wallet connected next, even after
+  // wallet-ui itself correctly determined there was no real username for
+  // that wallet (see WalletStep.handleConnect and handleAuth in App.tsx for
+  // the two call sites this now correctly distinguishes between).
   async fn post_wallet(
     State(s): State<LocalState>,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
     if let Some(pk) = body["pubkey"].as_str() {
-      let username = body["username"].as_str().unwrap_or("").to_string();
       *s.wallet_pubkey.0.lock().unwrap() = Some(pk.to_string());
-      if !username.is_empty() {
-        *s.wallet_username.0.lock().unwrap() = Some(username.clone());
+      if let Some(username) = body.get("username").and_then(|v| v.as_str()) {
+        *s.wallet_username.0.lock().unwrap() = if username.is_empty() {
+          None
+        } else {
+          Some(username.to_string())
+        };
       }
-      tracing::info!("[HTTP] Wallet connected: {pk} username={username}");
+      tracing::info!(
+        "[HTTP] Wallet connected: {pk} username={}",
+        body.get("username").and_then(|v| v.as_str()).unwrap_or("<unset>")
+      );
     }
     StatusCode::OK
   }
