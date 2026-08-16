@@ -1621,7 +1621,15 @@ pub fn reset_multiplayer_session_state(
         // never touches ER at all. That's exactly the "popup comes up as
         // if they're the same thing" report: two genuinely separate game
         // modes sharing one leftover piece of state.
-        *rollup_bridge = crate::multiplayer::rollup::bridge::RollupNetworkBridge::default();
+        //
+        // A full `Default` reset here was too broad, though: this system
+        // fires on `OnExit(InGame)`, i.e. the instant the game-over prompt
+        // is dismissed — which can happen before `retry_pending_finalization`
+        // has gotten around to spawning the undelegate+finalize task for a
+        // just-finished wagered game. Wiping the bridge at that moment
+        // silently dropped the queued finalization with no error, stranding
+        // the wager. Preserve any in-flight finalization instead.
+        rollup_bridge.reset_preserving_finalization();
     }
     info!("[NET] Reset P2P connection, heartbeat, Braid transport, opponent-liveness, and rollup bridge state on match exit");
 }

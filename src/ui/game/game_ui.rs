@@ -431,7 +431,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_online_player_name;
+    use super::{resolve_online_player_name, resolve_opponent_display_name};
     use crate::states::main_menu::PlayerIdentity;
 
     #[test]
@@ -456,6 +456,39 @@ mod tests {
             "Bob"
         );
     }
+
+    /// The exact live repro: `CompetitiveMatch.opponent_username`'s async VPS
+    /// fetch hasn't resolved yet (empty string) at the moment this renders,
+    /// but the P2P handshake already delivered the real name synchronously —
+    /// must prefer the P2P name, not fall through to the empty VPS value
+    /// (which would render as the literal placeholder "Player").
+    #[test]
+    fn prefers_p2p_handshake_name_when_vps_fetch_hasnt_resolved_yet() {
+        assert_eq!(
+            resolve_opponent_display_name(Some("Tinog"), ""),
+            "Tinog"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_vps_username_when_p2p_name_unavailable() {
+        assert_eq!(resolve_opponent_display_name(None, "Tinog"), "Tinog");
+    }
+
+    #[test]
+    fn falls_back_to_vps_username_when_p2p_name_is_empty_string() {
+        assert_eq!(resolve_opponent_display_name(Some(""), "Tinog"), "Tinog");
+    }
+
+    #[test]
+    fn prefers_p2p_name_over_a_populated_vps_username_too() {
+        // Not just an empty-vs-nonempty tiebreak — P2P is the more current,
+        // same-frame source, so it wins even when the VPS value is also set.
+        assert_eq!(
+            resolve_opponent_display_name(Some("Tinog"), "StaleName"),
+            "Tinog"
+        );
+    }
 }
 
 /// Resolve display name + ELO string for both colors from whichever source
@@ -472,6 +505,21 @@ fn resolve_online_player_name(
         .cloned()
         .or_else(|| fallback_name.map(str::to_string))
         .unwrap_or_default()
+}
+
+/// The opponent's-side mirror of `resolve_online_player_name`'s local-side
+/// fix: `vps_username` (`CompetitiveMatch.opponent_username`) is an async
+/// VPS fetch that can still be empty at render time, while `p2p_display_name`
+/// (`P2PConnectionState.opponent_display_name`) is populated synchronously
+/// by the JOIN_ACK/GAME_START handshake before `InGame` is even entered —
+/// see `p2p_vps.rs`'s `JoinerDetected`/`JoinerGameStart` handlers. Preferring
+/// it when available avoids the same "shows the literal placeholder name"
+/// race that used to only be fixed for the local player.
+fn resolve_opponent_display_name(p2p_display_name: Option<&str>, vps_username: &str) -> String {
+    p2p_display_name
+        .filter(|n| !n.is_empty())
+        .unwrap_or(vps_username)
+        .to_string()
 }
 
 pub(crate) fn resolve_player_names(
@@ -556,16 +604,36 @@ pub(crate) fn resolve_player_names(
                     params.player_identity.as_ref().map(|id| id.as_ref()),
                     Some(profile.username.as_str()),
                 );
+                // The exact same race, mirrored on the opponent's side:
+                // `comp.opponent_username` is also an async VPS fetch that
+                // can still be empty at the moment this renders, and
+                // `render_compact_user_row` falls back to the literal
+                // string "Player" for an empty name — live repro: a casual
+                // P2P match showed "Player" as the opponent's name on BOTH
+                // clients simultaneously. `p2p_conn.opponent_display_name`
+                // is populated synchronously by the JOIN_ACK/GAME_START
+                // handshake, before `InGame` is even entered (see
+                // `p2p_vps.rs`'s `JoinerDetected`/`JoinerGameStart`
+                // handlers) — no async race — so it's the right same-frame
+                // fallback here, exactly mirroring `local_name`'s priority
+                // order above.
+                let opponent_name = resolve_opponent_display_name(
+                    params
+                        .p2p_conn
+                        .as_ref()
+                        .and_then(|c| c.opponent_display_name.as_deref()),
+                    comp.opponent_username.as_str(),
+                );
                 let is_white_local = local_color == PieceColor::White;
                 if is_white_local {
                     white_name = local_name;
                     white_elo = format!("{}", profile.elo);
-                    black_name = comp.opponent_username.clone();
+                    black_name = opponent_name;
                     black_elo = format!("{}", comp.opponent_elo);
                 } else {
                     black_name = local_name;
                     black_elo = format!("{}", profile.elo);
-                    white_name = comp.opponent_username.clone();
+                    white_name = opponent_name;
                     white_elo = format!("{}", comp.opponent_elo);
                 }
             } else {
