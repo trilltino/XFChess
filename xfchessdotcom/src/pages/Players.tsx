@@ -158,6 +158,7 @@ export function Players() {
                         ? wallet.publicKey.toBase58()
                         : null
                     }
+                    wallet={wallet}
                     lichessUsername={profile.data.lichessUsername}
                     lichessBlitz={profile.data.lichessBlitz}
                     lichessRapid={profile.data.lichessRapid}

@@ -20,7 +20,7 @@ import {
   PROGRAM_ID,
 } from '../lib/anchor_client';
 import bs58 from 'bs58';
-import { submitSignup, getUserStatus, registerWithWallet, checkUsernameAvailable, addEmail, syncProfile, type UserStatus } from '../lib/api';
+import { submitSignup, getUserStatus, registerWithWallet, checkUsernameAvailable, addEmail, syncProfile, ensureAuthToken, type UserStatus } from '../lib/api';
 import { MatchHistory } from '../components/MatchHistory';
 import { LichessLinkCard } from '../components/LichessLinkCard';
 
@@ -300,11 +300,15 @@ export function ProfileViewer() {
   const [emailAddError, setEmailAddError] = useState<string | null>(null);
 
   const handleAddEmail = async () => {
-    const token = localStorage.getItem('xfchess_token');
-    if (!token || !emailAddValue) return;
+    if (!emailAddValue) return;
     setEmailAddLoading(true);
     setEmailAddError(null);
     try {
+      // Same gap as Lichess linking (see `ensureAuthToken`'s doc comment):
+      // `xfchess_token` is only set at first-time profile creation, so a
+      // returning visit with wallet connected + profile loaded can still
+      // have no cached JWT. This used to just silently no-op.
+      const token = await ensureAuthToken(wallet);
       await addEmail(emailAddValue, token);
       localStorage.setItem('xfchess_email', emailAddValue);
       setEmailAddOpen(false);
@@ -563,7 +567,8 @@ export function ProfileViewer() {
                     onClick={async () => {
                       try {
                         const { initLichessLink } = await import('../lib/api/lichess');
-                        const { authUrl } = await initLichessLink(wallet.publicKey!.toBase58());
+                        const token = await ensureAuthToken(wallet);
+                        const { authUrl } = await initLichessLink(wallet.publicKey!.toBase58(), token);
                         window.open(authUrl, 'lichess_oauth', 'width=600,height=700');
                       } catch (err) {
                         alert(err instanceof Error ? err.message : 'Failed to start Lichess link');
@@ -626,6 +631,7 @@ export function ProfileViewer() {
 
                   <LichessLinkCard
                     walletPubkey={wallet.publicKey?.toBase58() ?? null}
+                    wallet={wallet}
                     lichessUsername={profile?.data.lichessUsername}
                     lichessBlitz={profile?.data.lichessBlitz}
                     lichessRapid={profile?.data.lichessRapid}
