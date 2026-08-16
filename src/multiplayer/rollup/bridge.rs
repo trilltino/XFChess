@@ -152,6 +152,35 @@ impl RollupNetworkBridge {
             ..Default::default()
         }
     }
+
+    /// True while an on-chain finalization (undelegate + `finalize_game`,
+    /// which pays out any wager) is queued or in flight — either still
+    /// waiting on `retry_pending_finalization`'s preconditions, or already
+    /// spawned and awaiting its result, or the game-end move batch that must
+    /// land before undelegation can even be attempted.
+    pub fn has_pending_finalization(&self) -> bool {
+        self.pending_finalization.is_some()
+            || self.finalization_rx.is_some()
+            || self.game_end_moves_flushing
+            || self.game_end_flush_rx.is_some()
+    }
+
+    /// Resets everything except an in-flight finalization. Used when leaving
+    /// `InGame` (see `reset_multiplayer_session_state`): a full `Default`
+    /// reset there was silently discarding `pending_finalization`/
+    /// `finalization_rx` whenever the player dismissed the game-over prompt
+    /// before `retry_pending_finalization` had gotten around to firing —
+    /// permanently stranding the wager payout with no error or log, since
+    /// the async task that would have logged `[UNDELEGATE]`/`[FINALIZED]`
+    /// was simply never spawned. Reproduced live 2026-08-16.
+    pub fn reset_preserving_finalization(&mut self) {
+        let mut fresh = Self::default();
+        fresh.pending_finalization = self.pending_finalization.take();
+        fresh.finalization_rx = self.finalization_rx.take();
+        fresh.game_end_moves_flushing = self.game_end_moves_flushing;
+        fresh.game_end_flush_rx = self.game_end_flush_rx.take();
+        *self = fresh;
+    }
 }
 
 pub struct RollupNetworkBridgePlugin;

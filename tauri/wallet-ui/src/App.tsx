@@ -1465,7 +1465,24 @@ function Onboarding() {
           needsProfile = true;
         }
       }
-    } catch { /* on-chain lookup failed — fall through to profile step */ }
+    } catch {
+      // The on-chain lookup itself failed (e.g. a flaky devnet RPC call inside
+      // sync-profile) — that says nothing about whether this wallet actually
+      // has a profile. `login`/`register` (just above, in
+      // WalletStep.handleConnect) already returned a real username for this
+      // exact pubkey; falling through to needsProfile=true unconditionally
+      // here re-shows "Choose Your Handle" to an already-registered player
+      // every time devnet RPC hiccups, even though their pubkey checked out
+      // fine. Trust that already-known username instead, unless it's the
+      // throwaway registration placeholder (see resolveExistingUsername).
+      const registrationPlaceholder = nextPubkey.slice(0, 8);
+      if (user && user !== registrationPlaceholder) {
+        resolvedUser = user;
+        localStorage.setItem("xfchess_username", resolvedUser);
+        setUsername(resolvedUser);
+        needsProfile = false;
+      }
+    }
 
     // Push the fully-resolved (on-chain + off-chain aware) answer back to
     // the bridge — `handleConnect`'s earlier POST /wallet only had the raw
