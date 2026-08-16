@@ -39,7 +39,7 @@ export function Footer() {
           </a>
           
           <a 
-            href="https://github.com/xfchess" 
+            href="https://github.com/trilltino/XFChess"
             target="_blank" 
             rel="noopener noreferrer" 
             style={{ 
