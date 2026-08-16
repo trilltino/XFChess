@@ -633,7 +633,6 @@ function WalletStep({
       if (!pubkey) throw new Error("No public key returned from wallet");
       localStorage.setItem("xfchess_wallet", pubkey);
       localStorage.setItem("xfchess_wallet_provider", walletName);
-      const _walletUsername = localStorage.getItem("xfchess_username") ?? "";
 
       // Check registration status first — avoids redundant signing requests.
       logLifecycle("BACKEND_VERIFY", { path: "check-wallet" });
@@ -663,7 +662,25 @@ function WalletStep({
       // signature — posting this earlier (e.g. right after provider.connect())
       // let a rejected sign-message prompt still leave the game client
       // believing the wallet was connected and unlocking wagered play.
-      await apiPost("/wallet", { pubkey, username: _walletUsername });
+      //
+      // `username` here MUST come from `auth.username` (this call's own
+      // login/register response, scoped to THIS pubkey) — never from
+      // `localStorage.getItem("xfchess_username")`. This popup's browser
+      // profile is shared/persistent across wallets (see the module doc
+      // comment on why), so a prior, completely unrelated wallet's cached
+      // name was leaking straight through here and getting adopted by the
+      // game client's poller as "the bridge's trustworthy username" (see
+      // `sync_bridge_pubkey_to_solana`'s doc comment in src/states/
+      // main_menu.rs, which explicitly assumes this POST is trustworthy) —
+      // live repro: game client showed a stale, unrelated username as
+      // already-known while this exact ProfileStep correctly asked for a
+      // fresh handle for the wallet that actually just connected, because
+      // the two paths were computing "the username" independently. Even
+      // `auth.username` isn't the FULLY on-chain-aware answer yet — that's
+      // `handleAuth`'s job below, which posts its own resolved value once
+      // it has one — but it's guaranteed to actually be about this wallet,
+      // unlike the old localStorage read.
+      await apiPost("/wallet", { pubkey, username: auth.username });
 
       logLifecycle("TX_COMPLETE", { pubkey });
       onAuth(auth.token, auth.username, pubkey);
@@ -1449,6 +1466,21 @@ function Onboarding() {
         }
       }
     } catch { /* on-chain lookup failed — fall through to profile step */ }
+
+    // Push the fully-resolved (on-chain + off-chain aware) answer back to
+    // the bridge — `handleConnect`'s earlier POST /wallet only had the raw
+    // login/register response to go on, not this deeper check. Explicitly
+    // clearing to "" when `needsProfile` is true matters just as much as
+    // setting the real value when it's false: without it, a stale username
+    // from an earlier wallet/session that happened to still be sitting in
+    // the bridge's cache (see WalletStep.handleConnect's doc comment on the
+    // exact bug this closes) would keep being shown as "already known" by
+    // the game client's poller while this popup is correctly asking for a
+    // fresh handle — the two would visibly disagree, which is exactly what
+    // made this bug obvious from the player's side.
+    apiPost("/wallet", { pubkey: nextPubkey, username: needsProfile ? "" : resolvedUser }).catch(
+      () => {},
+    );
 
     if (needsProfile) {
       apiPost("/api/debug-log", { msg: "handleAuth: needsProfile=true — setStep(profile)" }).catch(
