@@ -36,7 +36,7 @@ export function OrganizationSchema() {
         logo: `${SITE_URL}/og-image.png`,
         sameAs: [
           'https://twitter.com/xfchess',
-          'https://github.com/xfchess',
+          'https://github.com/trilltino/XFChess',
           'https://youtube.com/xfchess',
         ],
       }}
