@@ -175,7 +175,6 @@ json = { package = "sonic-rs", version = "=0.3" }
 futures = "=0.3"
 parking_lot = "=0.12"
 url = { version = "=2.5", features = ["serde"] }
-websocket = { package = "tokio-websockets", version = "=0.10", features = ["client", "simd", "native-tls", "fastrand", "openssl"] }
 base64 = "=0.22"
 zstd = "=0.13"
 rand = "=0.10"
@@ -259,7 +258,6 @@ aes-gcm = "0.10.3"
 dirs = "5.0.1"
 chrono.workspace = true
 serde_bytes.workspace = true
-openssl = { version = "0.10", features = ["vendored"] }
 rfd = "0.15"
 iroh.workspace = true
 crossbeam-channel.workspace = true

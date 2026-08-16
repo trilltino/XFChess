@@ -8,7 +8,192 @@
   },
   "instructions": [
     {
+      "name": "accept_draw",
+      "docs": [
+        "Accepts the opponent's pending draw offer, ending the game as a draw.",
+        "Settlement (pot split, ELO, stats) happens afterward via `finalize_game`."
+      ],
+      "discriminator": [
+        5,
+        12,
+        23,
+        213,
+        201,
+        27,
+        117,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "The accepting player — must be white or black, and must not be the",
+            "player who placed the offer being accepted."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "accept_friend_request",
+      "docs": [
+        "Accepts a pending friend request, flipping the `Friendship` PDA's",
+        "status to `Accepted`. Only the addressee (not the original requester)",
+        "may accept."
+      ],
+      "discriminator": [
+        54,
+        73,
+        153,
+        144,
+        199,
+        113,
+        176,
+        81
+      ],
+      "accounts": [
+        {
+          "name": "friendship",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  114,
+                  105,
+                  101,
+                  110,
+                  100,
+                  115,
+                  104,
+                  105,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party_a"
+              },
+              {
+                "kind": "account",
+                "path": "party_b"
+              }
+            ]
+          }
+        },
+        {
+          "name": "party_a"
+        },
+        {
+          "name": "party_b"
+        },
+        {
+          "name": "addressee",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "advance_round",
+      "docs": [
+        "Advance a Swiss tournament to its next round once every board in the",
+        "current round has reported (see `advance_round::handler` for why this",
+        "is permissionless — the point is a tournament can progress without",
+        "the backend scheduler alive to decide \"the round is over\")."
+      ],
+      "discriminator": [
+        230,
+        88,
+        119,
+        80,
+        54,
+        4,
+        212,
+        250
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cranker",
+          "docs": [
+            "Anyone may crank; safety comes from `round_boards_reported` already",
+            "proving on-chain that every board is in, not from caller identity."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "advance_winner",
+      "docs": [
+        "Places a completed match's winner into the correct player slot",
+        "(white or black, per `source_match.next_match_slot`) of the next",
+        "round's `TournamentMatch`, and flips that match to `Pending` once",
+        "both slots are filled. Called by the backend right after",
+        "`record_match_result` to propagate winners through the bracket."
+      ],
       "discriminator": [
         124,
         40,
@@ -196,6 +381,15 @@
     },
     {
       "name": "authorize_session_key",
+      "docs": [
+        "Creates a per-game `SessionDelegation` PDA for the calling player",
+        "(must be white or black in `game_id`), authorizing `session_pubkey`",
+        "to co-sign `record_move` on their behalf for the next 2 hours (max 10",
+        "moves per batch). This is what lets a player play an entire fast game",
+        "on the Ephemeral Rollup without a wallet popup per move. Distinct",
+        "from both the standalone `create_session` (not tied to one game) and",
+        "`authorize_global_session` (spans many games)."
+      ],
       "discriminator": [
         38,
         249,
@@ -335,26 +529,30 @@
         {
           "name": "tournament_players_shard_0",
           "docs": [
-            "TournamentPlayersShard 0 (players 0-63)"
+            "TournamentPlayersShard 0 always present (all tournament sizes)."
           ]
         },
         {
           "name": "tournament_players_shard_1",
           "docs": [
-            "TournamentPlayersShard 1 (players 64-127)"
-          ]
+            "TournamentPlayersShard 1 — present for >64-player tournaments only.",
+            "Pass the program ID in its place for smaller tournaments."
+          ],
+          "optional": true
         },
         {
           "name": "tournament_players_shard_2",
           "docs": [
-            "TournamentPlayersShard 2 (players 128-191)"
-          ]
+            "TournamentPlayersShard 2 — present for 256-player tournaments only."
+          ],
+          "optional": true
         },
         {
           "name": "tournament_players_shard_3",
           "docs": [
-            "TournamentPlayersShard 3 (players 192-255)"
-          ]
+            "TournamentPlayersShard 3 — present for 256-player tournaments only."
+          ],
+          "optional": true
         },
         {
           "name": "session_delegation",
@@ -421,7 +619,78 @@
       ]
     },
     {
+      "name": "block_user",
+      "docs": [
+        "Marks an existing `Friendship` edge as `Blocked`. Either party may",
+        "block; unlike `close_friendship` this does not refund rent or delete",
+        "the record, so the block persists as a record rather than resetting",
+        "to a clean slate."
+      ],
+      "discriminator": [
+        10,
+        164,
+        178,
+        6,
+        231,
+        175,
+        185,
+        191
+      ],
+      "accounts": [
+        {
+          "name": "friendship",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  114,
+                  105,
+                  101,
+                  110,
+                  100,
+                  115,
+                  104,
+                  105,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party_a"
+              },
+              {
+                "kind": "account",
+                "path": "party_b"
+              }
+            ]
+          }
+        },
+        {
+          "name": "party_a"
+        },
+        {
+          "name": "party_b"
+        },
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "cancel_game",
+      "docs": [
+        "Cancels a game and refunds each joined player's escrowed wager in",
+        "full (no fee taken). Allowed in three situations: the creator cancels",
+        "their own still-open lobby; either player cancels an active game that",
+        "has had zero moves played; or either player cancels a mid-game that's",
+        "been stalled for 24h+ with no activity. Refuses to run while the game",
+        "is delegated to an Ephemeral Rollup."
+      ],
       "discriminator": [
         121,
         194,
@@ -506,7 +775,79 @@
       ]
     },
     {
+      "name": "cancel_time_check",
+      "docs": [
+        "Cancel a previously scheduled time check crank"
+      ],
+      "discriminator": [
+        158,
+        77,
+        59,
+        154,
+        49,
+        29,
+        163,
+        236
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "game",
+          "docs": [
+            "The game account whose time-check task is being cancelled."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CancelTimeCheckArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "cancel_tournament",
+      "docs": [
+        "Halts a tournament still in `Registration` or `Active` and refunds",
+        "everyone. Entry-fee refund source depends on phase: during",
+        "`Registration` the deposits still sit in escrow; once `Active` they",
+        "were already swept to `host_treasury` at `start_tournament`, so",
+        "`host_treasury` must co-sign to authorize those refunds. The",
+        "operator-funded guaranteed prize (SOL and/or USDC, whichever was",
+        "locked) is returned to the operator in full. This is also the correct",
+        "path when `start_tournament` would fail with `MinPlayersNotReached`."
+      ],
       "discriminator": [
         249,
         227,
@@ -548,26 +889,30 @@
         {
           "name": "tournament_players_shard_0",
           "docs": [
-            "TournamentPlayersShard 0 (players 0-63)"
+            "TournamentPlayersShard 0 always present (all tournament sizes)"
           ]
         },
         {
           "name": "tournament_players_shard_1",
           "docs": [
-            "TournamentPlayersShard 1 (players 64-127)"
-          ]
+            "TournamentPlayersShard 1 — present for >64-player tournaments only.",
+            "Pass the program ID in its place for smaller tournaments."
+          ],
+          "optional": true
         },
         {
           "name": "tournament_players_shard_2",
           "docs": [
-            "TournamentPlayersShard 2 (players 128-191)"
-          ]
+            "TournamentPlayersShard 2 — present for 256-player tournaments only."
+          ],
+          "optional": true
         },
         {
           "name": "tournament_players_shard_3",
           "docs": [
-            "TournamentPlayersShard 3 (players 192-255)"
-          ]
+            "TournamentPlayersShard 3 — present for 256-player tournaments only."
+          ],
+          "optional": true
         },
         {
           "name": "usdc_prize_escrow_authority",
@@ -766,71 +1111,15 @@
       ]
     },
     {
-      "name": "claim_fees",
-      "discriminator": [
-        82,
-        251,
-        233,
-        156,
-        12,
-        52,
-        184,
-        202
-      ],
-      "accounts": [
-        {
-          "name": "caller",
-          "docs": [
-            "Anyone can trigger claim — permissionless"
-          ],
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "fee_vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  108,
-                  97,
-                  116,
-                  102,
-                  111,
-                  114,
-                  109,
-                  95,
-                  102,
-                  101,
-                  101,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "host_wallet",
-          "writable": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [],
-      "returns": "u64"
-    },
-    {
       "name": "claim_stale_dispute",
+      "docs": [
+        "Permissionless fallback for a dispute the platform authority never",
+        "reviewed: once `DISPUTE_TTL_SECS` (7 days) has elapsed past",
+        "`dispute.expires_at`, any signer may call this to split the pot 50/50",
+        "(each player gets their stake back), refund the challenger's bond",
+        "(no fault was ruled), and settle the game as a draw — ensuring funds",
+        "are never permanently locked by platform inaction."
+      ],
       "discriminator": [
         181,
         240,
@@ -948,6 +1237,13 @@
     },
     {
       "name": "claim_timeout",
+      "docs": [
+        "Permissionlessly awards victory to whichever player did NOT exceed",
+        "their clock, once that player's remaining time has run out. `caller`",
+        "need not be a participant — anyone (typically a crank) may trigger",
+        "this once a clock has actually expired; it errors as a no-op",
+        "otherwise. Settlement still happens afterward via `finalize_game`."
+      ],
       "discriminator": [
         130,
         234,
@@ -981,56 +1277,11 @@
           }
         },
         {
-          "name": "escrow_pda",
-          "docs": [
-            "System-owned wager escrow PDA — paid out via signed CPI."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  115,
-                  99,
-                  114,
-                  111,
-                  119
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "game_id"
-              }
-            ]
-          }
-        },
-        {
           "name": "caller",
           "docs": [
             "Permissionless — any signer may trigger the timeout once elapsed."
           ],
-          "writable": true,
           "signer": true
-        },
-        {
-          "name": "white_authority",
-          "docs": [
-            "White player's wallet — must match game.white."
-          ],
-          "writable": true
-        },
-        {
-          "name": "black_authority",
-          "docs": [
-            "Black player's wallet — must match game.black."
-          ],
-          "writable": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -1042,6 +1293,16 @@
     },
     {
       "name": "claim_tournament_prize",
+      "docs": [
+        "Pull-based prize claim for a `Completed` tournament: looks up which",
+        "of the (up to 10) finishing places the caller holds, checks it hasn't",
+        "already been claimed (tracked via a bitflag), and pays out their %",
+        "share from whichever pools are funded — the operator-guaranteed USDC",
+        "pool (`usdc_prize_pool`), the operator-guaranteed SOL pool",
+        "(`prize_pool`), or both. Either player or a permissionless crank",
+        "(`distribute_tournament_prizes`) can trigger a given place's payout,",
+        "but never both — the shared bitflag prevents double-paying."
+      ],
       "discriminator": [
         219,
         207,
@@ -1267,47 +1528,156 @@
       ]
     },
     {
-      "name": "collect_fee",
+      "name": "close_friendship",
+      "docs": [
+        "Closes a `Friendship` PDA, refunding its rent to the caller. Used to",
+        "decline a pending request, cancel one's own outgoing request, or",
+        "remove an already-accepted friend — the same instruction covers all",
+        "three, since they're just \"delete this edge\" from different states."
+      ],
       "discriminator": [
-        60,
-        173,
-        247,
-        103,
-        4,
-        93,
-        130,
-        48
+        20,
+        118,
+        133,
+        117,
+        237,
+        160,
+        30,
+        1
       ],
       "accounts": [
         {
-          "name": "payer",
-          "docs": [
-            "VPS backend authority — the only signer allowed to deposit into the fee vault."
-          ],
-          "writable": true,
-          "signer": true,
-          "address": "C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw"
-        },
-        {
-          "name": "fee_vault",
+          "name": "friendship",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  112,
-                  108,
-                  97,
-                  116,
                   102,
-                  111,
                   114,
+                  105,
+                  101,
+                  110,
+                  100,
+                  115,
+                  104,
+                  105,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party_a"
+              },
+              {
+                "kind": "account",
+                "path": "party_b"
+              }
+            ]
+          }
+        },
+        {
+          "name": "party_a"
+        },
+        {
+          "name": "party_b"
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_tournament",
+      "docs": [
+        "Finalize a completed tournament: transition it to `Closed` and sweep any",
+        "residual escrow to the platform treasury. Payouts happen exclusively via",
+        "`distribute_tournament_prizes` / `claim_tournament_prize`; this refuses to",
+        "run until every funded prize place has already been claimed."
+      ],
+      "discriminator": [
+        14,
+        80,
+        54,
+        9,
+        221,
+        239,
+        201,
+        35
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
                   109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "prize_escrow_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
                   95,
-                  102,
                   101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
                   101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121,
                   95,
                   118,
                   97,
@@ -1322,11 +1692,113 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Tournament host or platform admin — must sign to authorize the close."
+          ],
+          "writable": true,
+          "signer": true
         }
       ],
       "args": [
         {
-          "name": "amount",
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "complete_swiss_tournament",
+      "docs": [
+        "Finalize a Swiss tournament once `advance_round` has pushed",
+        "`current_round` to `total_rounds`: sorts final standings and marks the",
+        "tournament `Completed` so prize distribution/close can proceed. See",
+        "`complete_swiss::handler` for why this instruction exists — Swiss",
+        "otherwise had no terminal step equivalent to single-elimination's",
+        "final-match auto-completion."
+      ],
+      "discriminator": [
+        126,
+        224,
+        49,
+        196,
+        224,
+        235,
+        46,
+        147
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tournament_players_shard_0",
+          "docs": [
+            "TournamentPlayersShard 0 always present (all tournament sizes)."
+          ]
+        },
+        {
+          "name": "tournament_players_shard_1",
+          "docs": [
+            "TournamentPlayersShard 1 — present for >64-player tournaments only.",
+            "Pass the program ID in its place for smaller tournaments."
+          ],
+          "optional": true
+        },
+        {
+          "name": "tournament_players_shard_2",
+          "docs": [
+            "TournamentPlayersShard 2 — present for 256-player tournaments only."
+          ],
+          "optional": true
+        },
+        {
+          "name": "tournament_players_shard_3",
+          "docs": [
+            "TournamentPlayersShard 3 — present for 256-player tournaments only."
+          ],
+          "optional": true
+        },
+        {
+          "name": "cranker",
+          "docs": [
+            "Anyone may crank; the only effect is publishing standings that are",
+            "already fully determined by on-chain state — mirrors the \"anyone may",
+            "crank\" pattern already established by `advance_round` and",
+            "`distribute_tournament_prizes`."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
           "type": "u64"
         }
       ]
@@ -1349,9 +1821,6 @@
       "accounts": [
         {
           "name": "game",
-          "docs": [
-            "The game account to check"
-          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -1373,7 +1842,11 @@
           }
         },
         {
-          "name": "white"
+          "name": "white",
+          "docs": [
+            "read by this instruction's body, but constrained to `game.white`",
+            "anyway; see the same constraint in `schedule_time_check::ScheduleTimeCheck`."
+          ]
         },
         {
           "name": "black"
@@ -1392,6 +1865,15 @@
     },
     {
       "name": "create_game",
+      "docs": [
+        "Creates a new `Game` PDA and its wager escrow, seeding the board at",
+        "the starting position. `fee_payer` is the VPS relayer wallet that",
+        "covers account rent (reimbursed later via `fees_advanced`), kept",
+        "separate from `player` (white) so game creation can be sponsored",
+        "without the player holding SOL. Validates the wager against",
+        "`MIN_WAGER_LAMPORTS`/`MAX_WAGER_AMOUNT` and, for a non-zero wager,",
+        "transfers the creator's stake into escrow."
+      ],
       "discriminator": [
         124,
         69,
@@ -1498,6 +1980,14 @@
     },
     {
       "name": "create_session",
+      "docs": [
+        "Creates a standalone `PlayerSession` PDA: a time-bounded (24h by",
+        "default, or a custom `duration`/`spending_limit`/`max_wager`) session",
+        "key that can sign game transactions without a wallet popup. Distinct",
+        "from the per-game `authorize_session_key` (tied to one `Game`) and",
+        "the multi-game `authorize_global_session` — this one has its own",
+        "independent lifetime and spending cap, not scoped to any single game."
+      ],
       "discriminator": [
         242,
         193,
@@ -1581,6 +2071,14 @@
     },
     {
       "name": "delegate_game",
+      "docs": [
+        "Hands the `Game` PDA's ownership over to the MagicBlock delegation",
+        "program so subsequent `record_move` calls execute on the Ephemeral",
+        "Rollup with sub-second latency instead of on the Solana base layer.",
+        "The ER validator is chosen by the delegation program/magic-router",
+        "(not pinned here) so games aren't all forced onto one region. Must be",
+        "called before ER-side moves; `undelegate_game` reverses it."
+      ],
       "discriminator": [
         116,
         183,
@@ -1619,7 +2117,8 @@
           "signer": true
         },
         {
-          "name": "owner_program"
+          "name": "owner_program",
+          "address": "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
         },
         {
           "name": "buffer",
@@ -1660,6 +2159,15 @@
     },
     {
       "name": "dispute_game",
+      "docs": [
+        "Opens a dispute (e.g. suspected cheating) on an `Active` or",
+        "`Inactive` game. Moves the game to `Disputed` — freezing it out of",
+        "normal settlement — creates a `DisputeRecord` PDA (`Pending`,",
+        "`DISPUTE_TTL_SECS` to live) with the given reason and evidence hash,",
+        "and requires the challenger to post a `DISPUTE_BOND_LAMPORTS` bond,",
+        "which deters frivolous disputes since it's only refunded if the claim",
+        "is upheld. Caller must be white or black in the game."
+      ],
       "discriminator": [
         6,
         124,
@@ -1751,6 +2259,17 @@
     },
     {
       "name": "distribute_tournament_prizes",
+      "docs": [
+        "Permissionless crank that pushes each unclaimed place's SOL prize",
+        "share directly to its winner's wallet in one transaction, so winners",
+        "receive funds without having to sign a claim themselves. Winner",
+        "wallets are passed via `remaining_accounts`; a cranker cannot",
+        "redirect funds because destinations are constrained to the place",
+        "pubkeys already recorded on the `Tournament` account. Only handles",
+        "lump-sum SOL payouts — USDC pools and vesting schedules stay on the",
+        "pull-based `claim_tournament_prize` path. Idempotent: re-cranking",
+        "after full distribution is a no-op."
+      ],
       "discriminator": [
         88,
         13,
@@ -1834,6 +2353,15 @@
     },
     {
       "name": "finalize_game",
+      "docs": [
+        "Settles a finished game (checkmate, resignation, timeout, or accepted",
+        "draw) through the single base-layer settlement path: splits the",
+        "escrowed pot between winner/loser (or both, on a draw) net of the",
+        "platform fee, updates both players' ELO (K=32) and stats, reimburses",
+        "the recorded `fee_payer` relayer, and closes the `Game` PDA — rent",
+        "goes back to `fee_payer`, never to whoever happens to call this, so",
+        "an unconstrained caller can't steal the rent refund."
+      ],
       "discriminator": [
         203,
         227,
@@ -2007,7 +2535,110 @@
       ]
     },
     {
+      "name": "force_undelegate_after_timeout",
+      "docs": [
+        "Completes a forced undelegation once the `request_force_undelegate`",
+        "timeout has elapsed — hands the `Game` PDA back wiped to zero bytes",
+        "(data-loss by design; see the handler's doc comment). Follow up with",
+        "`recover_stuck_delegation` to release the escrow."
+      ],
+      "discriminator": [
+        44,
+        14,
+        40,
+        60,
+        15,
+        84,
+        76,
+        249
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "docs": [
+            "to zero bytes) by this instruction. Signs via program seeds."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_program",
+          "address": "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+        },
+        {
+          "name": "undelegation_request_pda",
+          "writable": true
+        },
+        {
+          "name": "delegation_record_pda",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata_pda",
+          "writable": true
+        },
+        {
+          "name": "delegation_rent_payer",
+          "writable": true
+        },
+        {
+          "name": "commit_state_pda",
+          "docs": [
+            "commit behind; verified against the delegation program's own PDA",
+            "derivation either way."
+          ],
+          "writable": true
+        },
+        {
+          "name": "commit_record_pda",
+          "writable": true
+        },
+        {
+          "name": "commit_reimbursement",
+          "docs": [
+            "(e.g. `delegation_rent_payer` again) is fine otherwise — see",
+            "`magicblock::delegation::force_undelegate_after_timeout`."
+          ],
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "fund_sol_prize",
+      "docs": [
+        "Operator deposits `amount` lamports into the tournament escrow PDA,",
+        "locking the guaranteed SOL prize pool (`tournament.prize_pool`).",
+        "Same one-time, pre-registration constraint as `fund_usdc_prize`: must",
+        "run during `Registration` before any player registers, and",
+        "`prize_pool` can only be set once. Entry fees paid later by players",
+        "never mix into this pool — they're operator revenue, not prize money."
+      ],
       "discriminator": [
         19,
         238,
@@ -2097,6 +2728,14 @@
     },
     {
       "name": "fund_usdc_prize",
+      "docs": [
+        "Operator deposits `amount` USDC into the tournament's USDC prize",
+        "escrow ATA, locking the guaranteed USDC prize pool. Must run while",
+        "the tournament is still `Registration` and before any player has",
+        "registered (`num_registered_players == 0`) and can only be called",
+        "once (`usdc_prize_funded` flips permanently) — this keeps the prize",
+        "provably fixed and independent of how many players eventually enter."
+      ],
       "discriminator": [
         171,
         94,
@@ -2357,6 +2996,15 @@
         },
         {
           "name": "game",
+          "docs": [
+            "there) instead of via Anchor's `init` constraint. `init, payer = X`",
+            "requires `X` to be a real transaction `Signer` — it CPIs into",
+            "`system_program::create_account` without ever supplying seeds for the",
+            "payer side, so a PDA payer like `session_delegation` fails on-chain",
+            "with \"signer privilege escalated\". Funding this account from a PDA",
+            "vault requires `invoke_signed` with the payer's own seeds, which only",
+            "the handler body can provide."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -2597,7 +3245,139 @@
       ]
     },
     {
+      "name": "global_record_move",
+      "docs": [
+        "Same as `record_move`, but for games created via",
+        "`global_create_game`/`global_join_game` — checks the mover's",
+        "`GlobalSessionDelegation` instead of a per-game `SessionDelegation`",
+        "(which those games never get, that's what makes create/join",
+        "popup-free for them)."
+      ],
+      "discriminator": [
+        74,
+        198,
+        216,
+        153,
+        251,
+        220,
+        45,
+        71
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "Global session key — must match the session_delegation below."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session_delegation",
+          "docs": [
+            "Global session delegation for the wallet actually making this move."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session_delegation.player",
+                "account": "GlobalSessionDelegation"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "move_uci",
+          "type": {
+            "array": [
+              "u8",
+              5
+            ]
+          }
+        },
+        {
+          "name": "next_board",
+          "type": {
+            "array": [
+              "u8",
+              68
+            ]
+          }
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "signature",
+          "type": {
+            "option": "bytes"
+          }
+        },
+        {
+          "name": "parent_nonce",
+          "type": {
+            "option": "u64"
+          }
+        }
+      ]
+    },
+    {
       "name": "init_profile",
+      "docs": [
+        "Creates a player's `PlayerProfile` PDA on first use (or re-initializes",
+        "a legacy one, reallocating it to the current account size). Enforces",
+        "username uniqueness via a `UsernameRecord` PDA and an 18+ age gate",
+        "computed from `date_of_birth` — accounts under 18 years old are",
+        "rejected outright. This is the entry point every player must call",
+        "before creating or joining games."
+      ],
       "discriminator": [
         210,
         162,
@@ -2667,68 +3447,15 @@
       ]
     },
     {
-      "name": "initialize_fee_vault",
-      "discriminator": [
-        185,
-        140,
-        228,
-        234,
-        79,
-        203,
-        252,
-        50
-      ],
-      "accounts": [
-        {
-          "name": "authority",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "fee_vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  108,
-                  97,
-                  116,
-                  102,
-                  111,
-                  114,
-                  109,
-                  95,
-                  102,
-                  101,
-                  101,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "host_wallet",
-          "type": "pubkey"
-        }
-      ]
-    },
-    {
       "name": "initialize_match",
+      "docs": [
+        "Creates a single `TournamentMatch` PDA (one bracket slot) with its",
+        "round, seeded player(s), and where its winner advances to next.",
+        "Called by the backend to lay out the single-elimination bracket after",
+        "`start_tournament` locks in seeding. Restricted to the tournament's",
+        "own authority; fails unless the tournament is `Active` and",
+        "`match_index` is within `total_matches`."
+      ],
       "discriminator": [
         156,
         133,
@@ -2974,6 +3701,15 @@
     },
     {
       "name": "initialize_tournament",
+      "docs": [
+        "Bootstraps a new tournament's `Tournament` PDA: validates player-count",
+        "(must be one of 2/4/8/16/32/64/128/256), ELO range, and that prize",
+        "shares sum to ≤10000 bps, then populates every field for the",
+        "`Registration` phase. Restricted to the VPS authority. Does not",
+        "create player shards or lock a prize — follow up with the matching",
+        "`initialize_shards*` instruction and `fund_sol_prize`/",
+        "`fund_usdc_prize` before opening registration to players."
+      ],
       "discriminator": [
         75,
         218,
@@ -3091,7 +3827,7 @@
                 ]
               },
               {
-                "kind": "arg",
+                "kind": "account",
                 "path": "usdc_mint"
               }
             ],
@@ -3235,6 +3971,13 @@
     },
     {
       "name": "initialize_tournament_escrow",
+      "docs": [
+        "Creates the tournament's SOL escrow PDA — a zero-data account that",
+        "just holds lamports for entry-fee deposits and (later) the",
+        "operator-funded guaranteed SOL prize. Must be called after",
+        "`initialize_tournament` and before `register_player` or",
+        "`fund_sol_prize`, both of which pay into this PDA."
+      ],
       "discriminator": [
         150,
         97,
@@ -3316,6 +4059,14 @@
     },
     {
       "name": "initialize_tournament_shards",
+      "docs": [
+        "Initializes all 4 `TournamentPlayersShard` PDAs for the large tier",
+        "(256-player tournaments only). Each shard holds up to 64 players'",
+        "pubkeys, ELOs, and Swiss standings — sharded because a single PDA",
+        "can't fit 256 players plus their metadata. For smaller tournaments",
+        "use `initialize_shards_small`/`initialize_shards_medium` instead;",
+        "this call fails if `tournament.max_players != 256`."
+      ],
       "discriminator": [
         10,
         119,
@@ -3388,6 +4139,14 @@
     },
     {
       "name": "join_game",
+      "docs": [
+        "Joins an open PvP lobby as black, matching the wager already escrowed",
+        "by white. Transitions the game from `WaitingForOpponent` to `Active`",
+        "and, for a SOL wager, transfers the joiner's stake into the same",
+        "escrow PDA (SPL-token wagers are funded through a separate path).",
+        "Reads `white_profile` to support cross-border platform-fee",
+        "calculation between the two players' jurisdictions."
+      ],
       "discriminator": [
         107,
         112,
@@ -3515,6 +4274,12 @@
     },
     {
       "name": "leave_tournament",
+      "docs": [
+        "Withdraws a player from a tournament still in `Registration`,",
+        "removing them from their shard and refunding their entry-fee deposit",
+        "in full from the tournament escrow PDA — the operator's wallet is",
+        "never touched, since fees haven't been swept there yet at this phase."
+      ],
       "discriminator": [
         223,
         40,
@@ -3556,26 +4321,34 @@
         {
           "name": "tournament_players_shard_0",
           "docs": [
-            "TournamentPlayersShard 0 (players 0-63)"
-          ]
+            "TournamentPlayersShard 0 always present (all tournament sizes)"
+          ],
+          "writable": true
         },
         {
           "name": "tournament_players_shard_1",
           "docs": [
-            "TournamentPlayersShard 1 (players 64-127)"
-          ]
+            "TournamentPlayersShard 1 — present for >64-player tournaments only.",
+            "Pass the program ID in its place for smaller tournaments."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "tournament_players_shard_2",
           "docs": [
-            "TournamentPlayersShard 2 (players 128-191)"
-          ]
+            "TournamentPlayersShard 2 — present for 256-player tournaments only."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "tournament_players_shard_3",
           "docs": [
-            "TournamentPlayersShard 3 (players 192-255)"
-          ]
+            "TournamentPlayersShard 3 — present for 256-player tournaments only."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "player",
@@ -3621,6 +4394,14 @@
     },
     {
       "name": "link_external_elo",
+      "docs": [
+        "Writes a verified Lichess rating attestation (blitz/rapid/bullet) onto",
+        "a player's profile. Only the configured `link_authority` (VPS backend",
+        "signer, which verifies Lichess account ownership via a bio-nonce",
+        "challenge off-chain) may call this — players cannot self-report",
+        "ratings. On the very first link, also seeds the on-chain `elo_rating`",
+        "from the external rating so new players don't start at a default ELO."
+      ],
       "discriminator": [
         112,
         2,
@@ -3660,8 +4441,56 @@
           "name": "player"
         },
         {
+          "name": "lichess_username_record",
+          "docs": [
+            "Claims (or verifies existing ownership of) this Lichess username's",
+            "uniqueness lock — see `LichessUsernameRecord`'s own doc comment for",
+            "why this exists. `init_if_needed` because the first link for a given",
+            "Lichess username creates the record; a re-sync of an already-linked",
+            "account reuses the same one."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  99,
+                  104,
+                  101,
+                  115,
+                  115,
+                  95,
+                  117,
+                  115,
+                  101,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "username"
+              }
+            ]
+          }
+        },
+        {
           "name": "link_authority",
+          "docs": [
+            "`mut` because it pays for `lichess_username_record` on first link."
+          ],
+          "writable": true,
           "signer": true,
+          "address": "42fiB5KcC1jEVXxmgPoWqpA3zuKEsZGu77YHmCwNEcrh"
+        },
+        {
+          "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
       ],
@@ -3685,7 +4514,68 @@
       ]
     },
     {
+      "name": "offer_draw",
+      "docs": [
+        "Offers a draw to the opponent — does not end the game by itself. The",
+        "opponent must call `accept_draw` to finalize it."
+      ],
+      "discriminator": [
+        87,
+        16,
+        73,
+        235,
+        76,
+        137,
+        216,
+        229
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "The offering player — must be white or black."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "process_undelegation",
+      "docs": [
+        "CPI entry point invoked by the MagicBlock delegation program itself",
+        "(not called directly by players or the backend) to finish committing",
+        "an undelegated account's buffered state back onto its canonical PDA.",
+        "Delegates to `ephemeral_rollups_sdk::cpi::undelegate_account`, which",
+        "already rejects a buffer that isn't the account's own canonical",
+        "undelegate-buffer PDA."
+      ],
       "discriminator": [
         196,
         28,
@@ -3723,6 +4613,16 @@
     },
     {
       "name": "record_match_result",
+      "docs": [
+        "Records the outcome of a single-elimination bracket match: sets",
+        "`tournament_match.winner` and status `Completed`, and — if this was",
+        "the final — marks the tournament `Completed` with `winner`/",
+        "`second_place` set (and `third_place`/`fourth_place` inferred for the",
+        "two semifinal losers). The tournament authority is the trusted source",
+        "of truth here; results are not cross-checked against an on-chain",
+        "`Game` account. Follow up with `advance_winner` to seed the winner",
+        "into their next bracket slot (unless this was the final)."
+      ],
       "discriminator": [
         37,
         251,
@@ -3820,6 +4720,17 @@
     },
     {
       "name": "record_move",
+      "docs": [
+        "Validates and applies a single chess move, advancing `Game.board`,",
+        "`move_count`, and clocks. Called via a per-game `SessionDelegation`",
+        "key rather than the player's wallet directly, so moves during a fast",
+        "game don't each need a wallet popup — `player` here is the session",
+        "signer, and the real moving wallet is `session_delegation.player`.",
+        "`parent_nonce`, when provided, must match `game.nonce` before the",
+        "move — a causal-chain check that rejects moves built on stale state.",
+        "Emits a `MoveEvent` so move history can be reconstructed from the",
+        "transaction log instead of being stored on-chain (zero rent cost)."
+      ],
       "discriminator": [
         111,
         244,
@@ -3945,6 +4856,16 @@
     },
     {
       "name": "record_swiss_result",
+      "docs": [
+        "Records one Swiss-system board result for the tournament's",
+        "`current_round` and updates both players' standings (score,",
+        "Buchholz/Sonneborn-Berger tiebreakers, color balance) across",
+        "whichever shard(s) they live in. Marks the board's bit in",
+        "`round_boards_reported` so `advance_round` can verify the round is",
+        "fully reported purely from on-chain state, without trusting an",
+        "off-chain caller. A single call can only set its own board's bit —",
+        "it can never skip or fake completion of the round."
+      ],
       "discriminator": [
         19,
         225,
@@ -3986,26 +4907,35 @@
         {
           "name": "tournament_players_shard_0",
           "docs": [
-            "TournamentPlayersShard 0 (players 0-63)"
-          ]
+            "TournamentPlayersShard 0 always present (all tournament sizes).",
+            "`mut` is required — standings updates must persist."
+          ],
+          "writable": true
         },
         {
           "name": "tournament_players_shard_1",
           "docs": [
-            "TournamentPlayersShard 1 (players 64-127)"
-          ]
+            "TournamentPlayersShard 1 — present for >64-player tournaments only.",
+            "Pass the program ID in its place for smaller tournaments."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "tournament_players_shard_2",
           "docs": [
-            "TournamentPlayersShard 2 (players 128-191)"
-          ]
+            "TournamentPlayersShard 2 — present for 256-player tournaments only."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "tournament_players_shard_3",
           "docs": [
-            "TournamentPlayersShard 3 (players 192-255)"
-          ]
+            "TournamentPlayersShard 3 — present for 256-player tournaments only."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "player",
@@ -4044,7 +4974,150 @@
       ]
     },
     {
+      "name": "recover_stuck_delegation",
+      "docs": [
+        "Releases wager escrow from a `Game` PDA left wiped by",
+        "`force_undelegate_after_timeout` — see",
+        "`governance_ix::recover_stuck_delegation` for the full rationale."
+      ],
+      "discriminator": [
+        24,
+        114,
+        109,
+        247,
+        7,
+        95,
+        71,
+        101
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "docs": [
+            "for why this can't be a typed `Account<'info, Game>`."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_pda",
+          "docs": [
+            "System-owned per-game wager escrow PDA (funds moved out via signed CPI)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury_vault",
+          "docs": [
+            "Platform treasury vault — receives the wiped `Game` PDA's reclaimed rent."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "white_authority",
+          "docs": [
+            "White player wallet, attested by `dispute_authority` from off-chain",
+            "records — cannot be verified on-chain since `game` no longer holds it."
+          ],
+          "writable": true
+        },
+        {
+          "name": "black_authority",
+          "docs": [
+            "Black player wallet — see `white_authority`."
+          ],
+          "writable": true
+        },
+        {
+          "name": "dispute_authority",
+          "docs": [
+            "The same authority trusted to single-handedly resolve disputes."
+          ],
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "register_player",
+      "docs": [
+        "Opts a player into a tournament in `Registration` phase, checking ELO",
+        "eligibility (`elo_min..=elo_max`), capacity, and no duplicate entry",
+        "across shards, then slots them into the correct",
+        "`TournamentPlayersShard` by registration order. For paid tournaments,",
+        "the guaranteed prize must already be locked (`fund_sol_prize`/",
+        "`fund_usdc_prize`) before anyone can register. The entry fee is",
+        "deposited into the tournament escrow PDA as a refundable deposit — it",
+        "is NOT prize money; it becomes operator revenue only once the",
+        "tournament actually starts (see `start_tournament`)."
+      ],
       "discriminator": [
         242,
         146,
@@ -4195,7 +5268,100 @@
       ]
     },
     {
+      "name": "request_force_undelegate",
+      "docs": [
+        "Starts the non-admin, owner-program-authorized forced-undelegation",
+        "countdown for a `Game` PDA whose ER validator has gone unreachable.",
+        "See `delegation_ix::force_recovery` and MAGICBLOCK.md's",
+        "\"Failure Mode: ER Unavailability\" section."
+      ],
+      "discriminator": [
+        249,
+        59,
+        55,
+        253,
+        199,
+        253,
+        112,
+        82
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "docs": [
+            "program (that's the scenario this instruction exists for), so it",
+            "cannot be a typed `Account<'info, Game>`. Signs via program seeds."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Must be the same key that funded the original `delegate_game` call",
+            "for this game (the delegation program checks it against",
+            "`delegation_metadata.rent_payer`)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner_program",
+          "address": "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+        },
+        {
+          "name": "undelegation_request_pda",
+          "docs": [
+            "in `magicblock::delegation::require_accounts_match_instruction`."
+          ],
+          "writable": true
+        },
+        {
+          "name": "delegation_record_pda"
+        },
+        {
+          "name": "delegation_metadata_pda",
+          "writable": true
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "resign",
+      "docs": [
+        "Concedes the game as a loss for the calling player (must be white or",
+        "black). Ends the game via `finish_by_resign`; actual payout/ELO/stats",
+        "settlement still happens afterward through `finalize_game`."
+      ],
       "discriminator": [
         177,
         177,
@@ -4229,56 +5395,11 @@
           }
         },
         {
-          "name": "escrow_pda",
-          "docs": [
-            "System-owned wager escrow PDA — paid out via signed CPI."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  115,
-                  99,
-                  114,
-                  111,
-                  119
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "game_id"
-              }
-            ]
-          }
-        },
-        {
           "name": "player",
           "docs": [
             "The resigning player — must be white or black."
           ],
-          "writable": true,
           "signer": true
-        },
-        {
-          "name": "white_authority",
-          "docs": [
-            "White player wallet — must match game.white."
-          ],
-          "writable": true
-        },
-        {
-          "name": "black_authority",
-          "docs": [
-            "Black player wallet — must match game.black."
-          ],
-          "writable": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -4290,6 +5411,15 @@
     },
     {
       "name": "resolve_dispute",
+      "docs": [
+        "Rules on a pending dispute. Restricted to the configured",
+        "`dispute_authority`. Allocates the wager pot per the ruling (full pot",
+        "to `winner`, or a 50/50 split on `None`/draw), then settles the",
+        "challenger's bond: refunded if their claim was upheld or the game was",
+        "ruled a draw, forfeited to the treasury if the ruling went against",
+        "them. Sets the game to `Settled` so `finalize_game` cannot re-process",
+        "it afterward."
+      ],
       "discriminator": [
         231,
         6,
@@ -4503,6 +5633,10 @@
     },
     {
       "name": "revoke_session",
+      "docs": [
+        "Deactivates a `PlayerSession` and closes the PDA, refunding its rent",
+        "to the player."
+      ],
       "discriminator": [
         86,
         92,
@@ -4563,6 +5697,11 @@
     },
     {
       "name": "revoke_session_key",
+      "docs": [
+        "Immediately disables the caller's own per-game `SessionDelegation`",
+        "(`enabled = false`, `expires_at = now`), so the session key can no",
+        "longer co-sign moves for this game."
+      ],
       "discriminator": [
         81,
         192,
@@ -4766,7 +5905,13 @@
           }
         },
         {
-          "name": "white"
+          "name": "white",
+          "docs": [
+            "for the wrapped crank ix's account-meta list, see",
+            "`magicblock::crank::build_time_check_schedule_instruction`), but",
+            "constrained to `game.white` anyway so a future caller can't schedule",
+            "a task naming the wrong players without this being caught here."
+          ]
         },
         {
           "name": "black"
@@ -4786,6 +5931,74 @@
           }
         }
       ]
+    },
+    {
+      "name": "send_friend_request",
+      "docs": [
+        "Opens a `Friendship` PDA (status `Pending`) between the signer and the",
+        "other party. Seeds are the two pubkeys in canonical (ascending) order,",
+        "which doubles as the self-friendship guard. Either party may be the",
+        "signing requester; the other becomes the addressee who must accept."
+      ],
+      "discriminator": [
+        26,
+        246,
+        211,
+        226,
+        34,
+        70,
+        151,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "friendship",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  114,
+                  105,
+                  101,
+                  110,
+                  100,
+                  115,
+                  104,
+                  105,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "party_a"
+              },
+              {
+                "kind": "account",
+                "path": "party_b"
+              }
+            ]
+          }
+        },
+        {
+          "name": "party_a"
+        },
+        {
+          "name": "party_b"
+        },
+        {
+          "name": "requester",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "session_create_game",
@@ -4834,26 +6047,30 @@
         {
           "name": "tournament_players_shard_0",
           "docs": [
-            "TournamentPlayersShard 0 (players 0-63)"
+            "TournamentPlayersShard 0 always present (all tournament sizes)."
           ]
         },
         {
           "name": "tournament_players_shard_1",
           "docs": [
-            "TournamentPlayersShard 1 (players 64-127)"
-          ]
+            "TournamentPlayersShard 1 — present for >64-player tournaments only.",
+            "Pass the program ID in its place for smaller tournaments."
+          ],
+          "optional": true
         },
         {
           "name": "tournament_players_shard_2",
           "docs": [
-            "TournamentPlayersShard 2 (players 128-191)"
-          ]
+            "TournamentPlayersShard 2 — present for 256-player tournaments only."
+          ],
+          "optional": true
         },
         {
           "name": "tournament_players_shard_3",
           "docs": [
-            "TournamentPlayersShard 3 (players 192-255)"
-          ]
+            "TournamentPlayersShard 3 — present for 256-player tournaments only."
+          ],
+          "optional": true
         },
         {
           "name": "session_delegation",
@@ -4906,6 +6123,10 @@
         },
         {
           "name": "game",
+          "docs": [
+            "`game_ix::global_create::GlobalCreateGame::game` for why `init, payer",
+            "= session_delegation` cannot work when the payer is a PDA."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -5035,26 +6256,30 @@
         {
           "name": "tournament_players_shard_0",
           "docs": [
-            "TournamentPlayersShard 0 (players 0-63)"
+            "TournamentPlayersShard 0 always present (all tournament sizes)."
           ]
         },
         {
           "name": "tournament_players_shard_1",
           "docs": [
-            "TournamentPlayersShard 1 (players 64-127)"
-          ]
+            "TournamentPlayersShard 1 — present for >64-player tournaments only.",
+            "Pass the program ID in its place for smaller tournaments."
+          ],
+          "optional": true
         },
         {
           "name": "tournament_players_shard_2",
           "docs": [
-            "TournamentPlayersShard 2 (players 128-191)"
-          ]
+            "TournamentPlayersShard 2 — present for 256-player tournaments only."
+          ],
+          "optional": true
         },
         {
           "name": "tournament_players_shard_3",
           "docs": [
-            "TournamentPlayersShard 3 (players 192-255)"
-          ]
+            "TournamentPlayersShard 3 — present for 256-player tournaments only."
+          ],
+          "optional": true
         },
         {
           "name": "session_delegation",
@@ -5220,6 +6445,12 @@
     },
     {
       "name": "set_username",
+      "docs": [
+        "Claims a `UsernameRecord` PDA for `username` and sets it on the",
+        "caller's existing profile. Unlike `init_profile`'s username field,",
+        "this uses plain `init` rather than `init_if_needed`, so it fails",
+        "outright if the username is already taken by another player."
+      ],
       "discriminator": [
         103,
         131,
@@ -5309,6 +6540,17 @@
     },
     {
       "name": "start_tournament",
+      "docs": [
+        "Locks registration and transitions the tournament to `Active`: sorts",
+        "all registered players by ELO descending to seed the bracket (or",
+        "initializes Swiss standings), then sweeps every entry-fee deposit",
+        "from escrow to `host_treasury` as operator revenue — what remains in",
+        "escrow after this is exactly the guaranteed prize. Single-elimination",
+        "requires a full bracket (`num_registered_players == max_players`);",
+        "Swiss only requires `min_players`. Below that threshold, call",
+        "`cancel_tournament` instead. Match/bracket PDAs are created",
+        "separately via `initialize_match`."
+      ],
       "discriminator": [
         164,
         168,
@@ -5350,26 +6592,34 @@
         {
           "name": "tournament_players_shard_0",
           "docs": [
-            "TournamentPlayersShard 0 (players 0-63)"
-          ]
+            "TournamentPlayersShard 0 always present (all tournament sizes)"
+          ],
+          "writable": true
         },
         {
           "name": "tournament_players_shard_1",
           "docs": [
-            "TournamentPlayersShard 1 (players 64-127)"
-          ]
+            "TournamentPlayersShard 1 — present for >64-player tournaments only.",
+            "Pass the program ID in its place for smaller tournaments."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "tournament_players_shard_2",
           "docs": [
-            "TournamentPlayersShard 2 (players 128-191)"
-          ]
+            "TournamentPlayersShard 2 — present for 256-player tournaments only."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "tournament_players_shard_3",
           "docs": [
-            "TournamentPlayersShard 3 (players 192-255)"
-          ]
+            "TournamentPlayersShard 3 — present for 256-player tournaments only."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "escrow_pda",
@@ -5422,6 +6672,13 @@
     },
     {
       "name": "undelegate_game",
+      "docs": [
+        "Commits the game's current state from the Ephemeral Rollup back to",
+        "the base layer and undelegates the `Game` PDA, returning ownership to",
+        "this program so mainnet/devnet instructions (like `finalize_game`)",
+        "can act on it again. No payer-identity check, so the VPS session key",
+        "can trigger this at game end without an extra wallet popup."
+      ],
       "discriminator": [
         40,
         145,
@@ -5478,6 +6735,14 @@
     },
     {
       "name": "update_elo",
+      "docs": [
+        "Updates a player's lifetime stats after a game — wins/losses/draws,",
+        "win streak, `games_played`, and (for ranked games) wagered/won",
+        "totals. Restricted to the VPS backend authority. Does NOT touch the",
+        "on-chain `elo_rating` itself, which is updated exclusively by",
+        "`finalize_game` (K=32); `opponent_rating`/`opponent_rd` are accepted",
+        "but unused, kept only for ABI compatibility with older callers."
+      ],
       "discriminator": [
         68,
         19,
@@ -5495,7 +6760,7 @@
             "VPS backend authority — only this key may update ELO standings."
           ],
           "signer": true,
-          "address": "C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw"
+          "address": "HZTwvN9AUK1n9jmQydrh5vkpdCBZm13W7qD9jtPZJSQc"
         },
         {
           "name": "profile",
@@ -5531,6 +6796,11 @@
     },
     {
       "name": "verify_profile",
+      "docs": [
+        "Marks a player's profile `is_verified = true` (KYC verification).",
+        "Restricted to the configured `kyc_authority` (the VPS master key) —",
+        "players cannot self-verify."
+      ],
       "discriminator": [
         101,
         137,
@@ -5579,6 +6849,13 @@
     },
     {
       "name": "withdraw_expired_wager",
+      "docs": [
+        "Lets a game's creator reclaim their escrowed wager from a lobby that",
+        "never found an opponent within the 24h expiration window. Verifies",
+        "the game is still `WaitingForOpponent`, the caller is `game.white`,",
+        "and 24h have elapsed since creation, then refunds (SOL or SPL token)",
+        "and marks the game `Expired`."
+      ],
       "discriminator": [
         167,
         176,
@@ -5720,6 +6997,84 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "withdraw_treasury",
+      "docs": [
+        "Withdraw accumulated platform fees from the treasury vault to a",
+        "destination wallet. Only the treasury authority may call this."
+      ],
+      "discriminator": [
+        40,
+        63,
+        122,
+        158,
+        144,
+        216,
+        83,
+        96
+      ],
+      "accounts": [
+        {
+          "name": "treasury_vault",
+          "docs": [
+            "System-owned platform treasury vault — the destination of all PvP",
+            "platform/dispute fees. Seeded PDA, so it cannot be substituted."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Only the dedicated treasury authority may withdraw. Kept separate from",
+            "`vps_authority` so treasury access uses its own dedicated wallet without",
+            "touching the result-signing key."
+          ],
+          "writable": true,
+          "signer": true,
+          "address": "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd"
+        },
+        {
+          "name": "destination",
+          "docs": [
+            "Destination wallet for the withdrawn fees."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -5734,6 +7089,19 @@
         215,
         34,
         47
+      ]
+    },
+    {
+      "name": "Friendship",
+      "discriminator": [
+        131,
+        16,
+        7,
+        208,
+        43,
+        72,
+        30,
+        137
       ]
     },
     {
@@ -5763,16 +7131,16 @@
       ]
     },
     {
-      "name": "PlatformFeeVault",
+      "name": "LichessUsernameRecord",
       "discriminator": [
-        108,
-        202,
-        143,
-        121,
-        8,
-        11,
-        125,
-        143
+        155,
+        170,
+        253,
+        67,
+        140,
+        193,
+        187,
+        245
       ]
     },
     {
@@ -5906,6 +7274,32 @@
         169,
         237
       ]
+    },
+    {
+      "name": "StuckDelegationRecovered",
+      "discriminator": [
+        213,
+        196,
+        182,
+        209,
+        188,
+        217,
+        193,
+        174
+      ]
+    },
+    {
+      "name": "TreasuryWithdrawn",
+      "discriminator": [
+        143,
+        181,
+        157,
+        169,
+        87,
+        155,
+        170,
+        46
+      ]
     }
   ],
   "errors": [
@@ -5926,388 +7320,503 @@
     },
     {
       "code": 6003,
+      "name": "InvalidLifecycleTransition",
+      "msg": "Invalid lifecycle transition."
+    },
+    {
+      "code": 6004,
+      "name": "GameAlreadyDelegated",
+      "msg": "Game is already delegated."
+    },
+    {
+      "code": 6005,
+      "name": "GameNotDelegated",
+      "msg": "Game is not delegated."
+    },
+    {
+      "code": 6006,
+      "name": "SettlementRequiresUndelegated",
+      "msg": "Settlement requires the game to be undelegated."
+    },
+    {
+      "code": 6007,
+      "name": "InvalidOwnerProgram",
+      "msg": "Invalid owner program for delegation."
+    },
+    {
+      "code": 6008,
+      "name": "UnauthorizedRelayer",
+      "msg": "Unauthorized relayer."
+    },
+    {
+      "code": 6009,
       "name": "NotPlayerTurn",
       "msg": "Not your turn."
     },
     {
-      "code": 6004,
+      "code": 6010,
       "name": "Overflow",
       "msg": "Calculation overflow."
     },
     {
-      "code": 6005,
+      "code": 6011,
       "name": "NotInGame",
       "msg": "You are not in this game."
     },
     {
-      "code": 6006,
+      "code": 6012,
       "name": "MoveLogFull",
       "msg": "Move log is full."
     },
     {
-      "code": 6007,
+      "code": 6013,
       "name": "GameNotExpired",
       "msg": "Game has not expired or is not in a withdrawable state."
     },
     {
-      "code": 6008,
+      "code": 6014,
       "name": "NotGameCreator",
       "msg": "Only the game creator can withdraw an expired wager."
     },
     {
-      "code": 6009,
+      "code": 6015,
       "name": "MissingTokenAccounts",
       "msg": "Missing token accounts for NFT/SPL wager payout."
     },
     {
-      "code": 6010,
+      "code": 6016,
       "name": "WagerTooHigh",
       "msg": "Wager amount exceeds the maximum allowed."
     },
     {
-      "code": 6011,
+      "code": 6017,
       "name": "InvalidBoardState",
       "msg": "Invalid board state or FEN."
     },
     {
-      "code": 6012,
+      "code": 6018,
       "name": "InvalidMove",
       "msg": "Invalid or illegal chess move."
     },
     {
-      "code": 6013,
+      "code": 6019,
       "name": "UnauthorizedAccess",
       "msg": "Unauthorized access to this resource."
     },
     {
-      "code": 6014,
+      "code": 6020,
       "name": "InvalidSessionKey",
       "msg": "Invalid session key provided."
     },
     {
-      "code": 6015,
+      "code": 6021,
       "name": "SessionExpiredOrDisabled",
       "msg": "Session has expired or is disabled."
     },
     {
-      "code": 6016,
+      "code": 6022,
       "name": "SessionExpired",
       "msg": "Session is expired or has been revoked."
     },
     {
-      "code": 6017,
+      "code": 6023,
       "name": "SessionSpendingLimit",
       "msg": "Session spending limit exceeded."
     },
     {
-      "code": 6018,
+      "code": 6024,
       "name": "SessionNotAuthorized",
       "msg": "Session not authorized for this operation."
     },
     {
-      "code": 6019,
+      "code": 6025,
       "name": "WagerExceedsSessionCap",
       "msg": "Wager exceeds session per-match cap."
     },
     {
-      "code": 6020,
+      "code": 6026,
       "name": "SessionSpendingLimitExceeded",
       "msg": "Session spending limit would be exceeded."
     },
     {
-      "code": 6021,
+      "code": 6027,
       "name": "InvalidNextFen",
       "msg": "Invalid next FEN provided in batch."
     },
     {
-      "code": 6022,
+      "code": 6028,
       "name": "InvalidBatchLength",
       "msg": "Moves and FENs arrays have different lengths."
     },
     {
-      "code": 6023,
+      "code": 6029,
       "name": "BatchTooLarge",
       "msg": "Batch size exceeds maximum allowed."
     },
     {
-      "code": 6024,
+      "code": 6030,
       "name": "InvalidNonce",
       "msg": "Invalid nonce provided for replay protection."
     },
     {
-      "code": 6025,
+      "code": 6031,
       "name": "ParentNonceMismatch",
       "msg": "Parent nonce mismatch: client's claimed parent state does not match on-chain nonce."
     },
     {
-      "code": 6026,
+      "code": 6032,
       "name": "InvalidGameStatus",
       "msg": "Game is not in the required status for this operation."
     },
     {
-      "code": 6027,
+      "code": 6033,
       "name": "GameNotFinished",
       "msg": "Game is not finished"
     },
     {
-      "code": 6028,
+      "code": 6034,
       "name": "InvalidWinner",
       "msg": "Invalid winner specified"
     },
     {
-      "code": 6029,
+      "code": 6035,
       "name": "NotYourTurn",
       "msg": "Not your turn to move"
     },
     {
-      "code": 6030,
+      "code": 6036,
       "name": "DuplicatePlayerAccount",
       "msg": "Duplicate player account detected"
     },
     {
-      "code": 6031,
+      "code": 6037,
       "name": "MissingPlayerAccount",
       "msg": "Missing player account"
     },
     {
-      "code": 6032,
+      "code": 6038,
       "name": "InvalidPlayerAccount",
       "msg": "Invalid player account"
     },
     {
-      "code": 6033,
+      "code": 6039,
       "name": "PrizeAlreadyClaimed",
       "msg": "Prize already claimed"
     },
     {
-      "code": 6034,
+      "code": 6040,
       "name": "InvalidMint",
       "msg": "Invalid mint for USDC"
     },
     {
-      "code": 6035,
+      "code": 6041,
       "name": "GameNotDisputed",
       "msg": "Game is not currently disputed."
     },
     {
-      "code": 6036,
+      "code": 6042,
       "name": "UnauthorizedDisputeResolution",
       "msg": "Unauthorized to resolve this dispute."
     },
     {
-      "code": 6037,
+      "code": 6043,
       "name": "TournamentNotInRegistration",
       "msg": "Tournament is not in registration phase."
     },
     {
-      "code": 6038,
+      "code": 6044,
       "name": "TournamentFull",
       "msg": "Tournament is full."
     },
     {
-      "code": 6039,
+      "code": 6045,
       "name": "AlreadyRegistered",
       "msg": "Player is already registered for this tournament."
     },
     {
-      "code": 6040,
+      "code": 6046,
       "name": "NotTournamentAuthority",
       "msg": "Unauthorized: Not the tournament authority."
     },
     {
-      "code": 6041,
+      "code": 6047,
       "name": "InvalidMatchStatus",
       "msg": "Invalid tournament match status."
     },
     {
-      "code": 6042,
+      "code": 6048,
       "name": "TournamentNotCompleted",
       "msg": "Tournament is not completed."
     },
     {
-      "code": 6043,
+      "code": 6049,
       "name": "NoPrizeToClaim",
       "msg": "No prize pool to claim or not the winner."
     },
     {
-      "code": 6044,
+      "code": 6050,
       "name": "TournamentNotActive",
       "msg": "Tournament is not active."
     },
     {
-      "code": 6045,
+      "code": 6051,
       "name": "EloTooLow",
       "msg": "Player ELO is below tournament minimum."
     },
     {
-      "code": 6046,
+      "code": 6052,
       "name": "EloTooHigh",
       "msg": "Player ELO is above tournament maximum."
     },
     {
-      "code": 6047,
+      "code": 6053,
       "name": "PlayerNotFound",
       "msg": "Player not found in tournament."
     },
     {
-      "code": 6048,
+      "code": 6054,
       "name": "UsdcPrizeNotFunded",
       "msg": "USDC prize pool has not been funded yet."
     },
     {
-      "code": 6049,
+      "code": 6055,
       "name": "PrizeNotFunded",
       "msg": "Guaranteed prize pool must be funded before registration opens."
     },
     {
-      "code": 6050,
+      "code": 6056,
       "name": "PrizeAlreadyFunded",
       "msg": "Guaranteed prize pool is already funded and cannot be changed."
     },
     {
-      "code": 6051,
+      "code": 6057,
       "name": "MinPlayersNotReached",
       "msg": "Minimum player count not reached."
     },
     {
-      "code": 6052,
+      "code": 6058,
       "name": "UsdcTransferFailed",
       "msg": "USDC transfer failed."
     },
     {
-      "code": 6053,
+      "code": 6059,
       "name": "InsufficientTreasuryForRefund",
       "msg": "Insufficient treasury balance for refunds."
     },
     {
-      "code": 6054,
+      "code": 6060,
       "name": "InsufficientFunds",
       "msg": "Insufficient funds"
     },
     {
-      "code": 6055,
+      "code": 6061,
       "name": "InsufficientPrizeFunds",
       "msg": "Insufficient prize funds"
     },
     {
-      "code": 6056,
+      "code": 6062,
       "name": "NoTimeLimit",
       "msg": "No time limit is set for this game."
     },
     {
-      "code": 6057,
+      "code": 6063,
       "name": "TimeoutNotExpired",
       "msg": "Timeout period has not elapsed yet."
     },
     {
-      "code": 6058,
+      "code": 6064,
       "name": "AlreadyFinished",
       "msg": "Game is already finished."
     },
     {
-      "code": 6059,
+      "code": 6065,
       "name": "FeeVaultNotReady",
       "msg": "Fee vault claim conditions not yet met (threshold or interval)."
     },
     {
-      "code": 6060,
+      "code": 6066,
       "name": "NoVestingConfigured",
       "msg": "Vesting parameters not configured for this tournament."
     },
     {
-      "code": 6061,
+      "code": 6067,
       "name": "MathOverflow",
       "msg": "Math overflow in calculation."
     },
     {
-      "code": 6062,
+      "code": 6068,
       "name": "NotTournamentWinner",
       "msg": "Not a tournament winner."
     },
     {
-      "code": 6063,
+      "code": 6069,
+      "name": "PrizesOutstanding",
+      "msg": "Cannot close: one or more funded prize places are still unclaimed."
+    },
+    {
+      "code": 6070,
       "name": "StakeTooLow",
       "msg": "Wager amount is below the minimum required"
     },
     {
-      "code": 6064,
+      "code": 6071,
       "name": "PoolTooSmallForFees",
       "msg": "Wager pool is too small to cover the advanced fees"
     },
     {
-      "code": 6065,
+      "code": 6072,
       "name": "FeePayerMismatch",
       "msg": "Fee payer does not match the initial payer"
     },
     {
-      "code": 6066,
+      "code": 6073,
       "name": "ArithmeticOverflow",
       "msg": "Arithmetic overflow occurred"
     },
     {
-      "code": 6067,
+      "code": 6074,
       "name": "InvalidArgument",
       "msg": "Invalid argument"
     },
     {
-      "code": 6068,
+      "code": 6075,
       "name": "EloOutOfRange",
       "msg": "ELO is out of range"
     },
     {
-      "code": 6069,
+      "code": 6076,
       "name": "InvalidSession",
       "msg": "Invalid session"
     },
     {
-      "code": 6070,
+      "code": 6077,
       "name": "SpendingLimitExceeded",
       "msg": "Spending limit exceeded"
     },
     {
-      "code": 6071,
+      "code": 6078,
       "name": "WagerLimitExceeded",
       "msg": "Wager limit exceeded"
     },
     {
-      "code": 6072,
+      "code": 6079,
       "name": "InvalidTournamentStatus",
       "msg": "Invalid tournament status"
     },
     {
-      "code": 6073,
+      "code": 6080,
       "name": "InvalidUsername",
       "msg": "Invalid username format or length."
     },
     {
-      "code": 6074,
+      "code": 6081,
+      "name": "InvalidLength",
+      "msg": "Username must be 3-20 characters"
+    },
+    {
+      "code": 6082,
+      "name": "InvalidCharacters",
+      "msg": "Username can only contain A-Z, a-z, 0-9, _, -"
+    },
+    {
+      "code": 6083,
+      "name": "ReservedUsername",
+      "msg": "This username is reserved"
+    },
+    {
+      "code": 6084,
+      "name": "UsernameTaken",
+      "msg": "Username already taken"
+    },
+    {
+      "code": 6085,
+      "name": "UsernameNotSet",
+      "msg": "Username not set"
+    },
+    {
+      "code": 6086,
+      "name": "ChangeCooldown",
+      "msg": "Cannot change username yet - cooldown active"
+    },
+    {
+      "code": 6087,
       "name": "UnderagePlayer",
       "msg": "Player must be 18 or older to participate in wagered games."
     },
     {
-      "code": 6075,
+      "code": 6088,
       "name": "GlobalSessionAlreadyActive",
       "msg": "A valid global session already exists for this player."
     },
     {
-      "code": 6076,
+      "code": 6089,
       "name": "GlobalSessionNoGamesRemaining",
       "msg": "Global session has no games remaining; please re-authorize."
     },
     {
-      "code": 6077,
+      "code": 6090,
       "name": "GlobalSessionSpendingLimitExceeded",
       "msg": "Global session spending limit would be exceeded."
     },
     {
-      "code": 6078,
+      "code": 6091,
       "name": "ResultMismatch",
       "msg": "Claimed result does not match the on-chain game result."
     },
     {
-      "code": 6079,
+      "code": 6092,
       "name": "GameStillInProgress",
       "msg": "Game result has not been committed on-chain; cannot finalize a game with no result yet."
+    },
+    {
+      "code": 6093,
+      "name": "InvalidFriendPair",
+      "msg": "Friendship parties must be distinct and passed in canonical (sorted) order."
+    },
+    {
+      "code": 6094,
+      "name": "FriendNotPending",
+      "msg": "Friend request is not pending."
+    },
+    {
+      "code": 6095,
+      "name": "BoardAlreadyRecorded",
+      "msg": "This board's result has already been recorded for the current round."
+    },
+    {
+      "code": 6096,
+      "name": "TournamentRoundIncomplete",
+      "msg": "Not every board has reported a result for the current round yet."
+    },
+    {
+      "code": 6097,
+      "name": "InvalidUndelegationBuffer",
+      "msg": "Buffer account is not the canonical undelegate-buffer for this account."
+    },
+    {
+      "code": 6098,
+      "name": "GameNotStuckDelegation",
+      "msg": "Game is not in the post-force-undelegate wiped state."
+    },
+    {
+      "code": 6099,
+      "name": "SwissTournamentNotFinished",
+      "msg": "complete_swiss_tournament called before every round has been played and advanced."
+    },
+    {
+      "code": 6100,
+      "name": "PlatformFeeTooLarge",
+      "msg": "Platform fee exceeds the maximum allowed for a single game."
+    },
+    {
+      "code": 6101,
+      "name": "NoDrawOfferPending",
+      "msg": "No draw offer is pending for this game."
+    },
+    {
+      "code": 6102,
+      "name": "CannotAcceptOwnDrawOffer",
+      "msg": "You cannot accept your own draw offer."
     }
   ],
   "types": [
@@ -6431,9 +7940,28 @@
       }
     },
     {
+      "name": "CancelTimeCheckArgs",
+      "docs": [
+        "Arguments for cancelling a scheduled time check crank."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "task_id",
+            "docs": [
+              "Task identifier to cancel (the same `task_id` — typically game_id —",
+              "used in the matching `schedule_time_check` call)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "CrankTimeCheckData",
       "docs": [
-        "Empty instruction data for crank_time_check (no parameters needed)"
+        "No arguments needed — the game account already carries its own clock state."
       ],
       "type": {
         "kind": "struct",
@@ -6442,6 +7970,11 @@
     },
     {
       "name": "DisputeRecord",
+      "docs": [
+        "One dispute per game (seed: `[b\"dispute\", game_id]`), opened by",
+        "`governance_ix::dispute` and closed out by either `resolve` (authority",
+        "ruling) or `claim_stale_dispute` (TTL auto-resolution)."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -6451,6 +7984,9 @@
           },
           {
             "name": "challenger",
+            "docs": [
+              "The player who opened the dispute."
+            ],
             "type": "pubkey"
           },
           {
@@ -6516,6 +8052,9 @@
     },
     {
       "name": "DisputeStatus",
+      "docs": [
+        "Dispute lifecycle state."
+      ],
       "type": {
         "kind": "enum",
         "variants": [
@@ -6527,6 +8066,77 @@
           },
           {
             "name": "Dismissed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FriendStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Accepted"
+          },
+          {
+            "name": "Blocked"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Friendship",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "requester",
+            "docs": [
+              "The player who sent the request."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "addressee",
+            "docs": [
+              "The player who must accept (the other party)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Current edge status."
+            ],
+            "type": {
+              "defined": {
+                "name": "FriendStatus"
+              }
+            }
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Unix timestamp the request was created."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "accepted_at",
+            "docs": [
+              "Unix timestamp the request was accepted (0 until accepted)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -6664,6 +8274,20 @@
           {
             "name": "nonce",
             "type": "u64"
+          },
+          {
+            "name": "draw_offered_by",
+            "docs": [
+              "Set by `offer_draw` to the offering player's pubkey; cleared once the",
+              "game reaches a terminal status. `accept_draw` requires this to be",
+              "`Some(the_other_player)`. Appended at the end of the struct (not",
+              "alongside related fields) so existing byte offsets — e.g. the pinned",
+              "`wager_amount_offset_is_212` test and the client's hand-parsed offset",
+              "in `src/multiplayer/solana/lobby.rs` — don't shift."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
           }
         ]
       }
@@ -6818,7 +8442,48 @@
       }
     },
     {
+      "name": "LichessUsernameRecord",
+      "docs": [
+        "LichessUsernameRecord PDA ensures a linked Lichess username can only ever",
+        "be attached to one player profile — closing a gap `link_external_elo` had",
+        "no protection against at all: before this record existed, the same",
+        "Lichess handle (and the external ELO it seeds) could be attached to any",
+        "number of different wallets' profiles, unlike local in-game usernames,",
+        "which `UsernameRecord` already protects. Mirrors `UsernameRecord`'s shape",
+        "and first-claimant-wins claim semantics exactly (see",
+        "`account_ix::link_external_elo::handler`) — same as",
+        "`account_ix::profile::handler`'s existing model for local usernames.",
+        "Case-sensitive by seed, same as `UsernameRecord` — not a new limitation,",
+        "just consistent with the existing precedent (no case-folding there",
+        "either).",
+        "",
+        "Known limitation, matching `UsernameRecord`'s own: there is no \"unlink\"",
+        "instruction, so a wallet that later links a *different* Lichess account",
+        "leaves its previous claim permanently orphaned (still pointing at that",
+        "wallet, never released). Out of scope for this fix — same shape as the",
+        "pre-existing local-username limitation, not introduced by this change.",
+        "",
+        "Seeds: `[LICHESS_USERNAME_SEED, lichess_username.as_bytes()]`"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "MatchStatus",
+      "docs": [
+        "Lifecycle of one bracket match."
+      ],
       "type": {
         "kind": "enum",
         "variants": [
@@ -6917,59 +8582,12 @@
       }
     },
     {
-      "name": "PlatformFeeVault",
-      "docs": [
-        "Platform fee vault — accumulates 0.05 SOL per ranked game.",
-        "Anyone can trigger `claim_fees` once the threshold or interval is met."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "host_wallet",
-            "docs": [
-              "The wallet that receives claimed fees."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "total_accumulated",
-            "docs": [
-              "Total lamports accumulated since last claim."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "auto_claim_threshold",
-            "docs": [
-              "Lamports threshold to trigger auto-claim (default: 100_000_000 = 0.1 SOL)."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "claim_interval_seconds",
-            "docs": [
-              "Seconds between forced claims even below threshold (default: 86400 = 24h)."
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "last_claim_at",
-            "type": "i64"
-          },
-          {
-            "name": "total_claimed",
-            "type": "u64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
       "name": "PlayerProfile",
+      "docs": [
+        "A player's long-term identity, ranking, and stats. One PDA per wallet",
+        "(seed: `[PROFILE_SEED, authority]`). Created/updated via `account_ix`;",
+        "gameplay stats and `elo_rating` are updated by `lifecycle::settlement`."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -6979,6 +8597,9 @@
           },
           {
             "name": "country",
+            "docs": [
+              "ISO 3166-1 alpha-2 country code, used for jurisdiction/compliance checks."
+            ],
             "type": "string"
           },
           {
@@ -6999,18 +8620,30 @@
           },
           {
             "name": "elo_rating",
+            "docs": [
+              "Centiscale rating (×100), updated by K=32 Elo in `lifecycle::settlement`. See `elo/README.md`."
+            ],
             "type": "f64"
           },
           {
             "name": "rd",
+            "docs": [
+              "Unused — reserved from an abandoned Glicko-2 rating attempt; never read or written."
+            ],
             "type": "f64"
           },
           {
             "name": "volatility",
+            "docs": [
+              "Unused — reserved from an abandoned Glicko-2 rating attempt; never read or written."
+            ],
             "type": "f64"
           },
           {
             "name": "last_played",
+            "docs": [
+              "Unix timestamp of the last completed game, for inactivity handling."
+            ],
             "type": "i64"
           },
           {
@@ -7027,6 +8660,9 @@
           },
           {
             "name": "ranked_games",
+            "docs": [
+              "Ranked (non-free) games played; drives the ELO-linking fee split in settlement."
+            ],
             "type": "u32"
           },
           {
@@ -7054,22 +8690,37 @@
           },
           {
             "name": "is_verified",
+            "docs": [
+              "KYC-verified via `account_ix::profile::verify_handler`."
+            ],
             "type": "bool"
           },
           {
             "name": "annual_wins_gbp",
+            "docs": [
+              "UK: annual wins in GBP, for jurisdictional wager-limit tracking."
+            ],
             "type": "u64"
           },
           {
             "name": "annual_wins_brl",
+            "docs": [
+              "Brazil: annual wins in BRL, for jurisdictional wager-limit tracking."
+            ],
             "type": "u64"
           },
           {
             "name": "annual_wins_cad",
+            "docs": [
+              "Canada: annual wins in CAD, for jurisdictional wager-limit tracking."
+            ],
             "type": "u64"
           },
           {
             "name": "annual_wins_eur",
+            "docs": [
+              "Germany: annual wins in EUR, for jurisdictional wager-limit tracking."
+            ],
             "type": "u64"
           },
           {
@@ -7090,26 +8741,45 @@
           },
           {
             "name": "lichess_blitz",
+            "docs": [
+              "Lichess blitz rating in centiscale (rating × 100)."
+            ],
             "type": "u32"
           },
           {
             "name": "lichess_rapid",
+            "docs": [
+              "Lichess rapid rating in centiscale (rating × 100)."
+            ],
             "type": "u32"
           },
           {
             "name": "lichess_bullet",
+            "docs": [
+              "Lichess bullet rating in centiscale (rating × 100)."
+            ],
             "type": "u32"
           },
           {
             "name": "lichess_last_sync",
+            "docs": [
+              "Unix timestamp of the last successful Lichess rating sync."
+            ],
             "type": "i64"
           },
           {
             "name": "external_elo_source",
+            "docs": [
+              "Source of the external rating link: 0 = none, 1 = Lichess."
+            ],
             "type": "u8"
           },
           {
             "name": "seeded_from_external",
+            "docs": [
+              "True once `elo_rating` has been seeded from an external link — gates",
+              "the one-time seed logic in `account_ix::link_external_elo::handler`."
+            ],
             "type": "bool"
           }
         ]
@@ -7169,6 +8839,9 @@
           },
           {
             "name": "can_create_games",
+            "docs": [
+              "Permission flags, independently revocable without disabling the whole session."
+            ],
             "type": "bool"
           },
           {
@@ -7185,6 +8858,9 @@
           },
           {
             "name": "is_active",
+            "docs": [
+              "Set false by `account_ix::handler_revoke_session`; the account then closes."
+            ],
             "type": "bool"
           },
           {
@@ -7263,6 +8939,48 @@
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StuckDelegationRecovered",
+      "docs": [
+        "Audit trail for `governance_ix::recover_stuck_delegation`. Before this",
+        "event existed there was no on-chain record at all of who was attested as",
+        "white/black or how the escrow was split — see",
+        "docs/PRE_MAINNET_E2E_PLAN.md §1.5."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "dispute_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "white_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "black_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "white_share",
+            "type": "u64"
+          },
+          {
+            "name": "black_share",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
           }
         ]
       }
@@ -7347,7 +9065,7 @@
           {
             "name": "max_players",
             "docs": [
-              "Maximum players (must be power of 2 for single-elimination: 8, 16, 32, 64, 128, 256)."
+              "Maximum players (must be power of 2 for single-elimination: 2, 4, 8, 16, 32, 64, 128, 256)."
             ],
             "type": "u16"
           },
@@ -7667,6 +9385,24 @@
               "Winner takes all flag."
             ],
             "type": "bool"
+          },
+          {
+            "name": "round_boards_reported",
+            "docs": [
+              "Bitmap: bit `board` is set once `record_swiss_result` has recorded",
+              "that board's result for `current_round`. Reset to all-zero whenever",
+              "`advance_round` bumps `current_round`. Sized for the worst case (a",
+              "256-player Swiss tournament has up to 128 boards per round).",
+              "Lets `advance_round` verify a round is actually complete purely from",
+              "on-chain state instead of trusting an off-chain caller — the whole",
+              "point being that round progression doesn't need the backend alive."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
           }
         ]
       }
@@ -7683,6 +9419,11 @@
     },
     {
       "name": "TournamentMatch",
+      "docs": [
+        "One bracket slot in a single-elimination tournament (seed:",
+        "`[tournament_id, match_index]` via `tournament_ix`). `player_black` is",
+        "`None` until the previous round's winner advances into this slot."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -7706,18 +9447,27 @@
           },
           {
             "name": "player_white",
+            "docs": [
+              "White player; `None` until seeded or advanced into this slot."
+            ],
             "type": {
               "option": "pubkey"
             }
           },
           {
             "name": "player_black",
+            "docs": [
+              "Black player; `None` until seeded or advanced into this slot."
+            ],
             "type": {
               "option": "pubkey"
             }
           },
           {
             "name": "winner",
+            "docs": [
+              "Set once the match completes."
+            ],
             "type": {
               "option": "pubkey"
             }
@@ -7733,6 +9483,9 @@
           },
           {
             "name": "game_id",
+            "docs": [
+              "The `Game` account's `game_id`, mirroring `game_pda`."
+            ],
             "type": {
               "option": "u64"
             }
@@ -7949,6 +9702,30 @@
       }
     },
     {
+      "name": "TreasuryWithdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "remaining",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "UsernameRecord",
       "docs": [
         "UsernameRecord PDA ensures username uniqueness across all players",
@@ -8005,9 +9782,19 @@
   ],
   "constants": [
     {
+      "name": "FRIENDSHIP_SEED",
+      "type": "bytes",
+      "value": "[102, 114, 105, 101, 110, 100, 115, 104, 105, 112]"
+    },
+    {
       "name": "GAME_SEED",
       "type": "bytes",
       "value": "[103, 97, 109, 101]"
+    },
+    {
+      "name": "LICHESS_USERNAME_SEED",
+      "type": "bytes",
+      "value": "[108, 105, 99, 104, 101, 115, 115, 95, 117, 115, 101, 114, 110, 97, 109, 101]"
     },
     {
       "name": "MOVE_LOG_SEED",

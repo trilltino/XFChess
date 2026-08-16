@@ -100,6 +100,22 @@ anchor deploy
 solana program deploy target/deploy/xfchess_game.so
 ```
 
+`scripts\build_program.bat` (plain `cargo build-sbf`) never needs OpenSSL and always works.
+`anchor build`/`anchor idl build` additionally compiles `xfchess-game`'s dev-dependency on
+`solana-program-test` (for IDL introspection), which pulls in `openssl` with the `vendored`
+feature — on Windows this tries to compile OpenSSL from source via Perl+nmake and reliably
+fails (`Destination must be a directory` in `copy.pl`, regardless of which Perl is on PATH).
+Skip the vendored build entirely by pointing `openssl-sys` at a real prebuilt OpenSSL instead
+(e.g. the Win64 installer from https://slproweb.com/products/Win32OpenSSL.html):
+
+```powershell
+$env:OPENSSL_NO_VENDOR    = "1"
+$env:OPENSSL_DIR          = "C:\Program Files\OpenSSL-Win64"
+$env:OPENSSL_LIB_DIR      = "C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD"
+$env:OPENSSL_INCLUDE_DIR  = "C:\Program Files\OpenSSL-Win64\include"
+anchor build
+```
+
 ### Full stack
 
 ```bash
