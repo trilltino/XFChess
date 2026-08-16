@@ -52,21 +52,25 @@ function base64url(buf: Uint8Array): string {
  * 2. Calls backend /api/auth/lichess/init to bind the flow to the wallet
  * 3. Returns the Lichess authorize URL for the popup
  */
-export async function initLichessLink(walletPubkey: string): Promise<{
+export async function initLichessLink(
+  walletPubkey: string,
+  token: string,
+): Promise<{
   authUrl: string;
   codeVerifier: string;
   state: string;
 }> {
   const codeVerifier = generateCodeVerifier();
 
-  // The backend now requires a Bearer JWT matching `wallet_pubkey` here —
+  // The backend requires a Bearer JWT matching `wallet_pubkey` here —
   // previously this was CSRF-protected only by the `state` param, so
   // anyone who could trigger this flow could link their real Lichess
-  // account (and the external ELO it seeds) to an arbitrary wallet.
-  const token = localStorage.getItem('xfchess_token');
-  if (!token) {
-    throw new Error('Please sign in with your wallet before linking Lichess.');
-  }
+  // account (and the external ELO it seeds) to an arbitrary wallet. The
+  // caller is responsible for obtaining a valid token (see
+  // `ensureAuthToken` in `lib/api/auth.ts`) — this function no longer
+  // reads `xfchess_token` directly, since that's frequently unset on a
+  // returning visit (see `ensureAuthToken`'s doc comment for why) and
+  // silently failing here with no path to actually sign in was the bug.
   const init = await request<LichessInitResponse>(
     `/api/auth/lichess/init?wallet_pubkey=${encodeURIComponent(walletPubkey)}`,
     { headers: { Authorization: `Bearer ${token}` } },

@@ -21,6 +21,12 @@ export interface RegisterRequest {
   email?: string | null;
 }
 
+export interface LoginRequest {
+  wallet: string;
+  signature: string;
+  timestamp: number;
+}
+
 export interface AuthResponse {
   token: string;
   username: string;
@@ -35,6 +41,52 @@ export function submitSignup(body: SignupRequest): Promise<{ ok: boolean; queued
 /** Create an account proving wallet ownership with a signed message. */
 export function registerWithWallet(body: RegisterRequest): Promise<AuthResponse> {
   return request('/api/auth/register', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** Re-establish a session for an already-registered wallet with a signed message. */
+export function loginWithWallet(body: LoginRequest): Promise<AuthResponse> {
+  return request('/api/auth/login', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/**
+ * Returns a JWT for the connected wallet, minting a fresh one via a signed
+ * login message if `xfchess_token` isn't already cached in localStorage.
+ *
+ * `xfchess_token` is otherwise only ever set once, during first-time profile
+ * creation (`ProfileViewer.tsx`'s `handleCreateProfile`) — viewing this page
+ * on a return visit (wallet reconnected, on-chain profile loads fine, no
+ * token in this browser/session) never re-establishes it. That silently
+ * broke every JWT-gated action on the page (add-email, Lichess linking) for
+ * any returning player without a cached token — invisible until
+ * `/auth/lichess/init` started requiring a JWT at all (it previously took
+ * none), which is what actually surfaced this gap. A wallet signature here
+ * is cheap and this is the same message shape `login`/`register` already
+ * use elsewhere, so this is a real re-auth, not a bypass.
+ */
+export async function ensureAuthToken(wallet: {
+  publicKey: { toBase58(): string } | null;
+  signMessage?: (msg: Uint8Array) => Promise<Uint8Array>;
+}): Promise<string> {
+  const cached = localStorage.getItem('xfchess_token');
+  if (cached) return cached;
+
+  if (!wallet.publicKey || !wallet.signMessage) {
+    throw new Error('Wallet not connected or does not support signing messages.');
+  }
+  const bs58 = await import('bs58');
+  const timestamp = Math.floor(Date.now() / 1000);
+  const message = new TextEncoder().encode(`xfchess:login:${timestamp}`);
+  const signatureBytes = await wallet.signMessage(message);
+  const signature = bs58.default.encode(signatureBytes);
+
+  const auth = await loginWithWallet({
+    wallet: wallet.publicKey.toBase58(),
+    signature,
+    timestamp,
+  });
+  localStorage.setItem('xfchess_token', auth.token);
+  localStorage.setItem('xfchess_username', auth.username);
+  return auth.token;
 }
 
 /** Check whether a username is already taken. */

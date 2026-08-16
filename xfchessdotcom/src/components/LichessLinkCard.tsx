@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react';
+import type { WalletContextState } from '@solana/wallet-adapter-react';
 
 interface LichessLinkCardProps {
   walletPubkey: string | null;
+  // Needed to sign a login message when no cached JWT exists yet — see
+  // `ensureAuthToken`'s doc comment in `lib/api/auth.ts` for why that's a
+  // real, common case here (not just first-time setup).
+  wallet: WalletContextState;
   lichessUsername?: string;
   lichessBlitz?: number;
   lichessRapid?: number;
@@ -22,6 +27,7 @@ function LichessIcon() {
 
 export function LichessLinkCard({
   walletPubkey,
+  wallet,
   lichessUsername,
   lichessBlitz,
   lichessRapid,
@@ -54,8 +60,10 @@ export function LichessLinkCard({
     if (!walletPubkey || linking) return;
     setLinking(true);
     try {
+      const { ensureAuthToken } = await import('../lib/api/auth');
       const { initLichessLink } = await import('../lib/api/lichess');
-      const { authUrl } = await initLichessLink(walletPubkey);
+      const token = await ensureAuthToken(wallet);
+      const { authUrl } = await initLichessLink(walletPubkey, token);
       const popup = window.open(authUrl, 'lichess_oauth', 'width=600,height=700');
       if (!popup) {
         alert('Popup blocked — please allow popups for this site and try again.');
