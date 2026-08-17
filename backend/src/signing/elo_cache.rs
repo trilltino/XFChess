@@ -22,8 +22,8 @@ pub struct CachedElo {
     /// see `programs/xfchess-game/src/elo/README.md`).
     pub elo_rating: f64,
     /// Read from the on-chain `PlayerProfile.rd` byte offset, which is a dead
-    /// field no instruction ever writes (see docs/AUDIT_TRACKING.md Phase 8
-    /// findings) — this will always read back as `0.0` in practice.
+    /// field no instruction ever writes — this will always read back as
+    /// `0.0` in practice.
     pub rd: f64,
     /// Player's country code (ISO 3166-1 alpha-2)
     pub country: String,

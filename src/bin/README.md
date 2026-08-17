@@ -27,5 +27,4 @@ cargo run --bin read_game --features solana -- <GAME_ID>
 
 - These tools hit **devnet** by default and each hardcodes its own local `PROGRAM_ID`/seed
   constants rather than importing a shared source (`src/solana/constants.rs` is unused
-  scaffold, not what these tools reference — see `docs/AUDIT_TRACKING.md` Phase 8); they
-  do not read the backend's `.env`.
+  scaffold, not what these tools reference); they do not read the backend's `.env`.

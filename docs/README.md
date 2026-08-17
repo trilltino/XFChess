@@ -12,7 +12,6 @@ code (each directory's README); this tree holds the cross-cutting material.
 | [runbooks/](runbooks/README.md) | Incident runbooks (backend down, settlement stuck, RPC degraded, …) |
 | [plans/](plans/) | Active implementation plans |
 | [legacy-cleanup-audit.md](legacy-cleanup-audit.md) | Open list of stale modules/bins to remove |
-| [AUDIT_TRACKING.md](AUDIT_TRACKING.md) | Module-by-module documentation and testing audit checklist |
 | [THREAT_MODEL.md](THREAT_MODEL.md), [SLO.md](SLO.md), [CAPACITY.md](CAPACITY.md), [SCALING.md](SCALING.md), [DR.md](DR.md) | Production posture: threats, SLOs, capacity, scaling, disaster recovery |
 | [ENVIRONMENTS.md](ENVIRONMENTS.md) | Environment matrix (local / staging / prod) |
 | [GIT_WORKFLOW.md](GIT_WORKFLOW.md) | Branch and commit conventions |

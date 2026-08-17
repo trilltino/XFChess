@@ -11,16 +11,18 @@ Source-control and release discipline (Production Reality Checklist §4). Part o
 
 ## Pull requests (required — no direct pushes to `main`)
 
-> **Status: APPLIED** via the GitHub API. Current `main` protection: PRs required,
-> required status checks = `Check`, `Test Suite`, `Web (build + audit)`; conversation
-> resolution + linear history on; force-push/deletion off; **admins hard-enforced**
-> (as of 2026-07-31) — direct pushes to `main`, including from the repo owner, are
-> rejected; every change (including public-safe syncs from the private repo) goes
-> through a branch + PR + passing checks, self-merged. **Remaining solo-safe
-> deviation:** required approvals = **0** — on a solo repo GitHub won't let you
-> approve your own PR, so "require 1 review" would lock you out of merging entirely.
-> Tighten that once you add a collaborator. Revert all protection:
-> `gh api -X DELETE repos/trilltino/XFChess/branches/main/protection`.
+> **Status: APPLIED** via the GitHub API. Current `main` protection (re-verified
+> 2026-08-17 via `gh api repos/trilltino/XFChess/branches/main/protection`): PRs
+> required, required status checks = `Check`, `Test Suite`, `Web (build + audit)`;
+> conversation resolution + linear history off; force-push/deletion off;
+> **`enforce_admins` is currently `false`** — the repo owner *can* push directly to
+> `main` and bypass the PR requirement; this was previously documented as
+> hard-enforced but is not, live, as of this check. Tighten it with:
+> `gh api -X PUT repos/trilltino/XFChess/branches/main/protection/enforce_admins`.
+> **Remaining solo-safe deviation:** required approvals = **0** — on a solo repo
+> GitHub won't let you approve your own PR, so "require 1 review" would lock you out
+> of merging entirely. Tighten that once you add a collaborator. Revert all
+> protection: `gh api -X DELETE repos/trilltino/XFChess/branches/main/protection`.
 
 The full policy to grow into (in **GitHub → Settings → Branches**):
 - ✅ Require a pull request before merging
