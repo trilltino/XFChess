@@ -205,13 +205,17 @@ pub async fn create_session(
     authed: Option<axum::Extension<crate::signing::auth::AuthedWallet>>,
     Json(req): Json<CreateSessionReq>,
 ) -> Result<Json<CreateSessionResp>, StatusCode> {
-    // If the caller authenticated with a per-user JWT, they may only open a
-    // session for their own wallet. (Legacy relay-secret callers have no
-    // AuthedWallet and are unaffected during the dual-accept rollout.)
-    if let Some(axum::Extension(crate::signing::auth::AuthedWallet(w))) = &authed {
-        if w != &req.wallet_pubkey {
-            return Err(StatusCode::FORBIDDEN);
-        }
+    // A session grants the backend a standing ability to sign moves as this
+    // wallet, so opening one must be traceable to a caller who is actually
+    // that wallet — not just "someone who knows the shared relay secret".
+    // Legacy relay-secret-only callers carry no AuthedWallet and are
+    // rejected here (previously they were let through unchecked during the
+    // dual-accept rollout; that's the impersonation gap this closes).
+    let Some(axum::Extension(crate::signing::auth::AuthedWallet(w))) = &authed else {
+        return Err(StatusCode::UNAUTHORIZED);
+    };
+    if w != &req.wallet_pubkey {
+        return Err(StatusCode::FORBIDDEN);
     }
     let wallet = Pubkey::from_str(&req.wallet_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
     let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {
@@ -406,37 +410,53 @@ pub async fn record_move(
     authed: Option<axum::Extension<crate::signing::auth::AuthedWallet>>,
     Json(req): Json<RecordMoveReq>,
 ) -> Result<Json<SigResp>, (StatusCode, String)> {
-    // If the caller authenticated with a per-user JWT, a valid credential for
-    // wallet A must not be usable to submit a move for a game A has nothing
-    // to do with. That does NOT mean caller == mover_wallet: the host's
-    // client relays moves for *both* players of a game it's actually part
-    // of (the backend's session key can sign for either mover, by design —
-    // see resolve_move_signer), so rejecting every caller != mover_wallet
-    // broke that relay pattern outright the moment a real two-player game
-    // hit it (confirmed live: 403s on every relayed opponent move, cascading
-    // into a finalize_game failure from the resulting on-chain move-count
+    // This handler signs and submits a transaction as `mover_wallet` using a
+    // session key the backend holds in custody — that's only within the
+    // authority the player actually granted if the caller can be tied
+    // cryptographically to a real identity. A caller with nothing but the
+    // legacy shared relay secret (no AuthedWallet) proves no such identity,
+    // so it is rejected outright rather than trusted with an arbitrary
+    // self-declared mover_wallet (previously allowed through unchecked
+    // during the dual-accept rollout — that was the impersonation gap).
+    //
+    // Given a real identity, a valid credential for wallet A must still not
+    // be usable to submit a move for a game A has nothing to do with. That
+    // does NOT mean caller == mover_wallet: the host's client relays moves
+    // for *both* players of a game it's actually part of (the backend's
+    // session key can sign for either mover, by design — see
+    // resolve_move_signer), so rejecting every caller != mover_wallet broke
+    // that relay pattern outright the moment a real two-player game hit it
+    // (confirmed live: 403s on every relayed opponent move, cascading into
+    // a finalize_game failure from the resulting on-chain move-count
     // mismatch). The correct check is on-chain participation in THIS
     // game_id, not string equality with the field the caller itself
     // supplied. Cheap in the common case (cached, see
     // `GameParticipantsCache`'s 5-minute TTL — participants never change
     // mid-game) and only ever consulted when the fast path doesn't apply.
-    if let Some(axum::Extension(crate::signing::auth::AuthedWallet(caller))) = &authed {
-        if caller != &req.mover_wallet {
-            let is_participant = match Pubkey::from_str(caller) {
-                Ok(caller_pk) => match state.game_participants.get(req.game_id).await {
-                    Some((white, black)) => caller_pk == white || caller_pk == black,
-                    None => false,
-                },
-                Err(_) => false,
-            };
-            if !is_participant {
-                let msg = format!(
-                    "Authenticated wallet {caller} is not a registered participant of game {} \
-                     (and does not match mover_wallet '{}')",
-                    req.game_id, req.mover_wallet
-                );
-                return Err((StatusCode::FORBIDDEN, msg));
-            }
+    let Some(axum::Extension(crate::signing::auth::AuthedWallet(caller))) = &authed else {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "record_move requires an authenticated caller identity (JWT); the legacy \
+             relay-secret-only path cannot verify who is submitting this move and is no \
+             longer accepted here"
+                .to_string(),
+        ));
+    };
+    if caller != &req.mover_wallet {
+        let is_participant = match Pubkey::from_str(caller) {
+            Ok(caller_pk) => match state.game_participants.get(req.game_id).await {
+                Some((white, black)) => caller_pk == white || caller_pk == black,
+                None => false,
+            },
+            Err(_) => false,
+        };
+        if !is_participant {
+            let msg = format!(
+                "Authenticated wallet {caller} is not a registered participant of game {} \
+                 (and does not match mover_wallet '{}')",
+                req.game_id, req.mover_wallet
+            );
+            return Err((StatusCode::FORBIDDEN, msg));
         }
     }
     let mover_wallet = Pubkey::from_str(&req.mover_wallet).map_err(|_| {
