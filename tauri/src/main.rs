@@ -100,7 +100,10 @@ fn nominal_http_port() -> u16 {
 /// Get the HTTP port for the wallet signing service — the real bound port
 /// if the server has started, else the nominal (env-derived) one.
 fn http_port() -> u16 {
-  ACTUAL_HTTP_PORT.get().copied().unwrap_or_else(nominal_http_port)
+  ACTUAL_HTTP_PORT
+    .get()
+    .copied()
+    .unwrap_or_else(nominal_http_port)
 }
 
 /// Path the HTTP bridge writes its actual bound port to, so the game client
@@ -109,10 +112,7 @@ fn http_port() -> u16 {
 /// raw-TCP listener; must match http_bridge_port_file() in the game
 /// client's src/multiplayer/solana/tauri_signer.rs.
 fn http_bridge_port_file() -> std::path::PathBuf {
-  std::env::temp_dir().join(format!(
-    "xfchess-wallet-http-{}.port",
-    nominal_http_port()
-  ))
+  std::env::temp_dir().join(format!("xfchess-wallet-http-{}.port", nominal_http_port()))
 }
 
 /// Bind the HTTP server, trying the nominal port first and then a small
@@ -121,7 +121,8 @@ fn http_bridge_port_file() -> std::path::PathBuf {
 /// records it in ACTUAL_HTTP_PORT before returning.
 async fn bind_http_port() -> Option<(TcpListener, u16)> {
   let nominal = nominal_http_port();
-  for port in std::iter::once(nominal).chain(nominal.saturating_add(1)..=nominal.saturating_add(10)) {
+  for port in std::iter::once(nominal).chain(nominal.saturating_add(1)..=nominal.saturating_add(10))
+  {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     if let Ok(listener) = TcpListener::bind(addr).await {
       let _ = ACTUAL_HTTP_PORT.set(port);
@@ -347,7 +348,10 @@ async fn http_server(
       }
       tracing::info!(
         "[HTTP] Wallet connected: {pk} username={}",
-        body.get("username").and_then(|v| v.as_str()).unwrap_or("<unset>")
+        body
+          .get("username")
+          .and_then(|v| v.as_str())
+          .unwrap_or("<unset>")
       );
     }
     StatusCode::OK
@@ -483,21 +487,36 @@ async fn http_server(
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/login", get_backend_url()), body, &headers).await
+    proxy_post(
+      &format!("{}/api/auth/login", get_backend_url()),
+      body,
+      &headers,
+    )
+    .await
   }
   async fn api_register(
     State(_s): State<LocalState>,
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/register", get_backend_url()), body, &headers).await
+    proxy_post(
+      &format!("{}/api/auth/register", get_backend_url()),
+      body,
+      &headers,
+    )
+    .await
   }
   async fn api_login_email(
     State(_s): State<LocalState>,
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/login-email", get_backend_url()), body, &headers).await
+    proxy_post(
+      &format!("{}/api/auth/login-email", get_backend_url()),
+      body,
+      &headers,
+    )
+    .await
   }
   async fn api_register_email(
     State(_s): State<LocalState>,
@@ -533,7 +552,12 @@ async fn http_server(
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/link-wallet", get_backend_url()), body, &headers).await
+    proxy_post(
+      &format!("{}/api/auth/link-wallet", get_backend_url()),
+      body,
+      &headers,
+    )
+    .await
   }
   async fn api_sync_profile(headers: axum::http::HeaderMap) -> impl IntoResponse {
     proxy_post(
@@ -732,8 +756,7 @@ async fn http_server(
   async fn api_open_profile_step(State(s): State<LocalState>) -> impl IntoResponse {
     s.needs_profile_step
       .store(true, std::sync::atomic::Ordering::Relaxed);
-    let wallet_url =
-      std::env::var("XFCHESS_WALLET_URL")
+    let wallet_url = std::env::var("XFCHESS_WALLET_URL")
       .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
     let profile_url = format!("{wallet_url}?step=profile");
     tracing::info!("[HTTP] opening profile step: {profile_url}");
@@ -804,10 +827,7 @@ async fn http_server(
   // every player needs wallet signing, not just desktop admins. Without this,
   // the popup has nowhere real to point at other than an external URL that
   // doesn't exist in a shipped build (see XFCHESS_WALLET_URL's default below).
-  async fn serve_wallet_ui(
-    State(s): State<LocalState>,
-    uri: axum::http::Uri,
-  ) -> impl IntoResponse {
+  async fn serve_wallet_ui(State(s): State<LocalState>, uri: axum::http::Uri) -> impl IntoResponse {
     serve_dist_file(&s.wallet_ui_dist_path, "/wallet-ui", uri.path()).await
   }
 
@@ -855,7 +875,11 @@ async fn http_server(
             .header("Content-Type", "text/html; charset=utf-8")
             .body(axum::body::Body::from(bytes))
             .unwrap_or_else(|_| StatusCode::NOT_FOUND.into_response()),
-          Err(_) => (StatusCode::NOT_FOUND, format!("{prefix} dist not found. Build it first: cd tauri{prefix} && npm run build")).into_response(),
+          Err(_) => (
+            StatusCode::NOT_FOUND,
+            format!("{prefix} dist not found. Build it first: cd tauri{prefix} && npm run build"),
+          )
+            .into_response(),
         }
       }
     }
@@ -905,8 +929,7 @@ async fn http_server(
   // Resolve the wallet-ui dist dir the same way: next to the binary in a
   // production bundle, or CARGO_MANIFEST_DIR-relative in dev.
   let wallet_ui_dist_path = {
-    let dev_path =
-      std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/wallet-ui/dist"));
+    let dev_path = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/wallet-ui/dist"));
     if dev_path.exists() {
       dev_path
     } else {
@@ -1102,9 +1125,8 @@ fn open_wallet_popup_for_signing(_app: &tauri::AppHandle) {
 
 fn open_wallet_popup_with_step(step: Option<&str>, force_fresh: bool) {
   let sid = begin_session();
-  let wallet_url =
-    std::env::var("XFCHESS_WALLET_URL")
-      .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
+  let wallet_url = std::env::var("XFCHESS_WALLET_URL")
+    .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
   let url = match step {
     Some(s) => format!("{wallet_url}?step={s}&sid={sid}"),
     None => format!("{wallet_url}?sid={sid}"),
@@ -1171,52 +1193,75 @@ fn open_in_browser(url: &str, force_fresh: bool) {
 
     fn get_chromium_default_browser() -> Option<String> {
       let output = std::process::Command::new("reg")
-        .args(["query", r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice", "/v", "ProgId"])
+        .args([
+          "query",
+          r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice",
+          "/v",
+          "ProgId",
+        ])
         .output()
         .ok()?;
       let stdout = String::from_utf8_lossy(&output.stdout);
-      let prog_id = stdout.lines().find(|l| l.contains("ProgId"))?.split_whitespace().last()?;
-      
+      let prog_id = stdout
+        .lines()
+        .find(|l| l.contains("ProgId"))?
+        .split_whitespace()
+        .last()?;
+
       let hkcr = format!(r"HKCR\{}\shell\open\command", prog_id);
       let output = std::process::Command::new("reg")
         .args(["query", &hkcr, "/ve"])
         .output()
         .ok()?;
       let stdout = String::from_utf8_lossy(&output.stdout);
-      
+
       let path_str = stdout.lines().find(|l| l.contains("REG_SZ"))?;
       let idx = path_str.find("REG_SZ")?;
       let cmd = path_str[idx + 6..].trim();
       let path = if cmd.starts_with('"') {
-          let end_quote = cmd[1..].find('"')?;
-          cmd[1..end_quote + 1].to_string()
+        let end_quote = cmd[1..].find('"')?;
+        cmd[1..end_quote + 1].to_string()
       } else {
-          let path_part = cmd.split(" --").next().unwrap_or(cmd).split(" %").next().unwrap_or(cmd);
-          path_part.trim().to_string()
+        let path_part = cmd
+          .split(" --")
+          .next()
+          .unwrap_or(cmd)
+          .split(" %")
+          .next()
+          .unwrap_or(cmd);
+        path_part.trim().to_string()
       };
       let lower = path.to_lowercase();
-      if lower.contains("chrome.exe") || lower.contains("msedge.exe") || lower.contains("brave.exe") || lower.contains("vivaldi.exe") || lower.contains("opera.exe") {
-          return Some(path);
+      if lower.contains("chrome.exe")
+        || lower.contains("msedge.exe")
+        || lower.contains("brave.exe")
+        || lower.contains("vivaldi.exe")
+        || lower.contains("opera.exe")
+      {
+        return Some(path);
       }
       None
     }
 
     if let Some(chromium_browser) = get_chromium_default_browser() {
-        if std::path::Path::new(&chromium_browser).exists() {
-            let app_flag = format!("--app={}", url_ts);
-            match Command::new(&chromium_browser)
-                .args([&app_flag, &format!("--window-size={WALLET_POPUP_WIDTH},{WALLET_POPUP_HEIGHT}")])
-                .spawn()
-            {
-                Ok(child) => {
-                    let pid = child.id();
-                    *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
-                    spawn_wallet_popup_resize_watcher();
-                    return;
-                }
-                Err(e) => tracing::warn!("[WalletPopup] failed to spawn {chromium_browser}: {e}"),
-            }
+      if std::path::Path::new(&chromium_browser).exists() {
+        let app_flag = format!("--app={}", url_ts);
+        match Command::new(&chromium_browser)
+          .args([
+            &app_flag,
+            &format!("--window-size={WALLET_POPUP_WIDTH},{WALLET_POPUP_HEIGHT}"),
+          ])
+          .spawn()
+        {
+          Ok(child) => {
+            let pid = child.id();
+            *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
+            spawn_wallet_popup_resize_watcher();
+            return;
+          }
+          Err(e) => tracing::warn!("[WalletPopup] failed to spawn {chromium_browser}: {e}"),
         }
+      }
     }
 
     // Fall back to default browser via open::that() if not Chromium or spawn failed
@@ -1636,7 +1681,6 @@ fn process_is_alive(pid: u32) -> bool {
     alive
   }
 }
-
 
 #[tauri::command]
 fn show_wallet_popup_window(app: tauri::AppHandle) {
