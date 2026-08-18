@@ -958,7 +958,7 @@ fn fetch_bridge_status() -> Result<(Option<String>, Option<String>), String> {
         .timeout(std::time::Duration::from_secs(3))
         .build()
         .map_err(|e| format!("bridge client build: {e}"))?;
-    let port = crate::multiplayer::solana::tauri_signer::wallet_bridge_port();
+    let port = crate::multiplayer::network::vps::wallet_bridge_port();
     let resp = client
         .get(format!("http://127.0.0.1:{port}/status"))
         .send()
@@ -982,7 +982,7 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let port = crate::multiplayer::solana::tauri_signer::wallet_bridge_port();
+    let port = crate::multiplayer::network::vps::wallet_bridge_port();
 
     // Step 1: fetch JWT from local bridge
     let token_resp = client
