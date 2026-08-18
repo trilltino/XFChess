@@ -107,11 +107,10 @@ universal/Intel binary yet, so the release won't run on an Intel Mac.
 
 ## Chrome OS (via Crostini)
 
-This is a minimal build — local play only, no online multiplayer/wagers, no
-bundled Stockfish, no wallet bridge. For online/Solana features on a
-Chromebook you'd need the Linux build above instead, and Crostini's GPU
-passthrough is inconsistent enough that even this minimal build isn't
-guaranteed to run well on every device.
+This is the exact same full-featured build as Linux above (Solana
+multiplayer/wagers, wallet bridge, bundled Stockfish — nothing removed) —
+Crostini is a genuine Debian container, so it just runs unmodified. It's
+published as a separate asset only so Chrome OS users can find it by name.
 
 1. Enable Crostini first if you haven't: **Settings → Advanced → Developers
    → Linux development environment → Turn on**.
@@ -119,16 +118,8 @@ guaranteed to run well on every device.
    [Releases page](https://github.com/trilltino/XFChess/releases) — either
    directly inside the Linux/Crostini file browser, or into your regular
    Chrome OS Downloads and then move it into the "Linux files" folder.
-3. Extract it and enter the folder:
-   ```bash
-   tar -xzf XFChess-chromeos-x86_64-<version>.tar.gz
-   cd chromeos
-   ```
-4. Run it:
-   ```bash
-   chmod +x xfchess
-   ./xfchess
-   ```
+3. Follow the same extract/prerequisite/run steps as the **Linux** section
+   above (the tarball's internal folder is still named `linux/`).
 
 **Uninstalling:** delete the extracted folder.
 
@@ -143,9 +134,7 @@ guaranteed to run well on every device.
 - **Chess engine feels weak/strong:** difficulty is adjustable in-game
   (Level 1–8); the default engine is the built-in `XFChessEngine`
   (native Rust, no setup needed). Stockfish ships bundled with every
-  release on Windows/macOS/Linux and is selectable as the **Engine**
+  release on all four platforms and is selectable as the **Engine**
   option when setting up a Play vs Computer game — if it doesn't work,
   it's a bug (the release build fails outright if Stockfish can't be
-  bundled), not a missing optional download. The Chrome OS build is the
-  one exception: it has no bundled Stockfish by design (minimal payload),
-  so only the built-in engine is available there.
+  bundled), not a missing optional download.
