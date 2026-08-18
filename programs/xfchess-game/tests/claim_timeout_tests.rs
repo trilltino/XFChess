@@ -18,7 +18,12 @@ use xfchess_game::errors::GameErrorCode;
 use xfchess_game::state::{Game, GameResult, GameStatus, GameType, MatchType};
 
 const GAME_ID: u64 = 90_001;
-const BASE_TIME_SECONDS: u64 = 300; // 5 minutes -> inactivity window = 900s
+// `base_time_seconds` only needs to be nonzero to select the "timed game"
+// branch of `lifecycle::clock::inactivity_window_seconds` — the actual
+// window is now a fixed `TIMED_GAME_INACTIVITY_WINDOW_SECONDS` (90s),
+// independent of this value. See that function's doc comment for why it's
+// no longer proportional to base time.
+const BASE_TIME_SECONDS: u64 = 300;
 
 /// A timed, active game with caller-controlled `updated_at`/`turn`, so the
 /// test can place it on either side of the inactivity window.
@@ -73,8 +78,9 @@ async fn claim_timeout_rejects_before_inactivity_window_elapses() {
         .unwrap()
         .unix_timestamp;
 
-    // Only 100s elapsed since the last move; window is 900s (3x base_time).
-    let (game_key, game_data) = timed_active_game(white, black, 1, now - 100);
+    // Only 30s elapsed since the last move; the fixed timed-game inactivity
+    // window (`TIMED_GAME_INACTIVITY_WINDOW_SECONDS`) is 90s.
+    let (game_key, game_data) = timed_active_game(white, black, 1, now - 30);
     ctx.set_account(&game_key, &AccountSharedData::from(game_data));
 
     let ix = claim_timeout_ix(GAME_ID, ctx.payer.pubkey());
@@ -113,8 +119,8 @@ async fn claim_timeout_awards_white_when_black_flags() {
     // `finish_by_timeout`'s `white_timed_out = turn % 2 == 1` branch. The
     // sibling test (`er_delegation_tests::claim_timeout_mutates_only_game_even_when_delegated`)
     // only covers the odd-turn (white-timed-out) parity.
-    // 1000s elapsed, comfortably past the 900s window.
-    let (game_key, game_data) = timed_active_game(white, black, 2, now - 1000);
+    // 200s elapsed, comfortably past the fixed 90s window.
+    let (game_key, game_data) = timed_active_game(white, black, 2, now - 200);
     ctx.set_account(&game_key, &AccountSharedData::from(game_data));
 
     let ix = claim_timeout_ix(GAME_ID, ctx.payer.pubkey());

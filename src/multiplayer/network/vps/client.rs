@@ -98,6 +98,55 @@ pub fn client_fast() -> Result<reqwest::blocking::Client, String> {
         .map_err(|e| format!("Failed to build HTTP client: {e}"))
 }
 
+// ── Tauri wallet bridge port resolution ─────────────────────────────────────
+//
+// Pure local port-file/env-var lookup — no Solana SDK dependency — so it
+// lives here rather than under `multiplayer::solana` (which is gated behind
+// the `solana` cargo feature). It was previously defined in
+// `multiplayer::solana::tauri_signer`, which broke every no-`solana`-feature
+// build the moment a caller outside that module (main_menu.rs's wallet-bridge
+// status poller, itself feature-independent) referenced it unconditionally.
+
+fn nominal_wallet_bridge_port() -> u16 {
+    std::env::var("XFCHESS_WALLET_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7454)
+}
+
+/// Path the Tauri bridge's HTTP server writes its actual bound port to.
+/// Must match `http_bridge_port_file()` in `tauri/src/main.rs`. The bridge
+/// tries the nominal port first and only falls back to scanning upward if
+/// that's already taken (e.g. a second local instance with no
+/// XFCHESS_WALLET_PORT override) — without reading this file back, every
+/// HTTP call this client makes to the bridge would still target the
+/// nominal port even when the bridge itself is actually listening
+/// somewhere else, which looked identical to the bridge not running at all.
+fn http_bridge_port_file() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "xfchess-wallet-http-{}.port",
+        nominal_wallet_bridge_port()
+    ))
+}
+
+/// HTTP port for this instance's Tauri wallet bridge: the bridge's
+/// announced actual port if its port file is present and parses, else the
+/// nominal XFCHESS_WALLET_PORT-derived value (default 7454) — matching the
+/// common single-instance case where they're always the same.
+pub fn wallet_bridge_port() -> u16 {
+    if let Some(port) = std::env::var("XFCHESS_ACTUAL_WALLET_PORT")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+    {
+        return port;
+    }
+
+    std::fs::read_to_string(http_bridge_port_file())
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or_else(nominal_wallet_bridge_port)
+}
+
 /// Backend response payload for the cached multi-currency rate endpoint
 /// (`GET /api/rates/all`), narrowed to the USD figures — USD is the primary
 /// display/input currency across the game client and admin panel.
