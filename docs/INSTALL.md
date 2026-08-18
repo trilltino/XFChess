@@ -5,7 +5,7 @@ End-to-end install instructions for players downloading a prebuilt release from
 toolchain or build step required. If you're setting up a dev environment instead,
 see the [Quick Start](../README.md#quick-start) in the root README.
 
-Every release publishes three assets, one per platform, all built by the same
+Every release publishes four assets, one per platform, all built by the same
 CI pipeline (`.github/workflows/release.yml` — see [PUBLISHING.md](PUBLISHING.md)
 for how they're cut):
 
@@ -14,6 +14,7 @@ for how they're cut):
 | Windows | `XFChess-Setup-<version>.exe` | NSIS installer |
 | macOS | `XFChess-<version>.dmg` | Disk image |
 | Linux | `XFChess-linux-x86_64-<version>.tar.gz` | Tarball |
+| Chrome OS (Crostini) | `XFChess-chromeos-x86_64-<version>.tar.gz` | Tarball |
 
 Single-player vs the built-in engine works fully offline. Online multiplayer,
 tournaments, and wager play need an internet connection (the app talks to
@@ -104,6 +105,24 @@ universal/Intel binary yet, so the release won't run on an Intel Mac.
 
 **Uninstalling:** delete the extracted folder.
 
+## Chrome OS (via Crostini)
+
+This is the exact same full-featured build as Linux above (Solana
+multiplayer/wagers, wallet bridge, bundled Stockfish — nothing removed) —
+Crostini is a genuine Debian container, so it just runs unmodified. It's
+published as a separate asset only so Chrome OS users can find it by name.
+
+1. Enable Crostini first if you haven't: **Settings → Advanced → Developers
+   → Linux development environment → Turn on**.
+2. Download `XFChess-chromeos-x86_64-<version>.tar.gz` from the
+   [Releases page](https://github.com/trilltino/XFChess/releases) — either
+   directly inside the Linux/Crostini file browser, or into your regular
+   Chrome OS Downloads and then move it into the "Linux files" folder.
+3. Follow the same extract/prerequisite/run steps as the **Linux** section
+   above (the tarball's internal folder is still named `linux/`).
+
+**Uninstalling:** delete the extracted folder.
+
 ## Troubleshooting
 
 - **The app won't connect / multiplayer doesn't load anything:** confirm
@@ -115,7 +134,7 @@ universal/Intel binary yet, so the release won't run on an Intel Mac.
 - **Chess engine feels weak/strong:** difficulty is adjustable in-game
   (Level 1–8); the default engine is the built-in `XFChessEngine`
   (native Rust, no setup needed). Stockfish ships bundled with every
-  release on all three platforms and is selectable as the **Engine**
+  release on all four platforms and is selectable as the **Engine**
   option when setting up a Play vs Computer game — if it doesn't work,
   it's a bug (the release build fails outright if Stockfish can't be
   bundled), not a missing optional download.

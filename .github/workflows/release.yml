@@ -278,6 +278,44 @@ jobs:
         with:
           files: release/XFChess-linux-x86_64-*.tar.gz
 
+  # ─────────────────────────── Chrome OS ────────────────────────────
+  # Crostini is a genuine Debian/Linux container, so the full-featured Linux
+  # build (Solana, wallet bridge, bundled Stockfish — everything) already
+  # works there unmodified. No reason to ship a crippled variant: this job
+  # just relabels the `linux` job's own artifact as a separate Chrome OS
+  # release asset, rather than compiling (and maintaining) a second build.
+  chromeos:
+    needs: linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Derive version from tag
+        id: ver
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=${v//\//-}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+          path: release
+
+      - name: Relabel as the Chrome OS asset
+        run: |
+          cd release
+          cp "XFChess-linux-x86_64-${{ steps.ver.outputs.version }}.tar.gz" \
+             "XFChess-chromeos-x86_64-${{ steps.ver.outputs.version }}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chromeos-binary
+          path: release/XFChess-chromeos-x86_64-*.tar.gz
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/XFChess-chromeos-x86_64-*.tar.gz
+
   # ───────────────────────────── macOS ─────────────────────────────
   macos:
     needs: verify-backend
