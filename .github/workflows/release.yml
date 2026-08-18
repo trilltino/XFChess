@@ -279,65 +279,31 @@ jobs:
           files: release/XFChess-linux-x86_64-*.tar.gz
 
   # ─────────────────────────── Chrome OS ────────────────────────────
-  # Minimal game-only build for Chrome OS's Crostini (Linux/Debian) container.
-  # No Solana feature, no Tauri wallet bridge, no Stockfish bundle — Crostini's
-  # GPU passthrough (virgl) is inconsistent and most Chromebooks aren't
-  # powerful enough to justify shipping the full desktop payload here.
-  # Mirrors docker/game-linux.Dockerfile's build (used for local Docker
-  # builds via scripts/build_linux.bat); run natively here to match every
-  # other release job instead of nesting Docker inside CI.
+  # Crostini is a genuine Debian/Linux container, so the full-featured Linux
+  # build (Solana, wallet bridge, bundled Stockfish — everything) already
+  # works there unmodified. No reason to ship a crippled variant: this job
+  # just relabels the `linux` job's own artifact as a separate Chrome OS
+  # release asset, rather than compiling (and maintaining) a second build.
   chromeos:
-    needs: verify-backend
+    needs: linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-
       - name: Derive version from tag
         id: ver
         run: |
           v="${GITHUB_REF_NAME#v}"
           echo "version=${v//\//-}" >> "$GITHUB_OUTPUT"
 
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libasound2-dev libudev-dev \
-            libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
-            libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+          path: release
 
-      - name: Build game client (release, no Solana feature)
-        run: cargo build --release --bin xfchess
-
-      - name: Stage payload
-        run: |
-          mkdir -p release/chromeos/assets
-          cp -r assets/* release/chromeos/assets/
-          cp target/release/xfchess release/chromeos/xfchess
-          chmod +x release/chromeos/xfchess
-          cat > release/chromeos/README.txt <<'EOF'
-          XFChess for Chrome OS (via Crostini)
-
-          Requires Crostini (Chrome OS's built-in Linux container) enabled:
-          Settings -> Advanced -> Developers -> Linux development environment.
-
-          1. Copy this folder into your Linux (Crostini) files.
-          2. chmod +x xfchess
-          3. ./xfchess
-
-          This build has no blockchain features and no bundled chess engine —
-          it's local play only. For online/Solana play, use the full desktop
-          build from the same release page (Windows/macOS/Linux).
-          EOF
-
-      - name: Package tarball
+      - name: Relabel as the Chrome OS asset
         run: |
           cd release
-          tar -czf "XFChess-chromeos-x86_64-${{ steps.ver.outputs.version }}.tar.gz" chromeos
+          cp "XFChess-linux-x86_64-${{ steps.ver.outputs.version }}.tar.gz" \
+             "XFChess-chromeos-x86_64-${{ steps.ver.outputs.version }}.tar.gz"
 
       - uses: actions/upload-artifact@v4
         with:
