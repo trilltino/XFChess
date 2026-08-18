@@ -8,7 +8,7 @@ export function Footer() {
         {/* Social Icons */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '24px' }}>
           <a 
-            href="https://twitter.com/xfchess" 
+            href="https://x.com/xfchessdotcom"
             target="_blank" 
             rel="noopener noreferrer" 
             style={{ 
@@ -70,7 +70,7 @@ export function Footer() {
           </a>
           
           <a 
-            href="https://youtube.com/xfchess" 
+            href="https://www.youtube.com/@xfchessdotcom"
             target="_blank" 
             rel="noopener noreferrer" 
             style={{ 
