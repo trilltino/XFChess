@@ -877,7 +877,28 @@ async fn dual_accept_auth_guards_signing_endpoints() {
     let (status, _) = app.post_json("/move/record", &move_body).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "no auth must 401");
 
-    // (b) Legacy relay secret → accepted (handler then 404s: no such session).
+    // (b) Legacy relay secret alone passes the outer middleware gate (proven
+    // via an endpoint with no per-wallet authority, e.g. undelegate_game,
+    // which doesn't take `authed`) but is no longer sufficient for
+    // record_move: that handler signs as a specific mover_wallet, so it
+    // requires a real caller identity (JWT) and rejects relay-secret-only
+    // callers itself, even though the middleware let them through.
+    let req = Request::builder()
+        .uri("/game/undelegate")
+        .method("POST")
+        .header("content-type", "application/json")
+        .header("X-Relay-Secret", "e2e-relay-secret")
+        .body(Body::from(
+            serde_json::to_vec(&json!({ "game_id": 999999 })).unwrap(),
+        ))
+        .unwrap();
+    let (status, _) = app.send(req).await;
+    assert_ne!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "valid relay secret must still pass the middleware gate on endpoints with no per-wallet authority"
+    );
+
     let req = Request::builder()
         .uri("/move/record")
         .method("POST")
@@ -886,10 +907,11 @@ async fn dual_accept_auth_guards_signing_endpoints() {
         .body(Body::from(serde_json::to_vec(&move_body).unwrap()))
         .unwrap();
     let (status, _) = app.send(req).await;
-    assert_ne!(
+    assert_eq!(
         status,
         StatusCode::UNAUTHORIZED,
-        "valid relay secret must pass"
+        "relay-secret-only (no JWT identity) must be rejected by record_move itself — \
+         it cannot verify who is submitting the move"
     );
 
     // (c) Per-user JWT (no relay header) → accepted.
