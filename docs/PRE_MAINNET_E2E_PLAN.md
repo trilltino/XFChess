@@ -4,7 +4,6 @@
 **Status:** Draft — derived from a source-level re-verification of an external
 audit checklist against current `HEAD`, not from the checklist's own wording.
 **Companion docs:** [THREAT_MODEL.md](THREAT_MODEL.md) (attacker/abuse model),
-[AUDIT_TRACKING.md](AUDIT_TRACKING.md) (doc/test coverage by module),
 [PRODUCTION_REALITY_PLAN.md](PRODUCTION_REALITY_PLAN.md) (ops hardening),
 [legacy-cleanup-audit.md](legacy-cleanup-audit.md) (dead code inventory).
 
@@ -420,9 +419,7 @@ scoring (`lib.rs:118-172`), top-1-move-rate/complexity
 (`scoring/mod.rs`, thresholds `config.rs:67-68`: review=0.60, flag=0.80), and
 a 30-game rolling per-player baseline (`cross_game/mod.rs:14-60`,
 advisory-only). **11 files now carry `#[cfg(test)]` modules**, including a
-regression guard for the CPL-arithmetic bug the most recent commit fixed —
-`docs/AUDIT_TRACKING.md`'s "no test files found for this crate" line is
-stale and should be updated in the next audit pass.
+regression guard for the CPL-arithmetic bug the most recent commit fixed.
 
 ### 3.2 Settlement coupling — ❌ headline finding: 1v1 wagered payouts happen before analysis, with no clawback path
 
@@ -679,12 +676,8 @@ Recorded for credibility and so these don't get re-asked next audit pass:
 
 **Sourcing methodology:** every finding above cites file:line against `HEAD`
 as of 2026-08-02, gathered via four independent full-source read passes
-(not grep-only) plus cross-checks against `docs/AUDIT_TRACKING.md`,
-`docs/THREAT_MODEL.md`, `docs/legacy-cleanup-audit.md`, and
-`docs/plans/networking-hardening-plan.md`. Where a docs cross-check
-surfaced a contradiction (AUDIT_TRACKING.md's anticheat-test-coverage row),
-it's flagged above rather than silently resolved — that doc should be
-updated as a small follow-up, not as part of this plan.
+(not grep-only) plus cross-checks against `docs/THREAT_MODEL.md`,
+`docs/legacy-cleanup-audit.md`, and `docs/plans/networking-hardening-plan.md`.
 
 **Note on scope:** compliance/KYC (source checklist §4, and the KYC-gating
 half of its §2) was investigated during the original source-verification

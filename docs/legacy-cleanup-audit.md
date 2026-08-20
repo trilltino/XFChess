@@ -43,26 +43,10 @@ Removal:
 - Delete `src/solana/multiplayer/`.
 - Remove `pub mod multiplayer;` from `src/solana/mod.rs`.
 
-### 2. Legacy Braid subscription resource shell
+### 2. Legacy Braid subscription resource shell — DONE
 
-Files:
-
-- `src/multiplayer/network/braid.rs`
-
-Evidence:
-
-- `BraidGameState`, `BraidConnectionStatus`, and `NetworkGameStateUpdated` are not used outside their defining file.
-- `BraidSubscriptionConfig` is only initialized and injected into `MainMenuUIContext`; no code reads it.
-- Live game transport now uses `OnlineGameSession`.
-
-Removal:
-
-- Remove `pub mod braid;` and `pub use braid::*;` from `src/multiplayer/network/mod.rs`.
-- Remove `.init_resource::<network::braid::BraidSubscriptionConfig>()` from `src/multiplayer/mod.rs`.
-- Remove `braid_subscription` from `MainMenuUIContext`.
-- Delete `src/multiplayer/network/braid.rs`.
-
-Risk: low, but compile-check after removal because `MainMenuUIContext` is a large Bevy system param.
+`src/multiplayer/network/braid.rs` and its resource injection have already been removed
+(verified: file no longer exists as of this pass). No action remaining.
 
 ### 3. Stale root Solana helper bins
 
@@ -274,7 +258,7 @@ a caller that assumes the seeding is already safe.
 ## Recommended Cleanup Order
 
 1. Remove `src/solana/multiplayer`.
-2. Remove `src/multiplayer/network/braid.rs` and the unused resource injection.
+2. ~~Remove `src/multiplayer/network/braid.rs`~~ — already done.
 3. Remove or quarantine `on_chain_benchmark` and `tournament_data_gen`.
 4. Delete the orphaned `game_ix/record.rs` and `game_ix/record_move.rs` — zero risk, they are not compiled.
 5. Delete the unused `state::TreasuryVault` type — zero risk, never instantiated on-chain.
