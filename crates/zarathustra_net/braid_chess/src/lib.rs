@@ -42,6 +42,12 @@ pub mod patch;
 pub mod publisher;
 pub mod resource;
 pub mod subscriber;
+pub mod tournament;
+
+/// Re-exported so callers can name the types this crate's public API takes —
+/// notably [`tournament::SwissMessage::from_update`], which decodes a
+/// [`braid_http::types::Update`] — without depending on `braid-http` directly.
+pub use braid_http;
 
 pub use error::BraidChessError;
 pub use message::{ChatPayload, ChessMessage, ClockState, EngineHint, MovePayload};
@@ -49,3 +55,7 @@ pub use patch::{version_hash, BraidPatch};
 pub use publisher::ChessPublisher;
 pub use resource::{ChessResource, ChessStream};
 pub use subscriber::ChessSubscriber;
+pub use tournament::{
+    MatchResult, ResultEntry, ScheduleStatus, SwissMessage, SwissPairing, SwissStandingsEntry,
+    TournamentResource,
+};

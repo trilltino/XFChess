@@ -69,6 +69,7 @@ pub fn handler(
 
     // See `record::handler`'s matching comment — plain-text FEN for explorers
     // that can't decode the `MoveEvent` below without this program's IDL.
+    #[cfg(feature = "move-validation")]
     msg!(
         "FEN: {}",
         chess_logic_on_chain::nimzovich_engine::CompactBoard::from_bytes(&next_board).to_fen()

@@ -44,7 +44,10 @@ pub fn init_logging() {
     .compact()
     .init();
 
-  info!("[Logging] Writing to {}", dir.join("wallet-bridge.log.<date>").display());
+  info!(
+    "[Logging] Writing to {}",
+    dir.join("wallet-bridge.log.<date>").display()
+  );
 }
 
 pub fn log_window_event(window: &str, event: &str, details: Option<&str>) {

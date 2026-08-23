@@ -15,7 +15,8 @@
       "Bash(xargs wc -l)",
       "Bash(npm outdated *)",
       "Bash(tasklist //FI \"IMAGENAME eq xfchess.exe\")",
-      "Bash(cargo clippy *)"
+      "Bash(cargo clippy *)",
+      "Bash(gh pr *)"
     ]
   }
 }

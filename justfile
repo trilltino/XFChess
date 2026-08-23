@@ -120,6 +120,32 @@ build-admin-ui:
 build-admin-ui-force:
     Set-Location tauri/tournament-admin; npm install; if ($?) { npm run build }; Set-Location ../..
 
+# Vite dev server on :5176; the desktop window points at it via
+# XFCHESS_ADMIN_DEV_URL. UI edits apply instantly — no rebuild, no relaunch —
+# and the panel auto-resumes your last session so a full reload doesn't send
+# you back to the login screen.
+#
+# Admin panel with HOT RELOAD (UI edits apply instantly, no rebuild)
+admin-dev: build-tauri build-backend
+    @$root = (Get-Location).Path; \
+     $bin = "{{bin}}"; \
+     if (-not (netstat -aon | Select-String ":8090.*LISTENING")) { \
+         Write-Host "[ADMIN-DEV] No backend on :8090 - starting one" -ForegroundColor Yellow; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root\backend'; & '$root\$bin\signing-server.exe'" -WindowStyle Normal; \
+         Start-Sleep -Seconds 2 \
+     }; \
+     if (-not (netstat -aon | Select-String ":5176.*LISTENING")) { \
+         Write-Host "[ADMIN-DEV] Starting Vite dev server on :5176" -ForegroundColor Cyan; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root\tauri\tournament-admin'; npm install; npm run dev" -WindowStyle Normal; \
+         Start-Sleep -Seconds 4 \
+     } else { \
+         Write-Host "[ADMIN-DEV] Vite already running on :5176" -ForegroundColor Green \
+     }; \
+     Write-Host "[ADMIN-DEV] Launching desktop window against the dev server" -ForegroundColor Cyan; \
+     $env:XFCHESS_ADMIN_DEV_URL = 'http://localhost:5176'; \
+     $env:XFCHESS_OPEN_ADMIN = '1'; \
+     & "./{{bin}}/xfchess-tauri.exe"
+
 # Install web frontend dependencies (only if node_modules is missing)
 build-web-ui:
     @if (-not (Test-Path "xfchessdotcom/node_modules/.bin/vite")) { \
@@ -167,9 +193,13 @@ profile: build-profile
 web:
     Set-Location xfchessdotcom; npm run dev
 
-# Open the tournament admin desktop window (starts a backend if :8090 is down,
-# reuses a running Tauri shell, else launches one)
-admin: build-admin-ui build-tauri build-backend
+# Always force-rebuilds the admin UI — it used to skip rebuilding whenever
+# dist/ already existed, which silently kept serving a stale bundle after any
+# tauri/tournament-admin/src edit (e.g. the PRODUCTION SSH-tunnel key path fix
+# never took effect until an explicit build-admin-ui-force).
+#
+# Open the tournament admin desktop window (built dist; use admin-dev for HMR)
+admin: build-admin-ui-force build-tauri build-backend
     @$root = (Get-Location).Path; \
      $bin = "{{bin}}"; \
      if (-not (netstat -aon | Select-String ":8090.*LISTENING")) { \

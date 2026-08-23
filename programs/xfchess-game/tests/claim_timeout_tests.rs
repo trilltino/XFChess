@@ -136,3 +136,33 @@ async fn claim_timeout_awards_white_when_black_flags() {
         "black's clock expired (even turn) -> white must win"
     );
 }
+
+#[tokio::test]
+async fn claim_timeout_cancels_zero_move_game_instead_of_awarding_black() {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+
+    let mut ctx = start(vec![]).await;
+    let now = ctx
+        .banks_client
+        .get_sysvar::<Clock>()
+        .await
+        .unwrap()
+        .unix_timestamp;
+
+    let (game_key, game_data) = timed_active_game(white, black, 1, now - 200);
+    ctx.set_account(&game_key, &AccountSharedData::from(game_data));
+
+    let ix = claim_timeout_ix(GAME_ID, ctx.payer.pubkey());
+    send(&mut ctx, ix, &[])
+        .await
+        .expect("claim_timeout should cancel an expired zero-move game");
+
+    let game = fetch_game(&mut ctx, GAME_ID).await;
+    assert_eq!(game.status, GameStatus::Cancelled);
+    assert_eq!(
+        game.result,
+        GameResult::None,
+        "zero moves means no winner and no one-sided payout"
+    );
+}

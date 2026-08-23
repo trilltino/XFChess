@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 
 const PGN_ZSTD_PREFIX: &str = "zstd:";
 
@@ -81,6 +82,24 @@ pub struct MoveRecord {
     pub fen_after: Option<String>,
     pub player: String,
     pub timestamp: i64,
+}
+
+/// Per-game facts a spectator list needs, joined in one query.
+///
+/// See [`GameRepository::get_spectator_summaries`].
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SpectatorGameSummary {
+    pub game_id: String,
+    /// The `games` row status ("active", "completed", …).
+    pub status: String,
+    /// Winner wallet, when the game has finished.
+    pub winner: Option<String>,
+    /// White's wallet — needed to turn `winner` into a "1-0"/"0-1" result.
+    pub player_white: Option<String>,
+    pub broadcast_delay_secs: i64,
+    pub move_count: i64,
+    /// Unix seconds of the most recent move; 0 when there are none.
+    pub last_move_at: i64,
 }
 
 /// Lightweight move record stored by the VPS handler (no SAN/fen_before needed at record time)
@@ -336,6 +355,75 @@ impl GameRepository {
         .await?;
 
         Ok(moves)
+    }
+
+    /// `fen_after` of the highest-numbered move for `game_id`, if any.
+    ///
+    /// `record_move` needs only this one value to replay-validate the next
+    /// move. It used to call `get_moves` and scan the whole history, so the
+    /// per-move cost grew with the game's length — O(n^2) row materializations
+    /// over a full game. The `idx_moves_game` index on `(game_id, move_number)`
+    /// turns this into a single index lookup.
+    pub async fn get_last_fen(&self, game_id: &str) -> Result<Option<String>> {
+        let row = sqlx::query_as::<_, (Option<String>,)>(
+            "SELECT fen_after FROM moves WHERE game_id = ? ORDER BY move_number DESC LIMIT 1",
+        )
+        .bind(game_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.and_then(|(fen,)| fen))
+    }
+
+    /// Everything a spectator list needs to know about one game, without
+    /// pulling its moves.
+    ///
+    /// `move_count` is the honest "is anything happening here" signal: a
+    /// tournament match record flips to `Active` when the orchestrator creates
+    /// the game *account*, which says nothing about whether either player ever
+    /// connected. Zero moves means an empty board and nothing to watch.
+    pub async fn get_spectator_summaries(
+        &self,
+        game_ids: &[String],
+    ) -> Result<HashMap<String, SpectatorGameSummary>> {
+        if game_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        // SQLite has no array binding; build one placeholder per id. The list
+        // is bounded by a tournament's match count, so this stays small.
+        let placeholders = std::iter::repeat_n("?", game_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            r#"
+            SELECT  g.id                       AS game_id,
+                    g.status                   AS status,
+                    g.winner                   AS winner,
+                    g.player_white             AS player_white,
+                    g.broadcast_delay_secs     AS broadcast_delay_secs,
+                    COUNT(m.id)                AS move_count,
+                    COALESCE(MAX(m.timestamp), 0) AS last_move_at
+            FROM games g
+            LEFT JOIN moves m ON m.game_id = g.id
+            WHERE g.id IN ({placeholders})
+            GROUP BY g.id
+            "#
+        );
+
+        // `sql` is built only from a fixed template plus one `?` per id — every
+        // id is bound, never interpolated. Audited for injection.
+        let mut query = sqlx::query_as::<_, SpectatorGameSummary>(sqlx::AssertSqlSafe(sql));
+        for id in game_ids {
+            query = query.bind(id);
+        }
+
+        Ok(query
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(|s| (s.game_id.clone(), s))
+            .collect())
     }
 
     /// Reads the per-game broadcast delay (0 = live). Missing row → 0.

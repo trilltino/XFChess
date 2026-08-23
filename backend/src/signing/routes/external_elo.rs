@@ -47,7 +47,6 @@ pub struct LinkConfirmResp {
     pub blitz_rating: u32,
     pub rapid_rating: u32,
     pub bullet_rating: u32,
-    pub seeded_elo: f64,
 }
 
 #[derive(Serialize)]
@@ -344,14 +343,8 @@ async fn link_confirm(
         warn!("[ExternalElo] Failed to store link in DB: {}", e);
     }
 
-    // Invalidate ELO cache so next fetch reflects the seeded value
+    // Invalidate ELO cache so next fetch reflects the newly-linked account
     state.elo_cache.invalidate(&pending.pubkey);
-
-    let seeded_elo = if blitz_rating > rapid_rating + 500 {
-        blitz_rating as f64
-    } else {
-        rapid_rating as f64
-    };
 
     Ok(Json(LinkConfirmResp {
         tx_signature: tx_sig,
@@ -359,7 +352,6 @@ async fn link_confirm(
         blitz_rating,
         rapid_rating,
         bullet_rating,
-        seeded_elo,
     }))
 }
 

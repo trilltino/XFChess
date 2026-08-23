@@ -21,6 +21,7 @@ use axum::{
 };
 use serde_json::Value;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -50,9 +51,32 @@ const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 /// upstream paid RPC from a single source.
 const RATE_LIMIT_MAX_PER_WINDOW: usize = 180;
 
+/// Hard ceiling on tracked source addresses. Even with a trustworthy key the
+/// map should not be able to grow without limit; past this point new sources are
+/// rejected rather than admitted, which fails closed under flood conditions
+/// instead of consuming memory.
+const RATE_LIMIT_MAX_TRACKED_SOURCES: usize = 50_000;
+
 fn rate_tracker() -> &'static Mutex<HashMap<String, Vec<Instant>>> {
     static TRACKER: OnceLock<Mutex<HashMap<String, Vec<Instant>>>> = OnceLock::new();
     TRACKER.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Comma-separated peer addresses permitted to set `x-real-ip` /
+/// `x-forwarded-for` on our behalf, from `TRUSTED_PROXY_IPS`. In the normal
+/// deployment this is the local nginx (`127.0.0.1`), which is also the default
+/// when the variable is unset — matching how the service is actually fronted.
+fn trusted_proxies() -> &'static Vec<String> {
+    static TRUSTED: OnceLock<Vec<String>> = OnceLock::new();
+    TRUSTED.get_or_init(|| {
+        std::env::var("TRUSTED_PROXY_IPS")
+            .unwrap_or_else(|_| "127.0.0.1,::1".to_string())
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    })
 }
 
 fn http_client() -> &'static reqwest::Client {
@@ -65,18 +89,93 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
-fn client_ip(headers: &HeaderMap) -> String {
-    headers
-        .get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string)
-        .unwrap_or_else(|| "unknown".to_string())
+/// The connection's peer address, or `None` when the server was not started
+/// with connect-info (in-process `oneshot` tests, chiefly).
+///
+/// Written as a bespoke infallible extractor rather than
+/// `Option<ConnectInfo<SocketAddr>>` because axum 0.8 requires
+/// `OptionalFromRequestParts` for that shape, and because a missing peer address
+/// must degrade to "no better key available" rather than rejecting the request.
+struct PeerAddr(Option<SocketAddr>);
+
+impl<S> axum::extract::FromRequestParts<S> for PeerAddr
+where
+    S: Send + Sync,
+{
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(PeerAddr(
+            parts
+                .extensions
+                .get::<axum::extract::ConnectInfo<SocketAddr>>()
+                .map(|ci| ci.0),
+        ))
+    }
+}
+
+/// Resolves the rate-limit key for a request.
+///
+/// The socket's peer address is the ground truth, because a client cannot forge
+/// it. `x-real-ip` is honoured only when the peer is a configured trusted proxy
+/// — otherwise the header is just a caller-supplied string.
+///
+/// This previously read `x-real-ip` unconditionally and fell back to the literal
+/// `"unknown"`, which broke in both directions at once: anything reaching the
+/// port directly could rotate the header per request to escape the limit
+/// entirely (while minting a fresh, never-evicted map key each time), and every
+/// request that legitimately arrived without the header shared one `"unknown"`
+/// bucket, so 180 of them denied the proxy to all the rest.
+fn client_ip(headers: &HeaderMap, peer: Option<SocketAddr>) -> String {
+    let peer_ip = peer
+        .map(|addr| addr.ip().to_string())
+        .unwrap_or_else(|| "unknown-peer".to_string());
+
+    if trusted_proxies().iter().any(|t| *t == peer_ip) {
+        if let Some(forwarded) = headers
+            .get("x-real-ip")
+            .or_else(|| headers.get("x-forwarded-for"))
+            .and_then(|v| v.to_str().ok())
+            // `x-forwarded-for` is a list; the left-most entry is the origin.
+            .and_then(|v| v.split(',').next())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            return forwarded.to_string();
+        }
+    }
+
+    peer_ip
 }
 
 /// Returns true if `ip` has exceeded its request budget for the window.
+///
+/// Also evicts sources whose history has fully aged out. Only the timestamps
+/// inside a bucket used to be pruned, never the buckets themselves, so the map
+/// retained one `Vec` per address seen for the life of the process.
 async fn rate_limited(ip: &str) -> bool {
     let mut tracker = rate_tracker().lock().await;
     let now = Instant::now();
+
+    tracker.retain(|key, hits| {
+        if key == ip {
+            return true; // handled below, don't drop the bucket we're about to use
+        }
+        hits.retain(|t| now.duration_since(*t) < RATE_LIMIT_WINDOW);
+        !hits.is_empty()
+    });
+
+    if !tracker.contains_key(ip) && tracker.len() >= RATE_LIMIT_MAX_TRACKED_SOURCES {
+        tracing::warn!(
+            "[rpc_proxy] tracking {} distinct sources — refusing new ones until the window clears",
+            tracker.len()
+        );
+        return true;
+    }
+
     let hits = tracker.entry(ip.to_string()).or_default();
     hits.retain(|t| now.duration_since(*t) < RATE_LIMIT_WINDOW);
     if hits.len() >= RATE_LIMIT_MAX_PER_WINDOW {
@@ -104,8 +203,13 @@ fn method_allowed(body: &Value) -> bool {
 
 /// Shared forwarding logic for both clusters — validates, rate-limits, then
 /// relays the raw JSON-RPC body to `upstream_url` and mirrors its response.
-async fn forward(headers: &HeaderMap, body: &Value, upstream_url: &str) -> Response {
-    let ip = client_ip(headers);
+async fn forward(
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+    body: &Value,
+    upstream_url: &str,
+) -> Response {
+    let ip = client_ip(headers, peer);
     if rate_limited(&ip).await {
         return (StatusCode::TOO_MANY_REQUESTS, "rate limited").into_response();
     }
@@ -143,10 +247,11 @@ async fn forward(headers: &HeaderMap, body: &Value, upstream_url: &str) -> Respo
 /// paid provider's secret token in every binary — see module docs.
 async fn proxy_rpc(
     State(state): State<AppState>,
+    PeerAddr(peer): PeerAddr,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    forward(&headers, &body, &state.solana_rpc_url).await
+    forward(&headers, peer, &body, &state.solana_rpc_url).await
 }
 
 /// POST /api/rpc/mainnet — same as `/api/rpc` but forwards to a dedicated
@@ -156,6 +261,7 @@ async fn proxy_rpc(
 /// (same public endpoint the client used to hit directly and unproxied).
 async fn proxy_rpc_mainnet(
     State(state): State<AppState>,
+    PeerAddr(peer): PeerAddr,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
@@ -164,7 +270,7 @@ async fn proxy_rpc_mainnet(
         .solana_mainnet_rpc_url
         .clone()
         .unwrap_or_else(|| "https://api.mainnet-beta.solana.com".to_string());
-    forward(&headers, &body, &upstream_url).await
+    forward(&headers, peer, &body, &upstream_url).await
 }
 
 pub fn rpc_proxy_routes() -> Router<AppState> {

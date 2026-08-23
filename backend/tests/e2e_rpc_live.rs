@@ -114,8 +114,14 @@ fn debug_transaction_reports_real_on_chain_outcome() {
         ))
         .expect("known-good signature should be found on-chain");
 
-    assert!(info.success, "known-good tx should report success: {info:?}");
-    assert!(info.slot > 0, "slot should be populated from the real transaction");
+    assert!(
+        info.success,
+        "known-good tx should report success: {info:?}"
+    );
+    assert!(
+        info.slot > 0,
+        "slot should be populated from the real transaction"
+    );
     assert_eq!(info.signature, KNOWN_GOOD_SIG);
     assert!(
         info.program_ids.contains(&PROGRAM_ID.to_string()),
@@ -190,8 +196,7 @@ async fn spawn_live_app(rpc_url: &str) -> axum::Router {
     run_migrations(&pools).await.expect("run migrations");
     // Only used to create/migrate tables via `.init()` — AppState::new below
     // builds the real store this test actually reads/writes through.
-    let schema_vault =
-        IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
+    let schema_vault = IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
     let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await.expect("session store init");
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;

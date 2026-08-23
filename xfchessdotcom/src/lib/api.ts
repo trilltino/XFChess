@@ -14,7 +14,4 @@
  */
 
 export * from './api/client';
-export * from './api/auth';
-export * from './api/kyc';
-export * from './api/games';
 export * from './api/tournament';

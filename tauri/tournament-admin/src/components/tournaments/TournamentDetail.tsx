@@ -8,7 +8,7 @@ function RoundCountdown({ deadlineAt }: { deadlineAt: number }) {
     const id = setInterval(() => setRemaining(deadlineAt - Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(id);
   }, [deadlineAt]);
-  if (remaining <= 0) return <span style={{ color: "#f87171", fontWeight: 700, fontSize: "13px" }}>⏰ ROUND EXPIRED</span>;
+  if (remaining <= 0) return <span style={{ color: "#f87171", fontWeight: 700, fontSize: "13px" }}>ROUND EXPIRED</span>;
   const h = Math.floor(remaining / 3600);
   const m = Math.floor((remaining % 3600) / 60);
   const s = remaining % 60;
@@ -16,7 +16,7 @@ function RoundCountdown({ deadlineAt }: { deadlineAt: number }) {
   const color = remaining < 300 ? "#f87171" : remaining < 900 ? "#fbbf24" : "#4ade80";
   return (
     <span style={{ fontFamily: "monospace", fontSize: "14px", fontWeight: 700, color }}>
-      ⏱ {h > 0 ? `${fmt(h)}:` : ""}{fmt(m)}:{fmt(s)}
+      {h > 0 ? `${fmt(h)}:` : ""}{fmt(m)}:{fmt(s)}
     </span>
   );
 }
@@ -67,15 +67,6 @@ interface SwissData {
 
 type ResultChoice = "white" | "black" | "draw" | null;
 
-const TEMPLATES_KEY = "tournament_templates";
-function loadTemplates(): Record<string, any> {
-  try { return JSON.parse(localStorage.getItem(TEMPLATES_KEY) || "{}"); } catch { return {}; }
-}
-function saveTemplate(name: string, data: any) {
-  const t = loadTemplates(); t[name] = data;
-  localStorage.setItem(TEMPLATES_KEY, JSON.stringify(t));
-}
-
 export default function TournamentDetail({ tournamentId, onBack, onEdit }: TournamentDetailProps) {
   const [tournament, setTournament] = useState<TournamentDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,21 +95,57 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
   const [roundDeadlineAt, setRoundDeadlineAt] = useState<number | null>(null);
   const [deadlineMinutes, setDeadlineMinutes] = useState("60");
   const [settingDeadline, setSettingDeadline] = useState(false);
-  const [bulkRegisterText, setBulkRegisterText] = useState("");
-  const [bulkRegisterResults, setBulkRegisterResults] = useState<{ wallet: string; ok: boolean; msg: string }[]>([]);
-  const [bulkRegistering, setBulkRegistering] = useState(false);
-
   const [escrowBalance, setEscrowBalance] = useState<{ balance_sol: number } | null>(null);
+  const [registrationReconciliation, setRegistrationReconciliation] = useState<any>(null);
+  const [auditEntries, setAuditEntries] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [fundAmountSol, setFundAmountSol] = useState("");
   const [fundingPrize, setFundingPrize] = useState(false);
   const [fundPrizeMsg, setFundPrizeMsg] = useState<string | null>(null);
   const [templateName, setTemplateName] = useState("");
-  const [savedTemplates] = useState<Record<string, any>>(loadTemplates);
+  const [savedTemplates, setSavedTemplates] = useState<{ name: string; data: any; created_at: number; updated_at: number }[]>([]);
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [templateMsg, setTemplateMsg] = useState<string | null>(null);
+
+  const loadTemplates = async () => {
+    const r = await apiClient.listTemplates();
+    if (r.ok) setSavedTemplates(r.data?.templates ?? []);
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!templateName || !tournament) return;
+    setTemplateSaving(true); setTemplateMsg(null);
+    const r = await apiClient.saveTemplate(templateName, tournament);
+    if (r.ok) {
+      setTemplateMsg(`Saved "${templateName}".`);
+      setTemplateName("");
+      await loadTemplates();
+    } else {
+      setTemplateMsg(`Error: ${r.error?.message || r.error?.status}`);
+    }
+    setTemplateSaving(false);
+  };
+
+  const handleDeleteTemplate = async (name: string) => {
+    if (!window.confirm(`Delete template "${name}"?`)) return;
+    const r = await apiClient.deleteTemplate(name);
+    if (r.ok) await loadTemplates();
+    else setTemplateMsg(`Error: ${r.error?.message || r.error?.status}`);
+  };
 
   useEffect(() => { loadTournament(); }, [tournamentId]);
   useEffect(() => {
     if (activeTab === "matches") loadBracket();
-    if (activeTab === "overview") loadEscrowBalance();
+    if (activeTab === "overview") { loadEscrowBalance(); loadRegistrationReconciliation(); loadAudit(); loadTransactions(); loadTemplates(); }
+  }, [activeTab, tournamentId]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      loadTournament();
+      if (activeTab === "matches") loadBracket();
+      if (activeTab === "overview") { loadEscrowBalance(); loadRegistrationReconciliation(); loadAudit(); loadTransactions(); }
+    }, 10000);
+    return () => window.clearInterval(id);
   }, [activeTab, tournamentId]);
 
   useEffect(() => {
@@ -170,6 +197,21 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
     if (r.ok) setEscrowBalance(r.data);
   };
 
+  const loadRegistrationReconciliation = async () => {
+    const r = await apiClient.getRegistrationReconciliation(tournamentId);
+    if (r.ok) setRegistrationReconciliation(r.data);
+  };
+
+  const loadAudit = async () => {
+    const r = await apiClient.getTournamentAuditLog(tournamentId, 20);
+    if (r.ok) setAuditEntries(r.data?.entries ?? []);
+  };
+
+  const loadTransactions = async () => {
+    const r = await apiClient.getTournamentTransactions(tournamentId);
+    if (r.ok) setTransactions(r.data?.transactions ?? []);
+  };
+
   const handleStartSwiss = async () => {
     setStartingSwiss(true); setStartSwissMsg(null);
     const r = await apiClient.initializeSwiss(tournamentId);
@@ -184,6 +226,7 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
   };
 
   const handleAdvanceRound = async () => {
+    if (!window.confirm("Use emergency Swiss round advancement? Automatic orchestration should be preferred.")) return;
     setAdvancingRound(true); setAdvanceMsg(null);
     const r = await apiClient.advanceRound(tournamentId);
     if (r.ok) {
@@ -197,6 +240,7 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
   };
 
   const handleRecordResult = async (matchIndex: number, white: string, black: string, forfeit = false) => {
+    if (!window.confirm("Record this result as an emergency override? The normal path is settlement-driven.")) return;
     const choice = forfeit ? "white" : resultChoices[matchIndex];
     if (!choice) return;
     const winner = choice === "white" ? white : choice === "black" ? black : null;
@@ -216,6 +260,7 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
   const handleSetGameId = async (matchIndex: number) => {
     const gameId = parseInt(gameIdInputs[matchIndex]);
     if (isNaN(gameId)) return;
+    if (!window.confirm(`Override automatic game ID assignment with ${gameId}?`)) return;
     setSettingGameId(matchIndex);
     const r = await apiClient.setMatchGameId(tournamentId, matchIndex, gameId);
     setResultMessages(prev => ({ ...prev, [matchIndex]: r.ok ? `Game #${gameId} linked.` : "Failed to set." }));
@@ -224,30 +269,16 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
   };
 
   const handleReseed = async () => {
+    if (!window.confirm("Reseed this tournament before start? This changes bracket seeding.")) return;
     const r = await apiClient.reseedPlayers(tournamentId, reseedOrder);
     setReseedMsg(r.ok ? "Players reseeded." : `Error: ${r.error?.message}`);
     if (r.ok) { setReseedMode(false); await loadTournament(); }
   };
 
-  const handleBulkRegister = async () => {
-    const wallets = bulkRegisterText.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
-    if (!wallets.length) return;
-    setBulkRegistering(true);
-    const results: { wallet: string; ok: boolean; msg: string }[] = [];
-    for (const wallet of wallets) {
-      const r = await fetch(`${apiClient.getBaseUrl()}/tournament/${tournamentId}/join`, {
-        method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${localStorage.getItem("admin_token")}` },
-        body: JSON.stringify({ player: wallet }),
-      });
-      results.push({ wallet, ok: r.ok, msg: r.ok ? "Joined" : await r.text() });
-    }
-    setBulkRegisterResults(results); setBulkRegistering(false);
-    await loadTournament();
-  };
-
   const handleFundPrize = async () => {
     const sol = parseFloat(fundAmountSol);
     if (isNaN(sol) || sol <= 0) return;
+    if (!window.confirm(`Lock ${sol} SOL as the guaranteed on-chain prize?`)) return;
     setFundingPrize(true); setFundPrizeMsg(null);
     const r = await apiClient.fundTournamentPrize(tournamentId, Math.round(sol * 1e9));
     if (r.ok && r.data) {
@@ -287,6 +318,7 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
 
         <InfoCard title="PLAYER LOAD">
           <Row label="CAPACITY" value={`${tournament.players.length} / ${tournament.max_players}`} />
+          {registrationReconciliation && <Row label="CHAIN SYNC" value={`${registrationReconciliation.on_chain_player_count} on-chain / ${registrationReconciliation.local_player_count} local · ${registrationReconciliation.reconciliation_status}`} color={registrationReconciliation.reconciliation_status === "in_sync" ? "#4ade80" : "#f87171"} />}
           <Row label="ENTRY FEE" value={fmt(tournament.entry_fee_lamports)} />
           {tournament.elo_min && <Row label="ELO RANGE" value={`${tournament.elo_min} – ${tournament.elo_max || "∞"}`} />}
           <Row label="KYC" value={tournament.kyc_required ? "REQUIRED" : "OPTIONAL"} color={tournament.kyc_required ? "var(--accent)" : "var(--text-dim)"} />
@@ -295,12 +327,11 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
         {tournament.entry_fee_lamports > 0 && (
           <InfoCard title="ECONOMICS">
             <Row label="PLATFORM CUT" value={fmt(tournament.platform_fee_lamports || 0)} color="var(--text-dim)" />
-            <Row label="PRIZE POOL" value={fmt(tournament.prize_pool || 0)} color="var(--accent)" />
-            {escrowBalance != null && <Row label="ESCROW LIVE" value={`${escrowBalance.balance_sol.toFixed(4)} SOL`} color="#4ade80" />}
-            {tournament.status === "Registration" && tournament.players.length === 0 && !tournament.prize_pool && (
+            <Row label="GUARANTEED ESCROW" value={escrowBalance != null ? `${escrowBalance.balance_sol.toFixed(4)} SOL` : "LOADING…"} color="#4ade80" />
+            {tournament.status === "Registration" && tournament.players.length === 0 && !(registrationReconciliation?.on_chain_prize_pool_lamports > 0) && (
               <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}>
                 <div style={{ fontSize: "10px", color: "#f87171", marginBottom: "8px", fontWeight: "800" }}>
-                  ⚠ PRIZE NOT FUNDED — registration will fail on-chain until locked
+                  PRIZE NOT FUNDED — registration will fail on-chain until locked
                 </div>
                 <div style={{ display: "flex", gap: "8px" }}>
                   <input type="number" step="0.0001" min="0" value={fundAmountSol} onChange={e => setFundAmountSol(e.target.value)}
@@ -322,7 +353,7 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
                   if (!share) return null;
                   return <div key={p} style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
                     <span style={{ color: "var(--text-dim)" }}>#{p}</span>
-                    <span style={{ color: "#fff", fontWeight: "700" }}>{fmt((tournament.prize_pool || 0) * share / 10000)}</span>
+                    <span style={{ color: "#fff", fontWeight: "700" }}>{fmt((registrationReconciliation?.on_chain_prize_pool_lamports || 0) * share / 10000)}</span>
                   </div>;
                 })}
               </div>
@@ -340,16 +371,49 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
           </button>
         </InfoCard>
 
+        <InfoCard title="TOURNAMENT AUDIT">
+          {auditEntries.length === 0
+            ? <div style={{ color: "var(--text-dim)", fontSize: "12px" }}>No recorded admin actions.</div>
+            : auditEntries.slice(0, 8).map((entry, index) => (
+              <div key={index} style={{ borderBottom: "1px solid var(--border)", padding: "6px 0", fontSize: "11px" }}>
+                <strong>{entry.action}</strong> · {entry.result}
+                <div style={{ color: "var(--text-dim)" }}>{new Date(entry.timestamp * 1000).toLocaleString()}</div>
+              </div>
+            ))}
+        </InfoCard>
+
+        <InfoCard title="TRANSACTION OPERATIONS">
+          {transactions.length === 0
+            ? <div style={{ color: "var(--text-dim)", fontSize: "12px" }}>No persisted tournament transactions.</div>
+            : transactions.slice(0, 8).map((tx, index) => (
+              <div key={index} style={{ borderBottom: "1px solid var(--border)", padding: "6px 0", fontSize: "11px" }}>
+                <strong>{tx.operation}</strong> · {tx.status} · retries {tx.retry_count}
+                <div style={{ color: "var(--text-dim)", fontFamily: "monospace" }}>{tx.signature}</div>
+              </div>
+            ))}
+        </InfoCard>
+
         <InfoCard title="TEMPLATE">
-          <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 12px" }}>Save this config as a named preset for reuse.</p>
+          <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 12px" }}>Save this config as a named preset for reuse. Stored on the backend — shared across machines and audit-logged.</p>
           <div style={{ display: "flex", gap: "8px" }}>
             <input value={templateName} onChange={e => setTemplateName(e.target.value)} placeholder="Template name…"
               style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
-            <button onClick={() => { if (templateName && tournament) { saveTemplate(templateName, tournament); setTemplateName(""); alert(`Saved "${templateName}"`); }}}
-              style={{ padding: "8px 16px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>SAVE</button>
+            <button onClick={handleSaveTemplate} disabled={templateSaving || !templateName}
+              style={{ padding: "8px 16px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer", opacity: templateSaving ? 0.6 : 1 }}>
+              {templateSaving ? "SAVING…" : "SAVE"}
+            </button>
           </div>
-          {Object.keys(savedTemplates).length > 0 && (
-            <div style={{ marginTop: "10px", fontSize: "11px", color: "var(--text-dim)" }}>Saved: {Object.keys(savedTemplates).join(", ")}</div>
+          {templateMsg && <div style={{ marginTop: "6px", fontSize: "11px", color: templateMsg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{templateMsg}</div>}
+          {savedTemplates.length > 0 && (
+            <div style={{ marginTop: "10px" }}>
+              {savedTemplates.map(t => (
+                <div key={t.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", fontSize: "11px", color: "var(--text-dim)" }}>
+                  <span>{t.name}</span>
+                  <button onClick={() => handleDeleteTemplate(t.name)}
+                    style={{ background: "transparent", border: "none", color: "#f87171", cursor: "pointer", fontSize: "11px" }}>✕</button>
+                </div>
+              ))}
+            </div>
           )}
         </InfoCard>
       </div>
@@ -409,44 +473,6 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
           </div>
         </div>
 
-        <InfoCard title="BULK REGISTER">
-          <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 12px" }}>Paste wallet addresses (one per line or comma-separated).</p>
-          <textarea value={bulkRegisterText} onChange={e => setBulkRegisterText(e.target.value)}
-            placeholder={"wallet1\nwallet2\nwallet3"}
-            style={{ width: "100%", height: "90px", background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px", fontFamily: "monospace", resize: "vertical", boxSizing: "border-box" }} />
-          <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
-            <button onClick={handleBulkRegister} disabled={bulkRegistering || !bulkRegisterText.trim()}
-              style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer", opacity: bulkRegistering ? 0.6 : 1 }}>
-              {bulkRegistering ? "REGISTERING…" : "BULK REGISTER"}
-            </button>
-            <label style={{ padding: "8px 16px", borderRadius: "8px", backgroundColor: "rgba(100,180,100,0.15)", color: "#86efac", border: "1px solid rgba(100,180,100,0.3)", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
-              CSV IMPORT
-              <input type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={async (e) => {
-                const file = e.target.files?.[0]; if (!file) return;
-                const text = await file.text();
-                setBulkRegistering(true);
-                const r = await apiClient.importPlayersCsv(tournamentId, text);
-                if (r.ok && r.data?.results) {
-                  setBulkRegisterResults(r.data.results.map((row) => ({ wallet: row.player, ok: row.status === "added", msg: row.status === "added" ? "Added" : "Already registered" })));
-                } else {
-                  setBulkRegisterResults([{ wallet: "", ok: false, msg: `Import failed: ${r.error?.message || r.error?.status}` }]);
-                }
-                setBulkRegistering(false);
-                await loadTournament();
-                e.target.value = "";
-              }} />
-            </label>
-          </div>
-          {bulkRegisterResults.length > 0 && (
-            <div style={{ marginTop: "12px", maxHeight: "130px", overflowY: "auto" }}>
-              {bulkRegisterResults.map((r, i) => (
-                <div key={i} style={{ fontSize: "11px", fontFamily: "monospace", color: r.ok ? "#4ade80" : "#f87171", marginBottom: "2px" }}>
-                  {r.ok ? "✓" : "✗"} {r.wallet.slice(0, 14)}… — {r.msg}
-                </div>
-              ))}
-            </div>
-          )}
-        </InfoCard>
       </div>
     );
   };
@@ -483,7 +509,10 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
           <PlayerTag color="black" name={black} isWinner={done && match.winner === black} />
         </div>
 
-        {!done && match.player_white && match.player_black && (
+            {!done && match.player_white && match.player_black && (
+              <details style={{ marginTop: "10px" }}>
+                <summary style={{ cursor: "pointer", color: "#fbbf24", fontSize: "10px", fontWeight: 800 }}>EMERGENCY OVERRIDES</summary>
+                <div style={{ marginTop: "8px" }}>
           <div>
             <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
               {(["white", "black", "draw"] as ResultChoice[]).map(opt => (
@@ -518,7 +547,9 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
               </button>
             </div>
             {msg && <div style={{ marginTop: "6px", fontSize: "11px", color: msg.startsWith("Error") || msg.startsWith("Failed") ? "#f87171" : "#4ade80", textAlign: "center" }}>{msg}</div>}
-          </div>
+                </div>
+                </div>
+              </details>
         )}
 
         {done && match.winner && (
@@ -588,10 +619,13 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
               </button>
             )}
             {canAdvance && (
-              <button onClick={handleAdvanceRound} disabled={advancingRound}
-                style={{ padding: "0.6rem 1.5rem", borderRadius: "100px", backgroundColor: "rgba(244,187,68,0.15)", color: "var(--accent)", fontWeight: "800", fontSize: "12px", border: "1px solid rgba(244,187,68,0.35)", cursor: "pointer", opacity: advancingRound ? 0.6 : 1 }}>
-                {advancingRound ? "ADVANCING…" : "ADVANCE ROUND ▶"}
-              </button>
+              <details>
+                <summary style={{ cursor: "pointer", color: "var(--accent)", fontSize: "11px", fontWeight: 800 }}>RECOVERY</summary>
+                <button onClick={handleAdvanceRound} disabled={advancingRound}
+                  style={{ marginTop: "6px", padding: "0.6rem 1.5rem", borderRadius: "100px", backgroundColor: "rgba(244,187,68,0.15)", color: "var(--accent)", fontWeight: "800", fontSize: "12px", border: "1px solid rgba(244,187,68,0.35)", cursor: "pointer", opacity: advancingRound ? 0.6 : 1 }}>
+                  {advancingRound ? "ADVANCING…" : "ADVANCE ROUND ▶"}
+                </button>
+              </details>
             )}
           </div>
         )}

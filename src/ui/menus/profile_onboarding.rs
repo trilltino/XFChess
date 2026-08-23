@@ -76,7 +76,7 @@ fn draw_profile_onboarding(
         .resizable(false)
         .collapsible(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .fixed_size([340.0, if state.creating { 220.0 } else { 260.0 }])
+        .fixed_size([360.0, if state.creating { 220.0 } else { 260.0 }])
         .frame(StyledPanel::popup())
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
@@ -145,31 +145,41 @@ fn draw_profile_onboarding(
                     );
                     ui.add_space(12.0);
 
+                    // `ui.horizontal` spans the full available width of its
+                    // parent, so a two-button row inside `vertical_centered`
+                    // still renders flush left — only a leaf widget's own
+                    // rect gets centered. `allocate_ui` with the row's real
+                    // content width turns the row into a leaf-sized block
+                    // that centers correctly, matching the "+ New profile"
+                    // button below it.
+                    const ROW_WIDTH: f32 = 208.0 + 8.0 + 34.0;
                     for name in &existing {
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_sized(
-                                    [202.0, 34.0],
-                                    egui::Button::new(egui::RichText::new(name).size(14.0)),
-                                )
-                                .clicked()
-                            {
-                                activate = Some(name.clone());
-                            }
-                            if ui
-                                .add_sized(
-                                    [34.0, 34.0],
-                                    egui::Button::new(
-                                        egui::RichText::new("X")
-                                            .color(egui::Color32::from_rgb(255, 60, 60))
-                                            .strong()
-                                            .size(14.0),
-                                    ),
-                                )
-                                .clicked()
-                            {
-                                delete_target = Some(name.clone());
-                            }
+                        ui.allocate_ui(egui::vec2(ROW_WIDTH, 34.0), |ui| {
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add_sized(
+                                        [208.0, 34.0],
+                                        egui::Button::new(egui::RichText::new(name).size(14.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    activate = Some(name.clone());
+                                }
+                                if ui
+                                    .add_sized(
+                                        [34.0, 34.0],
+                                        egui::Button::new(
+                                            egui::RichText::new("X")
+                                                .color(egui::Color32::from_rgb(255, 60, 60))
+                                                .strong()
+                                                .size(14.0),
+                                        ),
+                                    )
+                                    .clicked()
+                                {
+                                    delete_target = Some(name.clone());
+                                }
+                            });
                         });
                         ui.add_space(4.0);
                     }
@@ -177,7 +187,7 @@ fn draw_profile_onboarding(
                     ui.add_space(8.0);
                     if ui
                         .add_sized(
-                            [240.0, 34.0],
+                            [ROW_WIDTH, 34.0],
                             egui::Button::new(
                                 egui::RichText::new("+ New profile")
                                     .size(14.0)

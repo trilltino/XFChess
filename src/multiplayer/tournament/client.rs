@@ -4,7 +4,7 @@
 //! instant updates for pairings, results, and standings.
 
 use bevy::prelude::*;
-use braid_iroh::tournament::{SwissMessage, SwissPairing};
+use braid_chess::{SwissMessage, SwissPairing};
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -200,12 +200,12 @@ fn process_gossip_messages(
                 );
 
                 let (white_score, black_score) = match result {
-                    braid_iroh::tournament::MatchResult::Win { winner: _ } => {
+                    braid_chess::MatchResult::Win { winner: _ } => {
                         // Need to look up who was white/black in the pairing
                         // For now, assume 1-0 or 0-1
                         (1.0, 0.0) // Simplified - would need pairing info
                     }
-                    braid_iroh::tournament::MatchResult::Draw => (0.5, 0.5),
+                    braid_chess::MatchResult::Draw => (0.5, 0.5),
                 };
 
                 result_recorded_events.write(ResultRecorded {
@@ -340,11 +340,13 @@ mod tests {
                 white: "player1".to_string(),
                 black: "player2".to_string(),
                 board: 1,
+                game_id: None,
             },
             SwissPairing {
                 white: "player3".to_string(),
                 black: "player4".to_string(),
                 board: 2,
+                game_id: None,
             },
         ];
 
@@ -365,6 +367,7 @@ mod tests {
             white: "player1".to_string(),
             black: "player2".to_string(),
             board: 1,
+            game_id: None,
         }];
 
         let pairing = find_player_pairing("player2", 1, &pairings);
@@ -382,6 +385,7 @@ mod tests {
             white: "player1".to_string(),
             black: "player2".to_string(),
             board: 1,
+            game_id: None,
         }];
 
         let pairing = find_player_pairing("player3", 1, &pairings);

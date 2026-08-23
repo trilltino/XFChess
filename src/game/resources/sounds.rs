@@ -33,3 +33,21 @@ impl FromWorld for GameSounds {
         }
     }
 }
+
+/// Spawn a one-shot sound effect that despawns itself once playback finishes.
+///
+/// Always use this instead of `commands.spawn(AudioPlayer::new(..))` for SFX.
+/// Bevy's default `PlaybackSettings` is `PlaybackMode::Once`, which plays the
+/// clip and then does *nothing* — the entity and its live `AudioSink` survive
+/// for the rest of the process. Each of those sinks is a `rodio` player built on
+/// `queue::queue(true)`, i.e. a source that emits silence forever instead of
+/// ending, so rodio's mixer never drops it from `current_sources`. The audio
+/// thread then re-mixes one extra dead source *per sample* for every sound ever
+/// played: after a long session that is thousands of virtual calls at 44.1 kHz,
+/// which saturates a core and starves the render thread.
+///
+/// `PlaybackMode::Despawn` lets `cleanup_finished_audio` drop the entity — and
+/// with it the sink — as soon as the clip drains.
+pub fn play_sfx(commands: &mut Commands, sound: Handle<AudioSource>) {
+    commands.spawn((AudioPlayer::new(sound), PlaybackSettings::DESPAWN));
+}

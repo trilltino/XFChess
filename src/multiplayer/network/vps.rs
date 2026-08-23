@@ -54,7 +54,7 @@ pub use p2p::{
     P2PListFilter,
 };
 pub use session::{
-    activate_session, create_session, fetch_platform_fee_lamports, session_status, sign_and_submit,
+    activate_session, create_session, fetch_platform_fee_lamports, session_status,
     track_global_session_game, verify_global_session, SessionStatus,
 };
 pub use social::{
@@ -64,6 +64,8 @@ pub use social::{
     Presence as SocialPresence, SocialPollResponse,
 };
 pub use tournament::{
-    join_tournament, list_tournament_games, list_tournaments, tournament_session_create_game,
-    tournament_session_join_game, TournamentGameListing, TournamentSummary,
+    confirm_join, confirm_join_with_retry, fetch_game_pgn, fetch_tournament_games,
+    list_tournament_games, list_tournaments, my_tournament_status, tournament_session_create_game,
+    tournament_session_join_game, BlockedBy, GameState as TournamentGameState, LastMatchResult,
+    MyTournamentStatus, PlayerState, TournamentGameListing, TournamentSummary,
 };

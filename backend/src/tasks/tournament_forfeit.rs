@@ -9,13 +9,28 @@
 //! continuously offline (per the presence store — see
 //! `backend/src/signing/social/presence.rs`) for longer than
 //! [`FORFEIT_GRACE`].
+//!
+//! **Both formats are covered.** This was Swiss-only until 2026-08-21 (it bailed
+//! on `t.swiss_data.as_ref()`), which left single-elimination with no
+//! auto-forfeit at all. That is far more damaging in a bracket than in Swiss:
+//! a Swiss no-show costs one pairing, but an unresolved single-elim match
+//! blocks the winner from advancing, so that entire half of the bracket — and
+//! therefore the tournament, and therefore the prize payout — stalls forever
+//! with no recovery short of manual admin intervention. In a 16-player event
+//! at least one person closing their laptop is close to inevitable.
+//!
+//! See docs/plans/tournament-end-to-end-fix-plan.md §5 Phase 2.
 
-use crate::signing::storage::tournament::TournamentStatus;
+use crate::signing::solana::{record_result_ix, sign_and_submit};
+use crate::signing::storage::tournament::{MatchStatus, TournamentFormat, TournamentStatus};
 use crate::signing::AppState;
+use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::Signer;
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// How often to re-scan active tournaments' current-round pairings.
 const FORFEIT_TICK: Duration = Duration::from_secs(10);
@@ -52,7 +67,7 @@ pub fn spawn_tournament_forfeit_watcher(state: Arc<AppState>) {
 
 async fn run_tick(
     state: &Arc<AppState>,
-    mut offline_since: HashMap<(u64, String), Instant>,
+    offline_since: HashMap<(u64, String), Instant>,
 ) -> HashMap<(u64, String), Instant> {
     let online_node_ids: HashSet<String> = state
         .presence
@@ -68,6 +83,72 @@ async fn run_tick(
         if t.status != TournamentStatus::Active {
             continue;
         }
+
+        // ── Single-elimination ────────────────────────────────────────────
+        if t.format == TournamentFormat::SingleElimination {
+            let Some(round) = t.current_round() else {
+                continue;
+            };
+            for m in t.matches.iter().flatten() {
+                if m.round != round || m.status == MatchStatus::Completed {
+                    continue;
+                }
+                let (Some(white), Some(black)) = (m.player_white.clone(), m.player_black.clone())
+                else {
+                    continue; // opponent not decided yet — nothing to forfeit
+                };
+
+                for (player_id, opponent) in [(&white, &black), (&black, &white)] {
+                    let is_online = t
+                        .node_ids
+                        .get(player_id)
+                        .map(|node_id| online_node_ids.contains(node_id))
+                        .unwrap_or(false);
+                    if is_online {
+                        continue;
+                    }
+
+                    let key = (t.tournament_id, player_id.clone());
+                    let since = offline_since
+                        .get(&key)
+                        .copied()
+                        .unwrap_or_else(Instant::now);
+
+                    if since.elapsed() < FORFEIT_GRACE {
+                        still_offline.insert(key, since);
+                        continue;
+                    }
+
+                    // Both offline? Forfeit only one per tick — awarding the
+                    // match to a player who is also gone would advance a
+                    // no-show and stall the *next* round instead. The
+                    // opponent gets the same treatment on a later tick if
+                    // they're still absent when they're due to play.
+                    info!(
+                        "[tournament-forfeit] auto-forfeiting {} in single-elim tournament {} \
+                         match {} round {} (offline {}s) — awarding to {}",
+                        player_id,
+                        t.tournament_id,
+                        m.match_index,
+                        round,
+                        since.elapsed().as_secs(),
+                        opponent
+                    );
+                    forfeit_single_elim_match(
+                        state,
+                        t.tournament_id,
+                        m.match_index as usize,
+                        opponent,
+                        player_id,
+                    )
+                    .await;
+                    break; // this match is resolved; don't also forfeit the opponent
+                }
+            }
+            continue;
+        }
+
+        // ── Swiss ─────────────────────────────────────────────────────────
         let Some(sd) = t.swiss_data.as_ref() else {
             continue;
         };
@@ -101,7 +182,10 @@ async fn run_tick(
                 }
 
                 let key = (t.tournament_id, player_id.clone());
-                let since = offline_since.get(&key).copied().unwrap_or_else(Instant::now);
+                let since = offline_since
+                    .get(&key)
+                    .copied()
+                    .unwrap_or_else(Instant::now);
 
                 if since.elapsed() >= FORFEIT_GRACE {
                     info!(
@@ -133,4 +217,88 @@ async fn run_tick(
     }
 
     still_offline
+}
+
+/// Records a single-elimination forfeit in the store and mirrors it on-chain.
+///
+/// Mirrors `routes::tournament::record_result` — the store write is what
+/// unblocks the bracket (it advances the winner and assigns the next match's
+/// game ID), and the on-chain calls are best-effort so a transient RPC failure
+/// can't leave the tournament stuck off-chain. The reconciliation job is what
+/// heals any divergence.
+async fn forfeit_single_elim_match(
+    state: &Arc<AppState>,
+    tournament_id: u64,
+    match_index: usize,
+    winner: &str,
+    loser: &str,
+) {
+    let store = &state.tournament_store;
+    if !store
+        .record_result(
+            tournament_id,
+            match_index,
+            winner.to_string(),
+            loser.to_string(),
+        )
+        .await
+    {
+        warn!(
+            "[tournament-forfeit] record_result failed for match {} of tournament {}",
+            match_index, tournament_id
+        );
+        return;
+    }
+
+    let (Ok(program_id), Ok(winner_pk), Ok(loser_pk)) = (
+        Pubkey::from_str(&state.config.program_id),
+        Pubkey::from_str(winner),
+        Pubkey::from_str(loser),
+    ) else {
+        // Bot/test wallets aren't real pubkeys; the store result still stands.
+        return;
+    };
+
+    let authority = state.vps_authority.clone();
+    let rpc_url = state.config.solana_rpc_url.clone();
+    let next = store.get(tournament_id).await.and_then(|t| {
+        t.matches
+            .get(match_index)
+            .and_then(|m| m.as_ref())
+            .and_then(|m| m.next_match_for_winner)
+    });
+
+    let submitted = tokio::task::spawn_blocking(move || {
+        let rpc = crate::signing::solana::make_rpc(&rpc_url);
+        let ix = record_result_ix(
+            &program_id,
+            tournament_id,
+            match_index as u16,
+            &winner_pk,
+            &loser_pk,
+            &authority.pubkey(),
+        );
+        sign_and_submit(&rpc, &authority, &[ix]).map_err(|e| e.to_string())?;
+        if let Some(next_idx) = next {
+            let ix = crate::signing::solana::advance_winner_ix(
+                &program_id,
+                tournament_id,
+                match_index as u16,
+                next_idx,
+                &authority.pubkey(),
+            );
+            sign_and_submit(&rpc, &authority, &[ix]).map_err(|e| e.to_string())?;
+        }
+        Ok::<(), String>(())
+    })
+    .await;
+
+    match submitted {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => error!(
+            "[tournament-forfeit] on-chain mirror failed for match {} of tournament {}: {e}",
+            match_index, tournament_id
+        ),
+        Err(e) => error!("[tournament-forfeit] on-chain mirror task panicked: {e}"),
+    }
 }

@@ -15,6 +15,7 @@ use crate::state::Game;
 /// crank (`crank_ix/crank_time_check.rs` via `finish_by_timeout_if_expired`)
 /// — see docs/PRE_MAINNET_E2E_PLAN.md §1.3 on keeping those two in sync.
 pub const TIMED_GAME_INACTIVITY_WINDOW_SECONDS: i64 = 90;
+pub const ZERO_MOVE_REFUND_WINDOW_SECONDS: i64 = 90;
 const UNTIMED_GAME_INACTIVITY_WINDOW_SECONDS: i64 = 86_400;
 
 pub fn inactivity_window_seconds(game: &Game) -> i64 {

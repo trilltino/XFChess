@@ -132,8 +132,8 @@ fn probe_delegated(label: &str, url: &str, program_id: &str, game_pda: &str) {
 fn main() {
     let router = std::env::var("MAGIC_ROUTER_RPC_URL")
         .unwrap_or_else(|_| "https://devnet-router.magicblock.app".into());
-    let er = std::env::var("ER_RPC_URL")
-        .unwrap_or_else(|_| "https://devnet-eu.magicblock.app/".into());
+    let er =
+        std::env::var("ER_RPC_URL").unwrap_or_else(|_| "https://devnet-eu.magicblock.app/".into());
     let program = std::env::var("PROGRAM_ID")
         .unwrap_or_else(|_| "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into());
     // Game 16792328953888037348 from the 15:42 live run — delegated and never

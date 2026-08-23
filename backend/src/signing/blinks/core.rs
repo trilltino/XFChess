@@ -176,7 +176,10 @@ pub async fn build_register_transaction(
     )?;
 
     let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
-    let blockhash = rpc.get_latest_blockhash()?;
+    // Finalized: a blink is signed in the user's own wallet, which will only
+    // accept it if it can find the blockhash on its selected cluster — see
+    // `solana::wallet_signable_blockhash`.
+    let blockhash = solana::wallet_signable_blockhash(&rpc)?;
 
     use solana_sdk::{message::Message, transaction::Transaction};
     let message = Message::new(&[instruction], Some(&fee_payer.pubkey()));
@@ -229,7 +232,10 @@ pub async fn build_claim_prize_transaction(
     let instruction = claim_prize_ix(program_id, tournament_id, claimant);
 
     let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
-    let blockhash = rpc.get_latest_blockhash()?;
+    // Finalized: a blink is signed in the user's own wallet, which will only
+    // accept it if it can find the blockhash on its selected cluster — see
+    // `solana::wallet_signable_blockhash`.
+    let blockhash = solana::wallet_signable_blockhash(&rpc)?;
 
     use solana_sdk::{message::Message, transaction::Transaction};
     let message = Message::new(&[instruction], Some(&fee_payer.pubkey()));
@@ -264,7 +270,15 @@ pub async fn build_start_tournament_transactions(
         .await
         .ok_or_else(|| anyhow::anyhow!("Tournament {} not found", tournament_id))?;
 
-    let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
+    // One blockhash for the whole batch, fetched once on the blocking pool.
+    // This previously called the synchronous `get_latest_blockhash` once per
+    // transaction from an async fn — for a 256-player bracket that is 14 blocking
+    // round-trips holding a Tokio worker, and every transaction is broadcast
+    // together anyway, so they may as well share a blockhash.
+    let bh = tokio::task::spawn_blocking(|| {
+        solana::make_rpc(&solana::rpc_url_or_devnet()).get_latest_blockhash()
+    })
+    .await??;
     let mut out = Vec::new();
 
     // Tx 1: start_tournament
@@ -276,7 +290,6 @@ pub async fn build_start_tournament_transactions(
             &authority.pubkey(),
             host_treasury,
         );
-        let bh = rpc.get_latest_blockhash()?;
         use solana_sdk::{message::Message, transaction::Transaction};
         let msg = Message::new(&[ix], Some(&authority.pubkey()));
         let tx = Transaction::new(&[authority], msg, bh);
@@ -319,7 +332,6 @@ pub async fn build_start_tournament_transactions(
             })
             .collect();
 
-        let bh = rpc.get_latest_blockhash()?;
         use solana_sdk::{message::Message, transaction::Transaction};
         let msg = Message::new(&ixs, Some(&authority.pubkey()));
         let tx = Transaction::new(&[authority], msg, bh);
@@ -345,8 +357,13 @@ pub async fn check_wallet_balance(
         .await
         .ok_or_else(|| anyhow::anyhow!("Tournament {} not found", tournament_id))?;
 
-    let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
-    let balance = rpc.get_balance(wallet_pubkey)?;
+    // Synchronous client: read on the blocking pool so a slow endpoint cannot
+    // pin an async worker for the client's full 30 s timeout.
+    let wallet = *wallet_pubkey;
+    let balance = tokio::task::spawn_blocking(move || {
+        solana::make_rpc(&solana::rpc_url_or_devnet()).get_balance(&wallet)
+    })
+    .await??;
 
     let required = tournament.entry_fee_lamports + 5000; // Entry fee + buffer
     let sufficient = balance >= required;

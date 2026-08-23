@@ -35,6 +35,7 @@
 
 pub mod anticheat_enqueue;
 pub mod auth;
+pub mod auth_ws;
 pub mod blinks;
 pub mod config;
 pub mod elo_cache;
@@ -43,6 +44,7 @@ pub mod game_pgn;
 pub mod identity;
 pub mod linkage;
 pub mod p2p_relay;
+pub mod privy;
 pub mod routes;
 pub mod social;
 pub mod solana;
@@ -50,7 +52,6 @@ pub mod storage;
 pub mod swiss;
 pub mod tournament_gossip;
 pub mod ws_subscriber;
-pub mod auth_ws;
 
 use crate::signing::auth_ws::handle_auth_websocket;
 use axum::routing::get;
@@ -267,8 +268,8 @@ impl AppState {
         ));
         // Not loaded via `resolve_authority` — no secret key involved. See
         // `treasury_authority_pubkey`'s field doc.
-        let treasury_authority_pubkey =
-            Pubkey::from_str(&config.treasury_authority_pubkey).unwrap_or_else(|e| {
+        let treasury_authority_pubkey = Pubkey::from_str(&config.treasury_authority_pubkey)
+            .unwrap_or_else(|e| {
                 panic!(
                     "Invalid treasury_authority_pubkey in config ({}): {e} — \
                      this should have been caught by SigningConfig::validate()",
@@ -371,6 +372,68 @@ impl AppState {
         }
     }
 
+    /// Periodically evicts entries from the in-memory maps that would otherwise
+    /// grow without bound for the lifetime of the process.
+    ///
+    /// Three maps needed this and had no sweep, while every comparable map in
+    /// the codebase already did (`lichess_oauth`'s PKCE store, the lobby-invite
+    /// store, the presence map, the P2P relay state) — so this was an omission
+    /// rather than a policy:
+    ///
+    /// * `siws_nonces` — inserted on every unauthenticated `/auth/siws-challenge`
+    ///   call and removed only when that exact nonce is later verified. Expiry
+    ///   was checked but never collected, making it an unauthenticated
+    ///   memory-exhaustion vector.
+    /// * `er_write_locks` — one entry per `game_id` ever seen, kept forever.
+    /// * `active_global_sessions` — sessions whose on-chain delegation has
+    ///   already expired stay usable in memory indefinitely.
+    pub fn spawn_state_sweeps(state: AppState) {
+        const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(SWEEP_INTERVAL);
+            interval.tick().await; // skip the immediate first tick
+            loop {
+                interval.tick().await;
+
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                {
+                    let mut nonces = state.siws_nonces.lock().await;
+                    let before = nonces.len();
+                    nonces.retain(|_, (_, expires_at)| *expires_at > now);
+                    let dropped = before.saturating_sub(nonces.len());
+                    if dropped > 0 {
+                        tracing::debug!(
+                            "[sweep] dropped {dropped} expired SIWS nonces ({} live)",
+                            nonces.len()
+                        );
+                    }
+                }
+
+                // A per-game lock is only worth keeping while something might
+                // still contend for it. `Arc::strong_count == 1` means the map
+                // holds the only reference, so no request or worker is inside
+                // the critical section and dropping it cannot orphan a waiter.
+                {
+                    let mut locks = state.er_write_locks.lock().await;
+                    let before = locks.len();
+                    locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+                    let dropped = before.saturating_sub(locks.len());
+                    if dropped > 0 {
+                        tracing::debug!(
+                            "[sweep] released {dropped} idle ER game locks ({} live)",
+                            locks.len()
+                        );
+                    }
+                }
+            }
+        });
+    }
+
     /// Initialize gossip service with VPS node ID (called after P2P node starts)
     /// Note: node_id is a string representation of the iroh endpoint ID
     pub async fn init_gossip(&self, vps_node_id: String) {
@@ -430,19 +493,27 @@ pub fn build_router(state: AppState) -> Router<AppState> {
         )
         // WebSocket route for authentication sync
         .route("/ws/auth", get(handle_auth_websocket))
-        // Global persistent session delegation — all public. `prepare`/`activate`
-        // used to require an admin API key, which meant no ordinary player's
-        // client could ever call them; security here comes from the chain
-        // itself (`activate` only succeeds with a validly wallet-signed tx),
-        // the same trust model the per-game `/session/create`+`/session/activate`
-        // routes already use.
+        // Global persistent session delegation. The read-only `verify` probe is
+        // public; everything that mutates a wallet's session key sits behind the
+        // same dual-accept guard as the per-game session routes, and each of
+        // those handlers additionally requires a JWT proving control of the
+        // wallet it acts on (`RequireWallet`).
+        //
+        // This nest previously had no middleware at all despite the router being
+        // named "protected", which left `track-game` and `revoke` reachable by
+        // anyone — see `routes::global_session`'s module docs.
         .nest(
             "/api/global-session",
             crate::signing::routes::global_session::global_session_public_routes(),
         )
         .nest(
             "/api/global-session",
-            crate::signing::routes::global_session::global_session_protected_routes(),
+            crate::signing::routes::global_session::global_session_protected_routes().layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    crate::infrastructure::require_relay_or_jwt,
+                ),
+            ),
         )
         // Anti-cheat verdict + player stats queries
         .nest(

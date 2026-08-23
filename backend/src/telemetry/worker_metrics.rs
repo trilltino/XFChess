@@ -121,6 +121,17 @@ pub static PRIZE_DISTRIBUTION_AWAITING_APPROVAL_TOTAL: AtomicU64 = AtomicU64::ne
 /// alert, not routine traffic noise.
 pub static AUTH_UNCONFIGURED_RELAY_REJECTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
+/// `/session/create` calls refused by the per-wallet funding guard — either the
+/// sliding-window rate limit or the unactivated-session cap. Every one of these
+/// is a fee-payer drain attempt that was stopped, so a sustained nonzero rate is
+/// worth alerting on rather than filtering out as noise.
+pub static SESSION_CREATE_THROTTLED_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+/// Sponsored on-chain profile creations refused because the global daily
+/// lamport budget was already spent. Each sponsorship transfers real rent to a
+/// caller-controlled wallet, so this is the backstop on that faucet.
+pub static SPONSORSHIP_BUDGET_EXHAUSTED_TOTAL: AtomicU64 = AtomicU64::new(0);
+
 // ── Exchange rates (RateCache) ──────────────────────────────────────────────
 /// Both the primary and secondary rate sources failed on the same refresh —
 /// only stale cache (or nothing) was available.
@@ -248,7 +259,13 @@ pub fn render_prometheus() -> String {
          xfchess_auth_unconfigured_relay_rejected_total {}\n\
          # HELP xfchess_prize_distribution_awaiting_approval_total Distribution ticks deferred for a large prize pool awaiting manual admin approval\n\
          # TYPE xfchess_prize_distribution_awaiting_approval_total counter\n\
-         xfchess_prize_distribution_awaiting_approval_total {}\n",
+         xfchess_prize_distribution_awaiting_approval_total {}\n\
+         # HELP xfchess_session_create_throttled_total /session/create calls refused by the per-wallet fee-payer funding guard\n\
+         # TYPE xfchess_session_create_throttled_total counter\n\
+         xfchess_session_create_throttled_total {}\n\
+         # HELP xfchess_sponsorship_budget_exhausted_total Sponsored profile creations refused because the daily lamport budget was spent\n\
+         # TYPE xfchess_sponsorship_budget_exhausted_total counter\n\
+         xfchess_sponsorship_budget_exhausted_total {}\n",
         c(&SETTLEMENT_TICKS_TOTAL),
         c(&SETTLEMENT_TICK_MILLIS),
         c(&SETTLEMENT_GAMES_SCANNED_TOTAL),
@@ -287,5 +304,7 @@ pub fn render_prometheus() -> String {
         c(&RATES_SOURCE_DIVERGENCE_TOTAL),
         c(&AUTH_UNCONFIGURED_RELAY_REJECTED_TOTAL),
         c(&PRIZE_DISTRIBUTION_AWAITING_APPROVAL_TOTAL),
+        c(&SESSION_CREATE_THROTTLED_TOTAL),
+        c(&SPONSORSHIP_BUDGET_EXHAUSTED_TOTAL),
     )
 }

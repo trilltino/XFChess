@@ -251,10 +251,17 @@ async fn check_database(state: &AppState) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+// Both checks below run their RPC call on a blocking thread. They are reached
+// from `/health/detailed`, which is unauthenticated: called directly on the
+// async runtime, each one parks a Tokio worker for up to the 30s RPC timeout,
+// so a handful of concurrent health probes could stall every other request the
+// server was serving — including `/health` itself. They also reuse the shared
+// `RpcClient` rather than building one (and a fresh TLS handshake) per call.
+
 async fn check_solana_rpc(state: &AppState) -> Result<u64, Box<dyn std::error::Error>> {
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let rpc = std::sync::Arc::clone(&state.solana_rpc);
     let started = std::time::Instant::now();
-    let result = rpc.get_slot();
+    let result = tokio::task::spawn_blocking(move || rpc.get_slot()).await?;
     state.metrics.record_solana_rpc_call(
         "getSlot",
         result.is_ok(),
@@ -265,11 +272,21 @@ async fn check_solana_rpc(state: &AppState) -> Result<u64, Box<dyn std::error::E
 }
 
 async fn check_feepayer_pool(state: &AppState) -> (Option<String>, String) {
-    // Get a fee payer and check its balance
-    let fee_payer = state.feepayer.next();
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let fee_payer_pubkey = state.feepayer.next().pubkey();
+    let rpc = std::sync::Arc::clone(&state.solana_rpc);
 
-    match rpc.get_balance(&fee_payer.pubkey()) {
+    let balance = tokio::task::spawn_blocking(move || rpc.get_balance(&fee_payer_pubkey)).await;
+    let balance = match balance {
+        Ok(inner) => inner,
+        Err(e) => {
+            return (
+                Some(format!("Balance check task failed: {e}")),
+                "error".to_string(),
+            )
+        }
+    };
+
+    match balance {
         Ok(balance) => {
             // key_index 0: the pool round-robins and doesn't expose which slot
             // `.next()` picked, so this gauge tracks "whichever fee payer we

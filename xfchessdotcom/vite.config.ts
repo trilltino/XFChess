@@ -39,4 +39,17 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['xfchess-wasm'],
   },
+  // NOTE: deliberately no `advancedChunks` group for Privy.
+  //
+  // The Privy SDK is ~3.8 MB raw / ~1.1 MB gzip — on its own, five times the
+  // weight of the entire rest of this app. It is therefore loaded via dynamic
+  // import (see src/privy/privyRuntime.ts), which rolldown already splits into
+  // its own lazily-fetched chunk.
+  //
+  // An earlier attempt added `advancedChunks: { groups: [{ name: 'privy', ... }] }`
+  // to "isolate" it. That was actively harmful: forcing those modules into one
+  // named chunk pulls the chunk into the entry graph, so it loaded eagerly again
+  // and the dynamic import bought nothing. Verified by inspecting the script
+  // tags rolldown emits into dist/index.html — check there, not the chunk list,
+  // when reasoning about what actually loads on first paint.
 })

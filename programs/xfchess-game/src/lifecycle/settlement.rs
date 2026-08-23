@@ -3,6 +3,7 @@
 use crate::common::escrow;
 use crate::constants::*;
 use crate::elo::glicko2::calculate_elo_update;
+use crate::elo::rating::{bucket_for_time_control, rating_field_mut};
 use crate::errors::GameErrorCode;
 use crate::game_ix::finalize::EndGame;
 use crate::lifecycle::guards;
@@ -159,6 +160,51 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
     update_profiles(ctx, result, game_white, wager_amount, match_type)
 }
 
+/// Finalizes a cancelled game by refunding each joined player's original SOL
+/// wager and closing the game account. No treasury reimbursement, ELO, or
+/// win/loss stats are applied because no game result exists.
+pub fn settle_cancelled_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
+    {
+        let game = &ctx.accounts.game;
+        require!(
+            game.status == GameStatus::Cancelled,
+            GameErrorCode::InvalidGameStatus
+        );
+        guards::require_undelegated(game)?;
+        require!(
+            game.result == GameResult::None,
+            GameErrorCode::InvalidGameStatus
+        );
+    }
+
+    let wager_amount = ctx.accounts.game.wager_amount;
+    if wager_amount > 0 && ctx.accounts.game.wager_token.is_none() {
+        let bump = ctx.bumps.escrow_pda;
+        let sp = &ctx.accounts.system_program;
+        let escrow = &ctx.accounts.escrow_pda;
+
+        escrow::pay_from_game_escrow(
+            sp,
+            escrow,
+            ctx.accounts.white_authority.as_ref(),
+            wager_amount,
+            game_id,
+            bump,
+        )?;
+        escrow::pay_from_game_escrow(
+            sp,
+            escrow,
+            ctx.accounts.black_authority.as_ref(),
+            wager_amount,
+            game_id,
+            bump,
+        )?;
+    }
+
+    ctx.accounts.game.status = GameStatus::Settled;
+    Ok(())
+}
+
 fn update_profiles(
     ctx: Context<EndGame>,
     result: GameResult,
@@ -167,6 +213,7 @@ fn update_profiles(
     match_type: MatchType,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
+    let bucket = bucket_for_time_control(ctx.accounts.game.base_time_seconds);
     let white_profile = &mut ctx.accounts.white_profile;
     let black_profile = &mut ctx.accounts.black_profile;
 
@@ -190,10 +237,11 @@ fn update_profiles(
             }
             _ => 0.5,
         };
-        let (new_w, new_b) =
-            calculate_elo_update(white_profile.elo_rating, black_profile.elo_rating, sa);
-        white_profile.elo_rating = new_w;
-        black_profile.elo_rating = new_b;
+        let white_before = *rating_field_mut(white_profile, bucket);
+        let black_before = *rating_field_mut(black_profile, bucket);
+        let (new_w, new_b) = calculate_elo_update(white_before, black_before, sa);
+        *rating_field_mut(white_profile, bucket) = new_w;
+        *rating_field_mut(black_profile, bucket) = new_b;
         white_profile.last_played = now;
         black_profile.last_played = now;
 

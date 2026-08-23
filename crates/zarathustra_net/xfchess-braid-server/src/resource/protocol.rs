@@ -70,6 +70,17 @@ impl From<&BraidUpdate> for Update {
     fn from(update: &BraidUpdate) -> Self {
         let body = serde_json::to_string(&update.body).unwrap_or_else(|_| "null".to_string());
 
+        // Both shapes travel as a body, so the media type is the only thing
+        // that says which one this is: a full document, or the RFC 6902 patch
+        // document that transforms the previous version into this one. A
+        // receiver that ignores it and parses every body as the resource will
+        // silently mistake a patch for the state.
+        let content_type = if update.is_snapshot {
+            "application/json"
+        } else {
+            "application/json-patch+json"
+        };
+
         Update::snapshot(WireVersion::new(update.version.to_string()), body)
             .with_parents(
                 update
@@ -78,7 +89,7 @@ impl From<&BraidUpdate> for Update {
                     .map(|p| WireVersion::new(p.to_string()))
                     .collect(),
             )
-            .with_content_type("application/json")
+            .with_content_type(content_type)
     }
 }
 
@@ -98,6 +109,33 @@ pub fn format_chunk(update: &BraidUpdate) -> bytes::Bytes {
 /// conformant parser absorbs without producing an update.
 pub fn format_heartbeat() -> bytes::Bytes {
     formatter::format_heartbeat()
+}
+
+/// Encode one update for a gossip transport, tagged with its resource path.
+///
+/// # Why this is not [`format_chunk`]
+///
+/// The `209` framing that `format_chunk` emits carries no resource identity —
+/// over HTTP the request line already said which resource this is. Gossip has
+/// no request: a peer receives bytes on a topic that may carry updates for
+/// several resources, so the path has to travel *with* the update. [`Update`]
+/// has a `url` field for exactly this, and it survives a JSON round-trip,
+/// which the header framing does not.
+///
+/// This is the same convention `braid_iroh::SubscriptionManager::broadcast`
+/// already uses (a JSON-serialized [`Update`]) — the only addition is that
+/// `url` is populated, so a receiver can tell standings from pairings.
+pub fn encode_for_gossip(path: &str, update: &BraidUpdate) -> Option<Vec<u8>> {
+    let mut wire = Update::from(update);
+    wire.url = Some(path.to_string());
+    serde_json::to_vec(&wire)
+        .inspect_err(|e| {
+            tracing::error!(
+                "[braid] could not encode update v{} for gossip: {e}",
+                update.version
+            )
+        })
+        .ok()
 }
 
 #[cfg(test)]

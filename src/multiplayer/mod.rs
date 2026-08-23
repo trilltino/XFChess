@@ -100,33 +100,32 @@ impl Plugin for MultiplayerPlugin {
         ));
 
         // 3. Register core orchestration systems
-        app.add_systems(Startup, systems::initialize_braid_network)
-            .add_systems(
-                Update,
-                (
-                    systems::handle_network_events,
-                    systems::sweep_stale_move_buffers,
-                    systems::dispatch_remote_moves,
-                    systems::handle_resync_response,
-                    systems::handle_resync_request,
-                    systems::handle_game_control_messages,
-                    systems::send_local_draw_events,
-                    // Gated to InGame: `game_mode` alone doesn't reset on
-                    // leaving a match, so an ungated heartbeat kept ticking
-                    // in the background after returning to the menu and
-                    // could still time out there, forcing a bogus
-                    // MainMenu -> GameOver transition (stale "Game Aborted"
-                    // popup surfacing outside the game).
-                    systems::tick_heartbeat
-                        .run_if(in_state(crate::core::states::GameState::InGame)),
-                    systems::handle_pong,
-                    systems::record_casual_game_on_end,
-                ),
-            )
-            .add_systems(
-                OnExit(crate::core::states::GameState::InGame),
-                systems::reset_multiplayer_session_state,
-            );
+        app.add_systems(
+            Update,
+            (
+                systems::initialize_braid_network,
+                systems::handle_network_events,
+                systems::sweep_stale_move_buffers,
+                systems::dispatch_remote_moves,
+                systems::handle_resync_response,
+                systems::handle_resync_request,
+                systems::handle_game_control_messages,
+                systems::send_local_draw_events,
+                // Gated to InGame: `game_mode` alone doesn't reset on
+                // leaving a match, so an ungated heartbeat kept ticking
+                // in the background after returning to the menu and
+                // could still time out there, forcing a bogus
+                // MainMenu -> GameOver transition (stale "Game Aborted"
+                // popup surfacing outside the game).
+                systems::tick_heartbeat.run_if(in_state(crate::core::states::GameState::InGame)),
+                systems::handle_pong,
+                systems::record_casual_game_on_end,
+            ),
+        )
+        .add_systems(
+            OnExit(crate::core::states::GameState::InGame),
+            systems::reset_multiplayer_session_state,
+        );
 
         // 4. Register feature-specific cross-cutting systems
         #[cfg(feature = "solana")]

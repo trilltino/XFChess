@@ -1,0 +1,10 @@
+{
+  "identifier": "admin-tunnel",
+  "description": "Grants the tournament-admin window the app-level commands that own the PRODUCTION SSH tunnel (ensure_admin_tunnel / kill_admin_tunnel). Scoped to this one window; no other webview can start or stop a tunnel.",
+  "windows": ["tournament-admin"],
+  "local": true,
+  "remote": {
+    "urls": ["http://localhost:*/*"]
+  },
+  "permissions": ["allow-admin-tunnel"]
+}

@@ -319,6 +319,16 @@ pub enum GameErrorCode {
     NoDrawOfferPending, // accept_draw called with game.draw_offered_by == None
     #[msg("You cannot accept your own draw offer.")]
     CannotAcceptOwnDrawOffer, // the offering player tried to call accept_draw
+
+    // ── Session vault funding ─────────────────────────────────────────────────
+    //
+    // NOTE: new variants MUST be appended here at the end. Anchor derives error
+    // codes from declaration order (6000 + index), so inserting one mid-enum
+    // silently renumbers every variant after it — and both this codebase and
+    // its clients refer to codes numerically (e.g. the InsufficientFunds 6060
+    // writeup in the global-session notes).
+    #[msg("Session vault balance is too low to cover this game's rent and wager. Top it up by re-authorizing the session with a larger deposit.")]
+    GlobalSessionVaultUnderfunded,
 }
 
 // Alias so the rest of the codebase can use either name.

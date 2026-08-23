@@ -78,33 +78,15 @@ pub async fn join(
         )
     })?;
 
-    // Determine effective ELO for matchmaking.
-    // If the player was seeded from external and has a linked Lichess account,
-    // the on-chain elo_rating already reflects that seed. For brand-new players
-    // whose on-chain profile may not have synced yet, fall back to the backend DB.
-    let mut effective_elo = cached_elo.elo_rating;
-    if cached_elo.seeded_from_external {
-        info!(
-            "[Matchmaking] Player {} using externally-seeded ELO {}",
-            req.pubkey, cached_elo.elo_rating
-        );
-    } else if effective_elo == 120000.0 {
-        // Still at default — check backend DB for a pending link
-        let pool = app_state.store.pool();
-        if let Ok(row) = sqlx::query_as::<_, (i64, i64, i64)>(
-            "SELECT blitz_rating, rapid_rating, bullet_rating FROM external_elo_links WHERE pubkey = ? AND platform = 'lichess'"
-        )
-        .bind(&req.pubkey)
-        .fetch_one(&pool)
-        .await {
-            let (blitz, rapid, bullet) = row;
-            let best = [blitz, rapid, bullet].iter().copied().max().unwrap_or(0) as f64;
-            if best > 0.0 {
-                effective_elo = best * 100.0; // Convert to centiscale
-                info!("[Matchmaking] Player {} using backend Lichess ELO {} (on-chain still default)", req.pubkey, best);
-            }
-        }
-    }
+    // Effective ELO for matchmaking. This is the Classical/default bucket —
+    // the queue doesn't yet partition by time control (see `JoinRequest`),
+    // so it can't select `elo_bullet`/`elo_blitz`/`elo_rapid` per the
+    // requested game's pace; that's a follow-up to wire through once
+    // matchmaking itself becomes time-control-aware. Lichess ratings are no
+    // longer consulted here at all — `link_external_elo` no longer seeds
+    // `elo_rating`, so a Lichess-only fallback would just be stale/unrelated
+    // data standing in for a real (if still-default) XFChess rating.
+    let effective_elo = cached_elo.elo_rating;
 
     let ticket = MatchmakingTicket {
         pubkey: req.pubkey.clone(),

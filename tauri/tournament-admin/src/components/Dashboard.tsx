@@ -224,19 +224,19 @@ export default function Dashboard() {
     <div style={{ padding: "1.5rem", height: "100%", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       {fpLow && (
         <div style={{ padding: "0.75rem 1.25rem", backgroundColor: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: "12px", color: "#f87171", fontSize: "12px", fontWeight: "700" }}>
-          ⚠ FEEPAYER LOW — {wallets?.feepayer?.balance_sol} (threshold: {feepayerThreshold} SOL). TOP UP REQUIRED.
+          FEEPAYER LOW — {wallets?.feepayer?.balance_sol} (threshold: {feepayerThreshold} SOL). TOP UP REQUIRED.
         </div>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "1.25rem" }}>
-        <MetricCard label="PLAYERS IN GAME"   value={onlineCount}      icon="🎮" color="var(--primary)" />
-        <MetricCard label="GAMES IN PROGRESS" value={gamesInProgress}  icon="♟️" color="#3b82f6" />
-        <MetricCard label="CONFIRMED TXS"     value={txConfirmed}      icon="⛓️" color="var(--accent)" />
-        <MetricCard label="TREASURY"          value={wallets?.treasury?.balance_sol || "0.00 SOL"} icon="💰" color="#4ade80" />
+        <MetricCard label="PLAYERS IN GAME"   value={onlineCount}      icon="" color="var(--primary)" />
+        <MetricCard label="GAMES IN PROGRESS" value={gamesInProgress}  icon="" color="#3b82f6" />
+        <MetricCard label="CONFIRMED TXS"     value={txConfirmed}      icon="" color="var(--accent)" />
+        <MetricCard label="TREASURY"          value={wallets?.treasury?.balance_sol || "0.00 SOL"} icon="" color="#4ade80" />
         <MetricCard
           label="ER HEALTH"
           value={erStaleCount > 0 ? `${erStaleCount} STUCK` : erConnected ? "LIVE" : "POLL-ONLY"}
-          icon="🔗"
+          icon=""
           color={erStaleCount > 0 ? "#ef4444" : erConnected ? "#4ade80" : "#fbbf24"}
         />
       </div>
@@ -316,7 +316,7 @@ export default function Dashboard() {
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                               <span style={{ color: "#fff", fontWeight: "bold", fontSize: "16px" }}>Game #{r.game_id}</span>
                               <span style={{ backgroundColor: r.verdict === "Flag" ? "#ef4444" : "#f59e0b", color: "#fff", padding: "2px 8px", borderRadius: "100px", fontSize: "10px", fontWeight: "bold" }}>{r.verdict.toUpperCase()}</span>
-                              {stale && <span style={{ backgroundColor: "rgba(251,191,36,0.2)", color: "#fbbf24", padding: "2px 8px", borderRadius: "100px", fontSize: "10px", fontWeight: "bold" }}>⚠ {openHrs}H OLD</span>}
+                              {stale && <span style={{ backgroundColor: "rgba(251,191,36,0.2)", color: "#fbbf24", padding: "2px 8px", borderRadius: "100px", fontSize: "10px", fontWeight: "bold" }}>{openHrs}H OLD</span>}
                             </div>
                             <div style={{ color: "var(--text-dim)", fontSize: "12px", marginTop: "4px" }}>
                               Wager: <span style={{ color: "#4ade80" }}>{r.wager}</span> · Status: {r.status}
@@ -441,7 +441,7 @@ export default function Dashboard() {
             <h3 style={{ color: "var(--primary)", margin: 0, fontSize: "12px", letterSpacing: "2px", fontWeight: "800" }}>OPERATIONS</h3>
             <button onClick={runDeployment} disabled={deploying} className="primary"
               style={{ width: "100%", padding: "1rem", borderRadius: "100px", fontSize: "13px", boxShadow: "0 4px 15px rgba(173,92,47,0.3)" }}>
-              {deploying ? "ROLLING OUT…" : "🚀 ROLLOUT UPDATE"}
+              {deploying ? "ROLLING OUT…" : "ROLLOUT UPDATE"}
             </button>
             <div>
               <div style={{ fontSize: "10px", color: "var(--text-dim)", letterSpacing: "1px" }}>SERVER HEALTH</div>

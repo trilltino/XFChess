@@ -43,6 +43,18 @@ pub struct SolanaIntegrationState {
     /// of silently racing into the per-game wallet-popup fallback path just
     /// because the one-time setup hasn't resolved yet this frame.
     pub global_session_setup_in_progress: bool,
+    /// True when the connected wallet is a Privy embedded wallet rather than a
+    /// browser extension. Synced from the Tauri bridge's `/status` by
+    /// `sync_bridge_pubkey_to_solana` (main_menu.rs).
+    ///
+    /// Gates `authorize_global_session_if_needed`: the no-popup flow runs only
+    /// for embedded wallets, because its one unresolved blocker — a Solflare
+    /// "network mismatch: current network devnet, but this transaction is for
+    /// mainnet" rejection arriving with no user action — is an artifact of an
+    /// extension carrying its own user-selected cluster, which an embedded
+    /// wallet does not have. Defaults to `false`, so anything unknown takes the
+    /// proven per-game signing path.
+    pub wallet_is_embedded: bool,
     /// Set once `authorize_global_session_if_needed` permanently gives up on
     /// this wallet for the run (see `MAX_ATTEMPTS`). `Some(reason)` means
     /// every game this session will use per-game wallet signing instead of
@@ -121,6 +133,9 @@ impl Default for SolanaIntegrationState {
             global_session_keypair: None,
             global_session_active: false,
             global_session_setup_in_progress: false,
+            // Conservative default: unknown wallets take the per-game signing
+            // path until the bridge confirms an embedded wallet.
+            wallet_is_embedded: false,
             global_session_unavailable_reason: None,
             rpc_client: None,
             balance: 0.0,

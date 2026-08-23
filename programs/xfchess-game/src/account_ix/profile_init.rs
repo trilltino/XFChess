@@ -30,8 +30,23 @@ pub fn load_or_new_profile(data: &[u8], player: Pubkey, now: i64) -> Result<Play
     if profile.created_at == 0 {
         profile.created_at = now;
     }
+    // All four rating buckets start at the same default so the profile UI
+    // has something sane to show before the player's picked a game mode —
+    // `lifecycle::settlement::rating_field_mut` also lazily seeds a bucket on
+    // first touch, but doing it here too means a brand-new profile never
+    // shows a bare 0.0 for a mode it hasn't played yet.
+    let initial_elo = crate::elo::rating::INITIAL_ELO_CENTISCALE as f64;
     if profile.elo_rating == 0.0 {
-        profile.elo_rating = crate::elo::rating::INITIAL_ELO_CENTISCALE as f64;
+        profile.elo_rating = initial_elo;
+    }
+    if profile.elo_bullet == 0.0 {
+        profile.elo_bullet = initial_elo;
+    }
+    if profile.elo_blitz == 0.0 {
+        profile.elo_blitz = initial_elo;
+    }
+    if profile.elo_rapid == 0.0 {
+        profile.elo_rapid = initial_elo;
     }
 
     Ok(profile)

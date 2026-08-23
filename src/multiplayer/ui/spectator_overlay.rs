@@ -5,10 +5,14 @@
 //! - Live white/black clocks (interpolated locally between Braid broadcasts)
 //! - A rolling chat log fed by `OnlineChatMessage` events
 
+use crate::core::states::MenuState;
 use crate::core::states::{GameMode, GameState};
 use crate::multiplayer::network::online_game_session::OnlineChatMessage;
-use crate::multiplayer::spectator::{SpectatorClockState, SpectatorMatchInfo, SpectatorSession};
-use crate::multiplayer::traits::MessageReader;
+use crate::multiplayer::spectator::{
+    SpectateViaLinkEvent, SpectatorClockState, SpectatorMatchDetails, SpectatorMatchInfo,
+    SpectatorPlaylistEntry, SpectatorSession,
+};
+use crate::multiplayer::traits::{MessageReader, MessageWriter};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -55,6 +59,8 @@ pub fn spectator_hud_system(
     clock: Res<SpectatorClockState>,
     mut chat_log: ResMut<SpectatorChatLog>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut next_menu: ResMut<NextState<MenuState>>,
+    mut spectate_events: MessageWriter<SpectateViaLinkEvent>,
 ) {
     if *game_mode != GameMode::Spectator {
         return;
@@ -66,6 +72,8 @@ pub fn spectator_hud_system(
 
     let info = &match_info.0;
     let mut leave_clicked = false;
+    let mut back_to_tournament = false;
+    let mut switch_to: Option<SpectatorPlaylistEntry> = None;
 
     egui::TopBottomPanel::bottom("spectator_hud")
         .frame(egui::Frame {
@@ -147,7 +155,8 @@ pub fn spectator_hud_system(
                         .strong(),
                 );
 
-                // Right: leave spectating.
+                // Right: leave, return to the tournament, and hop between its
+                // other live games without going back to a menu.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add(
@@ -164,6 +173,64 @@ pub fn spectator_hud_system(
                         .clicked()
                     {
                         leave_clicked = true;
+                    }
+
+                    if session.tournament_id.is_some()
+                        && ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("← Tournament")
+                                        .size(12.0)
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(60, 70, 100))
+                                .corner_radius(4.0)
+                                .min_size(egui::vec2(100.0, 24.0)),
+                            )
+                            .clicked()
+                    {
+                        back_to_tournament = true;
+                    }
+
+                    // Next/previous are offered only when the playlist this
+                    // session was opened with holds more than one game.
+                    if let Some(next) = session.sibling(1) {
+                        let tip = format!("{} vs {}", next.white, next.black);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Next ▶")
+                                        .size(12.0)
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(60, 100, 160))
+                                .corner_radius(4.0)
+                                .min_size(egui::vec2(70.0, 24.0)),
+                            )
+                            .on_hover_text(tip)
+                            .clicked()
+                        {
+                            switch_to = Some(next.clone());
+                        }
+                    }
+                    if let Some(prev) = session.sibling(-1) {
+                        let tip = format!("{} vs {}", prev.white, prev.black);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("◀ Prev")
+                                        .size(12.0)
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(60, 100, 160))
+                                .corner_radius(4.0)
+                                .min_size(egui::vec2(70.0, 24.0)),
+                            )
+                            .on_hover_text(tip)
+                            .clicked()
+                        {
+                            switch_to = Some(prev.clone());
+                        }
                     }
                 });
             });
@@ -189,12 +256,38 @@ pub fn spectator_hud_system(
             }
         });
 
+    // Switching games reuses the whole spectate entry path — `begin_session`
+    // tears the previous feed down, so no board state carries over.
+    if let Some(entry) = switch_to {
+        chat_log.messages.clear();
+        spectate_events.write(SpectateViaLinkEvent {
+            game_id: entry.game_id.clone(),
+            details: Some(SpectatorMatchDetails {
+                tournament_name: match_info.0.tournament_name.clone(),
+                round: Some(entry.round),
+                white: Some(entry.white.clone()),
+                black: Some(entry.black.clone()),
+            }),
+            tournament_id: session.tournament_id,
+            playlist: session.playlist.clone(),
+        });
+        return;
+    }
+
+    // Back to the tournament: leave the game but land on the tournament
+    // screen, not the top-level menu, so the viewer can pick another game.
+    if back_to_tournament {
+        session.leave();
+        chat_log.messages.clear();
+        *game_mode = GameMode::SinglePlayer;
+        next_menu.set(MenuState::Tournaments);
+        next_state.set(GameState::MainMenu);
+        return;
+    }
+
     // Leave: tear down the spectator session and return to the main menu.
     if leave_clicked {
-        session.game_id = None;
-        session.pending_moves.clear();
-        session.applied_move_count = 0;
-        session.delay_result = None;
+        session.leave();
         chat_log.messages.clear();
         *game_mode = GameMode::SinglePlayer;
         next_state.set(GameState::MainMenu);

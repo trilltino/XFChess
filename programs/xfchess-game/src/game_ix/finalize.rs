@@ -42,5 +42,9 @@ pub struct EndGame<'info> {
 }
 
 pub fn handler(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
-    crate::lifecycle::settlement::settle_finished_game(ctx, game_id)
+    match ctx.accounts.game.status {
+        GameStatus::Finished => crate::lifecycle::settlement::settle_finished_game(ctx, game_id),
+        GameStatus::Cancelled => crate::lifecycle::settlement::settle_cancelled_game(ctx, game_id),
+        _ => Err(GameErrorCode::GameNotFinished.into()),
+    }
 }

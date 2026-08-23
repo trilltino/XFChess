@@ -3,7 +3,7 @@ import { useAuth } from "../hooks/useAuth";
 import { ENVIRONMENTS, type EnvId } from "../config/environments";
 
 export default function TokenAuth() {
-  const { login } = useAuth();
+  const { login, lastError } = useAuth();
   const [env, setEnv] = useState<EnvId>("local");
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,11 +31,15 @@ export default function TokenAuth() {
     try {
       const ok = await login(token, env);
       if (!ok) {
-        setError(
-          cfg.isProduction
-            ? "Could not authenticate. Tunnel down, or bad token — check the 'tunnel' SSH user and key."
-            : "Invalid access credentials, or no local backend on 127.0.0.1:8090."
-        );
+        const fallback = cfg.isProduction
+          ? "Could not authenticate. Tunnel down, or bad token — check the 'tunnel' SSH user and key."
+          : "Invalid access credentials, or no local backend on 127.0.0.1:8090.";
+        // lastError carries the real exception/HTTP status from useAuth's
+        // login() — show it instead of the generic fallback whenever we have
+        // it, so a Tauri permission denial doesn't look identical to a typo'd
+        // token. Full detail (and any earlier console.error) is also in
+        // devtools: right-click -> Inspect, or Ctrl+Shift+I.
+        setError(lastError ? `${fallback}\n\nDetail: ${lastError}` : fallback);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connection failed");
@@ -52,9 +56,6 @@ export default function TokenAuth() {
           <h1 style={{ color: "#fff", fontSize: "32px", fontWeight: 900, marginBottom: "0.5rem", letterSpacing: "-1px" }}>
             XF<span style={{ color: "var(--primary)" }}>CHESS</span>
           </h1>
-          <div style={{ color: "var(--text-dim)", fontSize: "12px", letterSpacing: "2px", fontWeight: 700 }}>
-            TOURNAMENT ORCHESTRATOR
-          </div>
         </div>
 
         {/* Environment selector */}
@@ -94,17 +95,10 @@ export default function TokenAuth() {
           })}
         </div>
 
-        <div style={{ fontSize: "11px", color: "var(--text-dim)", marginBottom: "1.5rem", lineHeight: 1.6 }}>
-          {cfg.isProduction ? (
-            <>Connects via SSH tunnel to <code>{`${cfg.tunnel!.sshUser}@${cfg.tunnel!.sshHost}`}</code> → backend loopback :{cfg.tunnel!.remotePort}. Requires the deploy key.</>
-          ) : (
-            <>Talks to a backend you run locally at <code>{cfg.backendUrl}</code>.</>
-          )}
-        </div>
+
 
         <form onSubmit={handleSubmit} style={{ textAlign: "left" }}>
           <div style={{ marginBottom: "1.75rem" }}>
-            <label style={labelStyle}>ADMIN ACCESS TOKEN</label>
             <input
               type="password"
               value={token}
@@ -135,7 +129,7 @@ export default function TokenAuth() {
               ? cfg.isProduction
                 ? "ESTABLISHING TUNNEL…"
                 : "CONNECTING…"
-              : `INITIATE ${cfg.label} TERMINAL`}
+              : "LOG ON"}
           </button>
         </form>
       </div>
@@ -166,15 +160,6 @@ const cardStyle: React.CSSProperties = {
   textAlign: "center",
 };
 
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  color: "var(--text-dim)",
-  fontSize: "10px",
-  fontWeight: 800,
-  letterSpacing: "1.5px",
-  marginBottom: "10px",
-};
-
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "1.1rem 1.5rem",
@@ -198,4 +183,6 @@ const errorBoxStyle: React.CSSProperties = {
   fontSize: "12px",
   textAlign: "center",
   fontWeight: 600,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
 };

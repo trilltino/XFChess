@@ -30,18 +30,29 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+use crate::signing::auth::RequireWallet;
 use crate::signing::AppState;
 
 // ── Route registration ────────────────────────────────────────────────────────
 
-/// Public: game client calls this to check whether a session exists.
+/// Truly public: reveals only whether the VPS currently holds a session for a
+/// wallet, which the client needs before deciding whether to show the
+/// "Authorize session" banner. Read-only and self-limiting.
 pub fn global_session_public_routes() -> Router<AppState> {
     Router::new().route("/{wallet}/verify", axum::routing::get(verify))
 }
 
-/// Player-facing: no shared secret required — `revoke` only takes effect
-/// on-chain with a validly wallet-signed transaction, same trust model as the
-/// per-game `/session/create` + `/session/activate` routes.
+/// Wallet-scoped mutations. Every route here acts on one specific wallet's
+/// session key, so every one requires a per-user JWT proving control of that
+/// wallet — enforced inside each handler via [`RequireWallet`].
+///
+/// This function was previously named "protected" while being mounted with no
+/// middleware at all, and its handlers checked nothing. That made `track-game`
+/// an unauthenticated way to copy any wallet's global session key into the
+/// per-game session store under an attacker-chosen `game_id`, and `revoke` an
+/// unauthenticated way to evict any player mid-game. The caller layers
+/// `require_relay_or_jwt` over this router in `signing::build_router`; the
+/// per-handler checks are what make the identity mandatory rather than optional.
 pub fn global_session_protected_routes() -> Router<AppState> {
     Router::new()
         .route("/register", post(register))
@@ -68,8 +79,11 @@ pub struct RegisterReq {
 /// bogus key is rejected outright.
 async fn register(
     State(state): State<AppState>,
+    caller: RequireWallet,
     Json(req): Json<RegisterReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    caller.require_is(&req.wallet_pubkey)?;
+
     let wallet = Pubkey::from_str(&req.wallet_pubkey)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid pubkey: {e}")))?;
     let secret_bytes = bs58::decode(&req.session_secret_key_b58)
@@ -144,8 +158,15 @@ pub struct TrackGameReq {
 /// case rather than being auto-settled).
 async fn track_game(
     State(state): State<AppState>,
+    caller: RequireWallet,
     Json(req): Json<TrackGameReq>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    // Without this the route copied any named wallet's global session keypair
+    // into `sessions[game_id]` for a caller-chosen `game_id`, with no
+    // authentication whatsoever — the first half of a chain that ended in that
+    // wallet's key signing an attacker-supplied transaction.
+    caller.require_is(&req.wallet_pubkey)?;
+
     let wallet = Pubkey::from_str(&req.wallet_pubkey)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid pubkey: {e}")))?;
 
@@ -196,19 +217,31 @@ async fn verify(
     }
 }
 
-/// Broadcast `revoke_global_session` and remove the session from memory.
+/// DELETE /api/global-session/:wallet — drops the VPS's copy of this wallet's
+/// global session key and returns the `session_pda` the client needs to build
+/// the on-chain `revoke_global_session` transaction.
+///
+/// Note this is *only* the in-memory half: the on-chain delegation stays
+/// authorized until the wallet signs and submits that transaction itself. The
+/// doc comment here used to claim the backend broadcast it, which it never did.
+///
+/// Requires the caller to own the wallet. Unauthenticated, this was a
+/// one-request denial of service against any player by public address — drop
+/// their session key mid-game and their moves stop being signable until they
+/// re-register, which in a wagered game means losing on the clock.
 async fn revoke(
     State(state): State<AppState>,
+    caller: RequireWallet,
     Path(wallet_str): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    caller.require_is(&wallet_str)?;
+
     let wallet = Pubkey::from_str(&wallet_str)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid pubkey: {e}")))?;
 
     let (session_pda, _) =
         Pubkey::find_program_address(&[b"global_session", wallet.as_ref()], &state.program_id);
 
-    // The revoke instruction is wallet-signed — we only need to tell the client
-    // the accounts it must include. The actual revoke tx is built client-side.
     {
         let mut active = state.active_global_sessions.lock().await;
         active.remove(&wallet);
@@ -216,7 +249,9 @@ async fn revoke(
 
     info!("global_session revoked (in-memory): wallet={wallet}");
     Ok(Json(serde_json::json!({
-        "status": "revoked",
+        "status": "revoked_locally",
         "session_pda": session_pda.to_string(),
+        "note": "The on-chain delegation is still active. Sign and submit \
+                 revoke_global_session with this session_pda to revoke it there too.",
     })))
 }

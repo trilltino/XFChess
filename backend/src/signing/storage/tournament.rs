@@ -293,6 +293,187 @@ impl TournamentRecord {
         self.players.len() >= self.max_players as usize
     }
 
+    /// Lowest round that still has an unfinished match — i.e. the round
+    /// currently being played. `None` once every match is complete.
+    pub fn current_round(&self) -> Option<u8> {
+        self.matches
+            .iter()
+            .flatten()
+            .filter(|m| m.status != MatchStatus::Completed)
+            .map(|m| m.round)
+            .min()
+    }
+
+    /// How many matches in `round` are still unfinished. This is what a
+    /// waiting player is actually blocked on, and lets the waiting-room UI say
+    /// "3 matches left in round 2" instead of spinning indefinitely.
+    pub fn matches_remaining_in_round(&self, round: u8) -> usize {
+        self.matches
+            .iter()
+            .flatten()
+            .filter(|m| m.round == round && m.status != MatchStatus::Completed)
+            .count()
+    }
+
+    /// Total rounds in the bracket (single-elim: ceil(log2(players))).
+    pub fn total_rounds(&self) -> u8 {
+        match self.format {
+            TournamentFormat::Swiss { rounds } => rounds,
+            TournamentFormat::SingleElimination => self
+                .matches
+                .iter()
+                .flatten()
+                .map(|m| m.round)
+                .max()
+                .map(|r| r + 1)
+                .unwrap_or(0),
+        }
+    }
+
+    /// The player's most recently finished match, as (round, won, opponent).
+    fn last_finished_match(&self, player: &str) -> Option<(u8, bool, String)> {
+        self.matches
+            .iter()
+            .flatten()
+            .filter(|m| m.status == MatchStatus::Completed)
+            .filter(|m| {
+                m.player_white.as_deref() == Some(player)
+                    || m.player_black.as_deref() == Some(player)
+            })
+            .max_by_key(|m| m.round)
+            .map(|m| {
+                let won = m.winner.as_deref() == Some(player);
+                let opponent = if m.player_white.as_deref() == Some(player) {
+                    m.player_black.clone().unwrap_or_default()
+                } else {
+                    m.player_white.clone().unwrap_or_default()
+                };
+                (m.round, won, opponent)
+            })
+    }
+
+    /// Finishing position (1-based) if the player placed, else `None`.
+    fn placing_for(&self, player: &str) -> Option<u8> {
+        let places = [
+            &self.winner,
+            &self.second_place,
+            &self.third_place,
+            &self.fourth_place,
+            &self.fifth_place,
+            &self.sixth_place,
+            &self.seventh_place,
+            &self.eighth_place,
+            &self.ninth_place,
+            &self.tenth_place,
+        ];
+        places
+            .iter()
+            .position(|p| p.as_deref() == Some(player))
+            .map(|i| (i + 1) as u8)
+    }
+
+    /// Everything the game client needs to render a player's position in this
+    /// tournament, in one shot.
+    ///
+    /// This exists because `match_for_player` alone is ambiguous: it returns
+    /// `None` both when a player has no match *and* when their next match
+    /// exists but its opponent slot is still empty (the `?` on the opponent
+    /// lookup). The client therefore couldn't tell "you won, your next
+    /// opponent is still playing" from "you aren't in this tournament", and
+    /// showed nothing in either case — leaving a player who'd just won
+    /// stranded on the menu with no indication the tournament was still live.
+    ///
+    /// See docs/plans/tournament-end-to-end-fix-plan.md §4.
+    pub fn player_status(&self, player: &str) -> PlayerTournamentStatus {
+        let registered = self.players.iter().any(|p| p == player);
+        let current_round = self.current_round();
+        let total_rounds = self.total_rounds();
+        let last_result = self
+            .last_finished_match(player)
+            .map(|(round, won, opponent)| LastMatchResult {
+                round,
+                won,
+                opponent,
+            });
+
+        let mut status = PlayerTournamentStatus {
+            state: PlayerState::NotRegistered,
+            registered,
+            tournament_status: self.status.clone(),
+            round: current_round,
+            total_rounds,
+            r#match: None,
+            blocked_by: None,
+            last_result,
+            placing: None,
+            prize_lamports: None,
+        };
+
+        if !registered {
+            return status;
+        }
+
+        match self.status {
+            TournamentStatus::Registration => {
+                status.state = PlayerState::Registered;
+                return status;
+            }
+            TournamentStatus::Cancelled => {
+                status.state = PlayerState::Cancelled;
+                return status;
+            }
+            TournamentStatus::Completed => {
+                let placing = self.placing_for(player);
+                status.placing = placing;
+                status.prize_lamports = placing.map(|p| self.calculate_prize(p));
+                status.state = if placing == Some(1) {
+                    PlayerState::Champion
+                } else {
+                    PlayerState::Eliminated
+                };
+                return status;
+            }
+            TournamentStatus::Active => {}
+        }
+
+        // Active: is the player seated in an unfinished match?
+        if let Some(assignment) = self.match_for_player(player) {
+            status.state = if assignment.game_id.is_some() {
+                PlayerState::MatchReady
+            } else {
+                // Both players known but the scheduler hasn't stamped a game
+                // ID yet — a brief window, not an error.
+                PlayerState::AwaitingGameId
+            };
+            status.r#match = Some(assignment);
+            return status;
+        }
+
+        // No playable match. Either they were knocked out, or they advanced
+        // and their next opponent is still being decided.
+        let knocked_out = self.matches.iter().flatten().any(|m| {
+            m.status == MatchStatus::Completed
+                && (m.player_white.as_deref() == Some(player)
+                    || m.player_black.as_deref() == Some(player))
+                && m.winner.as_deref() != Some(player)
+        });
+
+        if knocked_out {
+            status.state = PlayerState::Eliminated;
+            status.placing = self.placing_for(player);
+            status.prize_lamports = status.placing.map(|p| self.calculate_prize(p));
+        } else {
+            status.state = PlayerState::AwaitingOpponent;
+            if let Some(round) = current_round {
+                status.blocked_by = Some(BlockedBy {
+                    round,
+                    matches_remaining: self.matches_remaining_in_round(round),
+                });
+            }
+        }
+        status
+    }
+
     /// Returns the index of the final match.
     pub fn final_match_index(&self) -> usize {
         self.matches.len() - 1
@@ -469,6 +650,64 @@ impl TournamentRecord {
     }
 }
 
+/// Where a player stands in a tournament right now. Drives the client's
+/// tournament UI state machine — see
+/// docs/plans/tournament-end-to-end-fix-plan.md §4.1.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum PlayerState {
+    /// Not on this tournament's roster.
+    NotRegistered,
+    /// On the roster; tournament hasn't started.
+    Registered,
+    /// Seated in a match, both players known, game ID assigned — enter it.
+    MatchReady,
+    /// Seated with both players known, waiting on the scheduler to stamp a
+    /// game ID. Transient.
+    AwaitingGameId,
+    /// Advanced, but the next opponent is still being decided.
+    AwaitingOpponent,
+    /// Knocked out.
+    Eliminated,
+    /// Won the whole thing.
+    Champion,
+    /// Tournament was cancelled.
+    Cancelled,
+}
+
+/// What a waiting player is blocked on, so the UI can be specific rather than
+/// showing an open-ended spinner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockedBy {
+    pub round: u8,
+    pub matches_remaining: usize,
+}
+
+/// The player's most recently finished match.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastMatchResult {
+    pub round: u8,
+    pub won: bool,
+    pub opponent: String,
+}
+
+/// One-shot snapshot of a player's tournament position.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerTournamentStatus {
+    pub state: PlayerState,
+    pub registered: bool,
+    pub tournament_status: TournamentStatus,
+    /// Round currently being played; `None` once all matches are done.
+    pub round: Option<u8>,
+    pub total_rounds: u8,
+    /// The player's current match, when they have a playable one.
+    pub r#match: Option<MatchAssignment>,
+    pub blocked_by: Option<BlockedBy>,
+    pub last_result: Option<LastMatchResult>,
+    /// Finishing position, 1-based, once known.
+    pub placing: Option<u8>,
+    pub prize_lamports: Option<u64>,
+}
+
 /// Match assignment result for a player.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchAssignment {
@@ -498,6 +737,27 @@ pub struct TournamentStore {
     pool: SqlitePool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrationTransaction {
+    pub tournament_id: u64,
+    pub player: String,
+    pub elo: u32,
+    pub signature: String,
+    pub confirmed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TournamentTransaction {
+    pub tournament_id: u64,
+    pub signature: String,
+    pub operation: String,
+    pub status: String,
+    pub retry_count: u32,
+    pub last_error: Option<String>,
+    pub next_retry_at: Option<i64>,
+    pub created_at: i64,
+}
+
 impl TournamentStore {
     /// Creates a new TournamentStore with the provided pool.
     ///
@@ -513,8 +773,116 @@ impl TournamentStore {
         .execute(&pool)
         .await
         .ok();
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS tournament_registration_transactions (
+                tournament_id INTEGER NOT NULL,
+                player TEXT NOT NULL,
+                elo INTEGER NOT NULL,
+                signature TEXT NOT NULL,
+                confirmed_at INTEGER NOT NULL,
+                PRIMARY KEY (tournament_id, player)
+            );",
+        )
+        .execute(&pool)
+        .await
+        .ok();
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS tournament_transactions (
+                tournament_id INTEGER NOT NULL,
+                signature TEXT PRIMARY KEY,
+                operation TEXT NOT NULL,
+                status TEXT NOT NULL,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                next_retry_at INTEGER,
+                created_at INTEGER NOT NULL
+            );",
+        )
+        .execute(&pool)
+        .await
+        .ok();
         tracing::info!("[tournament-store] SQLite table ready");
         Self { pool }
+    }
+
+    pub async fn record_registration_transaction(&self, tx: RegistrationTransaction) -> bool {
+        sqlx::query(
+            "INSERT OR REPLACE INTO tournament_registration_transactions
+             (tournament_id, player, elo, signature, confirmed_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(tx.tournament_id as i64)
+        .bind(tx.player)
+        .bind(tx.elo as i64)
+        .bind(tx.signature)
+        .bind(tx.confirmed_at)
+        .execute(&self.pool)
+        .await
+        .is_ok()
+    }
+
+    pub async fn record_transaction(&self, tx: TournamentTransaction) -> bool {
+        sqlx::query(
+            "INSERT OR REPLACE INTO tournament_transactions
+             (tournament_id, signature, operation, status, retry_count, last_error, next_retry_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(tx.tournament_id as i64)
+        .bind(tx.signature)
+        .bind(tx.operation)
+        .bind(tx.status)
+        .bind(tx.retry_count as i64)
+        .bind(tx.last_error)
+        .bind(tx.next_retry_at)
+        .bind(tx.created_at)
+        .execute(&self.pool)
+        .await
+        .is_ok()
+    }
+
+    pub async fn transactions(&self, id: u64) -> Vec<TournamentTransaction> {
+        sqlx::query_as::<_, (i64, String, String, String, i64, Option<String>, Option<i64>, i64)>(
+            "SELECT tournament_id, signature, operation, status, retry_count, last_error, next_retry_at, created_at
+             FROM tournament_transactions WHERE tournament_id = ? ORDER BY created_at DESC",
+        )
+        .bind(id as i64)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(tournament_id, signature, operation, status, retry_count, last_error, next_retry_at, created_at)| TournamentTransaction {
+            tournament_id: tournament_id as u64,
+            signature,
+            operation,
+            status,
+            retry_count: retry_count as u32,
+            last_error,
+            next_retry_at,
+            created_at,
+        })
+        .collect()
+    }
+
+    pub async fn registration_transactions(&self, id: u64) -> Vec<RegistrationTransaction> {
+        sqlx::query_as::<_, (i64, String, i64, String, i64)>(
+            "SELECT tournament_id, player, elo, signature, confirmed_at
+             FROM tournament_registration_transactions WHERE tournament_id = ?
+             ORDER BY confirmed_at ASC",
+        )
+        .bind(id as i64)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(
+            |(tournament_id, player, elo, signature, confirmed_at)| RegistrationTransaction {
+                tournament_id: tournament_id as u64,
+                player,
+                elo: elo as u32,
+                signature,
+                confirmed_at,
+            },
+        )
+        .collect()
     }
 
     /// Stores a tournament record.
@@ -617,6 +985,33 @@ impl TournamentStore {
         .await
     }
 
+    /// Derives a stable game namespace from the tournament and match index.
+    /// Tournament IDs are limited to 48 bits so the 16-bit match index cannot overlap.
+    pub fn deterministic_game_id(tournament_id: u64, match_index: u16) -> Option<u64> {
+        (tournament_id < (1u64 << 48)).then_some((tournament_id << 16) | u64::from(match_index))
+    }
+
+    /// Assigns IDs to every ready match that does not already have one.
+    pub async fn assign_ready_game_ids(&self, id: u64) -> Vec<(u16, u64)> {
+        let mut assigned = Vec::new();
+        self.update(id, |t| {
+            for (index, maybe_match) in t.matches.iter_mut().enumerate() {
+                let Some(m) = maybe_match else { continue };
+                if m.game_id.is_some() || m.player_white.is_none() || m.player_black.is_none() {
+                    continue;
+                }
+                let Some(game_id) = Self::deterministic_game_id(id, m.match_index) else {
+                    continue;
+                };
+                m.game_id = Some(game_id);
+                m.status = MatchStatus::Active;
+                assigned.push((index as u16, game_id));
+            }
+        })
+        .await;
+        assigned
+    }
+
     /// Records a match result and tracks placements for top 4.
     pub async fn record_result(
         &self,
@@ -625,50 +1020,55 @@ impl TournamentStore {
         winner: String,
         loser: String,
     ) -> bool {
-        self.update(id, |t| {
-            if let Some(m) = t.matches[match_index].as_mut() {
-                m.winner = Some(winner.clone());
-                m.status = MatchStatus::Completed;
-            }
+        let updated = self
+            .update(id, |t| {
+                if let Some(m) = t.matches[match_index].as_mut() {
+                    m.winner = Some(winner.clone());
+                    m.status = MatchStatus::Completed;
+                }
 
-            // Advance the winner into their next-round match slot (if any).
-            let next = t.matches[match_index].as_ref().and_then(|m| {
-                m.next_match_for_winner
-                    .map(|n| (n as usize, m.next_match_slot))
-            });
-            if let Some((next_idx, slot)) = next {
-                if next_idx < t.matches.len() {
-                    if let Some(nm) = t.matches[next_idx].as_mut() {
-                        if slot == 0 {
-                            nm.player_white = Some(winner.clone());
-                        } else {
-                            nm.player_black = Some(winner.clone());
+                // Advance the winner into their next-round match slot (if any).
+                let next = t.matches[match_index].as_ref().and_then(|m| {
+                    m.next_match_for_winner
+                        .map(|n| (n as usize, m.next_match_slot))
+                });
+                if let Some((next_idx, slot)) = next {
+                    if next_idx < t.matches.len() {
+                        if let Some(nm) = t.matches[next_idx].as_mut() {
+                            if slot == 0 {
+                                nm.player_white = Some(winner.clone());
+                            } else {
+                                nm.player_black = Some(winner.clone());
+                            }
                         }
                     }
                 }
-            }
 
-            let final_idx = t.final_match_index();
+                let final_idx = t.final_match_index();
 
-            // The final must be checked before the semifinals: a 2-player
-            // bracket has a single match, so the saturating semifinal indices
-            // would otherwise swallow the final and never complete the
-            // tournament. Semifinals only exist in brackets of 4+ players.
-            if match_index == final_idx {
-                // Final complete - tournament done
-                t.winner = Some(winner);
-                t.second_place = Some(loser);
-                t.status = TournamentStatus::Completed;
-                t.completed_at = Some(chrono::Utc::now().timestamp());
-            } else if t.matches.len() >= 3 && match_index == t.semifinal1_index() {
-                // First semifinal - loser is 4th place
-                t.fourth_place = Some(loser);
-            } else if t.matches.len() >= 3 && match_index == t.semifinal2_index() {
-                // Second semifinal - loser is 3rd place
-                t.third_place = Some(loser);
-            }
-        })
-        .await
+                // The final must be checked before the semifinals: a 2-player
+                // bracket has a single match, so the saturating semifinal indices
+                // would otherwise swallow the final and never complete the
+                // tournament. Semifinals only exist in brackets of 4+ players.
+                if match_index == final_idx {
+                    // Final complete - tournament done
+                    t.winner = Some(winner);
+                    t.second_place = Some(loser);
+                    t.status = TournamentStatus::Completed;
+                    t.completed_at = Some(chrono::Utc::now().timestamp());
+                } else if t.matches.len() >= 3 && match_index == t.semifinal1_index() {
+                    // First semifinal - loser is 4th place
+                    t.fourth_place = Some(loser);
+                } else if t.matches.len() >= 3 && match_index == t.semifinal2_index() {
+                    // Second semifinal - loser is 3rd place
+                    t.third_place = Some(loser);
+                }
+            })
+            .await;
+        if updated {
+            self.assign_ready_game_ids(id).await;
+        }
+        updated
     }
 
     /// Update tournament status
@@ -877,6 +1277,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn deterministic_game_ids_are_stable_and_bounded() {
+        assert_eq!(
+            TournamentStore::deterministic_game_id(42, 7),
+            Some((42 << 16) | 7)
+        );
+        assert_eq!(TournamentStore::deterministic_game_id(1 << 48, 0), None);
+    }
+
     #[tokio::test]
     async fn two_player_tournament_completes_on_its_only_match() {
         let store = mem_store().await;
@@ -924,5 +1333,131 @@ mod tests {
         assert_eq!(t.status, TournamentStatus::Completed);
         assert_eq!(t.winner.as_deref(), Some("P1"));
         assert_eq!(t.second_place.as_deref(), Some("P0"));
+    }
+}
+
+#[cfg(test)]
+mod player_status_tests {
+    use super::*;
+
+    fn record_with_players(tournament_id: u64, n: usize) -> TournamentRecord {
+        let mut t = TournamentRecord::new(tournament_id, "test", 0);
+        t.max_players = n as u16;
+        for i in 0..n {
+            t.players.push(format!("P{i}"));
+            t.player_elos.push(2000 - i as u32);
+        }
+        t
+    }
+
+    /// The gap this whole feature exists to close: a player who wins round 1
+    /// while the other semifinal is still running must be distinguishable
+    /// from someone who was never in the tournament. Both used to surface as
+    /// `match_for_player == None`, so the client showed nothing for either.
+    #[test]
+    fn winner_awaiting_opponent_is_not_confused_with_a_stranger() {
+        let mut t = record_with_players(1, 4);
+        t.generate_bracket();
+        t.status = TournamentStatus::Active;
+
+        // Semifinal 0 done: P0 beat P3. Semifinal 1 still in progress.
+        {
+            let m = t.matches[0].as_mut().unwrap();
+            m.winner = Some("P0".into());
+            m.status = MatchStatus::Completed;
+        }
+        // Advance P0 into the final, as record_result would.
+        t.matches[2].as_mut().unwrap().player_white = Some("P0".into());
+
+        let advanced = t.player_status("P0");
+        assert_eq!(advanced.state, PlayerState::AwaitingOpponent);
+        assert!(advanced.registered);
+        let blocked = advanced.blocked_by.expect("should report what it waits on");
+        assert_eq!(
+            blocked.round, 0,
+            "still blocked on the unfinished semifinal"
+        );
+        assert_eq!(blocked.matches_remaining, 1);
+        let last = advanced.last_result.expect("should recall the win");
+        assert!(last.won);
+        assert_eq!(last.opponent, "P3");
+
+        // The loser is eliminated, not waiting.
+        assert_eq!(t.player_status("P3").state, PlayerState::Eliminated);
+
+        // Someone who never registered is neither.
+        let stranger = t.player_status("NOT_A_PLAYER");
+        assert_eq!(stranger.state, PlayerState::NotRegistered);
+        assert!(!stranger.registered);
+        assert!(stranger.blocked_by.is_none());
+    }
+
+    #[test]
+    fn match_ready_only_once_a_game_id_exists() {
+        let mut t = record_with_players(2, 4);
+        t.generate_bracket();
+        t.status = TournamentStatus::Active;
+
+        // Seated, both players known, but the scheduler hasn't stamped an id.
+        assert_eq!(t.player_status("P0").state, PlayerState::AwaitingGameId);
+
+        t.matches[0].as_mut().unwrap().game_id = Some(99);
+        let ready = t.player_status("P0");
+        assert_eq!(ready.state, PlayerState::MatchReady);
+        assert_eq!(ready.r#match.expect("match present").game_id, Some(99));
+    }
+
+    #[test]
+    fn registration_and_terminal_states() {
+        let mut t = record_with_players(3, 4);
+        assert_eq!(t.player_status("P0").state, PlayerState::Registered);
+
+        t.generate_bracket();
+        t.status = TournamentStatus::Completed;
+        t.winner = Some("P1".into());
+        t.second_place = Some("P0".into());
+        t.prize_pool = 1_000_000;
+        t.prize_shares = [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0];
+
+        let champ = t.player_status("P1");
+        assert_eq!(champ.state, PlayerState::Champion);
+        assert_eq!(champ.placing, Some(1));
+        assert_eq!(champ.prize_lamports, Some(600_000));
+
+        let runner_up = t.player_status("P0");
+        assert_eq!(runner_up.state, PlayerState::Eliminated);
+        assert_eq!(runner_up.placing, Some(2));
+        assert_eq!(runner_up.prize_lamports, Some(300_000));
+
+        t.status = TournamentStatus::Cancelled;
+        assert_eq!(t.player_status("P0").state, PlayerState::Cancelled);
+    }
+
+    /// 16-player: a round-2 winner waits on round 2's remaining matches, and
+    /// total_rounds reflects the real bracket depth.
+    #[test]
+    fn sixteen_player_bracket_reports_round_progress() {
+        let mut t = record_with_players(4, 16);
+        t.generate_bracket();
+        t.status = TournamentStatus::Active;
+        assert_eq!(t.total_rounds(), 4);
+
+        // Finish all 8 round-0 matches; P0 wins its own.
+        for i in 0..8 {
+            let m = t.matches[i].as_mut().unwrap();
+            let w = m.player_white.clone().unwrap();
+            m.winner = Some(w);
+            m.status = MatchStatus::Completed;
+        }
+        assert_eq!(t.current_round(), Some(1));
+        assert_eq!(t.matches_remaining_in_round(1), 4);
+
+        // P0 advanced but its round-1 opponent isn't decided yet.
+        t.matches[8].as_mut().unwrap().player_white = Some("P0".into());
+        t.matches[8].as_mut().unwrap().player_black = None;
+        let s = t.player_status("P0");
+        assert_eq!(s.state, PlayerState::AwaitingOpponent);
+        assert_eq!(s.round, Some(1));
+        assert_eq!(s.total_rounds, 4);
     }
 }

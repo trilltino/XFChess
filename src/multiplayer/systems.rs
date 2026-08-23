@@ -63,8 +63,9 @@ pub const GAME_TOPIC: &str = "/xfchess-game";
 pub fn initialize_braid_network(
     mut network_state: ResMut<OnlineNetworkState>,
     tokio_runtime: Res<TokioRuntime>,
+    player_identity: Res<crate::states::main_menu::PlayerIdentity>,
 ) {
-    if network_state.connected {
+    if network_state.connected || player_identity.username.is_none() {
         return;
     }
 

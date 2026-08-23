@@ -38,17 +38,18 @@ pub fn spawn_background_tasks(
         matchmaking::run_matchmaking_service(matchmaking_state).await;
     });
 
-    // Spawn tournament scheduler (with gossip so it can broadcast BracketFired)
+    // Spawn tournament scheduler (with the Braid hub so it can publish the
+    // bracket-start transition; the hub's sink carries it on to gossip peers)
     let tournament_store = (*state.tournament_store).clone();
-    let gossip = Some(state.tournament_gossip.clone());
+    let braid_hub = Some(state.braid_hub.clone());
     let on_chain = Some((
         config.program_id.clone(),
         config.solana_rpc_url.clone(),
         state.vps_authority.clone(),
         state.tournament_fee_recipient,
     ));
-    let trigger_tx = spawn_tournament_scheduler(tournament_store, gossip, on_chain);
-    info!("[Tasks] Tournament scheduler spawned with async-fill and gossip broadcast");
+    let trigger_tx = spawn_tournament_scheduler(tournament_store, braid_hub, on_chain);
+    info!("[Tasks] Tournament scheduler spawned with async-fill and Braid publication");
 
     // Auto prize distribution — cranks the permissionless
     // distribute_tournament_prizes instruction once a tournament completes,

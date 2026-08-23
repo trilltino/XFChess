@@ -217,6 +217,18 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_027 = include_str!("../../migrations/027_game_event_log.sql");
     run_script(&pools.session_pool, migration_027, "027").await?;
 
+    // ── Migration 028: admin_audit_log (persistent, named-actor audit trail) ─
+    let migration_028 = include_str!("../../migrations/028_admin_audit_log.sql");
+    run_script(&pools.session_pool, migration_028, "028").await?;
+
+    // ── Migration 029: tournament_templates (backend-persisted, was localStorage) ─
+    let migration_029 = include_str!("../../migrations/029_tournament_templates.sql");
+    run_script(&pools.session_pool, migration_029, "029").await?;
+
+    // ── Migration 030: social_identities (Privy Google/email → wallet mapping) ─
+    let migration_030 = include_str!("../../migrations/030_social_identities.sql");
+    run_script(&pools.session_pool, migration_030, "030").await?;
+
     info!("[Database] All migrations completed successfully");
     Ok(())
 }

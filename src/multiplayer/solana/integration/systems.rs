@@ -1021,21 +1021,50 @@ pub fn authorize_global_session_if_needed(
     mut attempted_for: Local<Option<Pubkey>>,
     mut failed_attempts: Local<u32>,
 ) {
-    // Disabled 2026-08-11 pending a real fix: confirmed on-chain fund leaks
-    // (revoke never reclaims the old deposit — see `establish_global_session`)
-    // and a live repro where this exact flow got a Solflare "network
-    // mismatch: current network devnet, but this transaction is for mainnet"
-    // rejection with no user action involved, plus wagered `global_create_game`
-    // still hitting `InsufficientFunds` (6060) because the vault's real
-    // balance isn't checked against a specific wager, only the soft
-    // spending_limit/max_wager caps (see the InsufficientFunds writeup this
-    // session). Until there's a top-up instruction and the blockhash/network
-    // mismatch is root-caused, every wallet should just use the proven
-    // per-game Tauri wallet-bridge signing path below (`cached_global_session_keypair_bytes`
-    // stays `None` — see `sync_from_solana_state` in lobby.rs). Re-enable by
-    // deleting this early return once those are fixed and redeployed.
-    return;
-    #[allow(unreachable_code)]
+    // Disabled 2026-08-11. Status of the three original blockers, re-checked
+    // 2026-08-23 while wiring up social-login embedded wallets:
+    //
+    //  1. FIXED (on-chain). "Revoke never reclaims the old deposit" — there is
+    //     now a `withdraw_global_session` instruction
+    //     (`account_ix::global_session_ix::handler_withdraw_global_session`,
+    //     exposed in lib.rs) that returns the unspent vault balance to the
+    //     player while keeping the account rent-exempt.
+    //
+    //  2. NOT APPLICABLE to embedded wallets. The Solflare "network mismatch:
+    //     current network devnet, but this transaction is for mainnet"
+    //     rejection is an artifact of an extension having its own
+    //     user-selected cluster that `ensureDevnet` has to nudge. A Privy
+    //     embedded wallet has no such setting, so this failure mode cannot
+    //     occur on that path. Still unresolved for extension wallets.
+    //
+    //  3. FIXED IN SOURCE, NOT YET DEPLOYED. `global_create_game` hitting
+    //     `InsufficientFunds` (6060) because only the soft
+    //     `spending_limit`/`max_wager` caps were checked, never the vault's
+    //     real balance. `game_ix::global_create` and `game_ix::global_join`
+    //     now both verify the vault covers rent + wager and stays rent-exempt,
+    //     returning `GlobalSessionVaultUnderfunded` with an actionable message
+    //     instead. **That guard only takes effect once the program is
+    //     redeployed to devnet.**
+    //
+    // (3) was deployed to devnet on 2026-08-23 (slot 486887670, sig
+    // 25ZoXVbwUx9Z4HB13GLDpqEKsMXmL7oE2vucgfYTqq6BahLJgXs7cH1xzVcxmFJAuxpBcH9xaGXqo67GV1AcDAzi),
+    // and `global_create_game_tests` proves the guard both rejects an
+    // underfunded vault and still accepts an adequately funded one.
+    //
+    // So the blanket disable is lifted — but only for embedded wallets, since
+    // (2) is still open for extensions. Everyone else keeps the proven per-game
+    // Tauri wallet-bridge signing path (`cached_global_session_keypair_bytes`
+    // stays `None` — see `sync_from_solana_state` in lobby.rs), which is the
+    // documented fallback in docs/plans/social-login-embedded-wallet-plan.md
+    // §8.4: play works fully without this, it just costs a popup per
+    // transaction.
+    //
+    // To extend this to extension wallets, root-cause (2) first — reproducing
+    // it needs Solflare with a non-devnet cluster selected.
+    if !solana_state.wallet_is_embedded {
+        return;
+    }
+
     const MAX_ATTEMPTS: u32 = 3;
 
     let Some(wallet_pubkey) = solana_state.wallet_pubkey else {
@@ -1155,9 +1184,8 @@ fn establish_global_session(
 ) -> Result<Keypair, String> {
     use crate::multiplayer::solana::global_session_manager::{
         build_authorize_global_session_ix, build_revoke_global_session_ix,
-        build_withdraw_global_session_ix, find_global_session_pda,
-        global_session_account_exists, global_session_is_live_onchain,
-        AuthorizeGlobalSessionArgs, GlobalSessionKeyManager,
+        build_withdraw_global_session_ix, find_global_session_pda, global_session_account_exists,
+        global_session_is_live_onchain, AuthorizeGlobalSessionArgs, GlobalSessionKeyManager,
     };
     use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
 

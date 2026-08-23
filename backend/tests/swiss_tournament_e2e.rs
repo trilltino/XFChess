@@ -122,8 +122,7 @@ async fn spawn_app() -> TestApp {
 
     // Only used to create/migrate tables via `.init()` — AppState::new below
     // builds the real store this test actually reads/writes through.
-    let schema_vault =
-        IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
+    let schema_vault = IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
     let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await.expect("session store init");
 
@@ -327,10 +326,7 @@ async fn approve_prize_release_route_sets_the_flag() {
         .get(tournament_id)
         .await
         .expect("seeded tournament");
-    assert!(
-        !fetched.prize_release_approved,
-        "should start unapproved"
-    );
+    assert!(!fetched.prize_release_approved, "should start unapproved");
 
     // No X-API-Key → rejected before the handler runs, same as every other
     // admin route.

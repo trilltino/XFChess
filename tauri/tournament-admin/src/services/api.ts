@@ -3,6 +3,20 @@
  * Provides centralized API communication with authentication, error handling, and response formatting
  */
 
+// Rust-routed fetch, NOT the browser's. This webview is served over
+// http://localhost:7454 (embedded axum server — `frontendDist` is claimed by
+// wallet-ui), so a browser fetch to the backend on :8090/:8091 is cross-origin
+// and dies on CORS: the request succeeds, returns 200, and the browser discards
+// the response for want of an Access-Control-Allow-Origin header. It surfaces as
+// an indistinguishable "failed to fetch", which is what made a working tunnel
+// look like a dead one for hours.
+//
+// tauri-plugin-http issues the request from Rust, where there is no origin, so
+// neither CORS nor this app's CSP connect-src applies. The signature is
+// drop-in compatible with window.fetch. Scope: capabilities/admin-http.json.
+// See docs/plans/tournament-admin-connection-rearchitecture.md §3 Phase 1.
+import { fetch } from "@tauri-apps/plugin-http";
+
 export interface ApiError {
   message: string;
   status?: number;
@@ -125,6 +139,21 @@ class ApiClient {
     });
   }
 
+  async predictTournamentCost(data: {
+    max_players: number;
+    format: string;
+    average_moves?: number;
+  }) {
+    return this.request<any>("/admin/tournament/predict-cost", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getOperatorAffordability() {
+    return this.request<any>("/admin/operator-affordability");
+  }
+
   async getTournamentBracket(id: number) {
     return this.request<any>(`/tournament/${id}/bracket`);
   }
@@ -169,18 +198,40 @@ class ApiClient {
     return this.request<any>(`/admin/tournament/${tournamentId}/escrow-balance`);
   }
 
+  async getRegistrationReconciliation(tournamentId: number) {
+    return this.request<any>(`/admin/tournament/${tournamentId}/registration-reconciliation`);
+  }
+
+  async getTournamentTransactions(tournamentId: number) {
+    return this.request<any>(`/admin/tournament/${tournamentId}/transactions`);
+  }
+
+  // Tournament templates — backend-persisted (SQLite), shared across
+  // machines and audit-logged. Replaces the old localStorage-only store.
+  async listTemplates() {
+    return this.request<{ templates: { name: string; data: any; created_at: number; updated_at: number }[] }>(
+      "/admin/tournament-templates"
+    );
+  }
+
+  async saveTemplate(name: string, data: any) {
+    return this.request<{ ok: boolean; name: string }>("/admin/tournament-templates", {
+      method: "POST",
+      body: JSON.stringify({ name, data }),
+    });
+  }
+
+  async deleteTemplate(name: string) {
+    return this.request<{ ok: boolean; name: string }>(`/admin/tournament-templates/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  }
+
   async setRoundDeadline(tournamentId: number, deadlineAt: number | null) {
     return this.request<any>(`/admin/tournament/${tournamentId}/set-round-deadline`, {
       method: "POST",
       body: JSON.stringify({ deadline_at: deadlineAt }),
     });
-  }
-
-  async importPlayersCsv(tournamentId: number, csvText: string) {
-    return this.request<{ ok: boolean; results: { player: string; status: string }[] }>(
-      `/admin/tournament/${tournamentId}/import-players-csv`,
-      { method: "POST", headers: { "Content-Type": "text/plain" }, body: csvText }
-    );
   }
 
   // Locks the guaranteed SOL prize for a tournament in its escrow PDA. Must be
@@ -249,6 +300,10 @@ class ApiClient {
   // Audit + logs
   async getAuditLog(limit = 100) {
     return this.request<any>(`/admin/audit-log?limit=${limit}`);
+  }
+
+  async getTournamentAuditLog(tournamentId: number, limit = 100) {
+    return this.request<any>(`/admin/audit-log?limit=${limit}&tournament_id=${tournamentId}`);
   }
 
   async getLogsStream() {
@@ -541,6 +596,8 @@ export interface CreateTournamentRequest {
   winner_takes_all?: boolean;
   scheduled_at?: number;
   kyc_required?: boolean;
+  /** Set to make the tournament private — players must supply it to register. */
+  password?: string;
 }
 
 export interface MatchInfo {

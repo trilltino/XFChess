@@ -1,20 +1,37 @@
 //! Tournament gossip service for real-time Swiss tournament updates.
 //!
-//! Manages gossip topics for tournaments using braid-iroh's gossip protocol.
-//! Provides topic lifecycle management, message broadcasting, bootstrap
-//! peer discovery, and message persistence for late joiners.
+//! Manages gossip topics for tournaments using braid-iroh's gossip protocol,
+//! and carries the Braid updates published by the [`ResourceHub`] out to peers.
+//! Provides topic lifecycle management, update broadcasting, and bootstrap
+//! peer discovery.
+//!
+//! # Late joiners
+//!
+//! This service carried a `tournament_gossip_log` SQLite table, plus
+//! `persist_message` / `get_missed_messages` / `replay_missed_messages`, meant
+//! to replay to a late peer whatever it had missed. None of it ever ran:
+//! `server.rs` created the table at startup, and nothing anywhere called
+//! `persist_message`, so the table stayed empty and the replay had nothing to
+//! replay. It was scaffolding for a mechanism that was never finished.
+//!
+//! That is now the transport's job rather than this service's. Every fact is a
+//! versioned update on a hub resource, so a late or reconnecting client gets
+//! the current snapshot followed by the live tail by subscribing — over HTTP
+//! `209` from [`crate::infrastructure::build_app_router`]'s `/braid` mount, or
+//! over gossip from here. Nothing to persist, nothing to replay by hand.
+//!
+//! [`ResourceHub`]: xfchess_braid_server::ResourceHub
 
 use anyhow::Result;
-use braid_iroh::SwissMessage;
 // Note: iroh crate not directly available, using String for node IDs
 pub type EndpointId = String;
 use rand::seq::IteratorRandom;
-use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
+use xfchess_braid_server::resource::protocol::{encode_for_gossip, BraidUpdate};
 
 use crate::signing::storage::tournament::TournamentStore;
 
@@ -36,8 +53,6 @@ pub struct TournamentGossipService {
     tournament_topics: Arc<RwLock<HashMap<u64, TopicHandle>>>,
     /// VPS node ID for reliable bootstrap
     vps_node_id: Option<EndpointId>,
-    /// SQLite pool for message persistence
-    db_pool: Option<SqlitePool>,
 }
 
 impl TournamentGossipService {
@@ -47,45 +62,33 @@ impl TournamentGossipService {
             store,
             tournament_topics: Arc::new(RwLock::new(HashMap::new())),
             vps_node_id,
-            db_pool: None,
         }
     }
 
-    /// Initialize the database for message persistence. Was previously a
-    /// no-op in practice: nothing called it (see `server.rs`, which now
-    /// does), and its `CREATE TABLE` embedded an inline `INDEX` clause —
-    /// valid MySQL syntax, not SQLite — which silently failed via the
-    /// trailing `.ok()`, so the table was never actually created even on
-    /// the rare path that did call this.
-    pub async fn init_db(&mut self, pool: SqlitePool) {
-        if let Err(e) = sqlx::query(
-            r#"CREATE TABLE IF NOT EXISTS tournament_gossip_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tournament_id INTEGER NOT NULL,
-                round INTEGER NOT NULL,
-                message_type TEXT NOT NULL,
-                message_json TEXT NOT NULL,
-                timestamp INTEGER NOT NULL
-            )"#,
-        )
-        .execute(&pool)
-        .await
-        {
-            warn!("[gossip] Failed to create tournament_gossip_log table: {e}");
+    /// Broadcast one hub update to a tournament's peers.
+    ///
+    /// `path` is the resource the update belongs to (e.g.
+    /// `tournament/42/standings`); it travels with the update, since a gossip
+    /// receiver has no request line to read it from.
+    ///
+    /// Missing topic is not an error — a tournament nobody has subscribed to
+    /// P2P still publishes over HTTP, and a subscriber that arrives later gets
+    /// the state from the snapshot rather than from this broadcast.
+    pub async fn broadcast_update(&self, tournament_id: u64, path: &str, update: &BraidUpdate) {
+        let Some(sender) = self.get_topic(tournament_id).await else {
             return;
+        };
+        let Some(bytes) = encode_for_gossip(path, update) else {
+            return;
+        };
+        if let Err(e) = sender.broadcast(bytes.into()).await {
+            warn!(
+                "[gossip] broadcast failed for {path} (v{}): {e}",
+                update.version
+            );
+        } else {
+            info!("[gossip] broadcast {path} v{}", update.version);
         }
-
-        if let Err(e) = sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_tournament_gossip_round ON tournament_gossip_log (tournament_id, round)",
-        )
-        .execute(&pool)
-        .await
-        {
-            warn!("[gossip] Failed to create tournament_gossip_log index: {e}");
-        }
-
-        self.db_pool = Some(pool);
-        info!("[gossip] Message persistence initialized");
     }
 
     /// Register a topic for a tournament with a live gossip sender
@@ -257,91 +260,6 @@ impl TournamentGossipService {
         self.tournament_topics.write().await.remove(&tournament_id);
         info!("[gossip] Removed topic for tournament {}", tournament_id);
     }
-
-    /// Persist a Swiss message to the database
-    pub async fn persist_message(&self, tournament_id: u64, message: &SwissMessage) {
-        let pool = match &self.db_pool {
-            Some(p) => p,
-            None => return,
-        };
-
-        let (round, msg_type) = match message {
-            SwissMessage::RoundStarted { round, .. } => (*round, "RoundStarted"),
-            SwissMessage::ResultRecorded { round, .. } => (*round, "ResultRecorded"),
-            SwissMessage::StandingsUpdated { .. } => (0, "StandingsUpdated"),
-            SwissMessage::BracketFired { .. } => (0, "BracketFired"),
-        };
-
-        let message_json = match serde_json::to_string(message) {
-            Ok(json) => json,
-            Err(e) => {
-                warn!("[gossip] Failed to serialize message: {}", e);
-                return;
-            }
-        };
-
-        let timestamp = chrono::Utc::now().timestamp();
-
-        sqlx::query(
-            "INSERT INTO tournament_gossip_log (tournament_id, round, message_type, message_json, timestamp) VALUES (?, ?, ?, ?, ?)"
-        )
-        .bind(tournament_id as i64)
-        .bind(round as i32)
-        .bind(msg_type)
-        .bind(message_json)
-        .bind(timestamp)
-        .execute(pool)
-        .await
-        .ok();
-    }
-
-    /// Get missed messages for a late joiner
-    pub async fn get_missed_messages(
-        &self,
-        tournament_id: u64,
-        since_round: u8,
-    ) -> Vec<SwissMessage> {
-        let pool = match &self.db_pool {
-            Some(p) => p,
-            None => return Vec::new(),
-        };
-
-        let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT message_json FROM tournament_gossip_log WHERE tournament_id = ? AND round >= ? ORDER BY timestamp ASC"
-        )
-        .bind(tournament_id as i64)
-        .bind(since_round as i32)
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-
-        rows.into_iter()
-            .filter_map(|(json,)| serde_json::from_str(&json).ok())
-            .collect()
-    }
-
-    /// Replay missed messages to a specific peer
-    pub async fn replay_missed_messages(
-        &self,
-        tournament_id: u64,
-        since_round: u8,
-        sender: &iroh_gossip::api::GossipSender,
-    ) -> Result<usize> {
-        let messages = self.get_missed_messages(tournament_id, since_round).await;
-        let count = messages.len();
-
-        for message in messages {
-            let bytes = serde_json::to_vec(&message)?;
-            sender.broadcast(bytes.into()).await?;
-        }
-
-        info!(
-            "[gossip] Replayed {} messages for tournament {} from round {}",
-            count, tournament_id, since_round
-        );
-
-        Ok(count)
-    }
 }
 
 /// Parse a node ID string (just returns the string for now)
@@ -357,6 +275,59 @@ pub fn format_node_id(node_id: &EndpointId) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+    use xfchess_braid_server::{bridge, ResourceHub};
+
+    /// The full publish path, end to end: a Swiss write lands on a hub
+    /// resource, the sink encodes that update for gossip, and a client decodes
+    /// it back into the event it was before this went through Braid.
+    ///
+    /// This is the seam the refactor introduced — server-side `BraidUpdate`,
+    /// wire `Update`, client-side `SwissMessage` — and the one place where a
+    /// path typo or a lost content-type silently degrades into "peers receive
+    /// nothing" rather than a compile error.
+    #[test]
+    fn a_hub_write_reaches_a_client_as_the_same_event() {
+        let hub = ResourceHub::new();
+        let captured: Arc<Mutex<Vec<(String, BraidUpdate)>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let sink_captured = captured.clone();
+        hub.set_gossip_sink(Arc::new(move |path: &str, update: &BraidUpdate| {
+            sink_captured
+                .lock()
+                .expect("sink mutex")
+                .push((path.to_string(), update.clone()));
+        }));
+
+        bridge::push_standings(
+            &hub,
+            7,
+            serde_json::json!([{ "player_id": "alice", "score": 1.5, "rank": 1 }]),
+        );
+
+        let events = captured.lock().expect("sink mutex");
+        let (path, update) = events
+            .iter()
+            .find(|(p, _)| p.ends_with("/standings"))
+            .expect("a standings write must reach the gossip sink");
+        assert_eq!(path, "tournament/7/standings");
+
+        let bytes = encode_for_gossip(path, update).expect("update should encode");
+        let wire: braid_chess::braid_http::types::Update =
+            serde_json::from_slice(&bytes).expect("encoded update should be valid JSON");
+
+        assert_eq!(
+            braid_chess::SwissMessage::from_update(&wire),
+            Some(braid_chess::SwissMessage::StandingsUpdated {
+                tournament_id: 7,
+                standings: vec![braid_chess::SwissStandingsEntry {
+                    player_id: "alice".into(),
+                    score: 1.5,
+                    rank: 1,
+                }],
+            })
+        );
+    }
 
     #[test]
     fn test_format_and_parse_node_id() {
@@ -377,48 +348,23 @@ mod tests {
         assert!(parse_node_id("valid_node_id").is_ok());
     }
 
-    /// Regression test for the bug this fixes: `init_db`'s `CREATE TABLE`
-    /// used to embed an inline `INDEX` clause (valid MySQL, not SQLite),
-    /// which silently failed via a trailing `.ok()` — so the table was never
-    /// actually created and every persisted message was a silent no-op.
+    /// A tournament nobody has joined P2P has no gossip topic. Broadcasting
+    /// into that must be a quiet no-op, not an error: the same update still
+    /// reached every HTTP `209` subscriber through the hub.
     #[tokio::test]
-    async fn init_db_persists_and_replays_missed_messages() {
+    async fn broadcast_without_a_topic_is_a_no_op() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .connect("sqlite::memory:")
             .await
             .expect("in-memory sqlite pool");
-        let tournament_store = TournamentStore::new(pool.clone()).await;
-        let mut gossip = TournamentGossipService::new(tournament_store, None);
+        let tournament_store = TournamentStore::new(pool).await;
+        let gossip = TournamentGossipService::new(tournament_store, None);
 
-        gossip.init_db(pool).await;
-        assert!(
-            gossip.db_pool.is_some(),
-            "init_db should succeed against a real SQLite pool, not silently no-op"
-        );
+        let update = BraidUpdate::snapshot(1, serde_json::json!([]));
+        gossip
+            .broadcast_update(42, "tournament/42/standings", &update)
+            .await;
 
-        let msg = SwissMessage::BracketFired {
-            tournament_id: 42,
-            player_count: 8,
-            started_at: 1_700_000_000,
-        };
-        gossip.persist_message(42, &msg).await;
-
-        let missed = gossip.get_missed_messages(42, 0).await;
-        assert_eq!(
-            missed.len(),
-            1,
-            "a message persisted via a working init_db should be replayable for a late joiner"
-        );
-        match &missed[0] {
-            SwissMessage::BracketFired {
-                tournament_id,
-                player_count,
-                ..
-            } => {
-                assert_eq!(*tournament_id, 42);
-                assert_eq!(*player_count, 8);
-            }
-            other => panic!("unexpected message variant: {other:?}"),
-        }
+        assert!(!gossip.has_topic(42).await);
     }
 }

@@ -21,7 +21,11 @@ use xfchess_game::errors::GameErrorCode;
 use xfchess_game::state::PlayerProfile;
 
 fn lichess_username_record_pda(username: &str) -> Pubkey {
-    Pubkey::find_program_address(&[b"lichess_username", username.as_bytes()], &xfchess_game::ID).0
+    Pubkey::find_program_address(
+        &[b"lichess_username", username.as_bytes()],
+        &xfchess_game::ID,
+    )
+    .0
 }
 
 fn profile_account(authority: Pubkey) -> (Pubkey, solana_sdk::account::Account) {

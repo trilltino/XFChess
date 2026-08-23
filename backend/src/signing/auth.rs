@@ -80,12 +80,70 @@ impl JwtIssuer {
     }
 }
 
-/// Request extension inserted by the dual-accept auth middleware when a request
-/// authenticated via a per-user JWT (as opposed to the legacy relay secret).
-/// Handlers can extract `Option<Extension<AuthedWallet>>` to apply per-caller
-/// authorization (e.g. you may only open a session for your own wallet).
+/// Request extension inserted by the dual-accept auth middleware when — and
+/// only when — a request authenticated via a per-user JWT. Its presence means
+/// the caller cryptographically proved control of this wallet; the legacy
+/// relay-secret path deliberately never inserts it, because a shared secret
+/// held by every game client proves nothing about *which* player is calling.
+///
+/// Handlers must not read this as `Option<Extension<AuthedWallet>>`. That shape
+/// is what made the relay secret a universal impersonation key: every
+/// per-caller check was written `if let Some(authed) = authed { ... }`, so a
+/// request arriving without a proven identity **skipped** the check instead of
+/// failing it. Use the [`RequireWallet`] extractor instead — it fails closed.
 #[derive(Clone, Debug)]
 pub struct AuthedWallet(pub String);
+
+/// Fail-closed extractor for "this route acts on behalf of exactly one wallet".
+///
+/// Yields the caller's cryptographically proven wallet, or rejects the request
+/// with `401` when no [`AuthedWallet`] was established. Because it is a
+/// mandatory extractor rather than an `Option`, a handler simply cannot be
+/// written in a way that silently proceeds without an identity — the "forgot to
+/// check" failure mode becomes impossible rather than merely discouraged.
+pub struct RequireWallet(pub String);
+
+impl<S> axum::extract::FromRequestParts<S> for RequireWallet
+where
+    S: Send + Sync,
+{
+    type Rejection = (axum::http::StatusCode, String);
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        match parts.extensions.get::<AuthedWallet>() {
+            Some(AuthedWallet(wallet)) => Ok(RequireWallet(wallet.clone())),
+            None => Err((
+                axum::http::StatusCode::UNAUTHORIZED,
+                "This endpoint acts on behalf of a specific wallet and requires a per-user \
+                 bearer token. Authenticate via /api/auth/siws-challenge + /api/auth/siws-verify; \
+                 the shared relay secret is not accepted here."
+                    .to_string(),
+            )),
+        }
+    }
+}
+
+impl RequireWallet {
+    /// Asserts the authenticated caller is exactly `claimed`, for handlers that
+    /// take the acted-on wallet in their request body. Mirrors
+    /// `routes::auth::require_caller_owns_wallet` for the extension-based path.
+    pub fn require_is(&self, claimed: &str) -> Result<(), (axum::http::StatusCode, String)> {
+        if self.0 == claimed {
+            return Ok(());
+        }
+        Err((
+            axum::http::StatusCode::FORBIDDEN,
+            format!(
+                "Authenticated wallet {} does not match the wallet this request claims to act on \
+                 ('{claimed}')",
+                self.0
+            ),
+        ))
+    }
+}
 
 /// Extracts the Bearer token from an Authorization header value.
 ///

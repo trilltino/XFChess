@@ -12,6 +12,7 @@ use crate::signing::{AppState, SigningConfig};
 use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use xfchess_braid_server::resource::protocol::BraidUpdate;
 
 const PID_FILE: &str = ".backend.pid";
 
@@ -109,26 +110,51 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(tournament_store.clone()),
     );
 
+    let orchestrator_tx = crate::signing::swiss::spawn_orchestrator(
+        tournament_store.clone(),
+        state.swiss_service.clone(),
+        Some(state.braid_hub.clone()),
+        Some(crate::signing::swiss::orchestrator::SwissOnChainConfig {
+            program_id: config.program_id.clone(),
+            rpc_url: config.solana_rpc_url.clone(),
+            cranker: state.vps_authority.clone(),
+        }),
+    );
+    state.orchestrator_tx = Some(orchestrator_tx);
+
     // ── Initialize social tables (friends, contacts) ─────────────────────────
     if let Err(e) = state.friends.init().await {
         tracing::warn!("[signing-server] Failed to init friends tables: {}", e);
     }
     info!("[signing-server] Social tables initialized");
 
-    // ── Initialize tournament gossip message persistence (late-joiner replay) ─
-    // Must run before `state` is cloned anywhere below — `Arc::get_mut`
-    // requires sole ownership, which only holds true this early.
-    match Arc::get_mut(&mut state.tournament_gossip) {
-        Some(gossip) => {
-            gossip.init_db(pools.session_pool.clone()).await;
-            info!("[signing-server] Tournament gossip persistence initialized");
-        }
-        None => {
-            tracing::warn!(
-                "[signing-server] Could not init tournament gossip persistence — \
-                 AppState.tournament_gossip already shared"
-            );
-        }
+    // ── Mirror every Braid hub update onto its tournament's gossip topic ─────
+    // One write, two transports: the Swiss orchestrator publishes a fact into
+    // the hub exactly once, and it reaches browsers over HTTP 209 (the /braid
+    // mount) and peers over gossip (here) as the same versioned update. This
+    // replaces the separate tagged-JSON broadcasts the service used to emit
+    // alongside its hub writes, and the SQLite log that existed only so a late
+    // peer could be replayed what those broadcasts dropped.
+    {
+        let gossip = state.tournament_gossip.clone();
+        state
+            .braid_hub
+            .set_gossip_sink(Arc::new(move |path: &str, update: &BraidUpdate| {
+                let Some(tournament_id) =
+                    braid_chess::TournamentResource::parse(path).map(|r| r.tournament_id())
+                else {
+                    return;
+                };
+                // The sink is called synchronously from whatever task performed
+                // the hub write, so the actual send has to move off it.
+                let gossip = gossip.clone();
+                let path = path.to_string();
+                let update = update.clone();
+                tokio::spawn(async move {
+                    gossip.broadcast_update(tournament_id, &path, &update).await;
+                });
+            }));
+        info!("[signing-server] Braid hub → tournament gossip fan-out wired");
     }
 
     // ── Build application router ───────────────────────────────────────────
@@ -161,7 +187,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     crate::tasks::er_watch::spawn_er_watch(settlement_state.clone());
     crate::tasks::tournament_forfeit::spawn_tournament_forfeit_watcher(settlement_state.clone());
     crate::signing::anticheat_enqueue::spawn_reingest_sweep(settlement_state);
-    info!("[signing-server] Settlement worker + anti-cheat re-ingest sweep + ER watch + tournament auto-forfeit watcher spawned");
+    // Evicts expired SIWS nonces and idle per-game ER locks. Without this the
+    // nonce map grows on every unauthenticated challenge request and never
+    // shrinks — see `AppState::spawn_state_sweeps`.
+    AppState::spawn_state_sweeps(state.clone());
+    // Pin the uptime clock to process start so `/stats` reports real uptime
+    // rather than the elapsed time since whichever request first touched it.
+    crate::signing::routes::main::init_uptime_clock();
+    info!("[signing-server] Settlement worker + anti-cheat re-ingest sweep + ER watch + tournament auto-forfeit watcher + state sweeps spawned");
 
     // ── Start HTTP Server ──────────────────────────────────────────────────
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
@@ -174,10 +207,19 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Serve with graceful shutdown: on SIGTERM (systemctl stop/restart) or Ctrl-C,
     // stop accepting new connections and let in-flight requests finish before exit.
-    axum::serve(listener, app.with_state(state.clone()))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(|e| anyhow::anyhow!("HTTP server error: {}", e))?;
+    // `into_make_service_with_connect_info` is what makes the peer address
+    // available to handlers. The RPC proxy's rate limiter needs it as ground
+    // truth: it previously keyed on the caller-supplied `x-real-ip` header,
+    // which anything reaching the port directly could rotate per request to
+    // escape the limit entirely.
+    axum::serve(
+        listener,
+        app.with_state(state.clone())
+            .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .map_err(|e| anyhow::anyhow!("HTTP server error: {}", e))?;
 
     info!("[signing-server] Graceful shutdown complete");
     remove_pid_file();

@@ -11,8 +11,7 @@ use tokio::sync::oneshot;
 use crate::multiplayer::solana::integration::state::DEVNET_RPC_URL;
 use crate::solana::instructions::{
     accept_draw_ix, authorize_session_key_ix, claim_timeout_ix, create_game_ix, join_game_ix,
-    offer_draw_ix,
-    GAME_SEED, PROGRAM_ID as SOLANA_PROGRAM_ID,
+    offer_draw_ix, GAME_SEED, PROGRAM_ID as SOLANA_PROGRAM_ID,
 };
 
 /// Which tab the lobby is showing.
@@ -387,8 +386,7 @@ pub fn spawn_claim_timeout(rpc_url: String, wallet_pubkey: Pubkey, game_id: u64)
     let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            if let Err(e) = async_claim_timeout(rpc_url, wallet_pubkey, program_id, game_id).await
-            {
+            if let Err(e) = async_claim_timeout(rpc_url, wallet_pubkey, program_id, game_id).await {
                 error!("[TIMEOUT] claim_timeout on-chain tx failed: {e}");
             }
         })
@@ -695,8 +693,7 @@ async fn async_create_game_via_global_session(
     session_keypair_bytes: Vec<u8>,
 ) -> Result<u64, String> {
     use crate::multiplayer::solana::global_session_manager::{
-        build_global_create_game_ix, check_global_session_can_afford_wager,
-        find_global_session_pda,
+        build_global_create_game_ix, check_global_session_can_afford_wager, find_global_session_pda,
     };
     use crate::solana::instructions::WAGER_ESCROW_SEED;
     use solana_sdk::signature::{Keypair, Signer};
@@ -795,7 +792,8 @@ pub fn cancel_game_on_chain(
     use crate::solana::instructions::cancel_game_ix;
 
     let rpc = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::confirmed());
-    let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let data = rpc
         .get_account_data(&game_pda)
         .map_err(|e| format!("fetch game account: {e}"))?;
@@ -816,11 +814,20 @@ pub fn cancel_game_on_chain(
     let ix = cancel_game_ix(program_id, wallet_pubkey, white, black, game_id)
         .map_err(|e| format!("build cancel_game_ix: {e}"))?;
 
-    sign_and_send_via_tauri(&rpc_url, wallet_pubkey, &[ix], &[], "Cancelling wagered game")
-        .map(|sig| {
-            info!("[CANCEL_GAME] game {} cancelled on-chain, sig {}", game_id, sig);
-            sig
-        })
+    sign_and_send_via_tauri(
+        &rpc_url,
+        wallet_pubkey,
+        &[ix],
+        &[],
+        "Cancelling wagered game",
+    )
+    .map(|sig| {
+        info!(
+            "[CANCEL_GAME] game {} cancelled on-chain, sig {}",
+            game_id, sig
+        );
+        sig
+    })
 }
 
 async fn async_lookup_game(

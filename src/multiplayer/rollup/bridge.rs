@@ -220,7 +220,8 @@ impl Plugin for RollupNetworkBridgePlugin {
         // redundant with this but harmless to leave in place.
         app.add_systems(
             Update,
-            handle_rollup_to_network_events.after(crate::multiplayer::systems::finalize_game_on_end),
+            handle_rollup_to_network_events
+                .after(crate::multiplayer::systems::finalize_game_on_end),
         );
         app.add_systems(Update, handle_network_to_rollup_events);
         app.add_systems(Update, process_batch_commit_requests);

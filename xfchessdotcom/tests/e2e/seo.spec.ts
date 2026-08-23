@@ -6,21 +6,12 @@ import { test, expect } from '@playwright/test';
 // adapted to XFChess's route list. See
 // docs/plans/xfchessdotcom-seo-sitemap-plan.md Phase 4.
 
-const PUBLIC_PAGES = [
-  '/home', '/features', '/play', '/tournaments', '/computer',
-  '/players', '/legal', '/compliance', '/anti-cheat', '/news/release',
-  '/launch',
-];
+const PUBLIC_PAGES = ['/home', '/play', '/tournaments', '/features'];
 
 // Prerendered at build time by scripts/prerender.mjs (Phase 3) — these are
 // the routes whose *raw* HTML (before any JS runs) must carry the correct
 // tags, since that's what zero-JS bots and social link-preview bots see.
-const PRERENDERED_PAGES = [
-  '/home', '/features', '/play', '/tournaments', '/computer',
-  '/legal', '/compliance', '/anti-cheat', '/news/release', '/launch',
-];
-
-const PRIVATE_PAGES = ['/kyc', '/profile', '/create-profile', '/verify', '/login', '/w_setup'];
+const PRERENDERED_PAGES = ['/home', '/play', '/tournaments', '/features'];
 
 test.describe('Public page SEO (client-rendered, real browser)', () => {
   for (const path of PUBLIC_PAGES) {
@@ -113,25 +104,9 @@ test.describe('Structured data (JSON-LD)', () => {
   });
 });
 
-test.describe('Private pages are noindex', () => {
-  for (const path of PRIVATE_PAGES) {
-    test(`${path} has robots: noindex, nofollow`, async ({ page }) => {
-      await page.goto(path);
-      const robots = await page.locator('meta[name="robots"]').getAttribute('content');
-      expect(robots).toBe('noindex, nofollow');
-    });
-  }
-});
-
-test.describe('Route duplication fix', () => {
-  test('/auth/login redirects to /login instead of rendering a duplicate page', async ({ page }) => {
-    await page.goto('/auth/login');
-    // A glob like '**/login' would also match '/auth/login' itself (it
-    // literally ends in "/login") — wait for the exact pathname instead.
-    await page.waitForFunction(() => window.location.pathname === '/login');
-    expect(new URL(page.url()).pathname).toBe('/login');
-  });
-});
+// The "private pages are noindex" block and the /auth/login duplicate-route
+// redirect test were removed with their routes — every surviving page is
+// public and indexable, and /auth/login now falls through the catch-all.
 
 test.describe('Technical SEO', () => {
   test('robots.txt is reachable and references the sitemap', async ({ request }) => {

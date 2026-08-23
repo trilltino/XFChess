@@ -15,6 +15,8 @@
 use crate::db::repository::GameRepository;
 use crate::signing::anticheat_enqueue::{enqueue_game_analysis, FinalizedGame};
 use crate::signing::solana::{self, GAME_SEED};
+use crate::signing::storage::tournament::TournamentFormat;
+use crate::signing::swiss::orchestrator::OrchestratorEvent;
 use crate::signing::AppState;
 use crate::telemetry::worker_metrics;
 use solana_sdk::pubkey::Pubkey;
@@ -43,111 +45,22 @@ const STALE_DELEGATION_SECS: i64 = 20 * 60;
 /// excuse for this case, since nothing has been sent to the ER yet.
 const STALE_UNDELEGATED_SECS: i64 = 5 * 60;
 
-/// GameStatus discriminants (borsh enum tags, see programs/.../state/game.rs).
-const STATUS_ACTIVE: u8 = 2;
-const STATUS_FINISHED: u8 = 5;
-const STATUS_SETTLED: u8 = 6;
-const STATUS_EXPIRED: u8 = 7;
-const STATUS_CANCELLED: u8 = 8;
+// GameStatus / GameResult borsh tags now live with the shared decoder, so the
+// worker and every other reader agree on them by construction.
+use crate::signing::solana::game_account::{
+    GameAccount as GameSnapshot, RESULT_NONE, STATUS_ACTIVE, STATUS_CANCELLED, STATUS_EXPIRED,
+    STATUS_FINISHED, STATUS_SETTLED,
+};
 
-/// GameResult borsh tags.
-const RESULT_NONE: u8 = 0;
-const RESULT_WINNER: u8 = 1;
-
-/// The fields of an on-chain `Game` account the worker needs.
-struct GameSnapshot {
-    white: Pubkey,
-    black: Pubkey,
-    fee_payer: Pubkey,
-    status: u8,
-    result_tag: u8,
-    winner: Option<Pubkey>,
-    wager_amount: u64,
-    base_time_seconds: u64,
-    increment_seconds: u16,
-    is_delegated: bool,
-    tournament_id: Option<u64>,
-    /// Unix timestamp of the game's last on-chain update (last move, or last
-    /// commit while delegated). Used only for the stale-delegation gauge.
-    updated_at: i64,
-    /// Flat platform fee (lamports) set at creation time — the amount
-    /// `settle_finished_game` actually pays to `treasury_vault` on finalize.
-    country_fee: u64,
-}
-
-/// Walks the borsh layout of the Game account (8-byte Anchor discriminator,
-/// then fields in declaration order). Enum/Option fields are compact-encoded,
-/// so everything after `result` sits at a variable offset.
+/// Decodes the on-chain `Game` account.
+///
+/// This used to be a bespoke offset walk that skipped `halfmove_clock`, reading
+/// everything from `created_at` onward two bytes early — including
+/// `is_delegated`, the flag the tick below branches on to decide whether a game
+/// must be undelegated before it can be finalized. It now delegates to the one
+/// shared decoder, which is pinned against the program's own offset test.
 fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
-    let mut o = 8usize; // discriminator
-    o += 8; // game_id
-    let white = Pubkey::try_from(data.get(o..o + 32)?).ok()?;
-    o += 32;
-    let black = Pubkey::try_from(data.get(o..o + 32)?).ok()?;
-    o += 32;
-    let status = *data.get(o)?;
-    o += 1;
-    o += 8; // last_move_timestamp
-    o += 8; // fees_advanced
-    let fee_payer = Pubkey::try_from(data.get(o..o + 32)?).ok()?;
-    o += 32; // fee_payer
-    let result_tag = *data.get(o)?;
-    o += 1;
-    let winner = if result_tag == RESULT_WINNER {
-        let w = Pubkey::try_from(data.get(o..o + 32)?).ok()?;
-        o += 32;
-        Some(w)
-    } else {
-        None
-    };
-    o += 68; // board_state
-    o += 2; // move_count
-    o += 2; // turn (u16)
-    o += 8; // created_at
-    let updated_at = i64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
-    o += 8; // updated_at
-    let wager_amount = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
-    o += 8;
-    let wager_token_tag = *data.get(o)?; // Option<Pubkey>
-    o += 1;
-    if wager_token_tag == 1 {
-        o += 32;
-    }
-    o += 1; // game_type
-    o += 1; // match_type
-    let country_fee = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
-    o += 8;
-    let base_time_seconds = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
-    o += 8;
-    let increment_seconds = u16::from_le_bytes(data.get(o..o + 2)?.try_into().ok()?);
-    o += 2;
-    o += 1; // bump
-    let is_delegated = *data.get(o)? != 0;
-    o += 1;
-    let tournament_id = match *data.get(o)? {
-        // Option<u64>
-        1 => {
-            o += 1;
-            Some(u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?))
-        }
-        _ => None,
-    };
-
-    Some(GameSnapshot {
-        white,
-        black,
-        fee_payer,
-        status,
-        result_tag,
-        winner,
-        wager_amount,
-        base_time_seconds,
-        increment_seconds,
-        is_delegated,
-        tournament_id,
-        updated_at,
-        country_fee,
-    })
+    crate::signing::solana::game_account::parse(data)
 }
 
 /// `getMultipleAccounts` accepts at most this many pubkeys per call.
@@ -287,8 +200,20 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
                     continue;
                 };
                 match snap.status {
-                    STATUS_SETTLED | STATUS_EXPIRED | STATUS_CANCELLED => {
+                    STATUS_SETTLED | STATUS_EXPIRED => {
                         state.store.deactivate(game_id).await;
+                    }
+                    STATUS_CANCELLED if !snap.is_delegated => {
+                        match state.store.get(game_id).await {
+                            Some(entry) => {
+                                if let Err(e) =
+                                    finalize_on_chain(state, game_id, &entry.keypair(), &snap).await
+                                {
+                                    warn!("[settlement] game {}: {}", game_id, e);
+                                }
+                            }
+                            None => warn!("[settlement] game {}: session disappeared", game_id),
+                        }
                     }
                     STATUS_FINISHED if snap.result_tag != RESULT_NONE && !snap.is_delegated => {
                         match state.store.get(game_id).await {
@@ -558,10 +483,9 @@ async fn redelegate_stale_game(state: &Arc<AppState>, game_id: u64, program_id: 
             info!("[settlement] game {} redelegated, sig {}", game_id, sig);
             worker_metrics::SETTLEMENT_REDELEGATE_RETRIED_TOTAL
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let base_rpc = solana::make_rpc(&state.config.solana_rpc_url);
             crate::signing::routes::main::schedule_time_check_crank(
                 state,
-                &base_rpc,
+                &state.config.solana_rpc_url,
                 program_id,
                 &session_kp,
                 game_id,
@@ -965,8 +889,8 @@ async fn finalize_on_chain(
         state,
         FinalizedGame {
             game_id,
-            white,
-            black,
+            white: white.clone(),
+            black: black.clone(),
             winner: winner_side.map(str::to_string),
             wager_lamports: snap.wager_amount,
             tournament_id: snap.tournament_id,
@@ -976,6 +900,57 @@ async fn finalize_on_chain(
     )
     .await;
 
+    if let Some(tournament_id) = snap.tournament_id {
+        let is_swiss = state
+            .tournament_store
+            .get(tournament_id)
+            .await
+            .is_some_and(|t| matches!(t.format, TournamentFormat::Swiss { .. }));
+        if is_swiss {
+            if let Some(tx) = &state.orchestrator_tx {
+                let result = match winner_side {
+                    Some("white") => swiss_pairing::MatchResult::WhiteWin,
+                    Some("black") => swiss_pairing::MatchResult::BlackWin,
+                    _ => swiss_pairing::MatchResult::Draw,
+                };
+                if let Err(e) = tx
+                    .send(OrchestratorEvent::GameEnded {
+                        tournament_id,
+                        game_id,
+                        result,
+                    })
+                    .await
+                {
+                    warn!(
+                        "[settlement] Failed to queue Swiss result for game {}: {}",
+                        game_id, e
+                    );
+                }
+            }
+        } else if let Some(tx) = &state.tournament_trigger {
+            if let Some((winner, loser)) = match winner_side {
+                Some("white") => Some((white.clone(), black.clone())),
+                Some("black") => Some((black.clone(), white.clone())),
+                _ => None,
+            } {
+                if let Err(e) = tx
+                    .send(crate::signing::TournamentTrigger::GameSettled {
+                        tournament_id,
+                        game_id,
+                        winner,
+                        loser,
+                    })
+                    .await
+                {
+                    warn!(
+                        "[settlement] Failed to queue elimination result for game {}: {}",
+                        game_id, e
+                    );
+                }
+            }
+        }
+    }
+
     state.store.deactivate(game_id).await;
     Ok(())
 }
@@ -983,6 +958,9 @@ async fn finalize_on_chain(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Not imported at module scope: only the tests assert on the winner tag,
+    // so importing it above would warn as unused in non-test builds.
+    use crate::signing::solana::game_account::RESULT_WINNER;
 
     /// Serializes a Game account exactly as Anchor/borsh lays it out.
     #[allow(clippy::too_many_arguments)]
@@ -1011,6 +989,11 @@ mod tests {
         }
         d.extend_from_slice(&[0u8; 68]); // board_state
         d.extend_from_slice(&10u16.to_le_bytes()); // move_count
+
+        // halfmove_clock — omitted here originally, which shifted every
+        // field below it by two bytes and made the fixture disagree with the
+        // real on-chain layout (see `signing::solana::game_account`).
+        d.extend_from_slice(&0u16.to_le_bytes());
         d.extend_from_slice(&1u16.to_le_bytes()); // turn (u16)
         d.extend_from_slice(&0i64.to_le_bytes()); // created_at
         d.extend_from_slice(&updated_at.to_le_bytes()); // updated_at
@@ -1037,6 +1020,7 @@ mod tests {
             None => d.push(0),
         }
         d.extend_from_slice(&7u64.to_le_bytes()); // nonce
+        d.push(0); // draw_offered_by = None
         d
     }
 

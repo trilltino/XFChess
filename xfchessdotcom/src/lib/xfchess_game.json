@@ -7817,6 +7817,11 @@
       "code": 6102,
       "name": "CannotAcceptOwnDrawOffer",
       "msg": "You cannot accept your own draw offer."
+    },
+    {
+      "code": 6103,
+      "name": "GlobalSessionVaultUnderfunded",
+      "msg": "Session vault balance is too low to cover this game's rent and wager. Top it up by re-authorizing the session with a larger deposit."
     }
   ],
   "types": [
@@ -8621,7 +8626,12 @@
           {
             "name": "elo_rating",
             "docs": [
-              "Centiscale rating (×100), updated by K=32 Elo in `lifecycle::settlement`. See `elo/README.md`."
+              "Classical-time-control rating (centiscale, ×100) — also the bucket used",
+              "for `Unlimited`/no-clock games. Updated by K=32 Elo in",
+              "`lifecycle::settlement`. See `elo/README.md`. Per-mode siblings:",
+              "`elo_bullet`, `elo_blitz`, `elo_rapid` (appended at the end of this",
+              "struct, below `seeded_from_external`, so existing byte offsets for",
+              "every field above them are unaffected)."
             ],
             "type": "f64"
           },
@@ -8777,10 +8787,27 @@
           {
             "name": "seeded_from_external",
             "docs": [
-              "True once `elo_rating` has been seeded from an external link — gates",
-              "the one-time seed logic in `account_ix::link_external_elo::handler`."
+              "Unused — `link_external_elo` no longer seeds `elo_rating` from a",
+              "linked account (removed: a one-time Lichess-derived seed was",
+              "confusing and gave a wagering-relevant rating a moment of external",
+              "influence). Kept as a dead field rather than removed, since Anchor",
+              "account layout changes require appending, and shrinking would shift",
+              "every field below it. Existing profiles seeded before the removal",
+              "keep whatever value they already had; nothing sets it going forward."
             ],
             "type": "bool"
+          },
+          {
+            "name": "elo_bullet",
+            "type": "f64"
+          },
+          {
+            "name": "elo_blitz",
+            "type": "f64"
+          },
+          {
+            "name": "elo_rapid",
+            "type": "f64"
           }
         ]
       }

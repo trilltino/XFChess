@@ -35,10 +35,18 @@ pub struct CachedElo {
     pub lichess_blitz: u32,
     /// Lichess last sync timestamp
     pub lichess_last_sync: i64,
-    /// Whether ELO was seeded from external rating
+    /// Whether ELO was seeded from external rating. Dead going forward —
+    /// `link_external_elo` no longer sets this — but existing profiles that
+    /// were seeded before the removal still carry `true`.
     pub seeded_from_external: bool,
     /// External ELO source (0=none, 1=lichess)
     pub external_elo_source: u8,
+    /// Per-time-control ratings (centiscale), appended to `PlayerProfile`
+    /// after `seeded_from_external`. `elo_rating` above is the Classical
+    /// bucket. See `elo::rating::bucket_for_time_control` in the program.
+    pub elo_bullet: f64,
+    pub elo_blitz: f64,
+    pub elo_rapid: f64,
     /// When this cache entry was last updated
     pub cached_at: Instant,
 }
@@ -174,6 +182,23 @@ impl EloCache {
         } else {
             false
         };
+        // Per-time-control ratings, appended after seeded_from_external
+        // (offset 264, 1 byte) — see PlayerProfile's own field-order comment.
+        let elo_bullet = if data_len >= 273 {
+            self.deserialize_f64(&account.data, 265).unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let elo_blitz = if data_len >= 281 {
+            self.deserialize_f64(&account.data, 273).unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let elo_rapid = if data_len >= 289 {
+            self.deserialize_f64(&account.data, 281).unwrap_or(0.0)
+        } else {
+            0.0
+        };
 
         let cached = CachedElo {
             elo_rating,
@@ -185,6 +210,9 @@ impl EloCache {
             lichess_last_sync,
             external_elo_source,
             seeded_from_external,
+            elo_bullet,
+            elo_blitz,
+            elo_rapid,
             cached_at: Instant::now(),
         };
 

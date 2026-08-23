@@ -1,5 +1,11 @@
 ﻿import { useState, useEffect, useRef, type CSSProperties } from "react";
 import bs58 from "bs58";
+import { usePrivy, useLogin, useLogout } from "@privy-io/react-auth";
+import { useWallets, useSignMessage, useSignTransaction, useCreateWallet } from "@privy-io/react-auth/solana";
+import type { WalletSource } from "./wallet/types";
+import { connectExtension } from "./wallet/extension";
+import { privyWalletSource } from "./wallet/privy";
+import { PRIVY_ENABLED, SOLANA_CHAIN } from "./privy/config";
 
 // ---------------------------------------------------------------------------
 // REST API bridge — works in Chrome AND Tauri webview
@@ -105,6 +111,12 @@ export function getConnectedProvider(): any {
   const kind = localStorage.getItem("xfchess_wallet_provider");
   if (kind === "solflare") return (window as any).solflare;
   if (kind === "phantom") return (window as any).phantom?.solana;
+  // An embedded wallet has no extension to hand back, and the fallback below
+  // would return Phantom — which is a *different keypair*. That is how profile
+  // creation for a Google user ended up asking Phantom to sign a transaction
+  // whose fee payer and profile owner were the Privy address: the signature
+  // could never be valid for it. Callers must take their Privy branch.
+  if (kind === "privy") return null;
   // Unknown (e.g. state from before this was tracked) — fall back to the old
   // best-effort behavior rather than refusing to sign at all.
   return (window as any).phantom?.solana ?? (window as any).solflare;
@@ -141,21 +153,35 @@ async function ensureDevnet(provider: any, kind: string | null): Promise<void> {
   }
 }
 
-// `ensureDevnet` above is unavoidably best-effort: neither Phantom's nor
-// Solflare's `switchNetwork`/`setCluster` calls expose a documented way to
-// verify the switch actually took (no stable `provider.network`/`.cluster`
-// readback across versions), and every branch already swallows its own
-// errors silently. Live repro (see global_session_manager.rs's
-// `establish_global_session` doc comment, which cross-references this): a
-// Solflare popup rejected a devnet transaction with "current network
-// devnet, but this transaction is for mainnet" — Solflare's own message
-// text, not ours — with no user action involved, meaning the switch call
-// either silently failed or hadn't taken effect yet when signTransaction
-// ran. Rather than gate signing on an unverifiable readback (which risks
-// false-positive lockouts on wallet versions this was never tested
-// against), detect that specific failure shape reactively and turn it into
-// an actionable message instead of the wallet's own confusing raw text —
-// see the two call sites below.
+// `ensureDevnet` above is best-effort (neither wallet exposes a documented
+// readback to verify the switch actually took), but it is NOT what the
+// "network mismatch" repro was about, despite what this comment used to say.
+//
+// Root cause, measured: a wallet extension cannot tell which cluster a
+// transaction targets from the transaction bytes — the only cluster-specific
+// thing in there is the recent blockhash — so it looks that blockhash up on
+// whichever cluster it is currently set to. That lookup (`isBlockhashValid`)
+// defaults to `finalized` commitment, and we were handing it blockhashes
+// fetched at `confirmed`, i.e. younger than the ~32 slot (~13s) finalization
+// lag. Against our own devnet endpoint, checked from a second devnet node:
+//
+//   getLatestBlockhash{confirmed} -> isBlockhashValid{finalized} = false
+//   getLatestBlockhash{finalized} -> isBlockhashValid{finalized} = true
+//
+// So Solflare could not confirm the blockhash existed on devnet, concluded the
+// transaction must belong to the other cluster, and refused to sign with "your
+// current network is set to devnet, but this transaction is for mainnet" —
+// while the user was already correctly on devnet, which is why the old advice
+// to go switch networks was useless. Fixed at the source: every blockhash that
+// goes into a wallet-signed transaction is now fetched at `finalized` — see
+// `/api/fresh-blockhash` in tauri/src/main.rs, `wallet_signable_blockhash` in
+// the backend's signing/solana/rpc.rs, and the same-named helper in
+// src/multiplayer/solana/tauri_signer.rs.
+//
+// The reactive detection below stays as a safety net — it still catches the
+// genuine case (the wallet really is on mainnet) and any wallet whose own RPC
+// lags further behind than finalization — but the message it maps to no longer
+// assumes the user did something wrong.
 export function isNetworkMismatchError(e: any): boolean {
   const msg = String(e?.message ?? e ?? "").toLowerCase();
   const mentionsNetwork = msg.includes("network") || msg.includes("cluster");
@@ -166,8 +192,9 @@ export function isNetworkMismatchError(e: any): boolean {
 }
 
 export const NETWORK_MISMATCH_MESSAGE =
-  "Your wallet extension is set to the wrong Solana network. Switch it to Devnet " +
-  "(open the extension → network/cluster settings → Devnet), then try again.";
+  "Your wallet could not verify this as a Devnet transaction. Try again — if it " +
+  "keeps happening, check that the extension's network is set to Devnet " +
+  "(extension → network/cluster settings → Devnet).";
 
 // `token` is optional because most `apiPost` call sites hit unauthenticated
 // bridge routes (e.g. `/token`, `/api/game/launch`) — but any route proxied
@@ -559,6 +586,229 @@ function StepDots({ step }: { step: Step }) {
 // ---------------------------------------------------------------------------
 import * as web3 from "@solana/web3.js";
 
+/**
+ * "Continue with Google" block.
+ *
+ * Privy authenticates the user and creates a Solana embedded wallet
+ * (`createOnLogin: 'users-without-wallets'`). Once that wallet shows up in
+ * `useWallets()`, this hands it to `onWallet` as a `WalletSource`, and it goes
+ * through the *same* `authenticateWithBackend` flow every extension wallet
+ * goes through — there is no privileged shortcut for social users.
+ *
+ * For a player with no wallet extension installed, this is the only path in the
+ * popup that works at all: the Phantom/Solflare rows both render as
+ * "not installed" for them, which was the dead end this whole feature exists to
+ * remove.
+ */
+function SocialLoginBlock({
+  onWallet,
+  busy,
+}: {
+  onWallet: (src: WalletSource) => void;
+  busy: boolean;
+}) {
+  const { ready, authenticated, user } = usePrivy();
+  const { login } = useLogin();
+  const { logout } = useLogout();
+  const { wallets } = useWallets();
+  const { createWallet } = useCreateWallet();
+  const { signMessage } = useSignMessage();
+  const { signTransaction } = useSignTransaction();
+  const handedOff = useRef<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [provisioning, setProvisioning] = useState(false);
+  const provisionTried = useRef(false);
+
+  /**
+   * Whether the player actually picked "Continue with Google" in THIS popup.
+   *
+   * Privy persists an authenticated session in the popup's Chrome profile, so a
+   * player who used Google once came back to `authenticated === true` with a
+   * populated `useWallets()` on the very first render. Both effects below then
+   * fired unprompted: the wallet was handed to `onWallet`, which runs the full
+   * `authenticateWithBackend` flow and raises a signature prompt. The player
+   * never got to choose between Google, Phantom and Solflare — the popup had
+   * already committed them to Google, and declining that prompt left "The user
+   * rejected the request." sitting above three buttons, none of which had been
+   * pressed.
+   *
+   * Nothing on the Privy path may run until the player has pressed the button.
+   * A persisted session is still used — clicking Google skips straight past
+   * `login()` — it just no longer acts on its own.
+   *
+   * Counted rather than a boolean because a boolean cannot express "pressed it
+   * again": a second press would leave state and every effect dependency
+   * unchanged, so nothing would re-run and a retry would be silently ignored.
+   */
+  const [attempt, setAttempt] = useState(0);
+  const chosen = attempt > 0;
+
+  // Hand the embedded wallet over exactly once per address. Privy re-renders
+  // this array on many state transitions, and re-firing would start a second
+  // login/register round-trip (and a second signature prompt) for a wallet
+  // already being processed.
+  useEffect(() => {
+    if (!chosen || !authenticated) return;
+    const wallet = wallets[0];
+    if (!wallet?.address) return;
+    if (handedOff.current === wallet.address) return;
+    handedOff.current = wallet.address;
+    logLifecycle("WALLET_CONNECT_START", { wallet: "privy" });
+    onWallet(privyWalletSource(wallet, signMessage, signTransaction));
+    // `onWallet` is recreated per render by the parent; including it would
+    // re-run this effect constantly. The `handedOff` ref is the real guard.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attempt, authenticated, wallets, signMessage, signTransaction]);
+
+  /**
+   * Whether this Privy session already has a Solana embedded wallet.
+   *
+   * `useWallets()` is empty for a moment after login while it hydrates, so an
+   * empty array on its own is not evidence of "no wallet" — provisioning off
+   * that alone races the hydration and asks Privy for a second wallet. The
+   * user object's `linkedAccounts` is the authoritative record and settles
+   * first, so it is the one that decides.
+   */
+  const hasEmbeddedWallet =
+    wallets.length > 0 ||
+    !!user?.linkedAccounts?.some(
+      (a) =>
+        a.type === "wallet" &&
+        a.chainType === "solana" &&
+        !!a.walletClientType?.startsWith("privy")
+    );
+
+  /**
+   * Create the embedded wallet ourselves rather than leaving it to Privy's
+   * `createOnLogin`.
+   *
+   * `createOnLogin` only fires inside the login flow, and the screen it drives
+   * (`EmbeddedWalletOnAccountCreateScreen`) silently does nothing at all if
+   * `user`, the access token, or the wallet proxy is missing — no error, no
+   * navigation, no close, just the "Creating your wallet" spinner forever.
+   * Worse, it leaves an authenticated session with no wallet, and `login()`
+   * then refuses to run ("user is already logged in"), so the button becomes
+   * inert and there is no way out of the popup.
+   *
+   * `createWallet()` is the headless equivalent: it either resolves or throws
+   * something we can show the user, and it can be retried from the button.
+   */
+  const provision = async () => {
+    if (provisioning) return;
+    setProvisioning(true);
+    setError(null);
+    logLifecycle("PRIVY_CREATE_WALLET_START");
+    try {
+      await createWallet();
+      logLifecycle("PRIVY_CREATE_WALLET_OK");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logLifecycle("PRIVY_CREATE_WALLET_FAILED", { error: msg });
+      setError(`Could not create your wallet: ${msg}`);
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
+  // A session that came back authenticated but wallet-less — either from a
+  // previous run that hung, or from `createOnLogin` no-opping — is repaired
+  // on sight rather than waiting for the user to work out that the button
+  // needs pressing again.
+  useEffect(() => {
+    if (!chosen || !ready || !authenticated || !user) return;
+    if (hasEmbeddedWallet || provisionTried.current) return;
+    provisionTried.current = true;
+    void provision();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attempt, ready, authenticated, user, hasEmbeddedWallet]);
+
+  const btnStyle: CSSProperties = {
+    width: "100%", padding: "14px 20px", borderRadius: 12,
+    border: `1px solid ${BORDER}`, background: "rgba(255,255,255,0.03)",
+    color: TEXT, fontSize: 15, fontWeight: 700, display: "flex",
+    alignItems: "center", gap: 14, cursor: ready && !busy ? "pointer" : "wait",
+    opacity: ready && !busy ? 1 : 0.6, transition: "all 0.2s",
+  };
+
+  // Signed in but wallet-less: the one state where the old button did nothing
+  // but log "user is already logged in" to a console nobody was watching.
+  const needsWallet = authenticated && !hasEmbeddedWallet;
+
+  // Chosen, signed in, Privy says a wallet exists — but `useWallets()` has not
+  // produced it yet. Both effects above bail in this window by design; without
+  // a label for it the button reads as broken.
+  const awaitingWallet =
+    chosen && authenticated && hasEmbeddedWallet && !wallets[0]?.address;
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      {error && <ErrorMsg msg={error} />}
+
+      <button
+        style={btnStyle}
+        disabled={!ready || busy || provisioning}
+        onClick={() => {
+          // Recording the choice is what releases the two effects above; for a
+          // persisted session that alone is enough to continue, with no second
+          // trip through Google.
+          setAttempt((n) => n + 1);
+          // An explicit click means "do it now", so the duplicate-suppression
+          // latch is dropped here. `handedOff` exists only to stop the effect
+          // above starting a SECOND hand-off for a wallet already in flight; it
+          // was never meant to be permanent. Nothing cleared it when a hand-off
+          // failed, so after one declined signature prompt the effect saw an
+          // address it had already handed off and returned on every subsequent
+          // click — the button did nothing, with no error, for the rest of the
+          // popup's life. This cannot race a live hand-off: the button is
+          // disabled while `busy`, which is exactly when one is in flight.
+          handedOff.current = null;
+          if (!authenticated) { login({ loginMethods: ["google"] }); return; }
+          if (!hasEmbeddedWallet) { void provision(); }
+        }}
+      >
+        <span style={{ fontSize: 18, width: 20, textAlign: "center" }}>G</span>
+        <span style={{ flex: 1 }}>
+          {provisioning
+            ? "Creating your wallet..."
+            : awaitingWallet
+              ? "Connecting your wallet..."
+              : needsWallet
+                ? "Finish setting up your wallet"
+                : "Continue with Google"}
+        </span>
+      </button>
+
+      {needsWallet && !provisioning && (
+        <button
+          onClick={async () => {
+            provisionTried.current = false;
+            setError(null);
+            handedOff.current = null;
+            setAttempt(0);
+            await logout();
+          }}
+          style={{
+            width: "100%", marginTop: 8, padding: "8px 0", background: "none",
+            border: "none", color: TEXT_DIM, fontSize: 12, cursor: "pointer",
+            textDecoration: "underline",
+          }}
+        >
+          Sign out of Google and start over
+        </button>
+      )}
+
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10, margin: "20px 0 4px",
+        opacity: 0.45, fontSize: 11, letterSpacing: "0.08em",
+      }}>
+        <span style={{ flex: 1, height: 1, background: BORDER }} />
+        <span>OR USE A WALLET</span>
+        <span style={{ flex: 1, height: 1, background: BORDER }} />
+      </div>
+    </div>
+  );
+}
+
 function WalletStep({
   onContinue, onAuth, onClose
 }: {
@@ -567,134 +817,127 @@ function WalletStep({
   onClose?: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const [connecting, setConnecting] = useState<"phantom" | "solflare" | null>(null);
+  const [connecting, setConnecting] = useState<"phantom" | "solflare" | "privy" | null>(null);
 
   const WALLET_META = {
     phantom: { label: "Phantom", icon: "", installUrl: "https://phantom.app/", provider: () => (window as any).phantom?.solana },
     solflare: { label: "Solflare", icon: "", installUrl: "https://solflare.com/", provider: () => (window as any).solflare },
   };
 
+  /**
+   * The XFChess half of connecting: prove ownership, get a JWT, tell the bridge.
+   *
+   * Shared by every provider — extension or Privy — so the invariants below
+   * exist once instead of once per provider. Each of them is a fixed bug:
+   *
+   *  1. `POST /wallet` happens only AFTER a signature verifies. Posting it
+   *     earlier (right after `provider.connect()`) let a rejected sign-message
+   *     prompt still leave the game client believing a wallet was connected,
+   *     which unlocked wagered play.
+   *  2. `username` comes from THIS call's auth response, never from
+   *     localStorage. The popup's Chrome profile is shared across wallets, so a
+   *     previous unrelated wallet's cached name leaked through here and was
+   *     adopted by the game client's poller as authoritative (see
+   *     `sync_bridge_pubkey_to_solana` in src/states/main_menu.rs, which
+   *     explicitly trusts this POST).
+   *  3. Ownership is always proven by a real signature. There used to be a
+   *     "hot" local-keypair path that self-signed silently with no prompt at
+   *     all; nothing may reintroduce that.
+   */
+  const authenticateWithBackend = async (src: WalletSource) => {
+    const { pubkey, signRaw, kind } = src;
+    if (!pubkey) throw new Error("No public key returned from wallet");
+    localStorage.setItem("xfchess_wallet", pubkey);
+    localStorage.setItem("xfchess_wallet_provider", kind);
+
+    // Check registration status first — avoids redundant signing requests.
+    logLifecycle("BACKEND_VERIFY", { path: "check-wallet" });
+    const checkResp = await fetch(`${API_BASE}/api/auth/check-wallet/${pubkey}`, {
+      headers: { "X-Session-Id": SESSION_ID },
+    });
+    const isRegistered = checkResp.ok;
+
+    let auth: AuthResponse;
+    logLifecycle("SIGN_REQUEST_START");
+    if (isRegistered) {
+      const ts = Math.floor(Date.now() / 1000);
+      const sig = await signRaw(`xfchess:login:${ts}`);
+      logLifecycle("SIGNATURE_RECEIVED");
+      auth = await apiPost<AuthResponse>("/api/auth/login", {
+        wallet: pubkey, signature: sig, timestamp: ts,
+      });
+    } else {
+      const ts = Math.floor(Date.now() / 1000);
+      const sig = await signRaw(`xfchess:register:${ts}`);
+      logLifecycle("SIGNATURE_RECEIVED");
+      auth = await apiPost<AuthResponse>("/api/auth/register", {
+        wallet: pubkey, signature: sig, timestamp: ts,
+        username: pubkey.slice(0, 8),
+      });
+    }
+
+    // Invariants 1 and 2 from this function's doc comment land here. On (2):
+    // `auth.username` is not yet the fully on-chain-aware answer — that is
+    // `handleAuth`'s job, which posts its own resolved value once it has one —
+    // but it is guaranteed to be about THIS wallet, unlike the old
+    // localStorage read.
+    // `provider` lets the game client tell an embedded wallet from an
+    // extension. It gates the no-popup global-session flow, which is enabled
+    // only for `privy` — see WalletProvider in tauri/src/main.rs.
+    await apiPost("/wallet", { pubkey, username: auth.username, provider: kind });
+
+    logLifecycle("TX_COMPLETE", { pubkey });
+    onAuth(auth.token, auth.username, pubkey);
+    onContinue(pubkey, src.provider ?? null);
+  };
+
+  /**
+   * Provider errors (Phantom/Solflare, and Privy's) are usually plain
+   * `{code, message}` objects rather than real Errors, so `console.error(e)`
+   * alone often prints "Unexpected error" with no stack. Log every own property
+   * so a failure is diagnosable from DevTools instead of only surfacing the
+   * same generic string in the UI.
+   */
+  const reportFailure = (e: any) => {
+    console.error("[WalletStep] connect failed:", e, JSON.stringify(e, Object.getOwnPropertyNames(e)));
+    logLifecycle("FAILED", { message: e?.message || String(e) });
+    setError(e?.message || String(e));
+  };
+
   const handleConnect = async (walletName: "phantom" | "solflare") => {
     setError(null);
     setConnecting(walletName);
     try {
-      let pubkey: string;
-      let provider: any;
-      // Always signs to prove key ownership before we treat the user as
-      // logged in — no path (there used to be a "hot" local-keypair option
-      // that self-signed silently, with no wallet popup at all) skips this.
-      let signRaw: (msg: string) => Promise<string>;
-
-      provider = WALLET_META[walletName].provider();
-      if (!provider) {
-        throw new Error(`${WALLET_META[walletName].label} extension not detected.`);
-      }
-      // Always a real approval prompt — no silent onlyIfTrusted reconnect.
-      // That fast path resolved with no popup at all once an extension had
-      // trusted this origin once, which is exactly what made "Connect
-      // Wallet" silently reuse whichever wallet was approved first instead
-      // of asking every time, especially confusing across multiple windows
-      // sharing one real browser profile (each window is its own bridge
-      // origin by port, but the extension's own trust memory isn't
-      // necessarily scoped that finely).
       logLifecycle("WALLET_CONNECT_START", { wallet: walletName });
-      const resp: any = await withTimeout(
-        provider.connect(),
-        30000,
-        `${WALLET_META[walletName].label} connection`,
-      );
-      // Phantom: publicKey is on the response object
-      // Solflare: publicKey is on the provider after connect, not on resp
-      pubkey = resp?.publicKey?.toBase58?.()
-        ?? resp?.publicKey?.toString?.()
-        ?? provider.publicKey?.toBase58?.()
-        ?? provider.publicKey?.toString?.();
-      logLifecycle("WALLET_CONNECTED", { pubkey });
-      // Nudge cluster as early as possible in the session — the first
-      // automatic signing popup for a fresh wallet is usually the global
-      // quick-sign-session authorize (see integration/systems.rs's
-      // `authorize_global_session_if_needed`, which fires the moment a
-      // profile is detected), so by the time that popup exists this has
-      // already had its one best-effort chance to run instead of racing it.
-      await ensureDevnet(provider, walletName);
-      // Signs raw bytes — no "utf8" arg to avoid Phantom>=0.16 off-chain prefix.
-      signRaw = async (msg: string): Promise<string> => {
-        const bytes = new TextEncoder().encode(msg);
-        logLifecycle("SIGN_REQUEST_START");
-        const { signature: sig } = await withTimeout<{ signature: Uint8Array }>(
-          provider.signMessage(bytes),
-          60000,
-          `${WALLET_META[walletName].label} signature`,
-        );
-        logLifecycle("SIGNATURE_RECEIVED");
-        return bs58.encode(sig);
-      };
+      const src = await connectExtension(walletName);
+      logLifecycle("WALLET_CONNECTED", { pubkey: src.pubkey });
 
-      if (!pubkey) throw new Error("No public key returned from wallet");
-      localStorage.setItem("xfchess_wallet", pubkey);
-      localStorage.setItem("xfchess_wallet_provider", walletName);
-
-      // Check registration status first — avoids redundant signing requests.
-      logLifecycle("BACKEND_VERIFY", { path: "check-wallet" });
-      const checkResp = await fetch(`${API_BASE}/api/auth/check-wallet/${pubkey}`, {
-        headers: { "X-Session-Id": SESSION_ID },
-      });
-      const isRegistered = checkResp.ok;
-
-      let auth: AuthResponse;
-      if (isRegistered) {
-        const ts = Math.floor(Date.now() / 1000);
-        const sig = await signRaw(`xfchess:login:${ts}`);
-        auth = await apiPost<AuthResponse>("/api/auth/login", {
-          wallet: pubkey, signature: sig, timestamp: ts,
-        });
-      } else {
-        const ts = Math.floor(Date.now() / 1000);
-        const sig = await signRaw(`xfchess:register:${ts}`);
-        auth = await apiPost<AuthResponse>("/api/auth/register", {
-          wallet: pubkey, signature: sig, timestamp: ts,
-          username: pubkey.slice(0, 8),
-        });
-      }
-
-      // Only tell the bridge (and thus the game client's /status poll) that
-      // a wallet is "connected" once ownership has been proven by a valid
-      // signature — posting this earlier (e.g. right after provider.connect())
-      // let a rejected sign-message prompt still leave the game client
-      // believing the wallet was connected and unlocking wagered play.
+      // Nudge cluster as early as possible in the session — the first automatic
+      // signing popup for a fresh wallet is usually the global quick-sign
+      // authorize (`authorize_global_session_if_needed` in
+      // integration/systems.rs, which fires the moment a profile is detected),
+      // so by the time that popup exists this has already had its one
+      // best-effort chance to run instead of racing it.
       //
-      // `username` here MUST come from `auth.username` (this call's own
-      // login/register response, scoped to THIS pubkey) — never from
-      // `localStorage.getItem("xfchess_username")`. This popup's browser
-      // profile is shared/persistent across wallets (see the module doc
-      // comment on why), so a prior, completely unrelated wallet's cached
-      // name was leaking straight through here and getting adopted by the
-      // game client's poller as "the bridge's trustworthy username" (see
-      // `sync_bridge_pubkey_to_solana`'s doc comment in src/states/
-      // main_menu.rs, which explicitly assumes this POST is trustworthy) —
-      // live repro: game client showed a stale, unrelated username as
-      // already-known while this exact ProfileStep correctly asked for a
-      // fresh handle for the wallet that actually just connected, because
-      // the two paths were computing "the username" independently. Even
-      // `auth.username` isn't the FULLY on-chain-aware answer yet — that's
-      // `handleAuth`'s job below, which posts its own resolved value once
-      // it has one — but it's guaranteed to actually be about this wallet,
-      // unlike the old localStorage read.
-      await apiPost("/wallet", { pubkey, username: auth.username });
+      // Extension-only: an embedded wallet has no user-selected cluster.
+      await ensureDevnet(src.provider, walletName);
 
-      logLifecycle("TX_COMPLETE", { pubkey });
-      onAuth(auth.token, auth.username, pubkey);
-
-      onContinue(pubkey, provider ?? null);
+      await authenticateWithBackend(src);
     } catch (e: any) {
-      // Provider errors (Phantom/Solflare) are usually plain {code, message}
-      // objects, not real Errors — console.error(e) alone often prints
-      // "Unexpected error" with no stack. Log every field we can find so a
-      // failure is actually diagnosable from DevTools instead of just
-      // surfacing the same generic string in the UI.
-      console.error("[WalletStep] connect failed:", e, JSON.stringify(e, Object.getOwnPropertyNames(e)));
-      logLifecycle("FAILED", { message: e?.message || String(e) });
-      setError(e.message || String(e));
+      reportFailure(e);
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const handlePrivyWallet = async (src: WalletSource) => {
+    setError(null);
+    setConnecting("privy");
+    try {
+      logLifecycle("WALLET_CONNECTED", { pubkey: src.pubkey, wallet: "privy" });
+      await authenticateWithBackend(src);
+    } catch (e: any) {
+      reportFailure(e);
     } finally {
       setConnecting(null);
     }
@@ -719,6 +962,10 @@ function WalletStep({
       </div>
 
       {error && <ErrorMsg msg={error} />}
+
+      {PRIVY_ENABLED && (
+        <SocialLoginBlock onWallet={handlePrivyWallet} busy={connecting !== null} />
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {(["phantom", "solflare"] as const).map((w) => {
@@ -815,6 +1062,12 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   const [pendingLabel, setPendingLabel] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Privy hooks are safe to call unconditionally: PrivyProviderWrapper renders
+  // a passthrough when VITE_PRIVY_APP_ID is unset, and these return empty
+  // state rather than throwing.
+  const { wallets: privyWallets } = useWallets();
+  const { signTransaction: privySignTransaction } = useSignTransaction();
+  const hasPrivyWallet = PRIVY_ENABLED && !!privyWallets[0]?.address;
   // Tracks which pending tx we've already auto-attempted, so the polling
   // effect doesn't re-fire signTransaction() every second while the user is
   // busy approving (or rejecting) it inside Phantom's own popup.
@@ -863,6 +1116,56 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
       await resolveAndHide(await signTxBytes(txB64, kp));
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setSigning(false);
+    }
+  };
+
+  // Signs via Privy's embedded wallet. Bytes in, bytes out — the same raw
+  // transaction the Rust side serialized, straight back to the bridge — so this
+  // path never has to reconcile Privy's `@solana/kit` types with this app's
+  // `@solana/web3.js` ones.
+  //
+  // In practice this fires rarely for a social user: it covers the onboarding
+  // transactions (`init_profile`, `authorize_global_session`) and any moment no
+  // session key is active. Once a global session is authorized, gameplay goes
+  // through `handleAutoSign` and never wakes this window at all.
+  //
+  // `ensureDevnet` is deliberately NOT called here: an embedded wallet has no
+  // user-selected cluster to nudge, so there is nothing to correct and
+  // `isNetworkMismatchError` is unreachable on this path.
+  const signWithPrivy = async (txB64: string) => {
+    setSigning(true);
+    setError(null);
+    try {
+      const wallet = privyWallets[0];
+      if (!wallet?.address) throw new Error("No Privy wallet available to sign with");
+
+      const tx = deserializeTx(Buffer.from(txB64, "base64"));
+      await refreshBlockhash(tx);
+
+      logLifecycle("SIGN_REQUEST_START");
+      const { signedTransaction } = await withTimeout(
+        privySignTransaction({
+          transaction: new Uint8Array(
+            tx instanceof web3.VersionedTransaction ? tx.serialize() : tx.serialize({
+              requireAllSignatures: false,
+              verifySignatures: false,
+            }),
+          ),
+          wallet,
+          chain: SOLANA_CHAIN,
+        }),
+        60000,
+        "Privy signature",
+      );
+      logLifecycle("SIGNATURE_RECEIVED");
+
+      await resolveAndHide(Buffer.from(signedTransaction).toString("base64"));
+      logLifecycle("TX_COMPLETE");
+    } catch (e: any) {
+      logLifecycle("FAILED", { message: e?.message || String(e) });
+      setError(e?.message || String(e));
     } finally {
       setSigning(false);
     }
@@ -943,10 +1246,20 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         const alreadyAttempted = sessionStorage.getItem("xfchess_auto_attempted_tx") === data.tx;
         if (secret) {
           handleAutoSign(data.tx, secret);
-        } else if (getConnectedProvider() && autoAttempted.current !== data.tx && !alreadyAttempted) {
+        } else if (
+          (hasPrivyWallet || getConnectedProvider()) &&
+          autoAttempted.current !== data.tx &&
+          !alreadyAttempted
+        ) {
           autoAttempted.current = data.tx;
           sessionStorage.setItem("xfchess_auto_attempted_tx", data.tx);
-          signWithExtension(data.tx);
+          // Privy first: if an embedded wallet is present it is definitionally
+          // the wallet this session authenticated with, whereas
+          // `getConnectedProvider()` only checks a persisted preference plus
+          // whether an extension object exists on `window` — it can be true for
+          // an extension that has nothing to do with the current session.
+          if (hasPrivyWallet) signWithPrivy(data.tx);
+          else signWithExtension(data.tx);
         }
       } else if (!data.tx) {
         sessionStorage.removeItem("xfchess_auto_attempted_tx");
@@ -991,7 +1304,11 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
       </p>
       {error && <ErrorMsg msg={error} />}
       {!signing && !sessionStorage.getItem("xfchess_session_key") && (
-        <PrimaryBtn onClick={() => signWithExtension(pendingTx)}>Sign with Extension</PrimaryBtn>
+        hasPrivyWallet ? (
+          <PrimaryBtn onClick={() => signWithPrivy(pendingTx)}>Sign</PrimaryBtn>
+        ) : (
+          <PrimaryBtn onClick={() => signWithExtension(pendingTx)}>Sign with Extension</PrimaryBtn>
+        )
       )}
     </div>
   );
@@ -1032,6 +1349,18 @@ function ProfileStep({
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Privy hooks are safe to call unconditionally — PrivyProviderWrapper renders
+  // a passthrough when VITE_PRIVY_APP_ID is unset, and these return empty state
+  // rather than throwing. Read here rather than threaded down from the parent's
+  // `walletProvider`, which is `null` for an embedded wallet by design (see
+  // WalletSource.provider) and is also lost entirely when the popup is reopened
+  // straight onto this step via the needs-profile-step flag.
+  const { wallets: privyWallets } = useWallets();
+  const { signTransaction: privySignTransaction } = useSignTransaction();
+  const privyWallet = PRIVY_ENABLED ? privyWallets[0] : undefined;
+  const signWithEmbedded =
+    localStorage.getItem("xfchess_wallet_provider") === "privy" && !!privyWallet?.address;
+
   const [handle, setHandle] = useState(defaultHandle || localStorage.getItem("xfchess_username") || "");
   const [country, setCountry] = useState("");
   const [dob, setDob] = useState("");
@@ -1055,15 +1384,26 @@ function ProfileStep({
           throw new Error("No wallet connected in this window — reopen from the game client and try again.");
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const provider: any = walletProvider ?? getConnectedProvider();
-        if (!provider) {
-          throw new Error("No Phantom/Solflare extension detected in this window.");
-        }
-        if (!provider.publicKey) {
-          try {
-            await withTimeout(provider.connect({ onlyIfTrusted: true }), 15000, "Wallet reconnect");
-          } catch {
-            await withTimeout(provider.connect(), 30000, "Wallet connection");
+        let provider: any = null;
+        if (signWithEmbedded) {
+          // Guard against signing with the wrong key if Privy ever hands back a
+          // different wallet than the one that authenticated.
+          if (privyWallet!.address !== walletPubkey) {
+            throw new Error(
+              "Your signed-in wallet changed — close this window and sign in again.",
+            );
+          }
+        } else {
+          provider = walletProvider ?? getConnectedProvider();
+          if (!provider) {
+            throw new Error("No Phantom/Solflare extension detected in this window.");
+          }
+          if (!provider.publicKey) {
+            try {
+              await withTimeout(provider.connect({ onlyIfTrusted: true }), 15000, "Wallet reconnect");
+            } catch {
+              await withTimeout(provider.connect(), 30000, "Wallet connection");
+            }
           }
         }
 
@@ -1097,18 +1437,43 @@ function ProfileStep({
         // the whole ProfileStep form from scratch.
         const MAX_ATTEMPTS = 2;
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-          let signed: web3.Transaction;
+          let signedB64: string;
           try {
             await refreshBlockhash(tx);
-            await ensureDevnet(provider, localStorage.getItem("xfchess_wallet_provider"));
-            logLifecycle("SIGN_REQUEST_START", { attempt });
-            signed = await withTimeout(provider.signTransaction(tx), 60000, "Wallet signature");
+            logLifecycle("SIGN_REQUEST_START", {
+              attempt,
+              wallet: signWithEmbedded ? "privy" : "extension",
+            });
+            if (signWithEmbedded) {
+              // `ensureDevnet` is deliberately skipped: an embedded wallet has
+              // no user-selected cluster to nudge, so `isNetworkMismatchError`
+              // is unreachable on this path.
+              const { signedTransaction } = await withTimeout(
+                privySignTransaction({
+                  transaction: new Uint8Array(
+                    tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
+                  ),
+                  wallet: privyWallet!,
+                  chain: SOLANA_CHAIN,
+                }),
+                60000,
+                "Privy signature",
+              );
+              signedB64 = Buffer.from(signedTransaction).toString("base64");
+            } else {
+              await ensureDevnet(provider, localStorage.getItem("xfchess_wallet_provider"));
+              const signed = await withTimeout<web3.Transaction>(
+                provider.signTransaction(tx),
+                60000,
+                "Wallet signature",
+              );
+              signedB64 = Buffer.from(signed.serialize()).toString("base64");
+            }
             logLifecycle("SIGNATURE_RECEIVED");
           } catch (e: any) {
             if (isNetworkMismatchError(e)) throw new Error(NETWORK_MISMATCH_MESSAGE);
             throw new Error("Signature rejected — try again to finish on-chain setup.");
           }
-          const signedB64 = Buffer.from(signed.serialize()).toString("base64");
           try {
             await apiPost<{ signature: string }>(
               "/api/auth/broadcast-tx",

@@ -23,6 +23,8 @@
 use axum::http::{Method, StatusCode};
 use axum::response::IntoResponse;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -56,10 +58,34 @@ struct WalletPubkey(Arc<Mutex<Option<String>>>);
 #[derive(Default, Clone)]
 struct WalletUsername(Arc<Mutex<Option<String>>>);
 
+/// Which provider the connected wallet came from: `phantom`, `solflare`, or
+/// `privy`. Reported by wallet-ui on `POST /wallet` and surfaced on `/status`.
+///
+/// The game client uses this to decide whether the no-popup global-session flow
+/// is safe to attempt: it is enabled only for `privy` embedded wallets, because
+/// the one unresolved blocker on that flow (a Solflare "network mismatch:
+/// current network devnet, but this transaction is for mainnet" rejection
+/// arriving with no user action) is an artifact of an extension carrying its own
+/// user-selected cluster. An embedded wallet has no such setting and cannot
+/// produce it. See `authorize_global_session_if_needed` in
+/// src/multiplayer/solana/integration/systems.rs.
+#[derive(Default, Clone)]
+struct WalletProvider(Arc<Mutex<Option<String>>>);
+
 /// JWT token issued by the backend on successful auth.
 /// Shared between the bridge HTTP server and the main app handle.
 #[derive(Default, Clone)]
 struct WalletJwt(Arc<Mutex<Option<String>>>);
+
+/// When the game client last polled `GET /status`. This bridge process
+/// survives independently of the game window (closing the game doesn't kill
+/// it — see `spawn_wallet_state_reaper`'s doc comment for why that used to
+/// mean a connected wallet stayed cached here forever, across every later
+/// launch, until the whole process was manually killed). Used only to detect
+/// "no game has been alive/polling for a while" so the cached wallet can be
+/// dropped on that basis, without needing to track the game's actual PID.
+#[derive(Default, Clone)]
+struct WalletLastSeen(Arc<Mutex<Option<std::time::Instant>>>);
 
 /// Type alias for in-flight signing request: the raw tx bytes, a short
 /// human-readable label describing what's being signed (e.g. "Joining game"),
@@ -100,7 +126,10 @@ fn nominal_http_port() -> u16 {
 /// Get the HTTP port for the wallet signing service — the real bound port
 /// if the server has started, else the nominal (env-derived) one.
 fn http_port() -> u16 {
-  ACTUAL_HTTP_PORT.get().copied().unwrap_or_else(nominal_http_port)
+  ACTUAL_HTTP_PORT
+    .get()
+    .copied()
+    .unwrap_or_else(nominal_http_port)
 }
 
 /// Path the HTTP bridge writes its actual bound port to, so the game client
@@ -109,10 +138,7 @@ fn http_port() -> u16 {
 /// raw-TCP listener; must match http_bridge_port_file() in the game
 /// client's src/multiplayer/solana/tauri_signer.rs.
 fn http_bridge_port_file() -> std::path::PathBuf {
-  std::env::temp_dir().join(format!(
-    "xfchess-wallet-http-{}.port",
-    nominal_http_port()
-  ))
+  std::env::temp_dir().join(format!("xfchess-wallet-http-{}.port", nominal_http_port()))
 }
 
 /// Bind the HTTP server, trying the nominal port first and then a small
@@ -121,7 +147,8 @@ fn http_bridge_port_file() -> std::path::PathBuf {
 /// records it in ACTUAL_HTTP_PORT before returning.
 async fn bind_http_port() -> Option<(TcpListener, u16)> {
   let nominal = nominal_http_port();
-  for port in std::iter::once(nominal).chain(nominal.saturating_add(1)..=nominal.saturating_add(10)) {
+  for port in std::iter::once(nominal).chain(nominal.saturating_add(1)..=nominal.saturating_add(10))
+  {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     if let Ok(listener) = TcpListener::bind(addr).await {
       let _ = ACTUAL_HTTP_PORT.set(port);
@@ -222,7 +249,9 @@ async fn http_server(
   notify: PendingTxNotify,
   wallet_pubkey: WalletPubkey,
   wallet_username: WalletUsername,
+  wallet_provider: WalletProvider,
   wallet_jwt: WalletJwt,
+  wallet_last_seen: WalletLastSeen,
 ) {
   use axum::{
     extract::State,
@@ -241,7 +270,9 @@ async fn http_server(
     notify: PendingTxNotify,
     wallet_pubkey: WalletPubkey,
     wallet_username: WalletUsername,
+    wallet_provider: WalletProvider,
     wallet_jwt: WalletJwt,
+    wallet_last_seen: WalletLastSeen,
     #[cfg(feature = "tournament-admin")]
     dist_path: std::path::PathBuf,
     wallet_ui_dist_path: std::path::PathBuf,
@@ -345,9 +376,21 @@ async fn http_server(
           Some(username.to_string())
         };
       }
+      // Absent means "caller has no opinion" — leave whatever is cached alone,
+      // same convention as `username` above.
+      if let Some(provider) = body.get("provider").and_then(|v| v.as_str()) {
+        *s.wallet_provider.0.lock().unwrap() = if provider.is_empty() {
+          None
+        } else {
+          Some(provider.to_string())
+        };
+      }
       tracing::info!(
         "[HTTP] Wallet connected: {pk} username={}",
-        body.get("username").and_then(|v| v.as_str()).unwrap_or("<unset>")
+        body
+          .get("username")
+          .and_then(|v| v.as_str())
+          .unwrap_or("<unset>")
       );
     }
     StatusCode::OK
@@ -365,13 +408,21 @@ async fn http_server(
     StatusCode::OK
   }
 
-  // GET /status — health / wallet info
+  // GET /status — health / wallet info. Only the game client polls this
+  // (every 5s while running — see `poll_wallet_bridge` in
+  // src/states/main_menu.rs), so a call here doubles as "the game is alive
+  // right now" for `spawn_wallet_state_reaper` below.
   async fn get_status(State(s): State<LocalState>) -> impl IntoResponse {
+    *s.wallet_last_seen.0.lock().unwrap() = Some(std::time::Instant::now());
     let pubkey = s.wallet_pubkey.0.lock().unwrap().clone();
     let username = s.wallet_username.0.lock().unwrap().clone();
-    Json(
-      serde_json::json!({ "connected": pubkey.is_some(), "pubkey": pubkey, "username": username }),
-    )
+    let provider = s.wallet_provider.0.lock().unwrap().clone();
+    Json(serde_json::json!({
+      "connected": pubkey.is_some(),
+      "pubkey": pubkey,
+      "username": username,
+      "provider": provider,
+    }))
   }
 
   // GET /api/consent
@@ -483,21 +534,36 @@ async fn http_server(
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/login", get_backend_url()), body, &headers).await
+    proxy_post(
+      &format!("{}/api/auth/login", get_backend_url()),
+      body,
+      &headers,
+    )
+    .await
   }
   async fn api_register(
     State(_s): State<LocalState>,
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/register", get_backend_url()), body, &headers).await
+    proxy_post(
+      &format!("{}/api/auth/register", get_backend_url()),
+      body,
+      &headers,
+    )
+    .await
   }
   async fn api_login_email(
     State(_s): State<LocalState>,
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/login-email", get_backend_url()), body, &headers).await
+    proxy_post(
+      &format!("{}/api/auth/login-email", get_backend_url()),
+      body,
+      &headers,
+    )
+    .await
   }
   async fn api_register_email(
     State(_s): State<LocalState>,
@@ -533,7 +599,12 @@ async fn http_server(
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
-    proxy_post(&format!("{}/api/auth/link-wallet", get_backend_url()), body, &headers).await
+    proxy_post(
+      &format!("{}/api/auth/link-wallet", get_backend_url()),
+      body,
+      &headers,
+    )
+    .await
   }
   async fn api_sync_profile(headers: axum::http::HeaderMap) -> impl IntoResponse {
     proxy_post(
@@ -637,7 +708,18 @@ async fn http_server(
       "jsonrpc": "2.0",
       "id": 1,
       "method": "getLatestBlockhash",
-      "params": [{ "commitment": "confirmed" }]
+      // `finalized`, not `confirmed`: this blockhash is written into a
+      // transaction that a wallet extension is about to be asked to sign, and
+      // the extension identifies which cluster the transaction belongs to by
+      // looking the blockhash up on its own selected cluster — at
+      // `isBlockhashValid`'s default `finalized` commitment. A `confirmed`
+      // blockhash is younger than the ~32 slot (~13s) finalization lag, so that
+      // lookup returns false for a perfectly good devnet blockhash, and
+      // Solflare refuses to sign with "Network mismatch: your current network
+      // is set to devnet, but this transaction is for mainnet". Costs ~13s of
+      // the ~60s validity window, which the callers' stale-blockhash retry
+      // already covers. Mirrors the backend's `wallet_signable_blockhash`.
+      "params": [{ "commitment": "finalized" }]
     });
     let resp = match client
       .post(format!("{}/api/rpc", get_backend_url()))
@@ -732,8 +814,7 @@ async fn http_server(
   async fn api_open_profile_step(State(s): State<LocalState>) -> impl IntoResponse {
     s.needs_profile_step
       .store(true, std::sync::atomic::Ordering::Relaxed);
-    let wallet_url =
-      std::env::var("XFCHESS_WALLET_URL")
+    let wallet_url = std::env::var("XFCHESS_WALLET_URL")
       .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
     let profile_url = format!("{wallet_url}?step=profile");
     tracing::info!("[HTTP] opening profile step: {profile_url}");
@@ -804,10 +885,7 @@ async fn http_server(
   // every player needs wallet signing, not just desktop admins. Without this,
   // the popup has nowhere real to point at other than an external URL that
   // doesn't exist in a shipped build (see XFCHESS_WALLET_URL's default below).
-  async fn serve_wallet_ui(
-    State(s): State<LocalState>,
-    uri: axum::http::Uri,
-  ) -> impl IntoResponse {
+  async fn serve_wallet_ui(State(s): State<LocalState>, uri: axum::http::Uri) -> impl IntoResponse {
     serve_dist_file(&s.wallet_ui_dist_path, "/wallet-ui", uri.path()).await
   }
 
@@ -840,12 +918,37 @@ async fn http_server(
       Some("png") => "image/png",
       Some("ico") => "image/x-icon",
       Some("woff2") => "font/woff2",
+      // Added for the Privy SDK, which requests a `.json` and may request a
+      // `.wasm` for its crypto path. Served as application/octet-stream, a
+      // browser refuses to execute the wasm and silently rejects the JSON —
+      // producing a popup that fails with no useful error anywhere.
+      Some("json") => "application/json",
+      Some("wasm") => "application/wasm",
+      Some("woff") => "font/woff",
+      Some("ttf") => "font/ttf",
+      Some("map") => "application/json",
       _ => "application/octet-stream",
+    };
+
+    // Cache policy. Vite fingerprints every asset (`index-<hash>.js`), so those
+    // are immutable and safe to cache hard. `index.html` is NOT fingerprinted
+    // and is the file that names which hashed bundle to load — and Vite *deletes*
+    // the previous bundle on each rebuild. With no cache header at all, Chrome
+    // heuristically cached index.html, so after a rebuild a still-open popup kept
+    // asking for a bundle that no longer existed on disk: its only <script> 404'd
+    // and the window rendered completely blank, with nothing in the UI to explain
+    // it. Reproduced twice during development. HTML must always be revalidated.
+    let is_html = mime.starts_with("text/html");
+    let cache_control = if is_html {
+      "no-store, must-revalidate"
+    } else {
+      "public, max-age=31536000, immutable"
     };
 
     match tokio::fs::read(&file_path).await {
       Ok(bytes) => axum::response::Response::builder()
         .header("Content-Type", mime)
+        .header("Cache-Control", cache_control)
         .body(axum::body::Body::from(bytes))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
       Err(_) => {
@@ -853,9 +956,14 @@ async fn http_server(
         match tokio::fs::read(dist.join("index.html")).await {
           Ok(bytes) => axum::response::Response::builder()
             .header("Content-Type", "text/html; charset=utf-8")
+            .header("Cache-Control", "no-store, must-revalidate")
             .body(axum::body::Body::from(bytes))
             .unwrap_or_else(|_| StatusCode::NOT_FOUND.into_response()),
-          Err(_) => (StatusCode::NOT_FOUND, format!("{prefix} dist not found. Build it first: cd tauri{prefix} && npm run build")).into_response(),
+          Err(_) => (
+            StatusCode::NOT_FOUND,
+            format!("{prefix} dist not found. Build it first: cd tauri{prefix} && npm run build"),
+          )
+            .into_response(),
         }
       }
     }
@@ -905,8 +1013,7 @@ async fn http_server(
   // Resolve the wallet-ui dist dir the same way: next to the binary in a
   // production bundle, or CARGO_MANIFEST_DIR-relative in dev.
   let wallet_ui_dist_path = {
-    let dev_path =
-      std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/wallet-ui/dist"));
+    let dev_path = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/wallet-ui/dist"));
     if dev_path.exists() {
       dev_path
     } else {
@@ -917,13 +1024,23 @@ async fn http_server(
     }
   };
 
+  spawn_wallet_state_reaper(
+    wallet_pubkey.clone(),
+    wallet_username.clone(),
+    wallet_provider.clone(),
+    wallet_jwt.clone(),
+    wallet_last_seen.clone(),
+  );
+
   let state = LocalState {
     app,
     pending,
     notify,
     wallet_pubkey,
     wallet_username,
+    wallet_provider,
     wallet_jwt,
+    wallet_last_seen,
     #[cfg(feature = "tournament-admin")]
     dist_path,
     wallet_ui_dist_path,
@@ -1102,9 +1219,8 @@ fn open_wallet_popup_for_signing(_app: &tauri::AppHandle) {
 
 fn open_wallet_popup_with_step(step: Option<&str>, force_fresh: bool) {
   let sid = begin_session();
-  let wallet_url =
-    std::env::var("XFCHESS_WALLET_URL")
-      .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
+  let wallet_url = std::env::var("XFCHESS_WALLET_URL")
+    .unwrap_or_else(|_| format!("http://localhost:{}/wallet-ui/", http_port()));
   let url = match step {
     Some(s) => format!("{wallet_url}?step={s}&sid={sid}"),
     None => format!("{wallet_url}?sid={sid}"),
@@ -1169,54 +1285,84 @@ fn open_in_browser(url: &str, force_fresh: bool) {
       );
     }
 
+    // Windows console apps like `reg.exe` allocate their own visible console
+    // window when spawned from a windows-subsystem (console-less) parent —
+    // CREATE_NO_WINDOW suppresses that so these lookups stay invisible.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
     fn get_chromium_default_browser() -> Option<String> {
       let output = std::process::Command::new("reg")
-        .args(["query", r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice", "/v", "ProgId"])
+        .args([
+          "query",
+          r"HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice",
+          "/v",
+          "ProgId",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
       let stdout = String::from_utf8_lossy(&output.stdout);
-      let prog_id = stdout.lines().find(|l| l.contains("ProgId"))?.split_whitespace().last()?;
-      
+      let prog_id = stdout
+        .lines()
+        .find(|l| l.contains("ProgId"))?
+        .split_whitespace()
+        .last()?;
+
       let hkcr = format!(r"HKCR\{}\shell\open\command", prog_id);
       let output = std::process::Command::new("reg")
         .args(["query", &hkcr, "/ve"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
       let stdout = String::from_utf8_lossy(&output.stdout);
-      
+
       let path_str = stdout.lines().find(|l| l.contains("REG_SZ"))?;
       let idx = path_str.find("REG_SZ")?;
       let cmd = path_str[idx + 6..].trim();
       let path = if cmd.starts_with('"') {
-          let end_quote = cmd[1..].find('"')?;
-          cmd[1..end_quote + 1].to_string()
+        let end_quote = cmd[1..].find('"')?;
+        cmd[1..end_quote + 1].to_string()
       } else {
-          let path_part = cmd.split(" --").next().unwrap_or(cmd).split(" %").next().unwrap_or(cmd);
-          path_part.trim().to_string()
+        let path_part = cmd
+          .split(" --")
+          .next()
+          .unwrap_or(cmd)
+          .split(" %")
+          .next()
+          .unwrap_or(cmd);
+        path_part.trim().to_string()
       };
       let lower = path.to_lowercase();
-      if lower.contains("chrome.exe") || lower.contains("msedge.exe") || lower.contains("brave.exe") || lower.contains("vivaldi.exe") || lower.contains("opera.exe") {
-          return Some(path);
+      if lower.contains("chrome.exe")
+        || lower.contains("msedge.exe")
+        || lower.contains("brave.exe")
+        || lower.contains("vivaldi.exe")
+        || lower.contains("opera.exe")
+      {
+        return Some(path);
       }
       None
     }
 
     if let Some(chromium_browser) = get_chromium_default_browser() {
-        if std::path::Path::new(&chromium_browser).exists() {
-            let app_flag = format!("--app={}", url_ts);
-            match Command::new(&chromium_browser)
-                .args([&app_flag, &format!("--window-size={WALLET_POPUP_WIDTH},{WALLET_POPUP_HEIGHT}")])
-                .spawn()
-            {
-                Ok(child) => {
-                    let pid = child.id();
-                    *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
-                    spawn_wallet_popup_resize_watcher();
-                    return;
-                }
-                Err(e) => tracing::warn!("[WalletPopup] failed to spawn {chromium_browser}: {e}"),
-            }
+      if std::path::Path::new(&chromium_browser).exists() {
+        let app_flag = format!("--app={}", url_ts);
+        match Command::new(&chromium_browser)
+          .args([
+            &app_flag,
+            &format!("--window-size={WALLET_POPUP_WIDTH},{WALLET_POPUP_HEIGHT}"),
+          ])
+          .spawn()
+        {
+          Ok(child) => {
+            let pid = child.id();
+            *wallet_popup_pid_cell().lock().unwrap() = Some(pid);
+            spawn_wallet_popup_resize_watcher();
+            return;
+          }
+          Err(e) => tracing::warn!("[WalletPopup] failed to spawn {chromium_browser}: {e}"),
         }
+      }
     }
 
     // Fall back to default browser via open::that() if not Chromium or spawn failed
@@ -1257,6 +1403,136 @@ fn open_in_browser(url: &str, force_fresh: bool) {
 /// indistinguishable to `EnumWindows`, which searches the whole desktop —
 /// either player's popup closing would `WM_CLOSE` *both* players' popups.
 #[cfg(windows)]
+// ── Admin SSH tunnel (PRODUCTION mode) ───────────────────────────────────────
+//
+// Owned here in Rust rather than in the panel's JavaScript, because the
+// JS-side version had no way to guarantee the child process died. Closing the
+// admin window or rebuilding the UI dropped the JS reference but left the real
+// `ssh.exe` running, and those orphans then squatted port 8091 so every
+// *subsequent* tunnel silently failed to bind — presenting as "tunnel down"
+// while SSH auth itself was working fine. Tying the child to app state plus
+// window-close/app-exit hooks makes that failure structurally impossible.
+//
+// See docs/plans/tournament-admin-connection-rearchitecture.md §3 Phase 2.
+#[cfg(feature = "tournament-admin")]
+#[derive(Default)]
+struct AdminTunnel(Arc<Mutex<Option<tauri_plugin_shell::process::CommandChild>>>);
+
+/// Probes `http://127.0.0.1:{port}/health` from Rust (no browser, so no CORS).
+#[cfg(feature = "tournament-admin")]
+async fn admin_health_ok(port: u16) -> bool {
+  let url = format!("http://127.0.0.1:{port}/health");
+  match reqwest::Client::new()
+    .get(&url)
+    .timeout(std::time::Duration::from_secs(3))
+    .send()
+    .await
+  {
+    Ok(r) => r.status().is_success(),
+    Err(_) => false,
+  }
+}
+
+/// Brings up the PRODUCTION SSH tunnel and returns once the backend actually
+/// answers through it. Idempotent: if a healthy tunnel is already listening
+/// (ours or one you opened by hand in a terminal) it is reused rather than
+/// duplicated.
+#[cfg(feature = "tournament-admin")]
+#[tauri::command]
+async fn ensure_admin_tunnel(
+  app: tauri::AppHandle,
+  key_path: String,
+  ssh_user: String,
+  ssh_host: String,
+  local_port: u16,
+  remote_host: String,
+  remote_port: u16,
+) -> Result<String, String> {
+  use tauri_plugin_shell::ShellExt;
+
+  // Already up and healthy? Reuse it.
+  if admin_health_ok(local_port).await {
+    return Ok("reused".into());
+  }
+
+  // Drop any child we previously spawned before binding the port again.
+  kill_admin_tunnel_inner(&app);
+
+  // Port occupied but NOT answering /health => a stale squatter (very likely an
+  // orphan from an older build). Say so precisely instead of blaming the tunnel.
+  if std::net::TcpStream::connect(("127.0.0.1", local_port)).is_ok() {
+    return Err(format!(
+      "Port {local_port} is already in use by another process, but it is not \
+       answering /health — it's most likely a stale ssh.exe from an earlier \
+       session. Close it (Task Manager, or `taskkill /F /IM ssh.exe`) and try again."
+    ));
+  }
+
+  let forward = format!("{local_port}:{remote_host}:{remote_port}");
+  let target = format!("{ssh_user}@{ssh_host}");
+  let child = app
+    .shell()
+    .command("ssh")
+    .args([
+      "-i",
+      &key_path,
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ExitOnForwardFailure=yes",
+      "-o",
+      "ServerAliveInterval=30",
+      "-o",
+      "StrictHostKeyChecking=accept-new",
+      "-N",
+      "-L",
+      &forward,
+      &target,
+    ])
+    .spawn()
+    .map(|(_rx, child)| child)
+    .map_err(|e| format!("could not start ssh: {e}"))?;
+
+  if let Ok(mut slot) = app.state::<AdminTunnel>().0.lock() {
+    *slot = Some(child);
+  }
+
+  // Poll rather than guessing a fixed delay: a cold handshake to a real VPS
+  // (TCP + host key + auth + forward setup) is routinely slower than the 8s
+  // the old JS timeout allowed, which is why it reported failure moments
+  // before the tunnel actually came up.
+  for _ in 0..30 {
+    if admin_health_ok(local_port).await {
+      return Ok("connected".into());
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+  }
+
+  kill_admin_tunnel_inner(&app);
+  Err(format!(
+    "SSH connected but the backend never answered /health on port {local_port} \
+     within 15s. Check that the '{ssh_user}' user exists on {ssh_host}, that \
+     your key is authorized, and that the backend is running."
+  ))
+}
+
+#[cfg(feature = "tournament-admin")]
+fn kill_admin_tunnel_inner(app: &tauri::AppHandle) {
+  if let Some(state) = app.try_state::<AdminTunnel>() {
+    if let Ok(mut slot) = state.0.lock() {
+      if let Some(child) = slot.take() {
+        let _ = child.kill();
+      }
+    }
+  }
+}
+
+#[cfg(feature = "tournament-admin")]
+#[tauri::command]
+fn kill_admin_tunnel(app: tauri::AppHandle) {
+  kill_admin_tunnel_inner(&app);
+}
+
 fn kill_wallet_popup() {
   use ::windows::core::BOOL;
   use ::windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
@@ -1589,6 +1865,56 @@ fn spawn_wallet_popup_resize_watcher() {
   });
 }
 
+/// How long the bridge can go without a `/status` poll before it forgets the
+/// connected wallet. The game client polls every 5s while running (see
+/// `poll_wallet_bridge`) — this is a generous multiple of that, not a tight
+/// timeout, so a brief hitch never disconnects an active session.
+const WALLET_STATE_IDLE_CLEAR_SECS: u64 = 30;
+
+/// Background task, run for the app's lifetime: this bridge process outlives
+/// the game window on purpose (closing the game doesn't kill it, so a later
+/// launch can reconnect fast) — but with no expiry, that meant the connected
+/// wallet (pubkey + username + JWT) stayed cached here indefinitely, across
+/// every subsequent game launch, until someone manually killed the process.
+/// A player who closed the game, came back hours/days later, and connected a
+/// *different* wallet on the website would still see the old wallet's
+/// username in the game client, because it was never told anything changed —
+/// the two are entirely separate connections (see `post_wallet`'s doc
+/// comment). Clearing the cache once nothing has polled `/status` for
+/// `WALLET_STATE_IDLE_CLEAR_SECS` ties the cached identity to "a game is
+/// actually running and asking," which is the right lifetime for it, without
+/// needing to track the game process's PID directly.
+fn spawn_wallet_state_reaper(
+  wallet_pubkey: WalletPubkey,
+  wallet_username: WalletUsername,
+  wallet_provider: WalletProvider,
+  wallet_jwt: WalletJwt,
+  wallet_last_seen: WalletLastSeen,
+) {
+  tauri::async_runtime::spawn(async move {
+    loop {
+      tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+      let stale = {
+        let last_seen = wallet_last_seen.0.lock().unwrap();
+        match *last_seen {
+          Some(at) => at.elapsed().as_secs() >= WALLET_STATE_IDLE_CLEAR_SECS,
+          // Never polled at all — nothing to clear yet, this isn't staleness.
+          None => false,
+        }
+      };
+      if stale && wallet_pubkey.0.lock().unwrap().is_some() {
+        tracing::info!(
+          "[WalletState] no /status poll for {WALLET_STATE_IDLE_CLEAR_SECS}s — clearing cached wallet"
+        );
+        *wallet_pubkey.0.lock().unwrap() = None;
+        *wallet_username.0.lock().unwrap() = None;
+        *wallet_provider.0.lock().unwrap() = None;
+        *wallet_jwt.0.lock().unwrap() = None;
+      }
+    }
+  });
+}
+
 /// How long a hidden popup can sit idle before it's actually killed, so a
 /// player who finishes their session doesn't leave a wallet-extension-
 /// capable Chrome window running invisibly in the background forever.
@@ -1637,7 +1963,6 @@ fn process_is_alive(pid: u32) -> bool {
   }
 }
 
-
 #[tauri::command]
 fn show_wallet_popup_window(app: tauri::AppHandle) {
   tracing::info!("[WalletPopup] show_wallet_popup_window invoked");
@@ -1656,7 +1981,29 @@ fn open_tournament_admin(app: &tauri::AppHandle) {
     // Served by the loopback-only wallet bridge from the built dist — the
     // admin panel only exists inside this desktop window, never as a
     // separate web process.
-    let admin_url = format!("http://localhost:{}/tournament-admin/", http_port());
+    //
+    // XFCHESS_ADMIN_DEV_URL overrides this with a Vite dev server (see
+    // `just admin-dev`), giving hot-module reload on UI edits instead of a
+    // full rebuild-and-relaunch cycle. Loopback-only by assertion below: a
+    // stray env var must never be able to point this window at a remote
+    // origin, since it holds admin credentials and shell/tunnel permissions.
+    let admin_url = match std::env::var("XFCHESS_ADMIN_DEV_URL") {
+      Ok(dev) if !dev.trim().is_empty() => {
+        let dev = dev.trim().to_string();
+        let is_loopback =
+          dev.starts_with("http://localhost:") || dev.starts_with("http://127.0.0.1:");
+        if is_loopback {
+          tracing::warn!("[TournamentAdmin] DEV MODE — loading from {dev} (hot reload)");
+          dev
+        } else {
+          tracing::error!(
+            "[TournamentAdmin] XFCHESS_ADMIN_DEV_URL={dev} is not loopback — ignoring"
+          );
+          format!("http://localhost:{}/tournament-admin/", http_port())
+        }
+      }
+      _ => format!("http://localhost:{}/tournament-admin/", http_port()),
+    };
     if let Some(win) = app.get_webview_window("tournament-admin") {
       tracing::info!("[TournamentAdmin] focusing existing window");
       let _ = win.show();
@@ -1675,6 +2022,15 @@ fn open_tournament_admin(app: &tauri::AppHandle) {
         .build()
       {
         Ok(win) => {
+          // Closing the admin window must take the SSH tunnel with it —
+          // otherwise the orphaned ssh.exe keeps port 8091 bound and the next
+          // login silently fails to establish a forward.
+          let tunnel_app = app.clone();
+          win.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+              kill_admin_tunnel_inner(&tunnel_app);
+            }
+          });
           let _ = win.show();
           let _ = win.set_focus();
         }
@@ -1710,12 +2066,18 @@ fn main() {
     .plugin(tauri_plugin_deep_link::init())
     .plugin(tauri_plugin_notification::init())
     .plugin(tauri_plugin_shell::init())
+    // Lets the tournament-admin webview issue backend calls from Rust rather
+    // than from the browser context — see the dependency comment in
+    // Cargo.toml. Scoped to loopback admin ports by capabilities/admin-http.json.
+    .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_clipboard_manager::init())
     .setup(|app| {
       // Always start disconnected — user must connect a wallet each session.
       let wallet_pubkey = WalletPubkey::default();
       let wallet_username = WalletUsername::default();
+      let wallet_provider = WalletProvider::default();
       let wallet_jwt = WalletJwt::default();
+      let wallet_last_seen = WalletLastSeen::default();
       let pending_tx: PendingTx = Arc::new(Mutex::new(None));
       let (pending_notify, _): (PendingTxNotify, _) = tokio::sync::watch::channel(());
       let auth_state = services::auth::AuthState::new();
@@ -1723,9 +2085,13 @@ fn main() {
       // Register shared state with Tauri app
       app.manage(wallet_pubkey.clone());
       app.manage(wallet_username.clone());
+      app.manage(wallet_provider.clone());
       app.manage(wallet_jwt.clone());
+      app.manage(wallet_last_seen.clone());
       app.manage(pending_tx.clone());
       app.manage(auth_state);
+      #[cfg(feature = "tournament-admin")]
+      app.manage(AdminTunnel::default());
 
       // ── HTTP wallet bridge — /pending, /pending/stream, /resolved, /wallet,
       // /hide, /token ── The wallet-ui React app subscribes to
@@ -1738,8 +2104,10 @@ fn main() {
         let n = pending_notify.clone();
         let w = wallet_pubkey.clone();
         let wu = wallet_username.clone();
+        let wp = wallet_provider.clone();
         let wj = wallet_jwt.clone();
-        tauri::async_runtime::spawn(http_server(h, p, n, w, wu, wj));
+        let wls = wallet_last_seen.clone();
+        tauri::async_runtime::spawn(http_server(h, p, n, w, wu, wp, wj, wls));
       }
 
       spawn_wallet_popup_idle_reaper();
@@ -1976,6 +2344,10 @@ fn main() {
       services::ipc::show_notification,
       services::ipc::open_url,
       services::ipc::copy_to_clipboard,
+      #[cfg(feature = "tournament-admin")]
+      ensure_admin_tunnel,
+      #[cfg(feature = "tournament-admin")]
+      kill_admin_tunnel,
     ])
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
@@ -1986,6 +2358,10 @@ fn main() {
       // wallet-extension-capable Chrome process after the game closes.
       if let tauri::RunEvent::ExitRequested { .. } = event {
         kill_wallet_popup();
+        // Same reasoning for the admin SSH tunnel: an orphaned ssh.exe holds
+        // port 8091 and breaks every later tunnel attempt.
+        #[cfg(feature = "tournament-admin")]
+        kill_admin_tunnel_inner(_app_handle);
       }
     });
 }

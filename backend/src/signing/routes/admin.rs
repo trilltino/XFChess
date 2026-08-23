@@ -8,6 +8,15 @@
 //! `state.store` (SQLite-backed). See `admin_routes()` for the full route map.
 
 use crate::db::repository::GameRepository;
+async fn tournament_transactions(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    Ok(Json(json!({
+        "tournament_id": id,
+        "transactions": state.tournament_store.transactions(id).await,
+    })))
+}
 use crate::signing::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -53,10 +62,22 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-fn add_audit(action: &str, target: &str, result: &str) {
+/// Records an admin action. `actor` is resolved from the API key that
+/// authenticated the current request (see `auth_middleware::current_admin_actor`).
+/// Always updates the in-memory tail (fast path for the live view); when
+/// `pool` is given also persists to `admin_audit_log` **before returning** so
+/// the entry survives a restart. Awaited (not fire-and-forget) deliberately —
+/// an audit log that can silently lose an entry to a crash between "response
+/// sent" and "write landed" defeats its own purpose. `pool` is only absent in
+/// the handful of handlers that predate `AppState` threading (elo override,
+/// IP ban, token rotate) — those stay memory-only until they're refactored to
+/// take `State<AppState>`.
+async fn add_audit(pool: Option<sqlx::SqlitePool>, action: &str, target: &str, result: &str) {
+    let actor = crate::infrastructure::auth_middleware::current_admin_actor();
+    let ts = now_secs();
     let entry = AuditEntry {
-        timestamp: now_secs(),
-        actor: "admin".to_string(),
+        timestamp: ts,
+        actor: actor.clone(),
         action: action.to_string(),
         target: target.to_string(),
         result: result.to_string(),
@@ -65,6 +86,22 @@ fn add_audit(action: &str, target: &str, result: &str) {
         log.push(entry);
         if log.len() > 500 {
             log.remove(0);
+        }
+    }
+    if let Some(pool) = pool {
+        if let Err(e) = sqlx::query(
+            "INSERT INTO admin_audit_log (ts, actor, action, target, result, method, path, status) \
+             VALUES (?, ?, ?, ?, ?, '', '', NULL)",
+        )
+        .bind(ts as i64)
+        .bind(&actor)
+        .bind(action)
+        .bind(target)
+        .bind(result)
+        .execute(&pool)
+        .await
+        {
+            error!("[admin] failed to persist audit entry ({action} {target}): {e}");
         }
     }
 }
@@ -127,11 +164,195 @@ struct AssignDisputeReq {
 #[derive(Deserialize)]
 struct AuditLogQuery {
     limit: Option<usize>,
+    tournament_id: Option<u64>,
 }
 
 #[derive(Deserialize)]
 struct FeeReportQuery {
     period: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TournamentCostRequest {
+    max_players: u16,
+    format: String,
+    #[serde(default)]
+    average_moves: u32,
+}
+
+#[derive(Deserialize)]
+struct AffordabilityQuery {
+    max_players: Option<u16>,
+    format: Option<String>,
+    average_moves: Option<u32>,
+}
+
+pub(crate) fn tournament_cost_estimate(
+    max_players: u16,
+    format: &str,
+    average_moves: u32,
+) -> serde_json::Value {
+    let games = max_players.saturating_sub(1) as u64;
+    let shards = max_players.div_ceil(64) as u64;
+    let shard_rent = shards * 34_100_000;
+    let match_rent = games * 2_170_000;
+    let game_rent = games * 3_400_000;
+    let tx_count = if format.eq_ignore_ascii_case("swiss") {
+        u64::from(max_players) * 3 + games
+    } else {
+        u64::from(max_players) * 2 + games * 3
+    };
+    let base_fees = tx_count * 5_000;
+    let priority_fees = tx_count * 200_000 * 10_000 / 1_000_000;
+    let er_session = games * 300_000;
+    let er_moves = games * u64::from(average_moves) * 5_000;
+    let gross =
+        shard_rent + match_rent + game_rent + base_fees + priority_fees + er_session + er_moves;
+    let refunds = shard_rent + match_rent + game_rent;
+    serde_json::json!({
+        "gross_lamports": gross,
+        "net_lamports": gross.saturating_sub(refunds),
+        "working_capital_lamports": gross,
+        "per_player_lamports": if max_players == 0 { 0 } else { gross / u64::from(max_players) },
+        "rent_lamports": shard_rent + match_rent + game_rent,
+        "er_lamports": er_session + er_moves,
+        "er_cost_confidence": "modeled",
+        "assumptions": {
+            "average_moves": average_moves,
+            "format": format,
+            "rent_refunds_modeled": true
+        }
+    })
+}
+
+async fn predict_tournament_cost(
+    State(_state): State<AppState>,
+    Json(req): Json<TournamentCostRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    Ok(Json(tournament_cost_estimate(
+        req.max_players,
+        &req.format,
+        req.average_moves,
+    )))
+}
+
+async fn operator_affordability(
+    State(state): State<AppState>,
+    Query(q): Query<AffordabilityQuery>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    use solana_sdk::signature::Signer;
+    let rpc = state.solana_rpc.clone();
+    let wallet = state.vps_authority.pubkey();
+    let balance = tokio::task::spawn_blocking(move || rpc.get_balance(&wallet).unwrap_or(0))
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // max_players defaults to the largest bracket size so an unparameterised
+    // call reports the worst case rather than silently claiming affordability
+    // for a size nobody asked about.
+    let max_players = q.max_players.unwrap_or(256);
+    let format = q.format.as_deref().unwrap_or("SingleElimination");
+    let average_moves = q.average_moves.unwrap_or(40);
+    let estimate = tournament_cost_estimate(max_players, format, average_moves);
+    let required = estimate
+        .get("working_capital_lamports")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(u64::MAX);
+
+    Ok(Json(json!({
+        "wallet": wallet.to_string(),
+        "balance_lamports": balance,
+        "balance_sol": balance as f64 / 1e9,
+        "predicted_for": { "max_players": max_players, "format": format, "average_moves": average_moves },
+        "required_working_capital_lamports": required,
+        "covers_prediction": balance >= required
+    })))
+}
+
+#[derive(Deserialize)]
+struct SaveTemplateReq {
+    name: String,
+    data: serde_json::Value,
+}
+
+/// GET /admin/tournament-templates — lists all saved templates.
+async fn list_templates(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let pool = state.store.pool();
+    let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(
+        "SELECT name, data_json, created_at, updated_at FROM tournament_templates ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| {
+        error!("[admin] failed to list templates: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let templates: Vec<_> = rows
+        .into_iter()
+        .map(|(name, data_json, created_at, updated_at)| {
+            json!({
+                "name": name,
+                "data": serde_json::from_str::<serde_json::Value>(&data_json).unwrap_or(json!(null)),
+                "created_at": created_at,
+                "updated_at": updated_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "templates": templates })))
+}
+
+/// POST /admin/tournament-templates — creates or overwrites a named template.
+async fn save_template(
+    State(state): State<AppState>,
+    Json(req): Json<SaveTemplateReq>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if req.name.trim().is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let pool = state.store.pool();
+    let now = now_secs() as i64;
+    let data_json = serde_json::to_string(&req.data).map_err(|_| StatusCode::BAD_REQUEST)?;
+    sqlx::query(
+        "INSERT INTO tournament_templates (name, data_json, created_at, updated_at) VALUES (?, ?, ?, ?) \
+         ON CONFLICT(name) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at",
+    )
+    .bind(&req.name)
+    .bind(&data_json)
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .map_err(|e| {
+        error!("[admin] failed to save template {}: {}", req.name, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    add_audit(Some(pool), "save_template", &req.name, "ok").await;
+    info!("[admin] Saved tournament template '{}'", req.name);
+    Ok(Json(json!({ "ok": true, "name": req.name })))
+}
+
+/// DELETE /admin/tournament-templates/:name
+async fn delete_template(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let pool = state.store.pool();
+    let result = sqlx::query("DELETE FROM tournament_templates WHERE name = ?")
+        .bind(&name)
+        .execute(&pool)
+        .await
+        .map_err(|e| {
+            error!("[admin] failed to delete template {}: {}", name, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    if result.rows_affected() == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    add_audit(Some(pool), "delete_template", &name, "ok").await;
+    info!("[admin] Deleted tournament template '{}'", name);
+    Ok(Json(json!({ "ok": true, "name": name })))
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -163,6 +384,15 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/admin/games/{game_id}/flag", post(flag_game))
         // Audit
         .route("/admin/audit-log", get(get_audit_log))
+        // Tournament templates
+        .route(
+            "/admin/tournament-templates",
+            get(list_templates).post(save_template),
+        )
+        .route(
+            "/admin/tournament-templates/{name}",
+            axum::routing::delete(delete_template),
+        )
         // Logs stream
         .route("/admin/logs/stream", get(logs_stream))
         // Treasury
@@ -175,9 +405,18 @@ pub fn admin_routes() -> Router<AppState> {
             get(tournament_escrow_balance),
         )
         .route(
+            "/admin/tournament/{id}/transactions",
+            get(tournament_transactions),
+        )
+        .route(
             "/admin/tournament/{id}/fund-prize",
             post(fund_tournament_prize),
         )
+        .route(
+            "/admin/tournament/predict-cost",
+            post(predict_tournament_cost),
+        )
+        .route("/admin/operator-affordability", get(operator_affordability))
         .route(
             "/admin/tournament/{id}/fill-bots",
             post(fill_tournament_bots),
@@ -395,7 +634,7 @@ async fn ban_player(
             error!("[admin] Failed to persist ban for {}: {}", wallet, e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    add_audit("ban_player", &wallet, "ok");
+    add_audit(Some(state.store.pool()), "ban_player", &wallet, "ok").await;
     info!("[admin] Banned player {} reason={}", wallet, req.reason);
     Ok(Json(json!({ "ok": true, "wallet": wallet })))
 }
@@ -411,10 +650,12 @@ async fn elo_override(
         overrides.insert(wallet.clone(), req.new_elo);
     }
     add_audit(
+        None,
         "elo_override",
         &wallet,
         &format!("new_elo={} reason={}", req.new_elo, req.reason),
-    );
+    )
+    .await;
     info!(
         "[admin] ELO override for {} → {} reason={}",
         wallet, req.new_elo, req.reason
@@ -495,10 +736,12 @@ async fn force_resign(
     // outcome, use POST /admin/dispute/resolve (dispute_authority). A dedicated
     // admin force-resign path is Phase 5 on-chain work.
     add_audit(
+        None,
         "force_resign_attempt",
         &format!("game_{}", game_id),
         &format!("winner={} (rejected: not implemented)", req.winner),
-    );
+    )
+    .await;
     warn!(
         "[admin] force_resign game {} rejected — no on-chain resign builder; use /admin/dispute/resolve",
         game_id
@@ -527,18 +770,89 @@ async fn flag_game(
             error!("[admin] Failed to persist flag for game {}: {}", game_id, e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    add_audit("flag_game", &format!("game_{}", game_id), &req.reason);
+    add_audit(
+        Some(state.store.pool()),
+        "flag_game",
+        &format!("game_{}", game_id),
+        &req.reason,
+    )
+    .await;
     info!("[admin] Flagged game {} reason={}", game_id, req.reason);
     Ok(Json(json!({ "ok": true, "game_id": game_id })))
 }
 
+#[derive(sqlx::FromRow, Serialize)]
+struct PersistedAuditRow {
+    timestamp: i64,
+    actor: String,
+    action: String,
+    target: String,
+    result: String,
+}
+
+/// Reads the persistent `admin_audit_log` table (survives a backend restart,
+/// unlike the old in-memory-only `AUDIT_LOG` Vec this replaced as the primary
+/// source). Falls back to the in-memory tail only if the DB read fails, so a
+/// transient SQLite hiccup doesn't blank the panel's audit view.
 async fn get_audit_log(
+    State(state): State<AppState>,
     Query(q): Query<AuditLogQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let limit = q.limit.unwrap_or(100);
-    let log = AUDIT_LOG.lock().map(|l| l.clone()).unwrap_or_default();
-    let entries: Vec<_> = log.into_iter().rev().take(limit).collect();
-    Ok(Json(json!({ "entries": entries, "total": entries.len() })))
+    let limit = q.limit.unwrap_or(100) as i64;
+    let pool = state.store.pool();
+
+    let rows: Result<Vec<PersistedAuditRow>, sqlx::Error> = if let Some(id) = q.tournament_id {
+        let target_a = format!("tournament:{}", id);
+        let target_b = format!("tournament_{}", id);
+        let path_needle = format!("/tournament/{}/", id);
+        sqlx::query_as(
+            "SELECT ts as timestamp, actor, action, target, result \
+             FROM admin_audit_log \
+             WHERE target = ?1 OR target = ?2 OR path LIKE '%' || ?3 || '%' \
+             ORDER BY id DESC LIMIT ?4",
+        )
+        .bind(&target_a)
+        .bind(&target_b)
+        .bind(&path_needle)
+        .bind(limit)
+        .fetch_all(&pool)
+        .await
+    } else {
+        sqlx::query_as(
+            "SELECT ts as timestamp, actor, action, target, result \
+             FROM admin_audit_log ORDER BY id DESC LIMIT ?1",
+        )
+        .bind(limit)
+        .fetch_all(&pool)
+        .await
+    };
+
+    let entries = match rows {
+        Ok(rows) => serde_json::to_value(rows).unwrap_or(json!([])),
+        Err(e) => {
+            error!(
+                "[admin] audit log DB read failed, falling back to in-memory tail: {}",
+                e
+            );
+            let log = AUDIT_LOG.lock().map(|l| l.clone()).unwrap_or_default();
+            let entries: Vec<_> = log
+                .into_iter()
+                .rev()
+                .filter(|entry| {
+                    q.tournament_id
+                        .map(|id| {
+                            entry.target == format!("tournament:{}", id)
+                                || entry.target == format!("tournament_{}", id)
+                        })
+                        .unwrap_or(true)
+                })
+                .take(limit as usize)
+                .collect();
+            serde_json::to_value(entries).unwrap_or(json!([]))
+        }
+    };
+    let total = entries.as_array().map(|a| a.len()).unwrap_or(0);
+    Ok(Json(json!({ "entries": entries, "total": total })))
 }
 
 async fn logs_stream() -> Result<Json<serde_json::Value>, StatusCode> {
@@ -641,24 +955,31 @@ async fn treasury_refund(
     }
 
     add_audit(
+        Some(state.store.pool()),
         "treasury_refund_requested",
         &req.wallet,
         &format!(
             "{} lamports reason={} — awaiting manual execution via treasury_signer",
             req.lamports, req.reason
         ),
-    );
+    )
+    .await;
     info!(
         "[admin] treasury_refund requested: {} lamports -> {} ({}); operator must run treasury_signer",
         req.lamports, req.wallet, req.reason
     );
 
-    let command = format!(
-        "TREASURY_AUTHORITY_KEY=<...> SOLANA_RPC_URL={} PROGRAM_ID={} \
-         cargo run --bin treasury_signer -- {} {} \"{}\"",
-        state.config.solana_rpc_url, state.program_id, req.wallet, req.lamports, req.reason
-    );
-
+    // Structured arguments, not a shell line. The previous version interpolated
+    // `state.config.solana_rpc_url` raw — that URL carries the Triton x-token in
+    // its path, the very secret `solana::redact_url` exists to keep out of logs,
+    // and this handler put it in an HTTP response body and the audit trail. It
+    // also spliced the operator-supplied `reason` into the command with nothing
+    // but surrounding double quotes, so a reason containing `"; …` produced a
+    // line that ran attacker-chosen text the moment it was pasted into the
+    // isolated host — the one machine in this design that holds the treasury key.
+    //
+    // The operator supplies the RPC URL and key from that host's own
+    // environment; neither belongs in a response from this process.
     (
         StatusCode::ACCEPTED,
         Json(json!({
@@ -667,7 +988,16 @@ async fn treasury_refund(
             "wallet": req.wallet,
             "lamports": req.lamports,
             "reason": req.reason,
-            "run_on_isolated_host": command,
+            "run_on_isolated_host": {
+                "binary": "treasury_signer",
+                "args": [req.wallet, req.lamports.to_string(), req.reason],
+                "env_required": ["TREASURY_AUTHORITY_KEY", "SOLANA_RPC_URL"],
+                "program_id": state.program_id.to_string(),
+                "rpc_cluster": crate::signing::solana::redact_url(&state.config.solana_rpc_url),
+                "note": "Set TREASURY_AUTHORITY_KEY and SOLANA_RPC_URL from the signing host's own \
+                         environment. Pass the args exactly as listed — do not build a shell \
+                         string from them.",
+            },
         })),
     )
 }
@@ -743,11 +1073,39 @@ async fn fund_tournament_prize(
         .metrics
         .record_transaction_confirmed("solana", submit_started.elapsed().as_millis() as f64);
 
+    state
+        .tournament_store
+        .record_transaction(crate::signing::storage::tournament::TournamentTransaction {
+            tournament_id: id,
+            signature: sig.to_string(),
+            operation: "fund_prize".to_string(),
+            status: "confirmed".to_string(),
+            retry_count: 0,
+            last_error: None,
+            next_retry_at: None,
+            created_at: chrono::Utc::now().timestamp(),
+        })
+        .await;
+
+    // Mirror the confirmed on-chain lock into the store's prize_pool field so
+    // GET /tournaments (list_tournaments) shows a real, chain-confirmed
+    // figure instead of the stale local accumulator it used to be (removed
+    // from join/fill-bots — see F2 in tournament-production-readiness-plan.md).
+    // Cumulative: fund_sol_prize can be called more than once per tournament.
+    state
+        .tournament_store
+        .update(id, |t| {
+            t.prize_pool = t.prize_pool.saturating_add(amount);
+        })
+        .await;
+
     add_audit(
+        Some(state.store.pool()),
         "fund_prize",
         &format!("tournament:{}", id),
         &format!("{} lamports", amount),
-    );
+    )
+    .await;
     info!(
         "[admin] Guaranteed prize of {} lamports locked for tournament {} ({})",
         amount, id, sig
@@ -916,7 +1274,7 @@ async fn rotate_token() -> Result<Json<serde_json::Value>, StatusCode> {
     let mut bytes = [0u8; 24];
     rand::rng().fill_bytes(&mut bytes);
     let new_token = format!("xf_admin_{}", hex::encode(bytes));
-    add_audit("rotate_token", "admin_token", "rotated");
+    add_audit(None, "rotate_token", "admin_token", "rotated").await;
     info!("[admin] Admin token rotated");
     Ok(Json(
         json!({ "ok": true, "new_token": new_token, "note": "Update ADMIN_API_KEY in .env and restart the backend." }),
@@ -932,7 +1290,7 @@ async fn ip_ban(Json(req): Json<IpBanReq>) -> Result<Json<serde_json::Value>, St
     if let Ok(mut bans) = IP_BANS.lock() {
         bans.push(entry);
     }
-    add_audit("ip_ban", &req.ip, &req.reason);
+    add_audit(None, "ip_ban", &req.ip, &req.reason).await;
     info!("[admin] IP banned: {} reason={}", req.ip, req.reason);
     Ok(Json(json!({ "ok": true, "ip": req.ip })))
 }
@@ -959,10 +1317,12 @@ async fn assign_dispute(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     add_audit(
+        Some(state.store.pool()),
         "assign_dispute",
         &format!("game_{}", game_id),
         &req.reviewer,
-    );
+    )
+    .await;
     Ok(Json(
         json!({ "ok": true, "game_id": game_id, "reviewer": req.reviewer }),
     ))
@@ -1009,7 +1369,6 @@ async fn fill_tournament_bots(
             for bot in &bots {
                 t.players.push(bot.clone());
                 t.player_elos.push(bot_elo);
-                t.prize_pool += t.entry_fee_lamports.saturating_sub(t.platform_fee_lamports);
             }
         })
         .await;
@@ -1019,10 +1378,12 @@ async fn fill_tournament_bots(
     match store.start_tournament(id).await {
         Ok(()) => {
             add_audit(
+                Some(state.store.pool()),
                 "fill_bots",
                 &format!("tournament_{}", id),
                 &format!("added {} bots", fill_count),
-            );
+            )
+            .await;
             info!(
                 "[admin] Filled tournament {} with {} bots, started bracket",
                 id, fill_count

@@ -1,0 +1,20 @@
+{
+  "identifier": "admin-http",
+  "description": "Rust-routed HTTP for the tournament-admin window ONLY. Requests made through tauri-plugin-http originate from Rust, so they carry no browser origin — no CORS preflight and no CSP connect-src check. Scoped to the loopback admin ports: 8090 (LOCAL backend) and 8091 (PRODUCTION, forwarded over the SSH tunnel). No public/remote host is reachable through this.",
+  "windows": ["tournament-admin"],
+  "local": true,
+  "remote": {
+    "urls": ["http://localhost:*/*"]
+  },
+  "permissions": [
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "http://127.0.0.1:8090/*" },
+        { "url": "http://127.0.0.1:8091/*" },
+        { "url": "http://localhost:8090/*" },
+        { "url": "http://localhost:8091/*" }
+      ]
+    }
+  ]
+}

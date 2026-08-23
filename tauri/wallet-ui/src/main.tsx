@@ -4,9 +4,12 @@ import { Buffer } from "buffer";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { PrivyProviderWrapper } from "./privy/PrivyProviderWrapper";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <PrivyProviderWrapper>
+      <App />
+    </PrivyProviderWrapper>
   </React.StrictMode>
 );

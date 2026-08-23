@@ -151,7 +151,10 @@ pub fn handler(
         record.owner = player.key();
         record.created_at = Clock::get()?.unix_timestamp;
     } else {
-        require!(record.owner == player.key(), crate::errors::GameErrorCode::UsernameTaken);
+        require!(
+            record.owner == player.key(),
+            crate::errors::GameErrorCode::UsernameTaken
+        );
     }
 
     Ok(())

@@ -9,6 +9,7 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 
+use crate::core::updates::{self, Platform, UpdateStatus};
 use crate::core::{DespawnOnExit, GameMode, GameState, MenuState};
 use crate::game::resources::MenuSounds;
 use crate::rendering::pieces::{PieceColor, PieceMeshes, PieceType};
@@ -38,7 +39,7 @@ pub(super) fn menu_click_sound(
         return;
     };
     if ctx.is_pointer_over_area() {
-        commands.spawn(bevy::audio::AudioPlayer::new(sounds.menu_click.clone()));
+        crate::game::resources::sounds::play_sfx(&mut commands, sounds.menu_click.clone());
     }
 }
 
@@ -75,6 +76,7 @@ pub enum NewMenuPanel {
     Settings,
     Profile,
     Multiplayer,
+    Updates,
 }
 
 impl NewMenuPanel {
@@ -89,6 +91,7 @@ impl NewMenuPanel {
             Self::Settings => 8,
             Self::Profile => 9,
             Self::Multiplayer => 10,
+            Self::Updates => 11,
         }
     }
 }
@@ -555,6 +558,7 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                 NewMenuPanel::DirectConnection => render_direct_connection_panel(ui, cx),
                 NewMenuPanel::Settings => render_settings_panel(ui, cx),
                 NewMenuPanel::Profile => render_profile_panel(ui, cx),
+                NewMenuPanel::Updates => render_updates_panel(ui, cx),
             }
 
             ui.set_opacity(1.0);
@@ -927,6 +931,34 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         if let Err(e) = webbrowser::open(&url) {
             tracing::warn!("[Menu] Failed to open {}: {}", url, e);
         }
+    }
+    ui.add_space(SP);
+
+    let update_label = match &cx.update_check.status {
+        UpdateStatus::Available(release) => format!("Update Available: {}", release.version),
+        UpdateStatus::Checking => "Checking for Updates".to_string(),
+        UpdateStatus::UpToDate => "Check for Updates".to_string(),
+        UpdateStatus::Failed(_) => "Update Check Failed".to_string(),
+        UpdateStatus::Idle => "Check for Updates".to_string(),
+    };
+    let update_tip = match &cx.update_check.status {
+        UpdateStatus::Available(_) => {
+            "Download the latest XFChess release for your operating system."
+        }
+        UpdateStatus::Checking => "XFChess is asking GitHub for the latest release.",
+        UpdateStatus::UpToDate => {
+            "You are on the latest published release. Open release downloads anyway."
+        }
+        UpdateStatus::Failed(_) => "Retry the release check or open the download links.",
+        UpdateStatus::Idle => "Check GitHub releases and show platform downloads.",
+    };
+    if item_expandable_tip(ui, &update_label, update_tip, W) {
+        play_click(&mut cx.commands, snd);
+        if !cx.update_check.is_checking() {
+            cx.update_check.start();
+        }
+        cx.update_check.panel_open = true;
+        *cx.new_menu_panel = NewMenuPanel::Updates;
     }
     ui.add_space(SP);
 }
@@ -1472,10 +1504,318 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
 }
 
+fn render_updates_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
+    ui.horizontal(|ui| {
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("< Back")
+                        .size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(180, 180, 200, 160)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
+            )
+            .clicked()
+        {
+            play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+            cx.update_check.panel_open = false;
+            *cx.new_menu_panel = NewMenuPanel::Main;
+        }
+        ui.add_space(6.0);
+        ui.label(
+            egui::RichText::new("Updates")
+                .size(16.5)
+                .color(egui::Color32::WHITE)
+                .family(egui::FontFamily::Proportional)
+                .strong(),
+        );
+    });
+    ui.add_space(14.0);
+
+    // Wider than the other panels' 280: the download cards are three stacked
+    // lines against a 48pt mark, and asset names like
+    // `XFChess-chromeos-x86_64-1.2.3.tar.gz - 82.4 MB` need the room to sit on
+    // one line. The window auto-sizes to this, so it only widens this panel.
+    const W: f32 = 430.0;
+
+    match &cx.update_check.status {
+        UpdateStatus::Checking => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    egui::RichText::new("Checking latest GitHub release...")
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(190, 200, 220)),
+                );
+            });
+        }
+        UpdateStatus::Available(release) => {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Version {} is available. You have {}.",
+                    release.version,
+                    updates::CURRENT_VERSION
+                ))
+                .size(11.0)
+                .color(egui::Color32::from_rgb(220, 235, 255)),
+            );
+            if let Some(date) = release.published_date() {
+                ui.label(
+                    egui::RichText::new(format!("Published {date}"))
+                        .size(9.5)
+                        .color(egui::Color32::from_rgb(150, 165, 190)),
+                );
+            }
+        }
+        UpdateStatus::UpToDate => {
+            ui.label(
+                egui::RichText::new(format!(
+                    "You are on the latest release: {}.",
+                    updates::CURRENT_VERSION
+                ))
+                .size(11.0)
+                .color(egui::Color32::from_rgb(170, 225, 180)),
+            );
+        }
+        UpdateStatus::Failed(reason) => {
+            ui.label(
+                egui::RichText::new("Could not check GitHub releases.")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(235, 175, 150)),
+            );
+            ui.label(
+                egui::RichText::new(reason)
+                    .size(9.4)
+                    .color(egui::Color32::from_rgb(180, 185, 205)),
+            );
+        }
+        UpdateStatus::Idle => {
+            ui.label(
+                egui::RichText::new("Check the latest release and download XFChess.")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(190, 200, 220)),
+            );
+        }
+    }
+
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        if ui
+            .add_sized(
+                [150.0, 30.0],
+                egui::Button::new(
+                    egui::RichText::new(if cx.update_check.is_checking() {
+                        "Checking..."
+                    } else {
+                        "Check Again"
+                    })
+                    .size(10.4)
+                    .color(egui::Color32::WHITE),
+                )
+                .fill(egui::Color32::from_rgba_unmultiplied(60, 110, 190, 90))
+                .corner_radius(5.0),
+            )
+            .clicked()
+        {
+            play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+            cx.update_check.start();
+        }
+
+        if matches!(cx.update_check.status, UpdateStatus::Available(_))
+            && ui
+                .add_sized(
+                    [150.0, 30.0],
+                    egui::Button::new(
+                        egui::RichText::new("Skip This Version")
+                            .size(10.0)
+                            .color(egui::Color32::from_rgb(190, 200, 220)),
+                    )
+                    .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14))
+                    .corner_radius(5.0),
+                )
+                .clicked()
+        {
+            play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+            cx.update_check.skip_available_version();
+            *cx.new_menu_panel = NewMenuPanel::Main;
+        }
+    });
+
+    ui.add_space(16.0);
+    section_sized(ui, "Downloads", 14.0);
+    ui.add_space(2.0);
+
+    for platform in Platform::ALL {
+        render_platform_download(ui, cx, platform, W);
+        ui.add_space(9.0);
+    }
+
+    ui.add_space(8.0);
+    if item_tip(
+        ui,
+        "Install Guide",
+        "Open docs/INSTALL.md in your browser.",
+        W,
+    ) {
+        play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+        updates::open_in_browser(updates::INSTALL_GUIDE_URL);
+    }
+}
+
+/// Drawn size of the platform mark, in points. A const because the texture is
+/// resampled to exactly this size (times the display scale) when it loads —
+/// see `platform_icon_texture`, which needs to agree with what's drawn here.
+const PLATFORM_ICON_SIZE: f32 = 48.0;
+
+fn render_platform_download(
+    ui: &mut egui::Ui,
+    cx: &mut MainMenuUIContext,
+    platform: Platform,
+    width: f32,
+) {
+    let icon_px = (PLATFORM_ICON_SIZE * ui.ctx().pixels_per_point()).round() as u32;
+    let icon = platform_icon_texture(ui.ctx(), platform, icon_px);
+    let (asset_name, size_label, url) = match cx.update_check.available() {
+        Some(release) => {
+            let asset = release.asset_for(platform);
+            (
+                asset
+                    .map(|a| a.name.as_str())
+                    .unwrap_or("Latest release page"),
+                asset.map(|a| a.size_label()).unwrap_or_default(),
+                release.download_url_for(platform).to_string(),
+            )
+        }
+        None => (
+            "Latest release page",
+            String::new(),
+            updates::RELEASES_URL.to_string(),
+        ),
+    };
+
+    let response = egui::Frame {
+        fill: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10),
+        stroke: egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 26),
+        ),
+        corner_radius: egui::CornerRadius::same(8),
+        inner_margin: egui::Margin::symmetric(16, 14),
+        ..egui::Frame::NONE
+    }
+    .show(ui, |ui| {
+        ui.set_width(width);
+        ui.horizontal(|ui| {
+            if let Some(icon) = icon {
+                ui.add(egui::Image::new((
+                    icon,
+                    egui::vec2(PLATFORM_ICON_SIZE, PLATFORM_ICON_SIZE),
+                )));
+            }
+            ui.add_space(4.0);
+            ui.vertical(|ui| {
+                ui.label(
+                    egui::RichText::new(platform.label())
+                        .size(18.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+                ui.label(
+                    egui::RichText::new(platform.kind())
+                        .size(13.0)
+                        .color(egui::Color32::from_rgb(150, 165, 195)),
+                );
+                ui.label(
+                    egui::RichText::new(if size_label.is_empty() {
+                        asset_name.to_string()
+                    } else {
+                        format!("{asset_name} - {size_label}")
+                    })
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(120, 130, 150)),
+                );
+            });
+        });
+    })
+    .response
+    .interact(egui::Sense::click());
+
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if response.clicked() {
+        play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+        updates::open_in_browser(&url);
+    }
+}
+
+/// Loads a platform mark as a texture sized for `target_px` physical pixels.
+///
+/// The marks ship at 256-512px but draw at ~48pt, and handing the GPU that
+/// 5-10x minification with plain bilinear filtering and no mipmaps is what
+/// made them look chewed up — only a handful of source texels land under each
+/// screen pixel, so thin features (Tux's legs, the Chrome spokes) alias badly.
+/// Resampling once here with a proper filter means the texture is already the
+/// size it gets drawn at and the GPU has nothing left to throw away.
+///
+/// `target_px` is part of the cache key: the display scale can change (moving
+/// the window between monitors), and a texture rasterised for the old scale
+/// would be exactly the blurry/aliased thing this avoids.
+fn platform_icon_texture(
+    ctx: &egui::Context,
+    platform: Platform,
+    target_px: u32,
+) -> Option<egui::TextureId> {
+    let id = egui::Id::new(("update_platform_icon", platform, target_px));
+    if let Some(texture) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return Some(texture.id());
+    }
+
+    let bytes = read_asset_bytes(platform.icon_path())?;
+    let decoded = image::load_from_memory(&bytes).ok()?;
+    let mut rgba = decoded.to_rgba8();
+    // Every mark is square, so one dimension is enough to compare against.
+    if target_px > 0 && rgba.width() > target_px {
+        rgba = image::imageops::resize(
+            &rgba,
+            target_px,
+            target_px,
+            image::imageops::FilterType::Lanczos3,
+        );
+    }
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    let texture = ctx.load_texture(
+        format!("update_platform_icon_{platform:?}_{target_px}"),
+        color_image,
+        egui::TextureOptions::LINEAR,
+    );
+    let texture_id = texture.id();
+    ctx.data_mut(|d| d.insert_temp(id, texture));
+    Some(texture_id)
+}
+
+fn read_asset_bytes(path: &str) -> Option<Vec<u8>> {
+    let mut candidates: Vec<std::path::PathBuf> = vec![path.into(), format!("./{path}").into()];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(path));
+        }
+    }
+    candidates.iter().find_map(|p| std::fs::read(p).ok())
+}
+
 fn section(ui: &mut egui::Ui, title: &str) {
+    section_sized(ui, title, 10.1);
+}
+
+/// `section` with an explicit heading size, for blocks that sit at a larger
+/// scale than the settings panel's stacked headings.
+fn section_sized(ui: &mut egui::Ui, title: &str, size: f32) {
     ui.label(
         egui::RichText::new(title)
-            .size(10.1)
+            .size(size)
             .color(egui::Color32::from_rgb(120, 180, 255))
             .strong(),
     );
@@ -2058,11 +2398,29 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
 }
 
-/// Render username + wallet balance in the top-right corner of the main menu.
-/// Clicking the balance section cycles through SOL → USD → GBP.
+/// Official Solana devnet faucet — where a player with an empty wallet goes to
+/// get something to wager with.
+const FAUCET_URL: &str = "https://faucet.solana.com";
+
+/// How long the HUD shows "Address copied!" in place of the player's name.
+const COPIED_FLASH_SECS: f64 = 1.6;
+
+/// Render username + wallet balance in the top-left corner of the main menu.
+/// Clicking the name copies the wallet address; clicking the balance section
+/// cycles through SOL → USD → GBP.
 pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     let display_name = cx.player_identity.display_name().to_string();
     let is_guest = cx.player_identity.username.is_none();
+
+    // Read from `PlayerIdentity` rather than `solana_state` so the name stays
+    // copyable in a build without the `solana` feature — the bridge reports the
+    // pubkey over `/status` either way, and topping up from the faucet is
+    // exactly what a player does *before* they have anything on-chain.
+    let pubkey_str = cx
+        .player_identity
+        .pubkey_str
+        .clone()
+        .filter(|s| !s.is_empty());
 
     #[cfg(feature = "solana")]
     let sol_balance = cx.solana_state.as_ref().map(|s| s.balance).unwrap_or(0.0);
@@ -2156,12 +2514,69 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             }
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(&display_name)
-                            .size(15.5)
-                            .color(egui::Color32::WHITE)
-                            .strong(),
-                    );
+                    match &pubkey_str {
+                        // With an address to hand, the name doubles as the
+                        // copy button — it is the only place in the menu the
+                        // player's own pubkey is on screen at all times.
+                        Some(pk) => {
+                            let copied_id = egui::Id::new("wallet_hud_name_copied_at");
+                            let now = ctx.input(|i| i.time);
+                            let copied_at = ctx.data(|d| d.get_temp::<f64>(copied_id));
+                            let just_copied =
+                                copied_at.is_some_and(|t| now - t < COPIED_FLASH_SECS);
+
+                            let resp = ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new(if just_copied {
+                                        "Address copied!"
+                                    } else {
+                                        display_name.as_str()
+                                    })
+                                    .size(15.5)
+                                    .color(if just_copied {
+                                        egui::Color32::from_rgb(20, 241, 149)
+                                    } else {
+                                        egui::Color32::WHITE
+                                    })
+                                    .strong(),
+                                )
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::NONE),
+                            );
+
+                            if resp.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+
+                            let resp = resp.on_hover_text(format!(
+                                "Click to copy your wallet address\n{pk}\n\n\
+                                 Out of SOL? Paste it into {FAUCET_URL} for free devnet \
+                                 SOL, then come back and play."
+                            ));
+
+                            if resp.clicked() {
+                                ui.output_mut(|o| {
+                                    o.commands.push(egui::OutputCommand::CopyText(pk.clone()))
+                                });
+                                ctx.data_mut(|d| d.insert_temp(copied_id, now));
+                            }
+
+                            // egui only redraws on input; without this the
+                            // "Address copied!" flash would sit there until the
+                            // player happened to move the mouse.
+                            if just_copied {
+                                ctx.request_repaint();
+                            }
+                        }
+                        None => {
+                            ui.label(
+                                egui::RichText::new(&display_name)
+                                    .size(15.5)
+                                    .color(egui::Color32::WHITE)
+                                    .strong(),
+                            );
+                        }
+                    }
 
                     // Balance/price only makes sense with a wallet connected —
                     // a local/guest profile shows just the name, nothing else.

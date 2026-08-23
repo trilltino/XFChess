@@ -1,22 +1,28 @@
-//! Swiss tournament service — pairing, scoring, and live broadcast.
+//! Swiss tournament service — pairing, scoring, and live publication.
 //!
 //! [`SwissService`] owns the per-tournament Swiss lifecycle on top of the
 //! persistent [`TournamentStore`]: initializing Swiss data, generating
 //! pairings for each round, recording match results, and recomputing
 //! standings with Buchholz/Sonneborn tiebreakers. When a round completes
-//! it auto-starts the next one. Updates are optionally fanned out to
-//! iroh gossip subscribers and Braid hub listeners so clients see live
-//! pairings and standings without polling.
+//! it auto-starts the next one.
+//!
+//! # Publishing
+//!
+//! Each fact is written **once**, into its Braid resource on the
+//! [`ResourceHub`] — pairings, standings, and the results log. The hub fans
+//! that update out to HTTP `209` subscribers and, via its gossip sink, to P2P
+//! peers. This service does not talk to a transport.
+//!
+//! It used to also emit tagged-JSON `SwissMessage`s over gossip beside each
+//! hub write. Those never actually reached anyone: the broadcasts were guarded
+//! on a `gossip` field whose only setter was never called, so it was `None` for
+//! the life of the process and every one of them returned early.
 //!
 //! On-chain and backend scoring conventions differ (integer points vs.
 //! FIDE float); helpers `to_contract_points` / `from_contract_points`
 //! convert between them.
 
 use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus, TournamentStore};
-use crate::signing::tournament_gossip::TournamentGossipService;
-use braid_iroh::{
-    MatchResult as SwissMessageResult, SwissMessage, SwissPairing, SwissStandingsEntry,
-};
 use xfchess_braid_server::{bridge, ResourceHub};
 // Note: bytes crate not available, using Vec<u8> instead
 use serde::{Deserialize, Serialize};
@@ -26,7 +32,7 @@ use swiss_pairing::{
     calculate_standings, generate_pairings, Color, ManualPairing, MatchResult, PairingConfig,
     StandingsEntry, SwissPlayer, SwissRound,
 };
-use tracing::{info, warn};
+use tracing::info;
 
 /// Swiss-specific tournament data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,7 +61,6 @@ pub struct SwissData {
 #[derive(Clone)]
 pub struct SwissService {
     store: TournamentStore,
-    gossip: Option<Arc<TournamentGossipService>>,
     braid_hub: Option<Arc<ResourceHub>>,
 }
 
@@ -64,19 +69,16 @@ impl SwissService {
     pub fn new(store: TournamentStore) -> Self {
         Self {
             store,
-            gossip: None,
             braid_hub: None,
         }
     }
 
     /// Attach the Braid resource hub so live updates stream to subscribers.
+    ///
+    /// This is the only publication path: the hub reaches HTTP subscribers
+    /// directly and peers through its gossip sink.
     pub fn set_braid_hub(&mut self, hub: Arc<ResourceHub>) {
         self.braid_hub = Some(hub);
-    }
-
-    /// Set the gossip service for broadcasting updates
-    pub fn set_gossip(&mut self, gossip: Arc<TournamentGossipService>) {
-        self.gossip = Some(gossip);
     }
 
     /// Initialize a Swiss tournament
@@ -166,11 +168,9 @@ impl SwissService {
             round.byes.len()
         );
 
-        // Broadcast round started via gossip
-        self.broadcast_round_started(tournament_id, next_round, &round)
-            .await;
-
-        // Push pairings to Braid subscribers
+        // Publish the round's pairings. The orchestrator republishes this same
+        // resource once it has created the games, adding a `game_id` per board;
+        // that is a second version of one resource, not a second writer.
         if let Some(hub) = &self.braid_hub {
             let pairings_json = serde_json::to_value(&round.pairings).unwrap_or_default();
             bridge::push_pairings(hub, tournament_id, next_round, pairings_json);
@@ -272,162 +272,28 @@ impl SwissService {
             let _ = self.start_round(tournament_id).await;
         }
 
-        // Broadcast result and standings via gossip
-        self.broadcast_result_recorded(tournament_id, round, board, &result)
-            .await;
-        self.broadcast_standings_updated(tournament_id, &standings)
-            .await;
-
-        // Push standings to Braid subscribers
+        // Publish the result and the standings it produced. A bye is a scoring
+        // adjustment with no board to report, so it never enters the log.
         if let Some(hub) = &self.braid_hub {
+            if let Some(result_json) = match result {
+                MatchResult::WhiteWin | MatchResult::ForfeitWhiteWin => {
+                    Some(serde_json::json!({ "Win": { "winner": "white" } }))
+                }
+                MatchResult::BlackWin | MatchResult::ForfeitBlackWin => {
+                    Some(serde_json::json!({ "Win": { "winner": "black" } }))
+                }
+                MatchResult::Draw => Some(serde_json::json!("Draw")),
+                MatchResult::Bye => None,
+            } {
+                bridge::push_result(hub, tournament_id, round, board, result_json);
+            }
+
             let standings_json = serde_json::to_value(&standings).unwrap_or_default();
             bridge::push_standings(hub, tournament_id, standings_json);
         }
 
         Ok(standings)
     }
-
-    /// Broadcast round started message via gossip
-    async fn broadcast_round_started(
-        &self,
-        tournament_id: u64,
-        round: u8,
-        swiss_round: &SwissRound,
-    ) {
-        let Some(gossip) = &self.gossip else { return };
-        let Some(sender) = gossip.get_topic(tournament_id).await else {
-            warn!("[swiss] No gossip topic for tournament {}", tournament_id);
-            return;
-        };
-
-        let pairings: Vec<SwissPairing> = swiss_round
-            .pairings
-            .iter()
-            .map(|p| SwissPairing {
-                white: p.white.clone(),
-                black: p.black.clone(),
-                board: p.board,
-            })
-            .collect();
-
-        let message = SwissMessage::RoundStarted {
-            tournament_id,
-            round,
-            pairings,
-        };
-
-        let bytes = match serde_json::to_vec(&message) {
-            Ok(b) => b,
-            Err(e) => {
-                warn!("[swiss] Failed to serialize RoundStarted: {}", e);
-                return;
-            }
-        };
-
-        if let Err(e) = sender.broadcast(bytes.into()).await {
-            warn!("[swiss] Failed to broadcast RoundStarted: {}", e);
-        } else {
-            info!(
-                "[swiss] Broadcast RoundStarted for tournament {} round {}",
-                tournament_id, round
-            );
-        }
-    }
-
-    /// Broadcast result recorded message via gossip
-    async fn broadcast_result_recorded(
-        &self,
-        tournament_id: u64,
-        round: u8,
-        board: u16,
-        result: &MatchResult,
-    ) {
-        let Some(gossip) = &self.gossip else { return };
-        let Some(sender) = gossip.get_topic(tournament_id).await else {
-            warn!("[swiss] No gossip topic for tournament {}", tournament_id);
-            return;
-        };
-
-        let msg_result = match result {
-            MatchResult::WhiteWin | MatchResult::ForfeitWhiteWin => SwissMessageResult::Win {
-                winner: "white".to_string(),
-            },
-            MatchResult::BlackWin | MatchResult::ForfeitBlackWin => SwissMessageResult::Win {
-                winner: "black".to_string(),
-            },
-            MatchResult::Draw => SwissMessageResult::Draw,
-            MatchResult::Bye => {
-                warn!("[swiss] Bye result in broadcast_result_recorded — skipping");
-                return;
-            }
-        };
-
-        let message = SwissMessage::ResultRecorded {
-            tournament_id,
-            round,
-            board,
-            result: msg_result,
-        };
-
-        let bytes = match serde_json::to_vec(&message) {
-            Ok(b) => b,
-            Err(e) => {
-                warn!("[swiss] Failed to serialize ResultRecorded: {}", e);
-                return;
-            }
-        };
-
-        if let Err(e) = sender.broadcast(bytes.into()).await {
-            warn!("[swiss] Failed to broadcast ResultRecorded: {}", e);
-        } else {
-            info!(
-                "[swiss] Broadcast ResultRecorded for tournament {} round {} board {}",
-                tournament_id, round, board
-            );
-        }
-    }
-
-    /// Broadcast standings updated message via gossip
-    async fn broadcast_standings_updated(&self, tournament_id: u64, standings: &[StandingsEntry]) {
-        let Some(gossip) = &self.gossip else { return };
-        let Some(sender) = gossip.get_topic(tournament_id).await else {
-            warn!("[swiss] No gossip topic for tournament {}", tournament_id);
-            return;
-        };
-
-        let entries: Vec<SwissStandingsEntry> = standings
-            .iter()
-            .map(|s| SwissStandingsEntry {
-                player_id: s.player_id.clone(),
-                score: s.score,
-                rank: s.rank,
-            })
-            .collect();
-
-        let message = SwissMessage::StandingsUpdated {
-            tournament_id,
-            standings: entries,
-        };
-
-        let bytes = match serde_json::to_vec(&message) {
-            Ok(b) => b,
-            Err(e) => {
-                warn!("[swiss] Failed to serialize StandingsUpdated: {}", e);
-                return;
-            }
-        };
-
-        if let Err(e) = sender.broadcast(bytes.into()).await {
-            warn!("[swiss] Failed to broadcast StandingsUpdated: {}", e);
-        } else {
-            info!(
-                "[swiss] Broadcast StandingsUpdated for tournament {} ({} entries)",
-                tournament_id,
-                standings.len()
-            );
-        }
-    }
-
     /// Get current pairings for a round
     pub async fn get_pairings(
         &self,
@@ -879,10 +745,7 @@ impl SwissService {
             })
             .await;
 
-        // Broadcast updated standings
-        self.broadcast_standings_updated(tournament_id, &standings)
-            .await;
-
+        // Publish updated standings
         if let Some(hub) = &self.braid_hub {
             let standings_json = serde_json::to_value(&standings).unwrap_or_default();
             bridge::push_standings(hub, tournament_id, standings_json);

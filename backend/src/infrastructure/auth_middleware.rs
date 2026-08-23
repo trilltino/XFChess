@@ -14,23 +14,62 @@ use std::env;
 use crate::signing::auth::AuthedWallet;
 use crate::signing::AppState;
 
-/// Middleware function that validates the X-API-Key header.
+tokio::task_local! {
+    /// The resolved admin identity for the current request, set by
+    /// `require_api_key` and read by `admin::add_audit` — this is how the
+    /// audit log attributes an action to a named operator without every
+    /// handler needing an `Extension<AdminActor>` parameter. Axum runs the
+    /// handler in the same task as the middleware chain, so a task-local
+    /// scope set here is visible for the whole request lifetime.
+    pub static ADMIN_ACTOR: String;
+}
+
+/// Returns the actor name resolved by `require_api_key` for the request
+/// currently executing on this task, or `"unknown"` if called outside one
+/// (e.g. a unit test that invokes a handler directly).
+pub fn current_admin_actor() -> String {
+    ADMIN_ACTOR
+        .try_with(|a| a.clone())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// Resolves the `X-API-Key` header against configured admin keys and, on a
+/// match, returns the actor name to attribute the request to.
 ///
-/// # Arguments
-/// * `request` - The incoming request
-/// * `next` - The next middleware/handler in the chain
-///
-/// # Returns
-/// Response with 401 Unauthorized if API key is missing or invalid,
-/// otherwise passes through to the next handler.
-pub async fn require_api_key(request: Request, next: Next) -> Result<Response, StatusCode> {
+/// Supports two forms, checked in order:
+/// - `ADMIN_API_KEYS=alice:<key>,ci:<key2>` — named keys, each compared in
+///   constant time; the matching name becomes the actor.
+/// - `ADMIN_API_KEY=<key>` — single legacy key, actor is `"legacy"`.
+/// - Debug builds only, neither set: the literal key `"dev"`, actor
+///   `"dev-default"`.
+fn resolve_admin_actor(provided_key: &str) -> Result<String, StatusCode> {
+    if let Ok(named) = env::var("ADMIN_API_KEYS") {
+        let mut any_configured = false;
+        for pair in named.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let Some((name, key)) = pair.split_once(':') else {
+                continue;
+            };
+            any_configured = true;
+            if constant_time_eq(provided_key, key) {
+                return Ok(name.to_string());
+            }
+        }
+        if any_configured {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        // ADMIN_API_KEYS set but empty/unparseable — fall through to legacy.
+    }
+
     let expected_key = match env::var("ADMIN_API_KEY") {
         Ok(key) => key,
         Err(env::VarError::NotPresent) => {
             #[cfg(debug_assertions)]
             {
                 tracing::warn!("[auth] ADMIN_API_KEY not set — defaulting to 'dev' in debug build");
-                "dev".to_string()
+                if constant_time_eq(provided_key, "dev") {
+                    return Ok("dev-default".to_string());
+                }
+                return Err(StatusCode::UNAUTHORIZED);
             }
             #[cfg(not(debug_assertions))]
             {
@@ -44,7 +83,23 @@ pub async fn require_api_key(request: Request, next: Next) -> Result<Response, S
         }
     };
 
-    // Extract X-API-Key header
+    if constant_time_eq(provided_key, &expected_key) {
+        Ok("legacy".to_string())
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+/// Middleware function that validates the X-API-Key header.
+///
+/// # Arguments
+/// * `request` - The incoming request
+/// * `next` - The next middleware/handler in the chain
+///
+/// # Returns
+/// Response with 401 Unauthorized if API key is missing or invalid,
+/// otherwise passes through to the next handler.
+pub async fn require_api_key(request: Request, next: Next) -> Result<Response, StatusCode> {
     let provided_key = request
         .headers()
         .get("X-API-Key")
@@ -52,14 +107,68 @@ pub async fn require_api_key(request: Request, next: Next) -> Result<Response, S
         .map(|s| s.to_string())
         .unwrap_or_default();
 
-    // Validate key using constant-time comparison
-    if !constant_time_eq(&provided_key, &expected_key) {
-        tracing::debug!("[auth] Invalid API key provided");
-        return Err(StatusCode::UNAUTHORIZED);
+    let actor = match resolve_admin_actor(&provided_key) {
+        Ok(actor) => actor,
+        Err(status) => {
+            tracing::debug!("[auth] Invalid API key provided");
+            return Err(status);
+        }
+    };
+
+    tracing::debug!("[auth] API key validated successfully (actor={actor})");
+    Ok(ADMIN_ACTOR.scope(actor, next.run(request)).await)
+}
+
+/// Catch-all persistence for every mutating `/admin/*` request, independent
+/// of whether the handler calls `admin::add_audit`. This is the safety net
+/// from Phase 3 of `docs/plans/admin-panel-and-production-hardening.md`: a
+/// new admin route that forgets to log its own action is still captured here
+/// with method/path/status/actor, so the audit trail can't silently miss a
+/// mutation. Read-only `GET`/`HEAD` requests are skipped — they don't change
+/// state and would otherwise dominate the log with noise. Must be layered
+/// *inside* (after) `require_api_key` so `current_admin_actor()` is populated.
+pub async fn persist_admin_request(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let skip = matches!(method, axum::http::Method::GET | axum::http::Method::HEAD);
+    let actor = current_admin_actor();
+
+    let response = next.run(request).await;
+
+    if !skip {
+        let pool = state.store.pool();
+        let status = response.status().as_u16() as i64;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let result = format!("{} -> {}", method.as_str(), status);
+        // Awaited, not spawned — same durability reasoning as
+        // `admin::add_audit`: an audit entry that can be silently dropped by
+        // a crash racing a fire-and-forget task isn't durable.
+        if let Err(e) = sqlx::query(
+            "INSERT INTO admin_audit_log (ts, actor, action, target, result, method, path, status) \
+             VALUES (?, ?, ?, '', ?, ?, ?, ?)",
+        )
+        .bind(ts)
+        .bind(&actor)
+        .bind(&path)
+        .bind(&result)
+        .bind(method.as_str())
+        .bind(&path)
+        .bind(status)
+        .execute(&pool)
+        .await
+        {
+            tracing::error!("[auth] failed to persist admin audit entry for {path}: {e}");
+        }
     }
 
-    tracing::debug!("[auth] API key validated successfully");
-    Ok(next.run(request).await)
+    response
 }
 
 /// Middleware protecting the session-key signing endpoints (`/move/record`,

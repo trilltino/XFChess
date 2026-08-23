@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
+use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::{error, info, warn};
 
@@ -31,6 +32,82 @@ use crate::telemetry::worker_metrics;
 /// Shared by the eager pre-fund in `create_session` and the fallback fund in
 /// `activate_session` so the two can never silently diverge.
 const SESSION_FUND_LAMPORTS: u64 = 10_000_000;
+
+/// How many sessions one wallet may open per [`SESSION_RATE_WINDOW`].
+///
+/// Every `/session/create` funds a fresh keypair with [`SESSION_FUND_LAMPORTS`]
+/// from the fee-payer pool, and `game_id` is chosen by the caller, so without a
+/// ceiling a single authenticated wallet can drain the pool in a loop — 0.01 SOL
+/// per HTTP request, with nothing to stop it. A real player creates or joins a
+/// handful of games in an hour; this leaves ample headroom for retries and
+/// reconnects while making the drain loop useless.
+const SESSION_RATE_MAX_PER_WALLET: usize = 12;
+const SESSION_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Ceiling on *unactivated* sessions a wallet may hold at once. Bounds the
+/// stock of funded-but-unused keys independently of the rate above, which only
+/// bounds the flow.
+const SESSION_MAX_PENDING_PER_WALLET: i64 = 6;
+
+/// Per-wallet `/session/create` timestamps. Bounded: entries older than the
+/// window are dropped on every touch, and wallets whose history empties are
+/// evicted rather than left as permanently-growing keys.
+fn session_create_tracker() -> &'static tokio::sync::Mutex<HashMap<String, Vec<std::time::Instant>>>
+{
+    static TRACKER: std::sync::OnceLock<
+        tokio::sync::Mutex<HashMap<String, Vec<std::time::Instant>>>,
+    > = std::sync::OnceLock::new();
+    TRACKER.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
+}
+
+/// Rations `/session/create` against the fee-payer pool: a sliding-window rate
+/// limit per wallet, plus a cap on how many funded-but-unactivated sessions one
+/// wallet may hold. Returns the HTTP error to surface when either is exceeded.
+async fn session_funding_guard(state: &AppState, wallet: &str) -> Result<(), (StatusCode, String)> {
+    {
+        let mut tracker = session_create_tracker().lock().await;
+        let now = std::time::Instant::now();
+
+        // Evict stale wallets on every pass so this map tracks live callers
+        // rather than every wallet that has ever called.
+        tracker.retain(|_, hits| {
+            hits.retain(|t| now.duration_since(*t) < SESSION_RATE_WINDOW);
+            !hits.is_empty()
+        });
+
+        let hits = tracker.entry(wallet.to_string()).or_default();
+        if hits.len() >= SESSION_RATE_MAX_PER_WALLET {
+            warn!("[VPS] session-create rate limit hit for wallet {wallet}");
+            worker_metrics::SESSION_CREATE_THROTTLED_TOTAL
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                format!(
+                    "Too many sessions opened recently. At most {SESSION_RATE_MAX_PER_WALLET} \
+                     per {} minutes — retry shortly.",
+                    SESSION_RATE_WINDOW.as_secs() / 60
+                ),
+            ));
+        }
+        hits.push(now);
+    }
+
+    let pending = state.store.count_pending_for_wallet(wallet).await;
+    if pending >= SESSION_MAX_PENDING_PER_WALLET {
+        warn!("[VPS] wallet {wallet} holds {pending} unactivated sessions — refusing to fund more");
+        worker_metrics::SESSION_CREATE_THROTTLED_TOTAL
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            format!(
+                "You already have {pending} sessions waiting to be activated. Finish or abandon \
+                 those before starting another."
+            ),
+        ));
+    }
+
+    Ok(())
+}
 
 // ── Request / Response types ─────────────────────────────────────────────────
 
@@ -145,14 +222,6 @@ pub struct DisputeReq {
     pub disputing_player: String,
 }
 
-/// Request to sign a transaction with session key.
-#[derive(Deserialize, Serialize)]
-pub struct SignReq {
-    pub game_id: u64,
-    /// Base64-encoded serialized Transaction that needs the session key signature
-    pub tx_b64: String,
-}
-
 /// Response containing player profile details.
 #[derive(Serialize)]
 pub struct PlayerProfileResp {
@@ -166,10 +235,7 @@ pub struct PlayerProfileResp {
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/session/status/{game_id}", get(session_status))
-        .route("/telemetry/blur", post(report_blur_telemetry))
         .route("/game/{game_id}/nonce", get(get_move_nonce))
-        .route("/ratings/update", post(update_free_rated_result))
-        .route("/dispute/submit", post(submit_dispute))
         .route("/player/{pubkey}", get(get_player_profile))
         .route("/stats", get(get_stats))
 }
@@ -178,16 +244,31 @@ pub fn routes() -> Router<AppState> {
 /// Solana transactions on the caller's behalf, so these are wrapped with
 /// [`require_relay_secret`](crate::infrastructure::require_relay_secret) by the
 /// caller in `build_router`.
+/// NOTE: `POST /session/sign` used to live here. It deserialized an arbitrary
+/// caller-supplied `Transaction`, signed it with the game's session keypair,
+/// re-anchored it on a fresh blockhash and submitted it — with no inspection of
+/// the instructions, program IDs or accounts, and no check that the caller had
+/// any relationship to `game_id`. That is an unrestricted signing oracle over a
+/// key the backend holds on a player's behalf. It has been removed rather than
+/// constrained: nothing in the game client ever called it (delegation goes
+/// through `/game/delegate`, which builds the instruction server-side), so the
+/// endpoint was pure attack surface. `POST /session/tee_auth` is gone for the
+/// same reason — it verified a signature over a constant message with no nonce,
+/// game binding or expiry (replayable forever), then discarded the result.
 pub fn protected_routes() -> Router<AppState> {
     Router::new()
         .route("/session/create", post(create_session))
         .route("/session/activate", post(activate_session))
-        .route("/session/sign", post(sign_tx))
-        .route("/session/tee_auth", post(tee_auth))
         .route("/move/record", post(record_move))
         .route("/game/delegate", post(delegate_game))
         .route("/game/undelegate", post(undelegate_game))
         .route("/game/finalize", post(finalize_game))
+        // Both moved here from the public router. `/telemetry/blur` writes
+        // anti-cheat evidence against a named player and `/ratings/update`
+        // rewrites a game's recorded result — neither is a read, and neither
+        // should have been reachable without an identity.
+        .route("/telemetry/blur", post(report_blur_telemetry))
+        .route("/ratings/update", post(update_free_rated_result))
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -202,24 +283,31 @@ pub fn protected_routes() -> Router<AppState> {
 /// POST /session/create - Creates a new session for a game.
 pub async fn create_session(
     State(state): State<AppState>,
-    authed: Option<axum::Extension<crate::signing::auth::AuthedWallet>>,
+    caller: crate::signing::auth::RequireWallet,
     Json(req): Json<CreateSessionReq>,
-) -> Result<Json<CreateSessionResp>, StatusCode> {
-    // If the caller authenticated with a per-user JWT, they may only open a
-    // session for their own wallet. (Legacy relay-secret callers have no
-    // AuthedWallet and are unaffected during the dual-accept rollout.)
-    if let Some(axum::Extension(crate::signing::auth::AuthedWallet(w))) = &authed {
-        if w != &req.wallet_pubkey {
-            return Err(StatusCode::FORBIDDEN);
-        }
-    }
-    let wallet = Pubkey::from_str(&req.wallet_pubkey).map_err(|_| StatusCode::BAD_REQUEST)?;
+) -> Result<Json<CreateSessionResp>, (StatusCode, String)> {
+    // A caller may only open a session for their own wallet. This used to be
+    // conditional on an `Option<Extension<AuthedWallet>>` being present, which
+    // meant a relay-secret request skipped the check entirely rather than
+    // failing it. `RequireWallet` makes the identity mandatory.
+    caller.require_is(&req.wallet_pubkey)?;
+
+    // Funding a session key spends real lamports from the fee-payer pool, and
+    // `game_id` is caller-chosen, so this route is a direct drain vector unless
+    // it is rationed. Both budgets are checked before any keypair is generated.
+    session_funding_guard(&state, &req.wallet_pubkey).await?;
+
+    let wallet = Pubkey::from_str(&req.wallet_pubkey)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid wallet_pubkey".to_string()))?;
     let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {
         error!(
             "[VPS] Failed to create session for game {}: {}",
             req.game_id, e
         );
-        StatusCode::INTERNAL_SERVER_ERROR
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not create session".to_string(),
+        )
     })?;
     // RateCache::get already degrades to a stale-but-real rate on fetch failure —
     // None only happens on a cold cache with no successful fetch yet ever. Reject
@@ -228,7 +316,10 @@ pub async fn create_session(
         .rate_cache
         .gbp_to_lamports(crate::signing::routes::rates::PLATFORM_FEE_GBP)
         .await
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "SOL/GBP rate unavailable".to_string(),
+        ))?;
     let treasury_vault =
         Pubkey::find_program_address(&[solana::TREASURY_VAULT_SEED], &state.program_id).0;
     info!(
@@ -276,6 +367,7 @@ pub async fn create_session(
 /// as an opaque "HTTP 502" that only the server's own log can explain.
 pub async fn activate_session(
     State(state): State<AppState>,
+    caller: crate::signing::auth::RequireWallet,
     Json(req): Json<ActivateSessionReq>,
 ) -> Result<Json<SigResp>, (StatusCode, String)> {
     let tx_bytes = base64::Engine::decode(
@@ -300,6 +392,48 @@ pub async fn activate_session(
         "tx has no account keys".to_string(),
     ))?;
 
+    // The transaction's fee payer must be the authenticated caller. Without
+    // this the endpoint co-signs setup transactions on behalf of arbitrary
+    // wallets for arbitrary games — `activating_wallet` was previously read
+    // only for idempotency bookkeeping, never for authorization.
+    caller.require_is(&activating_wallet.to_string())?;
+
+    // Inspect before signing. The session key is `game.fee_payer` on-chain and
+    // holds backend funds, so co-signing an unexamined transaction is a signing
+    // oracle: a crafted payload could carry a lamport transfer, or any other
+    // instruction the session key is a valid signer for, and this endpoint
+    // would sign it. Only the two real setup bundles the game client sends are
+    // accepted — `[create_game, authorize_session_key]` and
+    // `[join_game, authorize_session_key]` (see `solana/lobby.rs`) — and the
+    // transaction must reference the Game PDA for the `game_id` it claims.
+    let expected_game_pda = Pubkey::find_program_address(
+        &[solana::GAME_SEED, &req.game_id.to_le_bytes()],
+        &state.program_id,
+    )
+    .0;
+    solana::validate_cosignable_tx(
+        &peek_tx,
+        &state.program_id,
+        &[
+            "create_game",
+            "join_game",
+            "authorize_session_key",
+            "global_create_game",
+            "global_join_game",
+        ],
+        &[expected_game_pda],
+    )
+    .map_err(|reason| {
+        warn!(
+            "[VPS] refused to co-sign setup TX for game {} from {activating_wallet}: {reason}",
+            req.game_id
+        );
+        (
+            StatusCode::BAD_REQUEST,
+            format!("setup transaction rejected: {reason}"),
+        )
+    })?;
+
     if state
         .store
         .wallet_activated(req.game_id, &activating_wallet)
@@ -314,8 +448,6 @@ pub async fn activate_session(
             ..Default::default()
         }));
     }
-
-    let rpc = solana::make_rpc(&state.config.solana_rpc_url);
 
     // Retrieve session keypair so we can co-sign the TX.
     // The create_game / join_game instructions require BOTH the player wallet
@@ -338,22 +470,34 @@ pub async fn activate_session(
     // first-time session (each game_id gets a brand-new, unfunded keypair
     // from /session/create). Funding after submission, as this used to do,
     // never had a chance to help.
-    let fee_payer = state.feepayer.next();
-    solana::fund_account(
-        &rpc,
-        fee_payer,
-        &entry.session_pubkey(),
-        SESSION_FUND_LAMPORTS,
-    )
+    // `fund_account` (15 s deadline) and `cosign_and_submit_tx` (30 s) both use
+    // the *blocking* Solana client and poll for confirmation, so back to back
+    // they can park an async worker thread for ~45 s. Run the pair on the
+    // blocking pool — same reasoning as `record_move` below.
+    let feepayer = state.feepayer.clone();
+    let session_pubkey = entry.session_pubkey();
+    let game_id = req.game_id;
+    let rpc_url = state.config.solana_rpc_url.clone();
+    let submit = tokio::task::spawn_blocking(move || {
+        let rpc = solana::make_rpc(&rpc_url);
+        solana::fund_account(
+            &rpc,
+            feepayer.next(),
+            &session_pubkey,
+            SESSION_FUND_LAMPORTS,
+        )
+        .map_err(|e| format!("Could not fund session key for game {game_id}: {e}"))?;
+        // Submit the wallet-signed TX, adding the session key co-signature.
+        solana::cosign_and_submit_tx(&rpc, &session_keypair, &tx_bytes)
+            .map_err(|e| format!("Failed to submit setup TX for game {game_id}: {e}"))
+    })
+    .await
     .map_err(|e| {
-        let msg = format!("Could not fund session key for game {}: {e}", req.game_id);
+        let msg = format!("activate_session task panicked for game {game_id}: {e}");
         error!("[VPS] {msg}");
-        (StatusCode::BAD_GATEWAY, msg)
+        (StatusCode::INTERNAL_SERVER_ERROR, msg)
     })?;
-
-    // Submit the wallet-signed TX, adding the session key co-signature.
-    let sig = solana::cosign_and_submit_tx(&rpc, &session_keypair, &tx_bytes).map_err(|e| {
-        let msg = format!("Failed to submit setup TX for game {}: {e}", req.game_id);
+    let sig = submit.map_err(|msg| {
         error!("[VPS] {msg}");
         (StatusCode::BAD_GATEWAY, msg)
     })?;
@@ -403,7 +547,7 @@ pub async fn session_status(
 /// Validates engine-side before Solana submission; derives next_fen internally.
 pub async fn record_move(
     State(state): State<AppState>,
-    authed: Option<axum::Extension<crate::signing::auth::AuthedWallet>>,
+    caller: crate::signing::auth::RequireWallet,
     Json(req): Json<RecordMoveReq>,
 ) -> Result<Json<SigResp>, (StatusCode, String)> {
     // If the caller authenticated with a per-user JWT, a valid credential for
@@ -420,24 +564,16 @@ pub async fn record_move(
     // supplied. Cheap in the common case (cached, see
     // `GameParticipantsCache`'s 5-minute TTL — participants never change
     // mid-game) and only ever consulted when the fast path doesn't apply.
-    if let Some(axum::Extension(crate::signing::auth::AuthedWallet(caller))) = &authed {
-        if caller != &req.mover_wallet {
-            let is_participant = match Pubkey::from_str(caller) {
-                Ok(caller_pk) => match state.game_participants.get(req.game_id).await {
-                    Some((white, black)) => caller_pk == white || caller_pk == black,
-                    None => false,
-                },
-                Err(_) => false,
-            };
-            if !is_participant {
-                let msg = format!(
-                    "Authenticated wallet {caller} is not a registered participant of game {} \
-                     (and does not match mover_wallet '{}')",
-                    req.game_id, req.mover_wallet
-                );
-                return Err((StatusCode::FORBIDDEN, msg));
-            }
-        }
+    if caller.0 != req.mover_wallet {
+        require_game_participant(&state, req.game_id, &caller.0)
+            .await
+            .map_err(|(status, mut msg)| {
+                msg.push_str(&format!(
+                    " (and does not match mover_wallet '{}')",
+                    req.mover_wallet
+                ));
+                (status, msg)
+            })?;
     }
     let mover_wallet = Pubkey::from_str(&req.mover_wallet).map_err(|_| {
         let msg = format!(
@@ -463,16 +599,15 @@ pub async fn record_move(
     // ── Engine-side validation (replay from previous FEN) ──
     let pool = state.store.pool();
     let repo = GameRepository::new(pool.clone());
-
-    let prev_fen = if let Ok(moves) = repo.get_moves(&req.game_id.to_string()).await {
-        moves
-            .iter()
-            .max_by_key(|m| m.move_number)
-            .and_then(|m| m.fen_after.clone())
-    } else {
-        None
-    }
-    .unwrap_or_else(|| "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
+    // Only the latest FEN is needed here — see `get_last_fen`. An error or a
+    // game with no recorded moves both fall back to the start position, as
+    // scanning the full history used to.
+    let prev_fen = repo
+        .get_last_fen(&req.game_id.to_string())
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
 
     let mut game = nimzovich_engine::on_chain::CompactBoard::from_fen(&prev_fen).to_on_chain_game();
 
@@ -555,6 +690,7 @@ pub async fn record_move(
         (StatusCode::INTERNAL_SERVER_ERROR, msg)
     })?;
     let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::RecordMove);
+    let er_url = er_rpc.url();
 
     // Serialize against any other ER write in flight for this game (another
     // record_move, an undelegate, the time-check crank) — see
@@ -564,18 +700,29 @@ pub async fn record_move(
     // Same empty-body 502 problem as delegate_game/undelegate_game — this is
     // the route every single move goes through, so an opaque failure here is
     // the single most disruptive place for it to happen.
-    let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {
+    // The Solana `RpcClient` used here is the *blocking* client, and
+    // `sign_and_submit_er` polls for confirmation for up to 30 s. Awaiting that
+    // inline parks a whole Tokio worker thread for the duration, so on a small
+    // VPS a handful of concurrent moves starves the runtime — /health and
+    // /metrics included. Hand it to the blocking pool, matching the pattern
+    // already used in `tasks/settlement_worker.rs`.
+    let sig = tokio::task::spawn_blocking(move || {
+        solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix])
+    })
+    .await
+    .map_err(|e| {
+        let msg = format!("record_move task panicked for game {}: {e}", req.game_id);
+        error!("[VPS] {msg}");
+        (StatusCode::INTERNAL_SERVER_ERROR, msg)
+    })?
+    .map_err(|e| {
         let msg = format!("record_move failed for game {}: {e}", req.game_id);
         error!("[VPS] {msg}");
         (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
         "[ER] game {} move {} recorded on Ephemeral Rollup ({}) sig {} — FEN after: {}",
-        req.game_id,
-        req.move_uci,
-        er_rpc.url(),
-        sig,
-        derived_next_fen
+        req.game_id, req.move_uci, &er_url, sig, derived_next_fen
     );
 
     // Persist the move before responding — this used to be a fire-and-forget
@@ -613,13 +760,155 @@ pub async fn record_move(
             .await
         {
             error!("[DB] Failed to insert move for game {}: {}", game_id_str, e);
+        } else {
+            publish_move_to_spectators(
+                &state,
+                &repo,
+                &game_id_str,
+                move_number,
+                &move_uci,
+                san.as_deref(),
+                &next_fen,
+                &player_wallet,
+            )
+            .await;
         }
     }
 
     Ok(Json(SigResp {
         sig: sig.to_string(),
-        er_endpoint: er_rpc.url(),
+        er_endpoint: er_url,
     }))
+}
+
+/// The Braid resource carrying a game's moves to spectators.
+///
+/// Registered lazily on a game's first move — a game nobody has played is not
+/// a resource anyone can subscribe to, and `404` is the honest answer.
+pub fn spectator_moves_path(game_id: &str) -> String {
+    format!("game/{game_id}/moves")
+}
+
+/// Append one move to the game's spectator feed.
+///
+/// # Why this is gated on the broadcast delay
+///
+/// A `209` subscription pushes each move the instant it is recorded. For a
+/// tournament game with a non-zero broadcast delay that is precisely the
+/// ghosting channel the delay exists to close — `get_moves_visible` filters the
+/// polled feed by timestamp, and a live stream would walk straight around it.
+///
+/// So a delayed game is never published here at all: its resource is never
+/// registered, a subscribe gets `404`, and the client falls back to the
+/// delay-gated poll it already uses. Two independent guards (this one, and the
+/// client refusing to subscribe unless the delay it fetched is 0) — losing
+/// either one alone does not leak a live board.
+#[allow(clippy::too_many_arguments)]
+async fn publish_move_to_spectators(
+    state: &AppState,
+    repo: &GameRepository,
+    game_id: &str,
+    move_number: i32,
+    move_uci: &str,
+    move_san: Option<&str>,
+    fen_after: &str,
+    player: &str,
+) {
+    if !crate::signing::routes::spectate::is_streamable(repo.get_broadcast_delay(game_id).await) {
+        return;
+    }
+
+    let path = spectator_moves_path(game_id);
+
+    // First move of this process's view of the game: hydrate from SQLite so a
+    // spectator who subscribes later still gets the moves already played. A
+    // restart mid-game otherwise leaves the log starting at "whatever happened
+    // next", which renders as a board with pieces missing.
+    if state.braid_hub.ensure_log(&path) {
+        if let Ok(existing) = repo.get_moves(game_id).await {
+            for m in existing {
+                // The move just written is already in the table; hydrating
+                // includes it, so don't append it twice below.
+                if m.move_number == move_number {
+                    continue;
+                }
+                state.braid_hub.append(
+                    &path,
+                    move_to_message(
+                        &m.move_uci,
+                        m.move_san.as_deref(),
+                        m.fen_after.as_deref().unwrap_or_default(),
+                        m.move_number,
+                        &m.player,
+                    ),
+                );
+            }
+        }
+    }
+
+    state.braid_hub.append(
+        &path,
+        move_to_message(move_uci, move_san, fen_after, move_number, player),
+    );
+}
+
+/// Encode one move as the `ChessMessage::Move` a spectator's
+/// `braid_chess::ChessSubscriber` decodes.
+///
+/// History and live tail must produce byte-identical shapes — a subscriber has
+/// one decode path for both.
+fn move_to_message(
+    move_uci: &str,
+    _move_san: Option<&str>,
+    fen_after: &str,
+    move_number: i32,
+    player: &str,
+) -> serde_json::Value {
+    let payload = braid_chess::MovePayload::from_uci(
+        move_uci.to_string(),
+        fen_after.to_string(),
+        move_number.max(0) as u32,
+        player.to_string(),
+    );
+    serde_json::to_value(braid_chess::ChessMessage::Move(payload))
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// Asserts `wallet` is White or Black in `game_id` according to the chain.
+///
+/// This is the authorization primitive for every game-scoped route. String
+/// equality against a field the caller supplied proves nothing, and a game's
+/// host legitimately acts for *both* players (it relays the opponent's moves),
+/// so the only meaningful question is on-chain participation in this specific
+/// game. Cheap in the common case — `GameParticipantsCache` holds a 5-minute
+/// TTL and participants never change mid-game.
+async fn require_game_participant(
+    state: &AppState,
+    game_id: u64,
+    wallet: &str,
+) -> Result<(), (StatusCode, String)> {
+    let wallet_pk = Pubkey::from_str(wallet).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("invalid wallet '{wallet}'"),
+        )
+    })?;
+
+    match state.game_participants.get(game_id).await {
+        Some((white, black)) if wallet_pk == white || wallet_pk == black => Ok(()),
+        Some(_) => Err((
+            StatusCode::FORBIDDEN,
+            format!("Authenticated wallet {wallet} is not a participant of game {game_id}"),
+        )),
+        // Participants unreadable (game not yet on chain, or RPC down). Fail
+        // closed: an unverifiable claim is not an authorized one.
+        None => Err((
+            StatusCode::FORBIDDEN,
+            format!(
+                "Could not verify participation in game {game_id} on-chain; refusing the request"
+            ),
+        )),
+    }
 }
 
 /// Upper bound on a single move's think time (ms). Anything larger is a
@@ -637,17 +926,20 @@ const MAX_THINK_MS: u32 = 2 * 60 * 60 * 1000; // 2 hours
 /// before scoring. Consumed by the anti-cheat pipeline as soft signals.
 pub async fn report_blur_telemetry(
     State(state): State<AppState>,
+    caller: crate::signing::auth::RequireWallet,
     Json(req): Json<BlurTelemetryReq>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, (StatusCode, String)> {
     // Only accept telemetry for games this server is actually relaying.
-    state
-        .store
-        .get(req.game_id)
-        .await
-        .ok_or(StatusCode::NOT_FOUND)?;
+    state.store.get(req.game_id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("no session for game {}", req.game_id),
+    ))?;
 
     if req.move_number == 0 {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "move_number is 1-based".to_string(),
+        ));
     }
     let expected_color = if req.move_number % 2 == 1 {
         "white"
@@ -655,7 +947,42 @@ pub async fn report_blur_telemetry(
         "black"
     };
     if req.color != expected_color {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("ply {} is {expected_color}'s", req.move_number),
+        ));
+    }
+
+    // This feeds the anti-cheat pipeline, and `INSERT OR IGNORE` makes the first
+    // write for a ply permanent. Unauthenticated, it let anyone race the real
+    // client and mark an opponent's moves as window-blurred — the alt-tab-to-
+    // engine signal — with no way to correct the record afterwards. A player may
+    // only report their own colour, established from on-chain participation
+    // rather than from the request body.
+    require_game_participant(&state, req.game_id, &caller.0).await?;
+    let (white, black) = state.game_participants.get(req.game_id).await.ok_or((
+        StatusCode::FORBIDDEN,
+        format!("could not resolve participants of game {}", req.game_id),
+    ))?;
+    let caller_is = if caller.0 == white.to_string() {
+        "white"
+    } else if caller.0 == black.to_string() {
+        "black"
+    } else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "caller is not a player in this game".to_string(),
+        ));
+    };
+    if caller_is != expected_color {
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!(
+                "you play {caller_is}; ply {} belongs to {expected_color} and only that player \
+                 may report telemetry for it",
+                req.move_number
+            ),
+        ));
     }
 
     let think_ms = req.think_ms.map(|t| t.min(MAX_THINK_MS) as i64);
@@ -676,7 +1003,10 @@ pub async fn report_blur_telemetry(
             "[telemetry] blur insert failed for game {}: {}",
             req.game_id, e
         );
-        StatusCode::INTERNAL_SERVER_ERROR
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not record telemetry".to_string(),
+        )
     })?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -703,8 +1033,13 @@ fn uci_to_fixed5(uci: &str) -> Result<[u8; 5], ()> {
 /// on this beyond what `activate_session` already provides.
 pub async fn delegate_game(
     State(state): State<AppState>,
+    caller: crate::signing::auth::RequireWallet,
     Json(req): Json<DelegateGameReq>,
 ) -> Result<Json<SigResp>, (StatusCode, String)> {
+    // Delegation moves a live game onto the ER and spends fee-payer lamports on
+    // the bookkeeping accounts' rent. Restrict it to the game's own players.
+    require_game_participant(&state, req.game_id, &caller.0).await?;
+
     let entry = state.store.get(req.game_id).await.ok_or_else(|| {
         let msg = format!("No session found for game {}", req.game_id);
         error!("[VPS] {msg}");
@@ -729,37 +1064,56 @@ pub async fn delegate_game(
             (StatusCode::INTERNAL_SERVER_ERROR, msg)
         })?;
 
-    let rpc = solana::rpc_for(&state.config, solana::RoutedInstr::DelegateGame);
-    // The client only ever saw `HTTP 502 —  —` on failure otherwise — see
-    // the identical fix + rationale on `undelegate_game`.
-    let blockhash = rpc.get_latest_blockhash().map_err(|e| {
-        let msg = format!(
-            "delegate_game get_latest_blockhash failed for game {}: {e}",
-            req.game_id
+    // `RpcClient` is the *synchronous* Solana client: `send_and_confirm_transaction`
+    // parks the calling thread until the cluster confirms — seconds in the good
+    // case, up to the client's 30 s timeout in the bad one. Running that straight
+    // from an async handler occupies a Tokio worker for the whole duration, and
+    // the runtime only has one worker per core: a handful of concurrent
+    // delegations was enough to stall every other request on the server,
+    // `/health` and `/metrics` included. All of it therefore runs on the blocking
+    // pool, and only the signature crosses back.
+    let rpc_url = solana::rpc_url_for(&state.config, solana::RoutedInstr::DelegateGame);
+    let payer_bytes = payer.to_bytes();
+    let session_bytes = session_kp.to_bytes();
+    let game_id = req.game_id;
+    let submit_url = rpc_url.clone();
+    let sig = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let rpc = solana::make_rpc(&submit_url);
+        let payer = Keypair::try_from(payer_bytes.as_slice())
+            .map_err(|e| format!("fee-payer keypair unusable: {e}"))?;
+        let session_kp = Keypair::try_from(session_bytes.as_slice())
+            .map_err(|e| format!("session keypair unusable: {e}"))?;
+        let blockhash = rpc.get_latest_blockhash().map_err(|e| {
+            format!("delegate_game get_latest_blockhash failed for game {game_id}: {e}")
+        })?;
+        let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer, &session_kp],
+            blockhash,
         );
+        rpc.send_and_confirm_transaction(&tx)
+            .map(|s| s.to_string())
+            .map_err(|e| {
+                // Debug, not just Display, logged separately: ClientError's
+                // Display impl collapses a simulation failure to one summary
+                // line ("Attempt to load a program that does not exist") with no
+                // indication of *which* account/program the runtime was even
+                // looking at. The Debug impl carries the full
+                // RpcResponseErrorData (including the simulation's `logs`),
+                // which is the only way to actually pin this down.
+                error!("[VPS] delegate_game full error detail for game {game_id}: {e:?}");
+                format!("delegate_game failed for game {game_id} (send failed): {e}")
+            })
+    })
+    .await
+    .map_err(|e| {
+        let msg = format!("delegate_game task for game {game_id} panicked: {e}");
         error!("[VPS] {msg}");
-        (StatusCode::BAD_GATEWAY, msg)
-    })?;
-    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&payer.pubkey()),
-        &[payer, &session_kp],
-        blockhash,
-    );
-    let sig = rpc.send_and_confirm_transaction(&tx).map_err(|e| {
-        let msg = format!(
-            "delegate_game failed for game {} (sig would be unknown — send failed): {e}",
-            req.game_id
-        );
-        // Debug, not just Display, logged separately: ClientError's Display
-        // impl collapses a simulation failure to one summary line ("Attempt
-        // to load a program that does not exist") with no indication of
-        // *which* account/program the runtime was even looking at. The
-        // Debug impl carries the full RpcResponseErrorData (including the
-        // simulation's `logs`), which is the only way to actually pin this
-        // down instead of guessing.
+        (StatusCode::INTERNAL_SERVER_ERROR, msg)
+    })?
+    .map_err(|msg| {
         error!("[VPS] {msg}");
-        error!("[VPS] delegate_game full error detail for game {}: {e:?}", req.game_id);
         (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
@@ -767,10 +1121,10 @@ pub async fn delegate_game(
         req.game_id, state.config.magic_router_rpc_url, sig
     );
 
-    schedule_time_check_crank(&state, &rpc, &program_id, &session_kp, req.game_id).await;
+    schedule_time_check_crank(&state, &rpc_url, &program_id, &session_kp, req.game_id).await;
 
     Ok(Json(SigResp {
-        sig: sig.to_string(),
+        sig,
         ..Default::default()
     }))
 }
@@ -789,7 +1143,7 @@ pub async fn delegate_game(
 /// needs to be (re)registered exactly like the normal delegate flow does.
 pub(crate) async fn schedule_time_check_crank(
     state: &AppState,
-    base_rpc: &solana_client::rpc_client::RpcClient,
+    base_rpc_url: &str,
     program_id: &Pubkey,
     session_kp: &solana_sdk::signature::Keypair,
     game_id: u64,
@@ -799,28 +1153,40 @@ pub(crate) async fn schedule_time_check_crank(
     let game_pda =
         Pubkey::find_program_address(&[solana::GAME_SEED, &game_id.to_le_bytes()], program_id).0;
 
-    // Game layout: disc(8) + game_id(8) + white(32) + black(32) + ... — same
-    // offsets `resolve_game_signer` uses for `fee_payer` below.
-    let (white, black) = match base_rpc.get_account_data(&game_pda) {
-        Ok(data) => {
-            let white = data.get(16..48).and_then(|b| Pubkey::try_from(b).ok());
-            let black = data.get(48..80).and_then(|b| Pubkey::try_from(b).ok());
-            match (white, black) {
-                (Some(w), Some(b)) => (w, b),
-                _ => {
-                    error!(
-                        "[VPS] schedule_time_check: malformed Game account for game {}",
-                        game_id
-                    );
-                    worker_metrics::TIME_CHECK_SCHEDULE_FAILED_TOTAL
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    return;
-                }
+    // Takes the base-layer URL rather than a prebuilt client so the account
+    // read can run on the blocking pool: `RpcClient` is the synchronous client,
+    // and this executes inside request handling for `/game/delegate`.
+    let read_url = base_rpc_url.to_string();
+    let account = tokio::task::spawn_blocking(move || {
+        solana::make_rpc(&read_url).get_account_data(&game_pda)
+    })
+    .await;
+
+    let (white, black) = match account {
+        Ok(Ok(data)) => match solana::game_account::parse(&data) {
+            Some(game) => (game.white, game.black),
+            None => {
+                error!(
+                    "[VPS] schedule_time_check: malformed Game account for game {}",
+                    game_id
+                );
+                worker_metrics::TIME_CHECK_SCHEDULE_FAILED_TOTAL
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return;
             }
+        },
+        Ok(Err(e)) => {
+            error!(
+                "[VPS] schedule_time_check: failed to read Game account for game {}: {e}",
+                game_id
+            );
+            worker_metrics::TIME_CHECK_SCHEDULE_FAILED_TOTAL
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return;
         }
         Err(e) => {
             error!(
-                "[VPS] schedule_time_check: failed to read Game account for game {}: {e}",
+                "[VPS] schedule_time_check: Game account read panicked for game {}: {e}",
                 game_id
             );
             worker_metrics::TIME_CHECK_SCHEDULE_FAILED_TOTAL
@@ -858,7 +1224,21 @@ pub(crate) async fn schedule_time_check_crank(
     // stranded a real-wager game's checkmate move on 2026-08-10.
     let _er_lock = er_game_lock(state, game_id).await;
 
-    match solana::sign_and_submit_er(&er_rpc, session_kp, &[ix]) {
+    // Blocking client + up-to-30 s confirmation poll: keep it off the async
+    // worker threads. The keypair is round-tripped through its bytes because
+    // this function only borrows it; a failure here is impossible for a valid
+    // key, so it folds into the existing best-effort failure branch rather
+    // than panicking.
+    let submit = match solana_sdk::signature::Keypair::try_from(session_kp.to_bytes().as_slice()) {
+        Ok(kp) => {
+            tokio::task::spawn_blocking(move || solana::sign_and_submit_er(&er_rpc, &kp, &[ix]))
+                .await
+                .unwrap_or_else(|e| Err(anyhow::anyhow!("schedule_time_check task panicked: {e}")))
+        }
+        Err(e) => Err(anyhow::anyhow!("session keypair round-trip failed: {e}")),
+    };
+
+    match submit {
         Ok(sig) => {
             info!("[VPS] schedule_time_check game {} sig {}", game_id, sig);
             worker_metrics::TIME_CHECK_SCHEDULED_TOTAL
@@ -924,11 +1304,7 @@ pub async fn resolve_game_signer(
         .ok()?
         .ok()?;
 
-    // Game layout: disc(8) + game_id(8) + white(32) + black(32) + status(1)
-    // + last_move_timestamp(8) + fees_advanced(8) → fee_payer at offset 97.
-    // Matches `parse_game_account` in `tasks::settlement_worker` — keep both
-    // in sync if the `Game` struct's field order ever changes.
-    let fee_payer = data.get(97..129).and_then(|b| Pubkey::try_from(b).ok())?;
+    let fee_payer = solana::game_account::parse(&data)?.fee_payer;
 
     let sessions = state.active_global_sessions.lock().await;
     sessions
@@ -988,12 +1364,16 @@ pub async fn resolve_move_signer(
             // Global sessions are marked usable at registration time (no
             // separate wallet-signed setup TX to wait for), so there's no
             // `active` flag to check here.
-            let owned =
-                Keypair::try_from(kp.to_bytes().as_slice()).map_err(|_| MoveSignerError::NoSession)?;
+            let owned = Keypair::try_from(kp.to_bytes().as_slice())
+                .map_err(|_| MoveSignerError::NoSession)?;
             return Ok((owned, true));
         }
     }
-    let entry = state.store.get(game_id).await.ok_or(MoveSignerError::NoSession)?;
+    let entry = state
+        .store
+        .get(game_id)
+        .await
+        .ok_or(MoveSignerError::NoSession)?;
     if !entry.active {
         return Err(MoveSignerError::SessionInactive);
     }
@@ -1003,8 +1383,13 @@ pub async fn resolve_move_signer(
 /// POST /game/undelegate - Undelegates a game from ER to devnet.
 pub async fn undelegate_game(
     State(state): State<AppState>,
+    caller: crate::signing::auth::RequireWallet,
     Json(req): Json<UndelegateGameReq>,
 ) -> Result<Json<SigResp>, (StatusCode, String)> {
+    // Pulling a game off the ER mid-play stalls both players until it is
+    // re-delegated, so this is a griefing lever for anyone but the players.
+    require_game_participant(&state, req.game_id, &caller.0).await?;
+
     let session_kp = resolve_game_signer(&state, req.game_id)
         .await
         .ok_or_else(|| {
@@ -1024,6 +1409,7 @@ pub async fn undelegate_game(
             (StatusCode::INTERNAL_SERVER_ERROR, msg)
         })?;
     let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::UndelegateGame);
+    let er_url = er_rpc.url();
 
     // Held through the `cancel_time_check_crank` call below too — both are
     // ER writes for this same game and must not race a concurrent
@@ -1035,28 +1421,52 @@ pub async fn undelegate_game(
     // string) — the real reason (stale ER state, RPC timeout, session key
     // mismatch, ...) stayed stuck in this process's own log, which isn't
     // where anyone debugging a two-client test is looking.
-    let sig = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]).map_err(|e| {
+    // Blocking client + up-to-30 s confirmation poll — off the async workers.
+    // `er_rpc`/`session_kp` are handed back out of the closure because the
+    // best-effort `cancel_time_check_crank` below still needs them, and it has
+    // to stay inside `_er_lock`'s scope (see the lock comment above).
+    let (submit, er_rpc, session_kp) = tokio::task::spawn_blocking(move || {
+        let r = solana::sign_and_submit_er(&er_rpc, &session_kp, &[ix]);
+        (r, er_rpc, session_kp)
+    })
+    .await
+    .map_err(|e| {
+        let msg = format!(
+            "undelegate_game task panicked for game {}: {e}",
+            req.game_id
+        );
+        error!("[VPS] {msg}");
+        (StatusCode::INTERNAL_SERVER_ERROR, msg)
+    })?;
+    let sig = submit.map_err(|e| {
         let msg = format!("undelegate_game failed for game {}: {e}", req.game_id);
         error!("[VPS] {msg}");
-        error!("[VPS] undelegate_game full error detail for game {}: {e:?}", req.game_id);
+        error!(
+            "[VPS] undelegate_game full error detail for game {}: {e:?}",
+            req.game_id
+        );
         (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
         "[ER] game {} undelegated from Ephemeral Rollup ({}) back to devnet, sig {}",
-        req.game_id,
-        er_rpc.url(),
-        sig
+        req.game_id, &er_url, sig
     );
 
     // Cancel the time-check crank as a separate, best-effort follow-up — never
     // let a cancel failure affect the undelegate result already returned
     // above. A stray task on an undelegated account is expected to fail
-    // harmlessly on its own next tick either way.
-    cancel_time_check_crank(&er_rpc, &state.program_id, &session_kp, req.game_id);
+    // harmlessly on its own next tick either way. Awaited (not detached) so it
+    // still runs under `_er_lock`, exactly as the synchronous call did.
+    let program_id = state.program_id;
+    let game_id = req.game_id;
+    let _ = tokio::task::spawn_blocking(move || {
+        cancel_time_check_crank(&er_rpc, &program_id, &session_kp, game_id);
+    })
+    .await;
 
     Ok(Json(SigResp {
         sig: sig.to_string(),
-        er_endpoint: er_rpc.url(),
+        er_endpoint: er_url,
     }))
 }
 
@@ -1109,55 +1519,31 @@ struct GameFeeBreakdown {
     country_fee: u64,
 }
 
-/// Reads the on-chain `Game.fees_advanced` and `Game.country_fee` fields
-/// directly off account bytes, since they're the authoritative amounts
-/// `settle_finished_game` actually pays to `treasury_vault` — recomputing an
-/// estimate client/backend-side (e.g. via a BPS-of-pot guess) can silently
-/// diverge from what the program transfers. Layout must track `Game`'s field
-/// order — mirrors (a subset of) `parse_game_account` in
-/// `tasks::settlement_worker`; keep both in sync if the struct's field order
-/// ever changes. Returns `None` on any parse failure (missing account,
-/// unexpected layout) — callers should treat that as "fee unknown", not "fee
-/// zero".
+/// Reads the on-chain `Game.fees_advanced` and `Game.country_fee` fields, the
+/// authoritative amounts `settle_finished_game` actually pays to
+/// `treasury_vault` — recomputing an estimate backend-side (e.g. via a
+/// BPS-of-pot guess) silently diverges from what the program transfers.
+///
+/// Returns `None` on any parse failure (missing account, unexpected layout) —
+/// callers must treat that as "fee unknown", not "fee zero".
+///
+/// This used to walk the byte offsets itself and got them wrong: it stepped
+/// `move_count` straight to `turn`, skipping `halfmove_clock`, so `country_fee`
+/// was read two bytes early and the platform fee reported back to players was
+/// garbage. It now goes through the shared decoder, which is pinned against the
+/// program's own offset test.
 fn read_game_fee_breakdown(
     rpc: &solana_client::rpc_client::RpcClient,
     program_id: &Pubkey,
     game_id: u64,
 ) -> Option<GameFeeBreakdown> {
-    const RESULT_WINNER: u8 = 1;
     let game_pda =
         Pubkey::find_program_address(&[solana::GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let data = rpc.get_account_data(&game_pda).ok()?;
-    let mut o = 8usize; // discriminator
-    o += 8; // game_id
-    o += 32 + 32; // white + black
-    o += 1; // status
-    o += 8; // last_move_timestamp
-    let fees_advanced = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
-    o += 8; // fees_advanced
-    o += 32; // fee_payer
-    let result_tag = *data.get(o)?;
-    o += 1;
-    if result_tag == RESULT_WINNER {
-        o += 32; // winner pubkey
-    }
-    o += 68; // board_state
-    o += 2; // move_count
-    o += 2; // turn
-    o += 8; // created_at
-    o += 8; // updated_at
-    o += 8; // wager_amount
-    let wager_token_tag = *data.get(o)?;
-    o += 1;
-    if wager_token_tag == 1 {
-        o += 32; // Some(Pubkey)
-    }
-    o += 1; // game_type
-    o += 1; // match_type
-    let country_fee = u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?);
+    let game = solana::game_account::parse(&data)?;
     Some(GameFeeBreakdown {
-        fees_advanced,
-        country_fee,
+        fees_advanced: game.fees_advanced,
+        country_fee: game.country_fee,
     })
 }
 
@@ -1173,7 +1559,10 @@ const ELO_FEE_LAMPORTS: u64 = 5_000;
 /// account is already closed and there's nothing left to read.
 fn estimate_country_fee(wager_lamports: u64) -> u64 {
     const COUNTRY_FEE_BPS: u64 = 100; // 1%
-    wager_lamports.saturating_mul(2).saturating_mul(COUNTRY_FEE_BPS) / 10_000
+    wager_lamports
+        .saturating_mul(2)
+        .saturating_mul(COUNTRY_FEE_BPS)
+        / 10_000
 }
 
 /// Winner payout after fees — reproduces `settle_finished_game`'s exact
@@ -1206,8 +1595,14 @@ fn compute_winner_lamports(
 
 pub async fn finalize_game(
     State(state): State<AppState>,
+    caller: crate::signing::auth::RequireWallet,
     Json(req): Json<FinalizeGameReq>,
 ) -> Result<Json<FinalizeResp>, (StatusCode, String)> {
+    // The chain decides the payout regardless of what this request claims, so
+    // an outsider calling this cannot redirect funds — but they can burn the
+    // session key's lamports on a doomed transaction for any game they name.
+    require_game_participant(&state, req.game_id, &caller.0).await?;
+
     // Both players' clients independently detect game-end locally and each
     // calls this route — deliberately, so finalization doesn't depend on one
     // specific client staying connected. Whichever call lands on-chain first
@@ -1223,7 +1618,12 @@ pub async fn finalize_game(
     let repo = GameRepository::new(state.store.pool());
     if let Ok(Some(existing)) = repo.get_game(&req.game_id.to_string()).await {
         if existing.status == "completed" {
-            if let Some(sig) = existing.finalize_sig {
+            // An *empty* signature is not evidence of settlement. `complete_game`
+            // is also written by the off-chain rated-result path, which stores
+            // `""` — treating that as a cached success made this return a
+            // fabricated receipt and skip the real on-chain finalize entirely,
+            // leaving the winner unpaid until the settlement worker caught up.
+            if let Some(sig) = existing.finalize_sig.filter(|s| !s.trim().is_empty()) {
                 info!(
                     "[VPS] finalize_game for game {} already completed (sig {sig}) — returning cached result",
                     req.game_id
@@ -1472,108 +1872,6 @@ pub struct FinalizeGameReq {
     pub wager_lamports: u64,
 }
 
-#[derive(Deserialize)]
-pub struct TeeAuthReq {
-    pub game_id: u64,
-    pub wallet_pubkey: String,
-    /// Base64-encoded Ed25519 signature over "Authenticate with MagicBlock TEE"
-    pub signature_b64: String,
-}
-
-/// POST /session/sign - Signs a transaction with the session key.
-pub async fn sign_tx(
-    State(state): State<AppState>,
-    Json(req): Json<SignReq>,
-) -> Result<Json<SigResp>, StatusCode> {
-    use solana_sdk::transaction::Transaction;
-
-    let entry = state
-        .store
-        .get(req.game_id)
-        .await
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    let tx_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &req.tx_b64)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-
-    let mut tx: Transaction =
-        bincode::deserialize(&tx_bytes).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let session_kp = entry.keypair();
-
-    let rpc = solana::make_rpc(&state.config.solana_rpc_url);
-    let blockhash = rpc
-        .get_latest_blockhash()
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-    tx.partial_sign(&[&session_kp], blockhash);
-
-    let sig = rpc.send_and_confirm_transaction(&tx).map_err(|e| {
-        error!("[VPS] sign_tx failed for game {}: {e}", req.game_id);
-        StatusCode::BAD_GATEWAY
-    })?;
-
-    Ok(Json(SigResp {
-        sig: sig.to_string(),
-        ..Default::default()
-    }))
-}
-
-/// POST /session/tee_auth - Verifies wallet ownership for TEE-backed private game state.
-///
-/// The wallet signs the canonical message "Authenticate with MagicBlock TEE" with its
-/// Ed25519 keypair. This backend verifies the signature and confirms the wallet identity,
-/// enabling encrypted move processing on the MagicBlock Ephemeral Rollup TEE.
-/// The session for `game_id` must already exist (player must call /session/create first).
-pub async fn tee_auth(
-    State(state): State<AppState>,
-    Json(req): Json<TeeAuthReq>,
-) -> Result<Json<SigResp>, StatusCode> {
-    use base64::Engine;
-    use solana_sdk::signature::Signature;
-
-    const TEE_AUTH_MESSAGE: &[u8] = b"Authenticate with MagicBlock TEE";
-
-    let wallet = Pubkey::from_str(&req.wallet_pubkey).map_err(|_| {
-        warn!("[TEE-AUTH] Invalid wallet pubkey: {}", req.wallet_pubkey);
-        StatusCode::BAD_REQUEST
-    })?;
-
-    let sig_bytes = base64::engine::general_purpose::STANDARD
-        .decode(&req.signature_b64)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-
-    let sig = Signature::try_from(sig_bytes.as_slice()).map_err(|_| {
-        warn!(
-            "[TEE-AUTH] Bad signature length ({} bytes) for game {}",
-            sig_bytes.len(),
-            req.game_id
-        );
-        StatusCode::BAD_REQUEST
-    })?;
-
-    if !sig.verify(wallet.as_ref(), TEE_AUTH_MESSAGE) {
-        warn!(
-            "[TEE-AUTH] Signature mismatch — wallet {} game {}",
-            req.wallet_pubkey, req.game_id
-        );
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    let _entry = state
-        .store
-        .get(req.game_id)
-        .await
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    info!(
-        "[TEE-AUTH] Wallet {} authenticated for game {}",
-        req.wallet_pubkey, req.game_id
-    );
-    Ok(Json(SigResp {
-        sig: "tee-auth-ok".to_string(),
-        ..Default::default()
-    }))
-}
-
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -1584,17 +1882,28 @@ pub struct StatsResp {
     pub uptime_seconds: u64,
 }
 
+/// Process start instant, captured the first time `/stats` is served. Real
+/// uptime needs a fixed reference point; the field previously reported
+/// `SystemTime::now()` as seconds — the Unix clock, around 1.7 billion, not an
+/// uptime at all.
+fn process_start() -> std::time::Instant {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    *START.get_or_init(std::time::Instant::now)
+}
+
+/// Called once during startup so `/stats` reports uptime from process start
+/// rather than from the first request that happened to touch it.
+pub fn init_uptime_clock() {
+    let _ = process_start();
+}
+
 /// GET /stats - Global platform statistics.
 pub async fn get_stats(State(state): State<AppState>) -> Result<Json<StatsResp>, StatusCode> {
     let active_games = state.store.count_active().await;
     let unique_players = state.store.count_unique_players().await;
     let total_sessions = state.store.count_total_sessions().await;
 
-    // Simple uptime tracking (could be improved with proper resource)
-    let uptime_seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let uptime_seconds = process_start().elapsed().as_secs();
 
     Ok(Json(StatsResp {
         active_games,
@@ -1678,19 +1987,53 @@ async fn generate_san(
 
 // ── Item 5: move nonce ────────────────────────────────────────────────────────
 
-/// GET /game/:game_id/nonce - Returns the last confirmed on-chain move nonce.
-/// The client uses `nonce + 1` as the next move's nonce.
+/// GET /game/:game_id/nonce - Returns the last confirmed move nonce, read from
+/// the chain with the local move log as a fallback.
+///
+/// This used to derive the nonce purely from local SQLite rows while its doc
+/// comment claimed it was the on-chain value. The two diverge in practice —
+/// `record_move` submits to the ER first and persists afterwards, so a DB write
+/// that fails (or a restore from an older snapshot) leaves the local count
+/// behind the chain's, and the client then builds its next move on a nonce the
+/// program rejects with `InvalidNonce`. The `Game` account is authoritative, so
+/// read it; fall back to the local log only when the account can't be read,
+/// which is the pre-existing behaviour and no worse than before.
 pub async fn get_move_nonce(
     Path(game_id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<NonceResp>, StatusCode> {
-    let pool = state.store.pool();
-    let game_id_str = game_id.to_string();
-    let repo = GameRepository::new(pool);
-    let next = repo.get_next_move_number(&game_id_str).await.unwrap_or(1) as u64;
+    if let Some(on_chain) = read_game_nonce(&state, game_id).await {
+        return Ok(Json(NonceResp { nonce: on_chain }));
+    }
+
+    let repo = GameRepository::new(state.store.pool());
+    let next = repo
+        .get_next_move_number(&game_id.to_string())
+        .await
+        .unwrap_or(1) as u64;
     // next_move_number is 1-based; last confirmed nonce = next - 1 (0 if no moves yet).
     let nonce = next.saturating_sub(1);
+    warn!(
+        "[VPS] game {game_id}: could not read on-chain nonce, falling back to local move log \
+         ({nonce}) — a mismatch here surfaces to the client as InvalidNonce"
+    );
     Ok(Json(NonceResp { nonce }))
+}
+
+/// Reads `Game.nonce` off-chain-account bytes, or `None` if the account is
+/// missing/unreadable. Uses the shared decoder so the offsets stay in one place.
+async fn read_game_nonce(state: &AppState, game_id: u64) -> Option<u64> {
+    let game_pda = Pubkey::find_program_address(
+        &[solana::GAME_SEED, &game_id.to_le_bytes()],
+        &state.program_id,
+    )
+    .0;
+    let rpc = std::sync::Arc::clone(&state.solana_rpc);
+    let data = tokio::task::spawn_blocking(move || rpc.get_account_data(&game_pda))
+        .await
+        .ok()?
+        .ok()?;
+    solana::game_account::parse(&data).map(|g| g.nonce)
 }
 
 // ── Item 4: free-rated ELO update ────────────────────────────────────────────
@@ -1698,8 +2041,43 @@ pub async fn get_move_nonce(
 /// POST /ratings/update - Records result of a free (no-wager) rated game and triggers ELO update.
 pub async fn update_free_rated_result(
     State(state): State<AppState>,
+    caller: crate::signing::auth::RequireWallet,
     Json(req): Json<FreeRatedResultReq>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, (StatusCode, String)> {
+    // This writes a game's recorded players, winner and status. Unauthenticated,
+    // it let anyone rewrite the result of *any* game — including a settled
+    // wagered one — and, by marking a live game "completed", make
+    // `finalize_game` short-circuit before its on-chain call. Restrict it to the
+    // two people who actually played.
+    if caller.0 != req.white_pubkey && caller.0 != req.black_pubkey {
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!(
+                "Authenticated wallet {} is not one of the two players named in this result",
+                caller.0
+            ),
+        ));
+    }
+
+    // Free-rated games carry no wager, so a wagered game must never be settled
+    // through this path — that is `finalize_game`'s job, and only the chain may
+    // decide its outcome.
+    if let Ok(Some(existing)) = GameRepository::new(state.store.pool())
+        .get_game(&req.game_id.to_string())
+        .await
+    {
+        if existing.stake_amount > 0.0 {
+            return Err((
+                StatusCode::CONFLICT,
+                format!(
+                    "Game {} carries a wager and settles on-chain; it cannot be recorded through \
+                     the free-rated result path.",
+                    req.game_id
+                ),
+            ));
+        }
+    }
+
     let pool = state.store.pool();
     let game_id_str = req.game_id.to_string();
     let repo = GameRepository::new(pool);
@@ -1711,7 +2089,10 @@ pub async fn update_free_rated_result(
             "[ratings/update] Failed to upsert game {}: {}",
             req.game_id, e
         );
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not record result".to_string(),
+        ));
     }
 
     let white_username = repo.get_username(&req.white_pubkey).await.ok();
@@ -1735,7 +2116,10 @@ pub async fn update_free_rated_result(
             "[ratings/update] Failed to complete game {}: {}",
             req.game_id, e
         );
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not record result".to_string(),
+        ));
     }
 
     state.elo_cache.invalidate(&req.white_pubkey);
@@ -1750,22 +2134,36 @@ pub async fn update_free_rated_result(
 
 // ── Item 6: dispute submission ────────────────────────────────────────────────
 
-/// POST /dispute/submit - Opens a 48-hour dispute window for a completed wager game.
-/// The VPS logs the dispute; a human admin resolves it.
+/// POST /dispute/submit — **removed**. It logged a warning and returned
+/// `dispute-{id}-pending`, which the client rendered as a filed dispute; nothing
+/// was ever persisted and no admin could see it. Telling a player their dispute
+/// is open when no record exists is worse than refusing outright, so this now
+/// answers 501 and names the route that works — the same honest-501 treatment
+/// `admin::force_resign` already uses for its unimplemented on-chain path.
+///
+/// The real flow is `POST /dispute/notify` (`routes::dispute`), which records
+/// the case against the player's on-chain `dispute_game` transaction and is
+/// resolved by `POST /admin/dispute/resolve`.
 pub async fn submit_dispute(
     State(_state): State<AppState>,
     Json(req): Json<DisputeReq>,
-) -> Result<Json<SigResp>, StatusCode> {
-    // Log the dispute — human review resolves it.
+) -> (StatusCode, Json<serde_json::Value>) {
     warn!(
-        "[dispute] Player {} disputes game {} — manual review required",
-        req.disputing_player, req.game_id
+        "[dispute] rejected legacy /dispute/submit for game {} from {} — use /dispute/notify",
+        req.game_id, req.disputing_player
     );
-    // Return a stub sig so the client can display "dispute submitted".
-    Ok(Json(SigResp {
-        sig: format!("dispute-{}-pending", req.game_id),
-        ..Default::default()
-    }))
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({
+            "ok": false,
+            "error": "not_implemented",
+            "detail": "This endpoint never recorded anything. Submit the on-chain dispute_game \
+                       transaction, then POST /dispute/notify with its signature to open a real \
+                       case.",
+            "use_instead": "/dispute/notify",
+            "game_id": req.game_id,
+        })),
+    )
 }
 
 #[cfg(test)]
@@ -1840,7 +2238,9 @@ mod tests {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let db_url = |tag: &str| {
-            format!("sqlite:file:xfchess_resolve_move_signer_{tag}_{nanos}?mode=memory&cache=shared")
+            format!(
+                "sqlite:file:xfchess_resolve_move_signer_{tag}_{nanos}?mode=memory&cache=shared"
+            )
         };
         let pools = initialize_pools(&db_url("session"), &db_url("vault"))
             .await
@@ -2090,9 +2490,7 @@ mod tests {
         // at resolve_move_signer (404), never with 403.
         let result = record_move(
             State(state.clone()),
-            Some(axum::Extension(crate::signing::auth::AuthedWallet(
-                white_wallet.to_string(),
-            ))),
+            crate::signing::auth::RequireWallet(white_wallet.to_string()),
             Json(req_body.clone()),
         )
         .await;
@@ -2110,9 +2508,7 @@ mod tests {
         // rejected — proves the check wasn't simply removed.
         let result = record_move(
             State(state.clone()),
-            Some(axum::Extension(crate::signing::auth::AuthedWallet(
-                stranger_wallet.to_string(),
-            ))),
+            crate::signing::auth::RequireWallet(stranger_wallet.to_string()),
             Json(req_body),
         )
         .await;
@@ -2135,17 +2531,6 @@ mod tests {
         };
 
         let json = serde_json::to_string(&resp);
-        assert!(json.is_ok());
-    }
-
-    #[test]
-    fn test_sign_req_serialization() {
-        let req = SignReq {
-            game_id: 12345,
-            tx_b64: "base64_encoded_tx".to_string(),
-        };
-
-        let json = serde_json::to_string(&req);
         assert!(json.is_ok());
     }
 

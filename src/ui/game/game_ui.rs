@@ -8,8 +8,8 @@ use crate::ui::styles::*;
 use crate::ui::system_params::GameUIParams;
 use bevy::prelude::*;
 use bevy_egui::egui;
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::collections::{HashMap, VecDeque};
-use std::sync::mpsc::{self, Receiver, Sender};
 
 /// Flash resource that pulses the +increment label when a player gains time.
 #[derive(Resource, Default)]
@@ -55,10 +55,6 @@ pub enum AvatarEntry {
     Failed,
 }
 
-// Safety: egui::TextureHandle is Arc-backed and Send+Sync; Receiver is wrapped in Mutex.
-unsafe impl Send for AvatarCache {}
-unsafe impl Sync for AvatarCache {}
-
 /// Cap on distinct avatars held in memory at once — without this, a long
 /// session that browses lobbies/spectates/views standings accumulates one
 /// GPU texture per unique player name forever. Eviction is FIFO by first
@@ -72,17 +68,17 @@ const MAX_AVATAR_CACHE_ENTRIES: usize = 200;
 pub struct AvatarCache {
     pub entries: HashMap<String, AvatarEntry>,
     insertion_order: VecDeque<String>,
-    rx: std::sync::Mutex<Receiver<(String, Vec<u8>)>>,
+    rx: Receiver<(String, Vec<u8>)>,
     pub tx: Sender<(String, Vec<u8>)>,
 }
 
 impl Default for AvatarCache {
     fn default() -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = unbounded();
         Self {
             entries: HashMap::new(),
             insertion_order: VecDeque::new(),
-            rx: std::sync::Mutex::new(rx),
+            rx,
             tx,
         }
     }
@@ -120,8 +116,7 @@ impl AvatarCache {
 
     /// Drain the channel; promotes `Loading` entries to `PendingBytes` or `Failed`.
     pub fn drain_channel(&mut self) {
-        let Ok(rx) = self.rx.lock() else { return };
-        while let Ok((name, bytes)) = rx.try_recv() {
+        while let Ok((name, bytes)) = self.rx.try_recv() {
             if bytes.is_empty() {
                 self.entries.insert(name, AvatarEntry::Failed);
             } else {
@@ -464,10 +459,7 @@ mod tests {
     /// (which would render as the literal placeholder "Player").
     #[test]
     fn prefers_p2p_handshake_name_when_vps_fetch_hasnt_resolved_yet() {
-        assert_eq!(
-            resolve_opponent_display_name(Some("Tinog"), ""),
-            "Tinog"
-        );
+        assert_eq!(resolve_opponent_display_name(Some("Tinog"), ""), "Tinog");
     }
 
     #[test]
@@ -1522,11 +1514,7 @@ pub fn opponent_disconnect_ui(
             solana_sync.as_ref().and_then(|s| s.game_id),
             solana_sync.as_ref().map(|s| s.rpc_url.clone()),
         ) {
-            crate::multiplayer::solana::lobby::spawn_claim_timeout(
-                rpc_url,
-                wallet_pubkey,
-                game_id,
-            );
+            crate::multiplayer::solana::lobby::spawn_claim_timeout(rpc_url, wallet_pubkey, game_id);
         }
 
         return;
@@ -1580,7 +1568,7 @@ pub fn play_check_sound_system(
     }
     let Some(s) = sounds else { return };
     if game_phase.0 == GamePhase::Check {
-        commands.spawn(bevy::audio::AudioPlayer::new(s.check.clone()));
+        crate::game::resources::sounds::play_sfx(&mut commands, s.check.clone());
     }
 }
 

@@ -90,6 +90,7 @@ pub struct MainMenuUIContext<'w, 's> {
     #[cfg(feature = "solana")]
     pub tournament_client:
         Option<ResMut<'w, crate::multiplayer::solana::tournament::TournamentClientState>>,
+    pub pgn_replay_fetch: ResMut<'w, crate::states::main_menu::tournament_replay::PgnReplayFetch>,
     pub tournament_lobby: ResMut<'w, crate::states::tournament_menu::TournamentLobbyState>,
     pub compliance: ResMut<'w, crate::ui::compliance_modal::ComplianceState>,
     pub player_identity: ResMut<'w, crate::states::main_menu::PlayerIdentity>,
@@ -108,6 +109,7 @@ pub struct MainMenuUIContext<'w, 's> {
     pub exit_confirm: ResMut<'w, MenuExitConfirm>,
     pub focus_mode: ResMut<'w, MenuFocusMode>,
     pub board_animator: ResMut<'w, crate::states::main_menu::BoardAnimator>,
+    pub update_check: ResMut<'w, crate::core::updates::UpdateCheck>,
     pub spectate_events: Option<MessageWriter<'w, SpectateViaLinkEvent>>,
     pub tokio_runtime: Res<'w, crate::multiplayer::TokioRuntime>,
     /// Used by the exit-confirmation dialog to request a graceful shutdown

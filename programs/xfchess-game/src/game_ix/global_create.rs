@@ -112,6 +112,35 @@ pub fn handler(
     // in `tests/global_create_game_tests.rs`.
     let space = 8 + Game::INIT_SPACE;
     let lamports = Rent::get()?.minimum_balance(space);
+
+    // `has_budget` above only checks the SOFT caps the player authorized
+    // (`max_wager`, `spending_limit`). It says nothing about whether the vault
+    // actually holds the lamports this instruction is about to move, and the two
+    // diverge constantly: every completed game spends real balance while the
+    // caps stay where they were set.
+    //
+    // Without this check the shortfall surfaces from deep inside
+    // `debit_program_pda` as a bare arithmetic/insufficient-funds failure
+    // (the "InsufficientFunds 6060" reports), which reads like a bug in the
+    // program rather than "your session vault needs a top-up" — and was one of
+    // the reasons the no-popup session path was disabled client-side.
+    //
+    // The vault must also stay rent-exempt afterwards, or the runtime reaps the
+    // delegation account and the player silently loses the session.
+    {
+        let vault = ctx.accounts.session_delegation.to_account_info();
+        let rent_min = Rent::get()?.minimum_balance(vault.data_len());
+        let required = lamports
+            .checked_add(wager_amount)
+            .ok_or(GameErrorCode::ArithmeticOverflow)?
+            .checked_add(rent_min)
+            .ok_or(GameErrorCode::ArithmeticOverflow)?;
+        require!(
+            vault.lamports() >= required,
+            GameErrorCode::GlobalSessionVaultUnderfunded
+        );
+    }
+
     let game_id_bytes = game_id.to_le_bytes();
     let game_bump = [ctx.bumps.game];
     let game_seeds: [&[u8]; 3] = [GAME_SEED, game_id_bytes.as_ref(), game_bump.as_ref()];

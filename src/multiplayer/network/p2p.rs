@@ -440,8 +440,7 @@ fn handle_network_events(
                             connection_state.game_id = Some(*game_id);
                             connection_state.status = P2PConnectionStatus::Connected;
                             if !from_display.is_empty() {
-                                connection_state.opponent_display_name =
-                                    Some(from_display.clone());
+                                connection_state.opponent_display_name = Some(from_display.clone());
                             }
 
                             if let Some(tx) = &network_state.message_sender {
@@ -471,8 +470,7 @@ fn handle_network_events(
                             connection_state.status = P2PConnectionStatus::Connected;
                             connection_state.player_color = Some(PieceColor::Black);
                             if !from_display.is_empty() {
-                                connection_state.opponent_display_name =
-                                    Some(from_display.clone());
+                                connection_state.opponent_display_name = Some(from_display.clone());
                             }
 
                             // Subscribe to game-specific topic for move traffic

@@ -13,6 +13,8 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const solUsdRate = useSolUsdRate();
+  const [preflight, setPreflight] = useState<any>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState<CreateTournamentRequest>({
@@ -51,6 +53,19 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solUsdRate]);
 
+  useEffect(() => {
+    if (currentStep !== 5) return;
+    let cancelled = false;
+    setPreflightLoading(true);
+    Promise.all([
+      apiClient.predictTournamentCost({ max_players: formData.max_players, format: formData.format, average_moves: 40 }),
+      apiClient.getOperatorAffordability(),
+    ]).then(([cost, wallet]) => {
+      if (!cancelled) setPreflight({ cost: cost.ok ? cost.data : null, wallet: wallet.ok ? wallet.data : null });
+    }).finally(() => { if (!cancelled) setPreflightLoading(false); });
+    return () => { cancelled = true; };
+  }, [currentStep, formData.max_players, formData.format]);
+
   const updateFormData = (field: keyof CreateTournamentRequest, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
@@ -65,13 +80,15 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
         return true;
       case 4:
         return true;
+      case 5:
+        return Boolean(preflight?.cost && preflight?.wallet?.balance_lamports >= preflight.cost.working_capital_lamports);
       default:
         return false;
     }
   };
 
   const nextStep = () => {
-    if (validateStep() && currentStep < 4) {
+    if (validateStep() && currentStep < 5) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -295,6 +312,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
           <option value={32}>32 PLAYER DOCK</option>
           <option value={64}>64 PLAYER DOCK</option>
           <option value={128}>128 PLAYER DOCK</option>
+          <option value={256}>256 PLAYER DOCK</option>
         </select>
       </div>
     </div>
@@ -342,6 +360,20 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
       </div>
 
       <div>
+        <label style={labelStyle}>JOIN PASSWORD (OPTIONAL — MAKES IT PRIVATE)</label>
+        <input
+          type="text"
+          value={formData.password ?? ""}
+          onChange={(e) => updateFormData("password", e.target.value || undefined)}
+          placeholder="Leave blank for a public tournament"
+          style={inputStyle}
+        />
+        <div style={{ fontSize: "11px", color: "var(--text-dim)", marginTop: "6px" }}>
+          Players must enter this to register. Stored as an argon2 hash, never in plain text.
+        </div>
+      </div>
+
+      <div>
         <label style={labelStyle}>SCHEDULED ACTIVATION</label>
         <div style={{ display: "flex", gap: "8px" }}>
           <input
@@ -382,6 +414,35 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
     </div>
   );
 
+  const renderStep5 = () => {
+    const cost = preflight?.cost;
+    const wallet = preflight?.wallet;
+    const affordable = Boolean(cost && wallet && wallet.balance_lamports >= cost.working_capital_lamports);
+    const sol = (lamports: number) => `${(lamports / 1e9).toFixed(4)} SOL`;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <SectionTitle>Funding Preflight</SectionTitle>
+        {preflightLoading && <div style={{ color: "var(--text-dim)" }}>CALCULATING WORKING CAPITAL…</div>}
+        {!preflightLoading && cost && wallet && <>
+          <div style={{ padding: "1rem", border: `1px solid ${affordable ? "#4ade80" : "#f87171"}`, borderRadius: "12px", background: affordable ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)" }}>
+            <strong style={{ color: affordable ? "#4ade80" : "#f87171" }}>{affordable ? "VPS AUTHORITY CAN FUND THIS" : "INSUFFICIENT VPS BALANCE"}</strong>
+            <div style={{ marginTop: "6px", fontSize: "12px", color: "var(--text-dim)" }}>Wallet balance: {sol(wallet.balance_lamports)}</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+            <PreflightMetric label="GROSS COST" value={sol(cost.gross_lamports)} />
+            <PreflightMetric label="NET COST" value={sol(cost.net_lamports)} />
+            <PreflightMetric label="WORKING CAPITAL" value={sol(cost.working_capital_lamports)} />
+            <PreflightMetric label="PER PLAYER" value={sol(cost.per_player_lamports)} />
+          </div>
+          <div style={{ fontSize: "11px", color: "var(--accent)", padding: "10px", border: "1px solid rgba(244,187,68,0.35)", borderRadius: "8px" }}>
+            ER cost confidence: {String(cost.er_cost_confidence).toUpperCase()}. Estimate assumes 40 moves per game and must be replaced by measured devnet data before pricing production tournaments.
+          </div>
+        </>}
+        {!preflightLoading && (!cost || !wallet) && <div style={{ color: "#f87171" }}>Preflight unavailable. Tournament creation is blocked until cost and wallet checks succeed.</div>}
+      </div>
+    );
+  };
+
   return (
     <div style={{
       backgroundColor: "var(--surface)",
@@ -396,7 +457,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
     }}>
       {/* Progress Pills */}
       <div style={{ display: "flex", gap: "8px", marginBottom: "3rem" }}>
-        {[1, 2, 3, 4].map(step => (
+        {[1, 2, 3, 4, 5].map(step => (
           <div
             key={step}
             style={{
@@ -415,6 +476,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
         {currentStep === 2 && renderStep2()}
         {currentStep === 3 && renderStep3()}
         {currentStep === 4 && renderStep4()}
+        {currentStep === 5 && renderStep5()}
 
         {error && (
           <div style={{
@@ -469,7 +531,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
               CANCEL
             </button>
 
-            {currentStep < 4 ? (
+            {currentStep < 5 ? (
               <button
                 type="button"
                 onClick={nextStep}
@@ -487,10 +549,11 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
               <button
                 type="submit"
                 className="primary"
-                disabled={loading}
+                disabled={loading || !validateStep()}
                 style={{
                   padding: "0.85rem 2.5rem",
                   borderRadius: "100px",
+                  opacity: loading || !validateStep() ? 0.5 : 1,
                 }}
               >
                 {loading ? "INITIALIZING..." : "INITIALIZE TOURNAMENT"}
@@ -506,6 +569,13 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
 // Utility Components
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <h2 style={{ color: "#fff", fontSize: "24px", fontWeight: "800", marginBottom: "0.5rem" }}>{children}</h2>
+);
+
+const PreflightMetric = ({ label, value }: { label: string; value: string }) => (
+  <div style={{ padding: "12px", background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", borderRadius: "8px" }}>
+    <div style={{ color: "var(--text-dim)", fontSize: "10px", fontWeight: 800 }}>{label}</div>
+    <div style={{ color: "#fff", fontSize: "16px", fontWeight: 800, marginTop: "4px" }}>{value}</div>
+  </div>
 );
 
 /** The on-chain program and backend store prize shares in basis points

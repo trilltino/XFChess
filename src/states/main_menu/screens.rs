@@ -13,6 +13,10 @@ use crate::core::GameMode as CoreGameMode;
 use crate::game::ai::GameMode as AIGameMode;
 use crate::multiplayer::network::p2p::P2PConnectionStatus;
 #[cfg(feature = "solana")]
+use crate::multiplayer::network::vps::TournamentGameState;
+#[cfg(feature = "solana")]
+use crate::multiplayer::solana::tournament::GameTab;
+#[cfg(feature = "solana")]
 use crate::ui::styles::Layout;
 use bevy_egui::egui;
 use tracing::{error, info, warn};
@@ -646,6 +650,9 @@ pub(super) fn render_spectator_popup(
                                                     white: Some(game.username.clone().unwrap_or_else(|| game.display_name.clone())),
                                                     ..Default::default()
                                                 }),
+                                                tournament_id: None,
+
+                                                playlist: Vec::new(),
                                             });
                                             competitive.show_spectator_popup = false;
                                         }
@@ -1533,6 +1540,9 @@ fn render_solana_tournament_tab(
                                                 black: Some(game.black_label()),
                                             },
                                         ),
+                                        tournament_id: Some(game.tournament_id),
+
+                                        playlist: Vec::new(),
                                     });
                                 }
                             }
@@ -2103,6 +2113,10 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
 /// Part 4B — Tournament browser screen shown when MenuState::Tournaments is active.
 pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ctx.learn_viewport.rect_px = None;
+    // Set by a Finished tab's Replay button; acted on after the UI closure,
+    // where `ctx` is no longer borrowed by egui.
+    #[cfg(feature = "solana")]
+    let mut replay_request: Option<(u64, String, String)> = None;
     ui.vertical_centered(|ui| {
         ui.heading(egui::RichText::new("TOURNAMENTS").size(24.0).color(egui::Color32::from_rgb(255, 200, 50)).strong());
         ui.add_space(8.0);
@@ -2200,6 +2214,10 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                 })
                 .collect();
 
+            // Set by the "Back to lobby" button on the terminal-state panel
+            // below; applied after the immutable borrow of tournament_client ends.
+            let mut leave_tournament_clicked = false;
+
             // Waiting-for-next-match panel (shown when in an active tournament)
             if let Some(ref tc) = ctx.tournament_client {
                 if tc.active_tournament_id.is_some() && tc.waiting_for_next_match {
@@ -2217,6 +2235,59 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                         });
                     });
                     ui.add_space(12.0);
+                }
+
+                // Terminal states — previously the player just fell back to
+                // the menu with no indication of how the tournament ended.
+                let terminal = matches!(
+                    tc.my_state,
+                    Some(crate::multiplayer::network::vps::PlayerState::Eliminated)
+                        | Some(crate::multiplayer::network::vps::PlayerState::Champion)
+                );
+                if tc.active_tournament_id.is_some() && terminal {
+                    let is_champion = matches!(
+                        tc.my_state,
+                        Some(crate::multiplayer::network::vps::PlayerState::Champion)
+                    );
+                    ui.group(|ui| {
+                        ui.vertical_centered(|ui| {
+                            let (title, colour) = if is_champion {
+                                ("Tournament Won", egui::Color32::GOLD)
+                            } else {
+                                ("Eliminated", egui::Color32::from_rgb(220, 120, 120))
+                            };
+                            ui.label(egui::RichText::new(title).size(16.0).color(colour).strong());
+                            ui.add_space(6.0);
+                            if let Some(place) = tc.placing {
+                                ui.label(egui::RichText::new(format!("Final position: #{place}")).size(14.0).color(egui::Color32::WHITE));
+                            }
+                            if let Some(lamports) = tc.prize_lamports {
+                                if lamports > 0 {
+                                    ui.add_space(4.0);
+                                    ui.label(egui::RichText::new(format!("Prize: {:.4} SOL", lamports as f64 / 1e9)).size(14.0).color(egui::Color32::GOLD).strong());
+                                    ui.label(egui::RichText::new("Paid out automatically — no claim needed.").size(11.0).color(egui::Color32::GRAY));
+                                }
+                            }
+                            ui.add_space(8.0);
+                            if ui.button(egui::RichText::new("Back to lobby").size(12.0)).clicked() {
+                                leave_tournament_clicked = true;
+                            }
+                        });
+                    });
+                    ui.add_space(12.0);
+                }
+            }
+
+            if leave_tournament_clicked {
+                if let Some(tc) = ctx.tournament_client.as_deref_mut() {
+                    tc.active_tournament_id = None;
+                    tc.my_state = None;
+                    tc.placing = None;
+                    tc.prize_lamports = None;
+                    tc.last_match_result = None;
+                    tc.waiting_for_next_match = false;
+                    tc.active_game_id = None;
+                    tc.status_message.clear();
                 }
             }
 
@@ -2352,21 +2423,21 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                                     // before the off-chain roster join — otherwise a player could
                                                     // show up in the bracket having never actually paid.
                                                     let wallet: Result<solana_sdk::pubkey::Pubkey, _> = pk.parse();
-                                                    let on_chain_ok = match wallet {
+                                                    let signature = match wallet {
                                                         Ok(w) => {
                                                             let rpc_url = std::env::var("SOLANA_RPC_URL")
                                                                 .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
                                                             match crate::multiplayer::solana::tournament::register_tournament(tid, w, &rpc_url) {
-                                                                Ok(_) => true,
-                                                                Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); false }
+                                                                Ok(sig) => Some(sig),
+                                                                Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); None }
                                                             }
                                                         }
-                                                        Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); false }
+                                                        Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); None }
                                                     };
-                                                    if !on_chain_ok {
+                                                    let Some(signature) = signature else {
                                                         return;
-                                                    }
-                                                    match crate::multiplayer::network::vps::join_tournament(tid, &pk, None) {
+                                                    };
+                                                    match crate::multiplayer::network::vps::confirm_join_with_retry(tid, &pk, 1200, &signature, None) {
                                                         Ok(slot) => info!("[TOURNAMENT] Joined tournament {} slot {}", tid, slot),
                                                         Err(e) => warn!("[TOURNAMENT] Join failed: {}", e),
                                                     }
@@ -2457,53 +2528,161 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                     }
                                 }
 
-                                // Watch Live — on-chain games of this tournament, spectatable
-                                // through the delay-gated feed while Active.
-                                if t.status.to_lowercase().contains("active") {
-                                    let games: Vec<_> = ctx.tournament_client.as_ref()
-                                        .map(|tc| tc.tournament_games.iter()
-                                            .filter(|g| g.tournament_id == t.tournament_id)
-                                            .cloned()
-                                            .collect())
+                                // Games of this tournament, in three tabs:
+                                // what's on now, what's next, and what you can
+                                // replay. Only the *expanded* card fetches, so
+                                // this is one request every 3s rather than the
+                                // old walk of every advertised tournament.
+                                if is_expanded {
+                                    let (games, tab) = ctx.tournament_client.as_ref()
+                                        .map(|tc| (tc.detail_games.clone(), tc.detail_tab))
                                         .unwrap_or_default();
-                                    ui.add_space(6.0);
-                                    if games.is_empty() {
-                                        ui.label(egui::RichText::new("No games on-chain yet for this round.").size(11.0).color(egui::Color32::from_gray(140)).italics());
-                                    }
-                                    for game in &games {
-                                        ui.horizontal(|ui| {
-                                            ui.label(egui::RichText::new(format!(
-                                                "R{}  {} vs {}",
-                                                game.round + 1,
-                                                game.white_label(),
-                                                game.black_label(),
-                                            )).size(11.0).color(egui::Color32::from_gray(190)));
-                                            let is_active = game.status == "Active";
-                                            let label = if is_active { "Watch Live" } else { &game.status };
-                                            if ui.add_enabled(
-                                                is_active,
+
+                                    let live_n = games.iter().filter(|g| g.state == TournamentGameState::Live).count();
+                                    let upcoming_n = games.iter().filter(|g| g.state == TournamentGameState::Upcoming).count();
+                                    let finished_n = games.iter().filter(|g| g.state == TournamentGameState::Finished).count();
+
+                                    ui.add_space(8.0);
+                                    ui.horizontal(|ui| {
+                                        let mut tab_button = |ui: &mut egui::Ui, label: &str, n: usize, this: GameTab| {
+                                            let selected = tab == this;
+                                            let fill = if selected {
+                                                egui::Color32::from_rgb(60, 100, 160)
+                                            } else {
+                                                egui::Color32::from_rgb(45, 45, 55)
+                                            };
+                                            if ui.add(
                                                 egui::Button::new(
-                                                    egui::RichText::new(label).size(11.0).color(egui::Color32::WHITE).strong()
+                                                    egui::RichText::new(format!("{label} ({n})"))
+                                                        .size(11.0)
+                                                        .color(egui::Color32::WHITE)
+                                                        .strong(),
                                                 )
-                                                .fill(if is_active { egui::Color32::from_rgb(60, 100, 160) } else { egui::Color32::from_rgb(50, 50, 60) })
-                                                .corner_radius(5.0)
-                                                .min_size(egui::vec2(90.0, 24.0)),
+                                                .fill(fill)
+                                                .corner_radius(4.0)
+                                                .min_size(egui::vec2(88.0, 22.0)),
                                             ).clicked() {
-                                                if let Some(ref mut w) = ctx.spectate_events {
-                                                    w.write(crate::multiplayer::spectator::SpectateViaLinkEvent {
-                                                        game_id: game.game_id.to_string(),
-                                                        details: Some(crate::multiplayer::spectator::SpectatorMatchDetails {
-                                                            tournament_name: Some(game.tournament_name.clone()),
-                                                            round: Some(game.round),
-                                                            white: Some(game.white_label()),
-                                                            black: Some(game.black_label()),
-                                                        }),
-                                                    });
+                                                if let Some(ref mut tc) = ctx.tournament_client {
+                                                    tc.detail_tab = this;
                                                 }
                                             }
+                                        };
+                                        tab_button(ui, "Live", live_n, GameTab::Live);
+                                        tab_button(ui, "Upcoming", upcoming_n, GameTab::Upcoming);
+                                        tab_button(ui, "Finished", finished_n, GameTab::Finished);
+                                    });
+
+                                    let want = match tab {
+                                        GameTab::Live => TournamentGameState::Live,
+                                        GameTab::Upcoming => TournamentGameState::Upcoming,
+                                        GameTab::Finished => TournamentGameState::Finished,
+                                    };
+                                    let shown: Vec<_> = games.iter().filter(|g| g.state == want).collect();
+
+                                    // The playlist handed to the spectator: the
+                                    // games it makes sense to hop between, so
+                                    // Next/Prev in the HUD needs no round-trip.
+                                    let playlist: Vec<crate::multiplayer::spectator::SpectatorPlaylistEntry> = games
+                                        .iter()
+                                        .filter(|g| g.watchable)
+                                        .map(|g| crate::multiplayer::spectator::SpectatorPlaylistEntry {
+                                            game_id: g.game_id.to_string(),
+                                            white: g.white_label(),
+                                            black: g.black_label(),
+                                            round: g.round,
+                                        })
+                                        .collect();
+
+                                    ui.add_space(4.0);
+                                    if shown.is_empty() {
+                                        let empty = match tab {
+                                            GameTab::Live => "No games in progress right now.",
+                                            GameTab::Upcoming => "No games scheduled yet.",
+                                            GameTab::Finished => "No games finished yet.",
+                                        };
+                                        ui.label(egui::RichText::new(empty).size(11.0).color(egui::Color32::from_gray(140)).italics());
+                                    }
+
+                                    for game in shown {
+                                        ui.horizontal(|ui| {
+                                            ui.label(egui::RichText::new(format!(
+                                                "R{} B{}  {} vs {}",
+                                                game.round + 1,
+                                                game.match_index + 1,
+                                                game.white_label(),
+                                                game.black_label(),
+                                            )).size(11.0).color(egui::Color32::from_gray(200)));
+
+                                            // Result for finished games, liveness for running ones.
+                                            if let Some(ref r) = game.result {
+                                                ui.label(egui::RichText::new(r).size(11.0).color(egui::Color32::from_rgb(244, 187, 68)).strong());
+                                            } else if let Some(label) = game.last_move_label() {
+                                                ui.label(egui::RichText::new(label).size(10.0).color(egui::Color32::from_gray(150)));
+                                            }
+                                            if game.move_count > 0 {
+                                                ui.label(egui::RichText::new(format!("{} moves", game.move_count)).size(10.0).color(egui::Color32::from_gray(130)));
+                                            }
+
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if game.state == TournamentGameState::Finished {
+                                                    if ui.add(
+                                                        egui::Button::new(egui::RichText::new("Replay").size(11.0).color(egui::Color32::WHITE).strong())
+                                                            .fill(egui::Color32::from_rgb(70, 110, 80))
+                                                            .corner_radius(5.0)
+                                                            .min_size(egui::vec2(80.0, 24.0)),
+                                                    ).clicked() {
+                                                        replay_request = Some((
+                                                            game.game_id,
+                                                            game.white_label(),
+                                                            game.black_label(),
+                                                        ));
+                                                    }
+                                                } else {
+                                                    // Watchability is the backend's call — a
+                                                    // bracket match flips to Active when its game
+                                                    // account is created, which is not the same
+                                                    // as anyone having moved.
+                                                    let btn = ui.add_enabled(
+                                                        game.watchable,
+                                                        egui::Button::new(
+                                                            egui::RichText::new("Watch").size(11.0).color(egui::Color32::WHITE).strong()
+                                                        )
+                                                        .fill(if game.watchable { egui::Color32::from_rgb(60, 100, 160) } else { egui::Color32::from_rgb(50, 50, 60) })
+                                                        .corner_radius(5.0)
+                                                        .min_size(egui::vec2(80.0, 24.0)),
+                                                    );
+                                                    // Say *why* it's disabled rather than
+                                                    // leaving a dead grey button.
+                                                    let btn = match game.not_watchable_reason.as_deref() {
+                                                        Some(reason) if !game.watchable => btn.on_disabled_hover_text(reason),
+                                                        _ => btn,
+                                                    };
+                                                    if btn.clicked() {
+                                                        if let Some(ref mut w) = ctx.spectate_events {
+                                                            w.write(crate::multiplayer::spectator::SpectateViaLinkEvent {
+                                                                game_id: game.game_id.to_string(),
+                                                                details: Some(crate::multiplayer::spectator::SpectatorMatchDetails {
+                                                                    tournament_name: Some(t.name.clone()),
+                                                                    round: Some(game.round),
+                                                                    white: Some(game.white_label()),
+                                                                    black: Some(game.black_label()),
+                                                                }),
+                                                                tournament_id: Some(t.tournament_id),
+                                                                playlist: playlist.clone(),
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            });
                                         });
+                                        if !game.watchable && game.state == TournamentGameState::Live {
+                                            if let Some(reason) = game.not_watchable_reason.as_deref() {
+                                                ui.label(egui::RichText::new(format!("   {reason}")).size(10.0).color(egui::Color32::from_gray(130)).italics());
+                                            }
+                                        }
                                     }
                                 }
+
 
                                 // Register button — only shown when status is "registration"
                                 if t.status.to_lowercase().contains("registration") {
@@ -2550,21 +2729,21 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                                     let pk = wallet_pubkey.clone().unwrap_or_default();
                                                     std::thread::spawn(move || {
                                                         let wallet: Result<solana_sdk::pubkey::Pubkey, _> = pk.parse();
-                                                        let on_chain_ok = match wallet {
+                                                        let signature = match wallet {
                                                             Ok(w) => {
                                                                 let rpc_url = std::env::var("SOLANA_RPC_URL")
                                                                     .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
                                                                 match crate::multiplayer::solana::tournament::register_tournament(tid, w, &rpc_url) {
-                                                                    Ok(_) => true,
-                                                                    Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); false }
+                                                                    Ok(sig) => Some(sig),
+                                                                    Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); None }
                                                                 }
                                                             }
-                                                            Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); false }
+                                                            Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); None }
                                                         };
-                                                        if !on_chain_ok {
+                                                        let Some(signature) = signature else {
                                                             return;
-                                                        }
-                                                        match crate::multiplayer::network::vps::join_tournament(tid, &pk, None) {
+                                                        };
+                                                        match crate::multiplayer::network::vps::confirm_join_with_retry(tid, &pk, 1200, &signature, None) {
                                                             Ok(slot) => info!("[TOURNAMENT] Registered for {} slot {}", tid, slot),
                                                             Err(e) => warn!("[TOURNAMENT] Register failed: {}", e),
                                                         }
@@ -2693,21 +2872,21 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                             let password = tc.password_input.clone();
                                             std::thread::spawn(move || {
                                                 let wallet: Result<solana_sdk::pubkey::Pubkey, _> = pk.parse();
-                                                let on_chain_ok = match wallet {
+                                                let signature = match wallet {
                                                     Ok(w) => {
                                                         let rpc_url = std::env::var("SOLANA_RPC_URL")
                                                             .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
                                                         match crate::multiplayer::solana::tournament::register_tournament(tid, w, &rpc_url) {
-                                                            Ok(_) => true,
-                                                            Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); false }
+                                                            Ok(sig) => Some(sig),
+                                                            Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); None }
                                                         }
                                                     }
-                                                    Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); false }
+                                                    Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); None }
                                                 };
-                                                if !on_chain_ok {
+                                                let Some(signature) = signature else {
                                                     return;
-                                                }
-                                                match crate::multiplayer::network::vps::join_tournament(tid, &pk, Some(&password)) {
+                                                };
+                                                match crate::multiplayer::network::vps::confirm_join_with_retry(tid, &pk, 1200, &signature, Some(&password)) {
                                                     Ok(slot) => info!("[TOURNAMENT] Joined private tournament {} slot {}", tid, slot),
                                                     Err(e) => warn!("[TOURNAMENT] Private join failed: {}", e),
                                                 }
@@ -2785,6 +2964,23 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
         #[cfg(not(feature = "solana"))]
         ui.label(egui::RichText::new("Tournament browser requires the solana feature.").size(13.0).color(egui::Color32::GRAY).italics());
     });
+
+    // Replay a finished tournament game: pull its PGN and hand it to the
+    // replay player the PGN-paste modal already drives, so a tournament game
+    // replays through exactly the same path as any other game.
+    #[cfg(feature = "solana")]
+    if let Some((game_id, white, black)) = replay_request {
+        ctx.menu_state.set(crate::core::MenuState::Main);
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        bevy::tasks::IoTaskPool::get()
+            .spawn(async move {
+                let _ = tx.send(crate::multiplayer::network::vps::fetch_game_pgn(game_id));
+            })
+            .detach();
+        ctx.pgn_replay_fetch.pending = Some(
+            crate::states::main_menu::tournament_replay::PendingPgnReplay { rx, white, black },
+        );
+    }
 }
 
 pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {

@@ -17,7 +17,7 @@
 
 mod common;
 
-use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+use anchor_lang::{AccountDeserialize, InstructionData, Space, ToAccountMetas};
 use common::*;
 use solana_sdk::{
     instruction::Instruction,
@@ -82,12 +82,15 @@ async fn sponsored_profile_is_owned_by_player_not_backend() {
 
     // Same rent computation the backend route performs via
     // getMinimumBalanceForRentExemption before building this transaction.
+    // Unlike the backend (which can't depend on this crate and duplicates
+    // the size as a manually-kept-in-sync constant), this test can just use
+    // the real INIT_SPACE directly — it can never drift.
     let rent = Rent::default();
-    let profile_rent = rent.minimum_balance(8 + 257); // discriminator + PlayerProfile::INIT_SPACE
-                                                      // The account struct constraint is `space = 8 + UsernameRecord::LEN`, and
-                                                      // UsernameRecord::LEN (48) already includes its own discriminator — so
-                                                      // the real allocated space is 56 bytes, not 48. Caught by this test
-                                                      // failing on-chain with "insufficient lamports" before this fix.
+    let profile_rent = rent.minimum_balance(8 + PlayerProfile::INIT_SPACE); // discriminator + PlayerProfile::INIT_SPACE
+                                                                            // The account struct constraint is `space = 8 + UsernameRecord::LEN`, and
+                                                                            // UsernameRecord::LEN (48) already includes its own discriminator — so
+                                                                            // the real allocated space is 56 bytes, not 48. Caught by this test
+                                                                            // failing on-chain with "insufficient lamports" before this fix.
     let username_rent = rent.minimum_balance(8 + 48);
     let transfer_ix = system_instruction::transfer(
         &backend.pubkey(),

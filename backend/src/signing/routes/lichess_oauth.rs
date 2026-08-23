@@ -55,7 +55,6 @@ pub struct ExchangeResponse {
     pub blitz_rating: u32,
     pub rapid_rating: u32,
     pub bullet_rating: u32,
-    pub seeded_elo: f64,
 }
 
 #[derive(Serialize)]
@@ -121,16 +120,15 @@ async fn init_oauth(
     Query(req): Query<InitRequest>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<InitResponse>, (StatusCode, String)> {
-    crate::signing::routes::auth::require_caller_owns_wallet(
-        &state,
-        &headers,
-        &req.wallet_pubkey,
-    )
-    .await
-    .map_err(|(status, msg)| {
-        warn!("[LichessOAuth] {msg}");
-        (status, "wallet_pubkey must match the authenticated wallet".to_string())
-    })?;
+    crate::signing::routes::auth::require_caller_owns_wallet(&state, &headers, &req.wallet_pubkey)
+        .await
+        .map_err(|(status, msg)| {
+            warn!("[LichessOAuth] {msg}");
+            (
+                status,
+                "wallet_pubkey must match the authenticated wallet".to_string(),
+            )
+        })?;
 
     // Validate wallet pubkey
     let _ = Pubkey::from_str(&req.wallet_pubkey).map_err(|e| {
@@ -487,12 +485,31 @@ async fn complete_link(
         bullet_rating * 100,
     );
 
+    // Transient RPC hiccups (rate limits, dropped connections, momentary node
+    // lag) are the common case for a single `sign_and_submit` failure here —
+    // retrying a few times before giving up avoids stranding an otherwise-
+    // successful Lichess link in the `offchain-pending` state, which nothing
+    // ever automatically retries afterward (see the doc comment below).
     let rpc = solana::make_rpc(&state.solana_rpc_url);
-    let tx_sig = match solana::sign_and_submit(&rpc, link_authority, &[ix]) {
+    let mut submit_result = solana::sign_and_submit(&rpc, link_authority, &[ix.clone()]);
+    for attempt in 1..=2 {
+        if submit_result.is_ok() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500 * attempt)).await;
+        submit_result = solana::sign_and_submit(&rpc, link_authority, &[ix.clone()]);
+    }
+    let tx_sig = match submit_result {
         Ok(sig) => sig.to_string(),
         Err(e) => {
+            // Falls back to DB-only persistence below so matchmaking ELO
+            // (`matchmaking/handlers.rs`, reads `external_elo_links` directly)
+            // still works, but nothing here retries the on-chain write later —
+            // `ProfileViewer`'s "Lichess linked" checklist row and the on-chain
+            // `PlayerProfile.lichess_username` field will show unlinked
+            // indefinitely for this wallet until a human re-runs the link.
             warn!(
-                "[LichessOAuth] On-chain submission failed for {}; persisting OAuth link locally: {}",
+                "[LichessOAuth] On-chain submission failed for {} after retries; persisting OAuth link locally: {}",
                 wallet_pubkey, e
             );
             "offchain-pending".to_string()
@@ -518,12 +535,6 @@ async fn complete_link(
     // Invalidate ELO cache
     state.elo_cache.invalidate(wallet_pubkey);
 
-    let seeded_elo = if blitz_rating > rapid_rating + 500 {
-        blitz_rating as f64
-    } else {
-        rapid_rating as f64
-    };
-
     info!(
         "[LichessOAuth] Linked {} -> Lichess '{}' (Blitz: {}, Rapid: {}, Bullet: {}) tx: {}",
         wallet_pubkey, username, blitz_rating, rapid_rating, bullet_rating, tx_sig
@@ -535,7 +546,6 @@ async fn complete_link(
         blitz_rating,
         rapid_rating,
         bullet_rating,
-        seeded_elo,
     })
 }
 
