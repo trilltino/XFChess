@@ -1,21 +1,21 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // Custom title bar for the borderless (decorations: false) tournament-admin
 // window — Tauri draws no OS chrome at all once decorations are off, so this
-// replaces it: a drag region plus minimize/maximize/close buttons wired to
-// the Rust-side commands in tauri/src/services/ipc.rs.
+// replaces it: a drag region plus minimize/maximize/close buttons.
 export default function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
+  const appWindow = getCurrentWindow();
 
   useEffect(() => {
-    invoke<boolean>("is_tournament_admin_maximized")
+    appWindow.isMaximized()
       .then(setIsMaximized)
       .catch(() => {});
   }, []);
 
   const toggleMaximize = () => {
-    invoke("toggle_maximize_tournament_admin").catch(() => {});
+    appWindow.toggleMaximize().catch(() => {});
     setIsMaximized((v) => !v);
   };
 
@@ -54,7 +54,7 @@ export default function TitleBar() {
       </div>
 
       <div data-tauri-drag-region="false" style={{ display: "flex", height: "100%" }}>
-        <TitleBarButton label="Minimize" onClick={() => invoke("minimize_tournament_admin").catch(() => {})}>
+        <TitleBarButton label="Minimize" onClick={() => appWindow.minimize().catch(() => {})}>
           <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor" /></svg>
         </TitleBarButton>
         <TitleBarButton label={isMaximized ? "Restore" : "Maximize"} onClick={toggleMaximize}>
@@ -69,7 +69,7 @@ export default function TitleBar() {
             </svg>
           )}
         </TitleBarButton>
-        <TitleBarButton label="Close" danger onClick={() => invoke("close_tournament_admin").catch(() => {})}>
+        <TitleBarButton label="Close" danger onClick={() => appWindow.close().catch(() => {})}>
           <svg width="10" height="10" viewBox="0 0 10 10">
             <line x1="0.5" y1="0.5" x2="9.5" y2="9.5" stroke="currentColor" strokeWidth="1.2" />
             <line x1="9.5" y1="0.5" x2="0.5" y2="9.5" stroke="currentColor" strokeWidth="1.2" />

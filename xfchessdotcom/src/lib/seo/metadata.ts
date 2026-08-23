@@ -28,26 +28,12 @@ function page(path: string, title: string, description: string, ogImage?: string
   return { path, title: `${SITE_NAME} | ${title}`, description, ogImage, noindex: false };
 }
 
-function privatePage(path: string, title: string): PageMetadata {
-  return { path, title: `${SITE_NAME} | ${title}`, description: '', noindex: true };
-}
-
-/** Static registry for the ~13 public marketing/content routes. */
+/** Static registry for the four public routes. */
 export const PAGE_METADATA: Record<string, PageMetadata> = {
   home: page(
     '/home',
     'Competitive Chess Server',
     'Play competitive chess with real prizes. Join tournaments, climb the ranked ladder, and challenge players worldwide on XFChess.',
-  ),
-  demo: page(
-    '/demo',
-    'Demo',
-    'Watch XFChess in action — ranked matches, wagered PvP, and tournament play, all on-chain.',
-  ),
-  features: page(
-    '/features',
-    'Features',
-    'Ranked matchmaking, wagered PvP, Swiss-format tournaments, and on-chain game verification — see what XFChess offers.',
   ),
   play: page(
     '/play',
@@ -59,67 +45,19 @@ export const PAGE_METADATA: Record<string, PageMetadata> = {
     'Tournaments',
     'Browse live and upcoming XFChess tournaments — Swiss-format brackets with real prize pools.',
   ),
-  computer: page(
-    '/computer',
-    'Play vs Computer',
-    'Play chess against the XFChess engine in your browser — no download required.',
-  ),
-  players: page(
-    '/players',
-    'Players',
-    'Look up XFChess player profiles, ratings, and match history.',
-  ),
-  legal: page(
-    '/legal',
-    'Legal',
-    'Terms of service and legal information for XFChess players.',
-  ),
-  compliance: page(
-    '/compliance',
-    'Compliance',
-    'XFChess compliance information for regulated jurisdictions.',
-  ),
-  antiCheat: page(
-    '/anti-cheat',
-    'Anti-Cheat',
-    'How XFChess detects and prevents cheating in ranked and wagered games.',
-  ),
-  newsRelease: page(
-    '/news/release',
-    'Release Notes',
-    'Latest XFChess release notes and platform updates.',
-  ),
-  launch: page(
-    '/launch',
-    'Launch',
-    'XFChess is live — join the competitive chess platform built on Solana.',
+  features: page(
+    '/features',
+    'Features',
+    'Ranked matchmaking, wagered PvP, Swiss-format tournaments, and on-chain game verification — see what XFChess offers.',
   ),
 };
 
-/** Dynamic per-tournament metadata (used by /tournament/:id). */
-export function forTournament(id: string | number, name?: string): PageMetadata {
-  const title = name ? `${name} — Tournament` : `Tournament #${id}`;
-  return page(
-    `/tournament/${id}`,
-    title,
-    name
-      ? `Standings, bracket, and details for the ${name} XFChess tournament.`
-      : `Standings, bracket, and details for XFChess tournament #${id}.`,
-  );
-}
-
-/** Non-indexable routes — wallet-gated, auth, or ephemeral in-game state. */
-export const PRIVATE_PAGE_METADATA: Record<string, PageMetadata> = {
-  verify: privatePage('/verify', 'Verify Profile'),
-  wSetup: privatePage('/w_setup', 'Wallet Setup'),
-  profile: privatePage('/profile', 'Profile'),
-  createProfile: privatePage('/create-profile', 'Create Profile'),
-  kyc: privatePage('/kyc', 'Identity Verification'),
-  login: privatePage('/login', 'Sign In'),
-  // /auth/login no longer has its own metadata entry — it's now a plain
-  // redirect to /login (see App.tsx), not a rendered page.
-  lichessCallback: privatePage('/auth/lichess/callback', 'Lichess Link'),
-};
+// PRIVATE_PAGE_METADATA, the privatePage() constructor, and forTournament()
+// went with the pages that used them (verify, w_setup, profile,
+// create-profile, kyc, login, the Lichess OAuth return leg, and
+// /tournament/:id). Every surviving route is public and indexable, so the
+// noindex path has no callers — reinstate it from git history if a
+// wallet-gated route comes back.
 
 export function canonicalUrl(path: string): string {
   return `${SITE_URL}${path}`;

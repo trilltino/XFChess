@@ -7,7 +7,7 @@ use crate::game::resources::turn::CurrentTurn;
 use crate::game::resources::{CapturedPieces, MoveHistory, PendingTurnAdvance};
 use crate::game::sync::board_state::{BoardMove, BoardStateSync, ChessEngineExt};
 use crate::rendering::pieces::PIECE_ON_BOARD_Y;
-use bevy::audio::{AudioPlayer, AudioSource};
+use bevy::audio::AudioSource;
 use bevy::prelude::*;
 
 /// Data required to identify a captured piece target.
@@ -66,7 +66,7 @@ pub fn play_move_audio(
     }
     // Only play move sound if NOT a capture
     if let Some(sound) = move_sound {
-        commands.spawn(AudioPlayer::new(sound));
+        crate::game::resources::sounds::play_sfx(commands, sound);
     }
 }
 
@@ -85,7 +85,7 @@ pub fn apply_capture(
     move_dir: Vec3,
 ) {
     if let Some(sound) = capture_sound {
-        commands.spawn(AudioPlayer::new(sound));
+        crate::game::resources::sounds::play_sfx(commands, sound);
     }
     captured_pieces.add_capture(target.color, target.piece_type);
 

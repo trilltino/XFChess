@@ -78,6 +78,9 @@ pub fn dispatch_deep_link(
         spectate_events(SpectateViaLinkEvent {
             game_id,
             details: None,
+            // A bare deep link carries no tournament context.
+            tournament_id: None,
+            playlist: Vec::new(),
         });
     }
 }

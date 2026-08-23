@@ -89,8 +89,14 @@ pub async fn debug_transaction(
         })
         .unwrap_or_default();
 
-    let pre_balances = meta.as_ref().map(|m| m.pre_balances.clone()).unwrap_or_default();
-    let post_balances = meta.as_ref().map(|m| m.post_balances.clone()).unwrap_or_default();
+    let pre_balances = meta
+        .as_ref()
+        .map(|m| m.pre_balances.clone())
+        .unwrap_or_default();
+    let post_balances = meta
+        .as_ref()
+        .map(|m| m.post_balances.clone())
+        .unwrap_or_default();
     let account_changes: Vec<AccountChange> = account_keys
         .iter()
         .zip(pre_balances.iter())

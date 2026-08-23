@@ -92,6 +92,22 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
     // writeup (this is the join-side half of the same bug).
     let wager = game.wager_amount;
     if game.wager_token.is_none() {
+        // Soft caps (`has_budget`, above) are not a balance check — see the
+        // fuller writeup in `global_create`. Verify the vault can actually cover
+        // the wager and still stay rent-exempt, so a shortfall reports as
+        // "top up your session" instead of a bare insufficient-funds failure
+        // from inside `debit_program_pda`. No rent term for a game account here:
+        // unlike create, join does not allocate one.
+        let vault = ctx.accounts.session_delegation.to_account_info();
+        let rent_min = Rent::get()?.minimum_balance(vault.data_len());
+        let required = wager
+            .checked_add(rent_min)
+            .ok_or(GameErrorCode::ArithmeticOverflow)?;
+        require!(
+            vault.lamports() >= required,
+            GameErrorCode::GlobalSessionVaultUnderfunded
+        );
+
         debit_program_pda(
             &ctx.accounts.session_delegation.to_account_info(),
             &ctx.accounts.escrow_pda.to_account_info(),

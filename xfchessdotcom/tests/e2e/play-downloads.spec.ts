@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Golden-path coverage for src/pages/Play.tsx's platform download buttons.
+// Golden-path coverage for src/pages/play/play.tsx's platform download buttons.
 // Each button fetches the GitHub "latest release" API, picks the asset
 // matching its platform's filename pattern, and redirects the page straight
 // to that asset's download URL — falling back to the releases page if the

@@ -30,5 +30,6 @@ pub mod matchmaking;
 pub mod puzzle;
 pub mod rates;
 pub mod rpc_proxy;
+pub mod spectate;
 pub mod tournament;
 pub mod wallet;

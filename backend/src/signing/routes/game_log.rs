@@ -679,16 +679,15 @@ async fn get_stream(state: &AppState, game_id: &str, stream: &str, headers: Head
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-// Two different Braid client conventions exist in this workspace and both
-// hit this route: `xfchess-braid-server`'s own client sends
-// `Subscribe: keep-alive`, but `braid_chess::ChessSubscriber` (the one
-// actually used for `/game/:id/moves` and `/game/:id/chat` — see
-// `braid-http/src/client/native_network.rs`) sends `Subscribe: true`. This
-// previously only recognized the former, so every real subscribe attempt
-// from the game client silently fell through to the plain-snapshot branch
-// below (a bare `[]` for a fresh game), which the subscriber's Braid parser
-// then rejected as malformed, ended the "stream", and reconnected — forever,
-// never actually receiving live updates. Accept both.
+// The draft leaves the `Subscribe` value open — it "may be blank, set to
+// `true`, or contain arbitrary data" — and every client in this workspace
+// sends `true` (`braid-http/src/client/native_network.rs`). This check
+// previously accepted only the older `keep-alive` spelling, so every real
+// subscribe attempt from the game client silently fell through to the
+// plain-snapshot branch below (a bare `[]` for a fresh game), which the
+// subscriber's Braid parser then rejected as malformed, ended the "stream",
+// and reconnected — forever, never actually receiving live updates. Accept
+// both spellings: `keep-alive` costs nothing and older peers may still send it.
 fn wants_subscribe(headers: &HeaderMap) -> bool {
     headers
         .get("Prefer")

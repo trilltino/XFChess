@@ -9,6 +9,8 @@
  */
 
 import { useWallet } from '@solana/wallet-adapter-react';
+import { SocialLoginButtons } from '../privy/SocialLoginButtons';
+import { PRIVY_WALLET_NAME } from '../privy/config';
 
 const isTauri =
   typeof window !== 'undefined' &&
@@ -30,6 +32,7 @@ export function WalletSelectionModal({ onClose }: { onClose: () => void }) {
       ? 'Requires Chrome Extension (Browser only).'
       : 'A powerful, feature-rich wallet with advanced security.',
     'Mobile Wallet Adapter': 'Native mobile connection for Android and iOS devices.',
+    [PRIVY_WALLET_NAME]: 'Signed in with Google or email — no extension needed.',
   };
 
   const visibleWallets = wallets.filter((w) => !HIDDEN_WALLETS.has(w.adapter.name));
@@ -61,8 +64,13 @@ export function WalletSelectionModal({ onClose }: { onClose: () => void }) {
             &times;
           </button>
         </div>
+        <SocialLoginButtons />
         <div className="wallet-list">
           {visibleWallets.map((wallet) => {
+            // Phantom/Solflare need a browser extension, which the Tauri shell
+            // has no host for. Privy deliberately is NOT in this list: it is an
+            // embedded wallet with no extension requirement, so it is the one
+            // option that genuinely works inside the desktop shell.
             const isDisabled =
               isTauri && (wallet.adapter.name === 'Phantom' || wallet.adapter.name === 'Solflare');
 

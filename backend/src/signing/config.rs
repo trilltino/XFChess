@@ -221,6 +221,18 @@ impl SigningConfig {
             problems
                 .push("FEE_PAYER_KEYS empty — backend cannot pay transaction fees in production");
         }
+        if prod {
+            match env::var("ADMIN_API_KEY") {
+                Ok(key) if key.len() >= 32 => {}
+                Ok(_) => problems.push("ADMIN_API_KEY too short (need >= 32 characters)"),
+                Err(env::VarError::NotPresent) => {
+                    problems.push("ADMIN_API_KEY not set — refusing to start without admin auth")
+                }
+                Err(env::VarError::NotUnicode(_)) => {
+                    problems.push("ADMIN_API_KEY contains invalid UTF-8")
+                }
+            }
+        }
         if prod && self.vps_authority_key.is_none() {
             problems.push(
                 "VPS_AUTHORITY_KEY not set — refusing to generate a random fallback in production",
@@ -240,9 +252,8 @@ impl SigningConfig {
             problems.push("TREASURY_AUTHORITY_PUBKEY is not a valid base58 pubkey");
         }
         if prod && self.allowed_origins.is_empty() {
-            problems.push(
-                "ALLOWED_ORIGINS empty — refusing to allow any origin (CORS) in production",
-            );
+            problems
+                .push("ALLOWED_ORIGINS empty — refusing to allow any origin (CORS) in production");
         }
 
         if problems.is_empty() {
@@ -309,10 +320,12 @@ mod tests {
     fn missing_authority_key_is_fatal_in_production() {
         let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
         std::env::set_var("APP_ENV", "production");
+        std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let mut config = base_config();
         config.vps_authority_key = None;
         let result = config.validate();
         std::env::remove_var("APP_ENV");
+        std::env::remove_var("ADMIN_API_KEY");
         let err = result.expect_err("missing VPS_AUTHORITY_KEY must be fatal in production");
         assert!(err.contains("VPS_AUTHORITY_KEY"));
     }
@@ -321,19 +334,34 @@ mod tests {
     fn all_authority_keys_present_passes_in_production() {
         let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
         std::env::set_var("APP_ENV", "production");
+        std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let result = base_config().validate();
         std::env::remove_var("APP_ENV");
+        std::env::remove_var("ADMIN_API_KEY");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn missing_admin_api_key_is_fatal_in_production() {
+        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        std::env::set_var("APP_ENV", "production");
+        std::env::remove_var("ADMIN_API_KEY");
+        let result = base_config().validate();
+        std::env::remove_var("APP_ENV");
+        let err = result.expect_err("missing ADMIN_API_KEY must be fatal in production");
+        assert!(err.contains("ADMIN_API_KEY"));
     }
 
     #[test]
     fn invalid_treasury_pubkey_is_fatal_in_production() {
         let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
         std::env::set_var("APP_ENV", "production");
+        std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let mut config = base_config();
         config.treasury_authority_pubkey = "not-a-real-pubkey".into();
         let result = config.validate();
         std::env::remove_var("APP_ENV");
+        std::env::remove_var("ADMIN_API_KEY");
         let err = result.expect_err("an invalid TREASURY_AUTHORITY_PUBKEY must fail validate()");
         assert!(err.contains("TREASURY_AUTHORITY_PUBKEY"));
     }
@@ -342,10 +370,12 @@ mod tests {
     fn missing_allowed_origins_is_fatal_in_production() {
         let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
         std::env::set_var("APP_ENV", "production");
+        std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let mut config = base_config();
         config.allowed_origins = vec![];
         let result = config.validate();
         std::env::remove_var("APP_ENV");
+        std::env::remove_var("ADMIN_API_KEY");
         let err = result.expect_err("empty ALLOWED_ORIGINS must be fatal in production");
         assert!(err.contains("ALLOWED_ORIGINS"));
     }

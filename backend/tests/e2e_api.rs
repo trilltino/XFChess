@@ -92,6 +92,30 @@ impl TestApp {
         self.send(req).await
     }
 
+    /// Admin-authenticated request. No `ADMIN_API_KEY`/`ADMIN_API_KEYS` is set
+    /// by these tests, so `require_api_key` falls to its debug-build default
+    /// (`X-API-Key: dev` -> actor `"dev-default"`) — see `auth_middleware::resolve_admin_actor`.
+    async fn admin_request(
+        &self,
+        method: &str,
+        uri: &str,
+        body: Option<&Value>,
+    ) -> (StatusCode, Value) {
+        let mut builder = Request::builder()
+            .uri(uri)
+            .method(method)
+            .header("X-API-Key", "dev");
+        let body = match body {
+            Some(b) => {
+                builder = builder.header("content-type", "application/json");
+                Body::from(serde_json::to_vec(b).unwrap())
+            }
+            None => Body::empty(),
+        };
+        let req = builder.body(body).unwrap();
+        self.send(req).await
+    }
+
     async fn send(&self, req: Request<Body>) -> (StatusCode, Value) {
         let resp = self.router().oneshot(req).await.unwrap();
         let status = resp.status();
@@ -131,8 +155,7 @@ async fn spawn_app() -> TestApp {
     // Only used below to create/migrate tables via `.init()` — the vault
     // itself doesn't matter since AppState::new builds the real store this
     // test actually reads/writes through.
-    let schema_vault =
-        IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
+    let schema_vault = IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
     let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await.expect("session store init");
 
@@ -974,7 +997,12 @@ async fn dual_accept_auth_guards_signing_endpoints() {
         "mover_wallet": other,
     });
     let (status, _) = app
-        .send_auth("POST", "/move/record", Some(&token), Some(&mismatched_move_body))
+        .send_auth(
+            "POST",
+            "/move/record",
+            Some(&token),
+            Some(&mismatched_move_body),
+        )
         .await;
     assert_eq!(
         status,
@@ -1043,5 +1071,161 @@ async fn treasury_refund_never_signs_in_process() {
     assert!(
         command.contains("treasury_signer"),
         "should hand the operator the isolated-host command: {command}"
+    );
+}
+
+// ── Tournament templates + persistent audit log (Phase 3) ─────────────────────
+
+/// Templates persist to `tournament_templates` (not localStorage/panel-only),
+/// and both a semantic `add_audit` call (save/delete) and the generic
+/// catch-all `persist_admin_request` middleware (which logs every mutating
+/// /admin/* request regardless of whether its handler calls add_audit) write
+/// through to the persistent `admin_audit_log` table.
+#[tokio::test]
+async fn tournament_template_round_trip_persists_and_is_audited() {
+    let app = spawn_app().await;
+
+    let (status, body) = app
+        .admin_request(
+            "POST",
+            "/admin/tournament-templates",
+            Some(&json!({ "name": "weekly-blitz", "data": { "max_players": 16, "format": "Swiss" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = app
+        .admin_request("GET", "/admin/tournament-templates", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let templates = body["templates"].as_array().expect("templates array");
+    assert_eq!(templates.len(), 1);
+    assert_eq!(templates[0]["name"], "weekly-blitz");
+    assert_eq!(templates[0]["data"]["max_players"], 16);
+
+    // The save should have landed in the persistent audit log, attributed to
+    // the debug-default actor, findable without a tournament_id filter.
+    // add_audit's DB write is awaited synchronously (see admin.rs), so it's
+    // guaranteed to be visible as soon as the save_template response returns.
+    let (status, body) = app
+        .admin_request("GET", "/admin/audit-log?limit=50", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let entries = body["entries"].as_array().expect("entries array");
+    assert!(
+        entries.iter().any(|e| e["action"] == "save_template"
+            && e["target"] == "weekly-blitz"
+            && e["actor"] == "dev-default"),
+        "expected a persisted save_template audit entry: {entries:?}"
+    );
+
+    // A mutating admin route that never calls add_audit (set-round-deadline
+    // has no tournament to act on here, so it 404s) must still be captured
+    // by the generic catch-all middleware — this is the "new endpoint can't
+    // forget to log" guarantee from Phase 3.
+    let (status, _) = app
+        .admin_request(
+            "POST",
+            "/admin/tournament/999999/set-round-deadline",
+            Some(&json!({ "deadline_at": 123 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, body) = app
+        .admin_request("GET", "/admin/audit-log?limit=50", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let entries = body["entries"].as_array().expect("entries array");
+    assert!(
+        entries.iter().any(|e| e["action"]
+            .as_str()
+            .is_some_and(|a| a.contains("set-round-deadline"))),
+        "generic middleware should have logged the unhandled mutation: {entries:?}"
+    );
+
+    let (status, body) = app
+        .admin_request("DELETE", "/admin/tournament-templates/weekly-blitz", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = app
+        .admin_request("GET", "/admin/tournament-templates", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["templates"].as_array().unwrap().len(), 0);
+
+    // Deleting an unknown template 404s rather than silently succeeding.
+    let (status, _) = app
+        .admin_request("DELETE", "/admin/tournament-templates/does-not-exist", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// A private tournament must reject a registration with a wrong or missing
+/// password. Until 2026-08-21 this whole path was inert in both directions:
+/// `CreateTournamentReq` had no password field so `password_hash` was never
+/// set, and `/confirm-join` accepted `{player, elo, signature}` with no
+/// password check at all — so the client's password prompt was decorative and
+/// anyone with the tournament ID could register.
+///
+/// This exercises the gate itself rather than the full signed-registration
+/// flow (which needs a real on-chain tx): a bad password must be rejected
+/// before any roster mutation, and must not be reported as a signature problem.
+#[tokio::test]
+async fn private_tournament_rejects_bad_password() {
+    use backend::signing::storage::tournament::TournamentRecord;
+
+    let app = spawn_app().await;
+
+    // Seed a private tournament directly — create_tournament itself submits
+    // on-chain txs, which this in-process test deliberately never does.
+    let mut record = TournamentRecord::new(4242, "private", 0);
+    record.max_players = 4;
+    record.password_hash = {
+        use argon2::{
+            password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+            Argon2,
+        };
+        let salt = SaltString::generate(&mut OsRng);
+        Some(
+            Argon2::default()
+                .hash_password(b"correct-horse", &salt)
+                .unwrap()
+                .to_string(),
+        )
+    };
+    app.state.tournament_store.create(record).await;
+
+    let stored = app.state.tournament_store.get(4242).await.unwrap();
+    assert!(
+        stored.password_hash.is_some(),
+        "tournament should be private"
+    );
+
+    // Wrong password → rejected. A 403 here (rather than 401/422) means the
+    // password gate fired, not the auth layer or signature verification.
+    let wallet = Keypair::new().pubkey().to_string();
+    let (status, _) = app
+        .post_json(
+            "/api/tournament/4242/confirm-join",
+            &json!({
+                "player": wallet,
+                "elo": 1200,
+                "signature": "not-a-real-signature",
+                "password": "wrong"
+            }),
+        )
+        .await;
+    assert_ne!(
+        status,
+        StatusCode::OK,
+        "a wrong password must never register a player"
+    );
+
+    // Whatever the rejection reason, the roster must be untouched.
+    let after = app.state.tournament_store.get(4242).await.unwrap();
+    assert!(
+        after.players.is_empty(),
+        "no player should have been added: {:?}",
+        after.players
     );
 }

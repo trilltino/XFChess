@@ -10,6 +10,7 @@
 //! - `GET  /auth/check-username/:u`  — Check username availability
 //! - `POST /auth/delete`             — GDPR right-to-erasure (wallet signature required)
 
+use crate::signing::solana;
 use crate::signing::AppState;
 use axum::{
     extract::State,
@@ -164,6 +165,212 @@ pub fn auth_routes() -> Router<AppState> {
         .route("/delete", post(delete_account))
         .route("/siws-challenge", post(siws_challenge))
         .route("/siws-verify", post(siws_verify))
+        .route("/privy-login", post(privy_login))
+}
+
+// ── Privy social login ─────────────────────────────────────────────────────────
+
+/// Maximum social identities created per hour across the instance before new
+/// signups are refused. Social signup is ~free, so this is a cheap Sybil brake;
+/// the real gate on wagering remains KYC + CACF (see `me`'s `can_wager`).
+const SOCIAL_SIGNUP_HOURLY_CAP: i64 = 200;
+
+/// POST /auth/privy-login — authenticate a Google/email user whose Solana
+/// wallet was created by Privy.
+///
+/// Body: `{ privy_token, wallet, signature, timestamp, username? }`
+///
+/// # Why both a wallet signature and a Privy token
+///
+/// The **wallet signature is the authority**, exactly as for Phantom: it proves
+/// control of the keypair that owns every on-chain asset and PDA. The Privy
+/// token is corroborating evidence that binds a social credential to that
+/// wallet, so we can (a) offer "sign in with Google" on the next visit and
+/// (b) enforce one-account-per-email.
+///
+/// Consequence worth stating plainly: a stolen Privy token alone authenticates
+/// nobody, because it cannot produce the signature. And a wallet signature alone
+/// still works through the ordinary `/auth/login` route — this endpoint adds a
+/// credential binding, it does not replace anything.
+#[derive(Deserialize)]
+struct PrivyLoginReq {
+    privy_token: String,
+    wallet: String,
+    signature: String,
+    timestamp: u64,
+    /// Desired handle on first signup. Defaults to a pubkey prefix, matching
+    /// the wallet-ui and website register paths.
+    username: Option<String>,
+    /// Email from the user's Privy linked accounts, when they have one.
+    ///
+    /// Not read from the access token: Privy's standard claims carry only the
+    /// DID (`sub`), not contact details. This is therefore client-asserted, and
+    /// is used ONLY for the D3 one-account-per-email guard and for display — it
+    /// never authenticates anything. Spoofing it can at worst lock the spoofer
+    /// out of their own signup by colliding with someone else's address; it
+    /// cannot grant access to that other account, since the wallet signature
+    /// still has to match.
+    email: Option<String>,
+    /// Which Privy method was used: `google`, `email`, … Display/analytics only.
+    /// Constrained to a short allowlist below so an arbitrary client string
+    /// never lands in the database.
+    login_method: Option<String>,
+}
+
+/// Login methods we record. Anything else is stored as `unknown` rather than
+/// trusted verbatim — this column is client-asserted.
+const KNOWN_LOGIN_METHODS: &[&str] = &["google", "email", "apple", "discord", "github", "twitter"];
+
+async fn privy_login(
+    State(state): State<AppState>,
+    Json(req): Json<PrivyLoginReq>,
+) -> Result<Json<AuthResp>, (StatusCode, String)> {
+    use crate::signing::privy;
+
+    // Server-side half of the kill switch: with PRIVY_APP_ID unset this route
+    // behaves as if it does not exist.
+    if !privy::is_configured() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "Social login is not enabled on this server".to_string(),
+        ));
+    }
+
+    // 1. Wallet signature — the authority. Same helper, same replay window as
+    //    every other wallet route; a Privy wallet is an ordinary ed25519 keypair.
+    verify_wallet_sig(&req.wallet, &req.signature, "login", req.timestamp)?;
+
+    // 2. Privy token — corroboration. Fails closed on an unreachable JWKS.
+    let claims = privy::verify_access_token(&req.privy_token)
+        .await
+        .map_err(|e| match e {
+            privy::PrivyError::Jwks(msg) => {
+                tracing::error!("[Privy] JWKS unavailable, refusing login: {msg}");
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Could not verify social sign-in right now. Please try again.".to_string(),
+                )
+            }
+            other => (StatusCode::UNAUTHORIZED, other.to_string()),
+        })?;
+
+    let provider = "privy";
+    let subject = claims.sub.clone();
+    // Absence is fine — the D3 email guard simply does not apply to an account
+    // that has no email on file.
+    let email_owned = req
+        .email
+        .as_ref()
+        .map(|e| e.trim().to_lowercase())
+        .filter(|e| !e.is_empty());
+    let email = email_owned.as_deref();
+
+    // 3. Existing binding for this credential?
+    let bound = state.store.find_wallet_by_social(provider, &subject).await;
+
+    if let Some(bound_wallet) = bound {
+        // Refuse to re-point an existing credential at a different wallet. Same
+        // invariant `link_wallet` enforces for email/password accounts: silently
+        // re-attaching would detach this identity from whatever KYC, CACF and
+        // session history sits under the old wallet, none of which is reconciled
+        // anywhere.
+        if bound_wallet != req.wallet {
+            return Err((
+                StatusCode::CONFLICT,
+                "This social account is already linked to a different wallet and cannot be \
+                 re-linked automatically. Contact support if you need to change it."
+                    .to_string(),
+            ));
+        }
+    } else {
+        // 4. First binding for this credential. Enforce D3 on the email, if any.
+        if let Some(addr) = email {
+            if let Some(other) = state
+                .store
+                .find_wallet_by_social_email(provider, addr)
+                .await
+            {
+                if other != req.wallet {
+                    let handle = state
+                        .store
+                        .find_user_by_wallet(&other)
+                        .await
+                        .map(|u| u.1)
+                        .unwrap_or_else(|| "an existing account".to_string());
+                    return Err((
+                        StatusCode::CONFLICT,
+                        format!(
+                            "This email is already linked to {handle}. Sign in with that wallet, \
+                             then link this account from Settings."
+                        ),
+                    ));
+                }
+            }
+        }
+
+        let hour_ago = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+            - 3600;
+        if state.store.count_social_identities_since(hour_ago).await >= SOCIAL_SIGNUP_HOURLY_CAP {
+            tracing::warn!("[Privy] hourly social signup cap reached, refusing new binding");
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many new accounts right now. Please try again shortly.".to_string(),
+            ));
+        }
+    }
+
+    // 5. Ensure the XFChess account exists. A Privy user is a first-class wallet
+    //    user — same table, same columns, no second tier (plan D2).
+    let username = match state.store.find_user_by_wallet(&req.wallet).await {
+        Some(user) => user.1,
+        None => {
+            let desired = req
+                .username
+                .filter(|u| !u.trim().is_empty())
+                .unwrap_or_else(|| req.wallet.chars().take(8).collect());
+            if state.store.username_taken(&desired).await {
+                return Err((StatusCode::CONFLICT, "Username already taken".to_string()));
+            }
+            state
+                .store
+                .create_wallet_user(&req.wallet, &desired, email)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            desired
+        }
+    };
+
+    // 6. Record/refresh the credential binding.
+    let login_method = req
+        .login_method
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| KNOWN_LOGIN_METHODS.contains(m))
+        .unwrap_or("unknown");
+    state
+        .store
+        .upsert_social_identity(provider, &subject, &req.wallet, login_method, email, true)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // 7. Ordinary XFChess JWT, keyed on the wallet like every other login.
+    let token = state
+        .jwt
+        .issue(&req.wallet)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    info!(
+        "[Auth] Privy login: wallet={} subject={}",
+        req.wallet, subject
+    );
+    Ok(Json(AuthResp {
+        token,
+        username,
+        wallet: req.wallet,
+    }))
 }
 
 // ── Shared response ────────────────────────────────────────────────────────────
@@ -452,6 +659,15 @@ struct MeResp {
     /// clearly-labeled stat alongside `elo` — never merged.
     lichess_blitz: u32,
     lichess_verified: bool,
+    /// Social providers bound to this wallet, e.g. `["google"]`. Empty for a
+    /// wallet-only (Phantom/Solflare) account.
+    login_methods: Vec<String>,
+    /// True when this wallet is a Privy-created embedded wallet.
+    ///
+    /// **UI only** — it drives "back up your wallet" nudges and the
+    /// un-backed-up balance cap. It must never influence `can_wager`: a social
+    /// user is a first-class wallet user (plan D2).
+    is_embedded_wallet: bool,
 }
 
 /// GET /auth/me — validates Bearer JWT and returns caller profile.
@@ -520,6 +736,11 @@ async fn me(
         .unwrap_or(false);
     let country = kyc_country.unwrap_or_default();
 
+    // Social-credential metadata. Presentational only — `can_wager` above is
+    // deliberately computed without reference to either of these.
+    let login_methods = state.store.social_login_methods(&wallet).await;
+    let is_embedded_wallet = state.store.wallet_is_embedded(&wallet).await;
+
     Ok(Json(MeResp {
         wallet: user.0,
         username: user.1,
@@ -532,6 +753,8 @@ async fn me(
         lichess_verified,
         elo,
         country,
+        login_methods,
+        is_embedded_wallet,
     }))
 }
 
@@ -574,7 +797,18 @@ async fn add_email(
 // ── POST /auth/sync-profile ────────────────────────────────────────────────────
 
 /// Minimal mirror of the on-chain PlayerProfile used only for borsh decoding.
-/// Field order MUST match the Anchor account definition exactly.
+/// Field order and widths MUST match
+/// `programs/xfchess-game/src/state/player_profile.rs` exactly up to the last
+/// field declared here — borsh is positional, so one wrong width silently
+/// shifts everything after it.
+///
+/// Decoded leniently (see `fetch_onchain_profile`), so declaring *fewer*
+/// trailing fields than the on-chain struct is safe: the tail is just left
+/// unread alongside Anchor's `#[max_len]` padding. Declaring more is also
+/// tolerated as long as the account still has padding to read them out of —
+/// a deployed program lagging behind this file (devnet accounts are 265 bytes,
+/// i.e. pre-`elo_bullet`) yields `0.0`/zero for the extra fields rather than
+/// an error. Don't read a field here that the deployed program may not have.
 #[derive(borsh::BorshDeserialize)]
 struct ProfileOnChain {
     pub _authority: [u8; 32],
@@ -595,6 +829,7 @@ struct ProfileOnChain {
     pub _total_won: u64,
     pub _created_at: i64,
     pub _last_game_at: i64,
+    pub _date_of_birth: i64,
     pub _is_verified: bool,
     pub _annual_wins_gbp: u64,
     pub _annual_wins_brl: u64,
@@ -602,6 +837,17 @@ struct ProfileOnChain {
     pub _annual_wins_eur: u64,
     pub username: String,
     pub username_set: bool,
+    pub _lichess_username: String,
+    pub _lichess_verified: bool,
+    pub _lichess_blitz: u32,
+    pub _lichess_rapid: u32,
+    pub _lichess_bullet: u32,
+    pub _lichess_last_sync: i64,
+    pub _external_elo_source: u8,
+    pub _seeded_from_external: bool,
+    pub _elo_bullet: f64,
+    pub _elo_blitz: f64,
+    pub _elo_rapid: f64,
 }
 
 /// Fetches and borsh-decodes the caller's on-chain `PlayerProfile`, or
@@ -643,10 +889,25 @@ async fn fetch_onchain_profile(
             "Account data too short".to_string(),
         ));
     }
-    let profile = ProfileOnChain::try_from_slice(&account.data[8..]).map_err(|e| {
+    // `deserialize`, not `try_from_slice`: Anchor allocates `8 +
+    // PlayerProfile::INIT_SPACE`, which reserves the *max* length of every
+    // `#[max_len]` string, while borsh writes only the actual bytes. Every
+    // real profile therefore ends in zero padding, and `try_from_slice`
+    // rejects leftover bytes ("Not all bytes read") — which made this fail
+    // for every wallet that had a profile at all. Reading only the fields we
+    // declare and ignoring the tail is exactly what Anchor's own
+    // `try_deserialize` does on-chain.
+    let profile = ProfileOnChain::deserialize(&mut &account.data[8..]).map_err(|e| {
         (
             StatusCode::UNPROCESSABLE_ENTITY,
-            format!("Failed to decode profile: {e}"),
+            // Length is the first thing to check when this fires: a profile
+            // created by an older program version is too short for the fields
+            // declared above and hits EOF here (devnet still has 200-byte
+            // pre-`date_of_birth` accounts from an old bot-seeding run).
+            format!(
+                "Failed to decode profile ({} bytes): {e}",
+                account.data.len()
+            ),
         )
     })?;
     Ok(Some(profile))
@@ -797,11 +1058,16 @@ async fn init_profile_tx(
     };
 
     // Fetch a recent blockhash so the transaction is immediately broadcastable.
+    // `finalized`, not `confirmed` — this transaction goes to a browser wallet
+    // extension, which decides whether to sign it at all by looking the
+    // blockhash up on its selected cluster at finalized commitment. See
+    // `solana::wallet_signable_blockhash`.
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
-    let recent_blockhash = tokio::task::spawn_blocking(move || rpc.get_latest_blockhash())
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC blockhash: {e}")))?;
+    let recent_blockhash =
+        tokio::task::spawn_blocking(move || solana::wallet_signable_blockhash(&rpc))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .map_err(|e| (StatusCode::BAD_GATEWAY, format!("RPC blockhash: {e}")))?;
 
     let tx = Transaction::new_unsigned(solana_sdk::message::Message::new_with_blockhash(
         &[ix],
@@ -935,7 +1201,9 @@ async fn init_profile_sponsored_tx(
         data,
     };
 
-    // discriminator(8) + PlayerProfile::INIT_SPACE(257). The username_record
+    // discriminator(8) + PlayerProfile::INIT_SPACE(281: 257 plus the 24 bytes
+    // added by `elo_bullet`/`elo_blitz`/`elo_rapid`, three f64 per-time-
+    // control ratings appended to the struct). The username_record
     // account struct constraint is `space = 8 + UsernameRecord::LEN`, and
     // UsernameRecord::LEN (48) already includes its own discriminator — so
     // the real allocated space is 56, not 48 (verified against a live
@@ -943,7 +1211,7 @@ async fn init_profile_sponsored_tx(
     // which failed on-chain with "insufficient lamports" before this fix).
     // Kept in sync manually since the backend doesn't depend on the program
     // crate — see programs/xfchess-game/src/state/{player_profile.rs,username_record.rs}.
-    const PROFILE_SPACE: usize = 8 + 257;
+    const PROFILE_SPACE: usize = 8 + 281;
     const USERNAME_RECORD_SPACE: usize = 8 + 48;
 
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
@@ -954,7 +1222,9 @@ async fn init_profile_sponsored_tx(
         let username_rent = rpc
             .get_minimum_balance_for_rent_exemption(USERNAME_RECORD_SPACE)
             .map_err(|e| e.to_string())?;
-        let blockhash = rpc.get_latest_blockhash().map_err(|e| e.to_string())?;
+        // Finalized: the player's wallet extension has to recognise this as a
+        // devnet blockhash before it will sign — see `wallet_signable_blockhash`.
+        let blockhash = solana::wallet_signable_blockhash(&rpc).map_err(|e| e.to_string())?;
         Ok::<_, String>((profile_rent + username_rent, blockhash))
     })
     .await
@@ -1337,4 +1607,46 @@ async fn siws_verify(
         username,
         wallet: req.wallet,
     }))
+}
+
+#[cfg(test)]
+mod profile_decode_tests {
+    use super::ProfileOnChain;
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+    use borsh::BorshDeserialize;
+
+    /// A real devnet `PlayerProfile` account (PDA
+    /// `2rnL1R63FndwkN8UcybiiwVqMCuR2vTirGZU48NH7bzT`, username "val"),
+    /// captured verbatim via `getAccountInfo`. Anchor allocates
+    /// `8 + PlayerProfile::INIT_SPACE` — the *max* length of every
+    /// `#[max_len]` string — but borsh writes only the actual string bytes,
+    /// so every real account carries trailing zero padding.
+    const REAL_PROFILE_B64: &str = "UuJjV6SCtVAsepYl9NwToT6BbL/CZ8gRg2700PZfdsZA9JatrWSSmQIAAABHQgIAAAABAAAAAAAAAAMAAAAAAAAAAEz9QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlriBagAAAAAAAAAAAAAAAIDUTj4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAHZhbAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+
+    /// Regression: `try_from_slice` rejects *any* leftover bytes, so decoding
+    /// a real profile with it fails with "Not all bytes read" — which
+    /// `sync_profile` surfaced as a blanket 422 for every wallet that had an
+    /// on-chain profile. Anchor's own `try_deserialize` reads the fields it
+    /// needs and ignores the padding; the backend mirror must do the same.
+    #[test]
+    fn decodes_a_real_padded_devnet_profile() {
+        let data = STANDARD.decode(REAL_PROFILE_B64).unwrap();
+        let mut rest = &data[8..];
+        let profile = ProfileOnChain::deserialize(&mut rest)
+            .expect("real on-chain profile must decode past its zero padding");
+
+        assert_eq!(profile.username, "val");
+        assert!(profile.username_set);
+        assert!(
+            !rest.is_empty(),
+            "fixture should still have trailing padding — otherwise it isn't \
+             exercising the leftover-bytes case"
+        );
+        assert!(
+            ProfileOnChain::try_from_slice(&data[8..]).is_err(),
+            "strict decoding must still reject the padding — if this ever \
+             passes, Anchor stopped over-allocating and the guard is moot"
+        );
+    }
 }

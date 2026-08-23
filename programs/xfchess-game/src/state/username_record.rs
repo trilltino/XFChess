@@ -21,7 +21,10 @@ impl UsernameRecord {
 pub fn validate_username(username: &str) -> Result<()> {
     // Check length
     let len = username.len();
-    require!(len >= 3 && len <= 20, crate::errors::GameErrorCode::InvalidLength);
+    require!(
+        len >= 3 && len <= 20,
+        crate::errors::GameErrorCode::InvalidLength
+    );
 
     // Check valid characters
     for ch in username.chars() {

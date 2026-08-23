@@ -18,7 +18,9 @@
 use crate::signing::storage::tournament::{MatchStatus, TournamentStore};
 use crate::signing::swiss::service::SwissService;
 use serde::{Deserialize, Serialize};
+use solana_sdk::signature::{Keypair, Signer};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use swiss_pairing::{MatchResult, Pairing};
 use tokio::sync::{mpsc, RwLock};
@@ -104,6 +106,14 @@ pub struct SwissOrchestrator {
     braid_hub: Option<Arc<ResourceHub>>,
     state: OrchestratorState,
     event_rx: mpsc::Receiver<OrchestratorEvent>,
+    on_chain: Option<SwissOnChainConfig>,
+}
+
+#[derive(Clone)]
+pub struct SwissOnChainConfig {
+    pub program_id: String,
+    pub rpc_url: String,
+    pub cranker: Arc<Keypair>,
 }
 
 impl SwissOrchestrator {
@@ -111,6 +121,7 @@ impl SwissOrchestrator {
         store: TournamentStore,
         swiss: Arc<SwissService>,
         braid_hub: Option<Arc<ResourceHub>>,
+        on_chain: Option<SwissOnChainConfig>,
     ) -> (Self, mpsc::Sender<OrchestratorEvent>) {
         let (tx, rx) = mpsc::channel(256);
         let orchestrator = Self {
@@ -119,6 +130,7 @@ impl SwissOrchestrator {
             braid_hub,
             state: OrchestratorState::new(),
             event_rx: rx,
+            on_chain,
         };
         (orchestrator, tx)
     }
@@ -283,6 +295,14 @@ impl SwissOrchestrator {
             return;
         }
 
+        if self
+            .state
+            .is_round_complete(tournament_id, active.round)
+            .await
+        {
+            self.crank_round(tournament_id, active.round).await;
+        }
+
         // Check if round is complete → auto-start next round
         if self
             .state
@@ -318,8 +338,12 @@ impl SwissOrchestrator {
                         "[orchestrator] Round {} started for tournament {}",
                         next_round.round, tournament_id
                     );
-                    // The new round pairings will be handled by a new
-                    // RoundPaired event sent by whoever triggered start_round.
+                    self.handle_round_paired(
+                        tournament_id,
+                        next_round.round,
+                        next_round.pairings.clone(),
+                    )
+                    .await;
                 }
                 Err(crate::signing::swiss::service::SwissServiceError::TournamentComplete) => {
                     info!("[orchestrator] Tournament {} is complete!", tournament_id);
@@ -331,6 +355,63 @@ impl SwissOrchestrator {
                     );
                 }
             }
+        }
+    }
+
+    async fn crank_round(&self, tournament_id: u64, round: u8) {
+        let Some(cfg) = &self.on_chain else { return };
+        let program_id = match solana_sdk::pubkey::Pubkey::from_str(&cfg.program_id) {
+            Ok(id) => id,
+            Err(e) => {
+                error!("[orchestrator] Invalid Swiss program ID: {}", e);
+                return;
+            }
+        };
+        let rpc_url = cfg.rpc_url.clone();
+        let cranker = cfg.cranker.clone();
+        let max_players = match self.store.get(tournament_id).await {
+            Some(t) => t.max_players,
+            None => return,
+        };
+        let is_final = self
+            .store
+            .get(tournament_id)
+            .await
+            .and_then(|t| t.swiss_data.map(|s| round >= s.total_rounds))
+            .unwrap_or(false);
+        let result = tokio::task::spawn_blocking(move || {
+            let rpc = crate::signing::solana::make_rpc(&rpc_url);
+            if !is_final {
+                let ix = crate::signing::solana::advance_round_ix(
+                    &program_id,
+                    tournament_id,
+                    &cranker.pubkey(),
+                );
+                crate::signing::solana::sign_and_submit(&rpc, &cranker, &[ix])
+                    .map_err(|e| format!("advance_round: {e}"))?;
+            } else {
+                let ix = crate::signing::solana::complete_swiss_tournament_ix(
+                    &program_id,
+                    tournament_id,
+                    max_players,
+                    &cranker.pubkey(),
+                );
+                crate::signing::solana::sign_and_submit(&rpc, &cranker, &[ix])
+                    .map_err(|e| format!("complete_swiss_tournament: {e}"))?;
+            }
+            Ok::<(), String>(())
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => error!(
+                "[orchestrator] Swiss on-chain crank failed for tournament {} round {}: {}",
+                tournament_id, round, e
+            ),
+            Err(e) => error!(
+                "[orchestrator] Swiss on-chain crank task failed for tournament {} round {}: {}",
+                tournament_id, round, e
+            ),
         }
     }
 
@@ -355,8 +436,9 @@ pub fn spawn_orchestrator(
     store: TournamentStore,
     swiss: Arc<SwissService>,
     braid_hub: Option<Arc<ResourceHub>>,
+    on_chain: Option<SwissOnChainConfig>,
 ) -> mpsc::Sender<OrchestratorEvent> {
-    let (orchestrator, tx) = SwissOrchestrator::new(store, swiss, braid_hub);
+    let (orchestrator, tx) = SwissOrchestrator::new(store, swiss, braid_hub, on_chain);
     tokio::spawn(orchestrator.run());
     tx
 }

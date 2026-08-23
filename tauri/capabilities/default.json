@@ -2,7 +2,14 @@
   "identifier": "default",
   "description": "Base permissions for all XFChess windows. Shell access is intentionally NOT granted here — it is scoped to the tournament-admin window only via admin-shell.json.",
   "windows": ["main", "tournament-admin", "wallet-popup"],
+  "remote": {
+    "urls": ["http://localhost:7454/**"]
+  },
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close"
   ]
 }

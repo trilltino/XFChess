@@ -155,15 +155,12 @@ fn render_popups(
             ..egui::Frame::NONE
         };
 
-        let body_color = egui::Color32::from_rgba_unmultiplied(
-            210, 215, 225, (255.0 * fade_alpha) as u8,
-        );
-        let accent_faded = egui::Color32::from_rgba_unmultiplied(
-            100, 200, 255, (255.0 * fade_alpha) as u8,
-        );
-        let close_color = egui::Color32::from_rgba_unmultiplied(
-            180, 180, 180, (255.0 * fade_alpha) as u8,
-        );
+        let body_color =
+            egui::Color32::from_rgba_unmultiplied(210, 215, 225, (255.0 * fade_alpha) as u8);
+        let accent_faded =
+            egui::Color32::from_rgba_unmultiplied(100, 200, 255, (255.0 * fade_alpha) as u8);
+        let close_color =
+            egui::Color32::from_rgba_unmultiplied(180, 180, 180, (255.0 * fade_alpha) as u8);
 
         let mut open = true;
         let mut close_clicked = false;
@@ -214,11 +211,9 @@ fn render_popups(
                     // Close button
                     let close = ui.add_sized(
                         [close_width, header_height],
-                        egui::Button::new(
-                            egui::RichText::new("X").size(13.0).color(close_color),
-                        )
-                        .fill(egui::Color32::TRANSPARENT)
-                        .stroke(egui::Stroke::NONE),
+                        egui::Button::new(egui::RichText::new("X").size(13.0).color(close_color))
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE),
                     );
                     if close.clicked() {
                         close_clicked = true;
@@ -233,9 +228,7 @@ fn render_popups(
                 ui.add_space(8.0);
 
                 // Body
-                ui.label(
-                    egui::RichText::new(&message).size(12.0).color(body_color),
-                );
+                ui.label(egui::RichText::new(&message).size(12.0).color(body_color));
 
                 if let Some(ref ct) = copy_text {
                     ui.add_space(8.0);
@@ -248,7 +241,10 @@ fn render_popups(
                             ))
                             .size(11.0)
                             .color(egui::Color32::from_rgba_unmultiplied(
-                                160, 160, 160, (255.0 * fade_alpha) as u8,
+                                160,
+                                160,
+                                160,
+                                (255.0 * fade_alpha) as u8,
                             ))
                             .monospace(),
                         );
@@ -267,7 +263,11 @@ fn render_popups(
                 if let Some(ref u) = url {
                     ui.add_space(4.0);
                     if ui
-                        .button(egui::RichText::new(&url_label).size(12.0).color(accent_faded))
+                        .button(
+                            egui::RichText::new(&url_label)
+                                .size(12.0)
+                                .color(accent_faded),
+                        )
                         .clicked()
                     {
                         let url_to_open = u.clone();
@@ -278,7 +278,9 @@ fn render_popups(
                 }
             });
 
-        if close_clicked { open = false; }
+        if close_clicked {
+            open = false;
+        }
 
         if let Some(inner) = win_resp {
             y_offset += inner.response.rect.height() + 8.0;

@@ -65,7 +65,7 @@ chain of moves: the same game always produces the same version sequence. See
 | [`ChessMessage`] + payloads | The event vocabulary |
 | [`BraidPatch`] / [`version_hash`] | Low-level patch construction (version + parents + body) |
 | [`ChessPublisher`] | PUTs events to a sub-resource, tracking the head version |
-| [`ChessSubscriber`] | Opens a `Subscribe: keep-alive` stream and decodes `ChessMessage`s |
+| [`ChessSubscriber`] | Opens a `Subscribe: true` stream and decodes `ChessMessage`s |
 
 ```rust,no_run
 use braid_chess::{ChessPublisher, ChessSubscriber, MovePayload};

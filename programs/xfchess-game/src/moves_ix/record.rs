@@ -70,6 +70,11 @@ pub fn handler(
     // IDL registered) can't decode `emit!` event data, so the board state
     // otherwise only shows as an opaque blob. `from_bytes` is a zero-cost
     // transmute; `to_fen` is a ~64-square string build, negligible CU cost.
+    // Gated: this is the only thing outside the validation path itself that
+    // pulls `chess_logic_on_chain` in, so leaving it ungated made
+    // `--no-default-features` fail to compile and forced the whole engine
+    // into every build — including ones that don't validate moves on-chain.
+    #[cfg(feature = "move-validation")]
     msg!(
         "FEN: {}",
         chess_logic_on_chain::nimzovich_engine::CompactBoard::from_bytes(&next_board).to_fen()

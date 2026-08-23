@@ -27,12 +27,6 @@ struct ActivateSessionReq<'a> {
     signed_tx_b64: &'a str,
 }
 
-#[derive(Serialize)]
-struct SignReq<'a> {
-    game_id: u64,
-    tx_b64: &'a str,
-}
-
 #[derive(Deserialize)]
 pub(super) struct SigResp {
     pub sig: String,
@@ -121,29 +115,12 @@ pub fn activate_session(game_id: u64, signed_tx_bytes: &[u8]) -> Result<String, 
     Ok(resp.sig)
 }
 
-/// Ask VPS to sign a pre-built TX with the session key and submit it.
-/// Used for delegation: client builds the complex instruction, VPS signs.
-pub fn sign_and_submit(game_id: u64, tx_bytes: &[u8]) -> Result<String, String> {
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
-    let response = client()?
-        .post(format!("{}/session/sign", vps_base()))
-        .json(&SignReq {
-            game_id,
-            tx_b64: &b64,
-        })
-        .send()
-        .map_err(|e| format!("vps sign_and_submit: {e}"))?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().unwrap_or_default();
-        return Err(format!("vps sign_and_submit: HTTP {status} — {body}"));
-    }
-    let resp = response
-        .json::<SigResp>()
-        .map_err(|e| format!("vps sign_and_submit parse: {e}"))?;
-    Ok(resp.sig)
-}
+// NOTE: `sign_and_submit` (POST /session/sign) was removed along with the
+// backend endpoint it called. Nothing in this crate ever invoked it —
+// delegation goes through `/game/delegate`, which builds the instruction
+// server-side — while the endpoint itself would sign *any* transaction handed
+// to it with the game's session key. See `backend/src/signing/routes/main.rs`
+// (`protected_routes`) for the full reasoning.
 
 /// Query session status from VPS.
 pub fn session_status(game_id: u64) -> Result<SessionStatus, String> {

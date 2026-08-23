@@ -57,7 +57,7 @@ export const ENVIRONMENTS: Record<EnvId, EnvConfig> = {
       remotePort: 8090,
       sshUser: "tunnel",
       sshHost: VPS_HOST,
-      sshKey: "~/.ssh/xfchess_vps",
+      sshKey: "C:/Users/isich/.ssh/xfchess_vps",
     },
   },
 };
@@ -68,7 +68,7 @@ export const ENVIRONMENTS: Record<EnvId, EnvConfig> = {
 export const OPS_SSH = {
   user: "deploy",
   host: VPS_HOST,
-  key: "~/.ssh/xfchess_vps",
+  key: "C:/Users/isich/.ssh/xfchess_vps",
 };
 
 export function envById(id: EnvId): EnvConfig {

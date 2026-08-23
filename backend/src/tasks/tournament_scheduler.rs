@@ -22,16 +22,18 @@
 //! * Tokio tasks  — <https://tokio.rs/tokio/tutorial/spawning>
 //! * mpsc channel — <https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html>
 
-use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus, TournamentStore};
-use crate::signing::tournament_gossip::TournamentGossipService;
-use braid_iroh::SwissMessage;
-use solana_sdk::signature::Keypair;
+use crate::signing::storage::tournament::{
+    MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus, TournamentStore,
+};
+use solana_sdk::signature::{Keypair, Signer};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
+use xfchess_braid_server::{bridge, ResourceHub};
 
 /// Channel buffer size for tournament trigger events.
 pub const TOURNAMENT_TRIGGER_CHANNEL_SIZE: usize = 256;
@@ -92,6 +94,13 @@ pub enum TournamentTrigger {
     ScheduledStart { tournament_id: u64 },
     /// Fill grace timer expired — start if still >= min_players.
     FillGraceExpired { tournament_id: u64 },
+    /// A settled single-elimination game is ready to advance the bracket.
+    GameSettled {
+        tournament_id: u64,
+        game_id: u64,
+        winner: String,
+        loser: String,
+    },
 }
 
 /// Async-fill tournament scheduler.
@@ -102,7 +111,7 @@ pub struct TournamentScheduler {
     trigger_rx: mpsc::Receiver<TournamentTrigger>,
     /// Per-tournament grace-timer handles — aborted on max-fill or admin start.
     fill_timers: HashMap<u64, JoinHandle<()>>,
-    gossip: Option<Arc<TournamentGossipService>>,
+    braid_hub: Option<Arc<ResourceHub>>,
     /// On-chain config — present when the backend has a VPS authority key.
     on_chain: Option<OnChainConfig>,
 }
@@ -124,15 +133,15 @@ impl TournamentScheduler {
                 trigger_tx: trigger_tx.clone(),
                 trigger_rx,
                 fill_timers: HashMap::new(),
-                gossip: None,
+                braid_hub: None,
                 on_chain: None,
             },
             trigger_tx,
         )
     }
 
-    pub fn set_gossip(&mut self, gossip: Arc<TournamentGossipService>) {
-        self.gossip = Some(gossip);
+    pub fn set_braid_hub(&mut self, hub: Arc<ResourceHub>) {
+        self.braid_hub = Some(hub);
     }
 
     pub fn set_on_chain(
@@ -174,7 +183,101 @@ impl TournamentScheduler {
                     self.fill_timers.remove(&tournament_id);
                     self.handle_fill_grace_expired(tournament_id).await;
                 }
+                TournamentTrigger::GameSettled {
+                    tournament_id,
+                    game_id,
+                    winner,
+                    loser,
+                } => {
+                    self.handle_game_settled(tournament_id, game_id, winner, loser)
+                        .await;
+                }
             }
+        }
+    }
+
+    async fn handle_game_settled(
+        &self,
+        tournament_id: u64,
+        game_id: u64,
+        winner: String,
+        loser: String,
+    ) {
+        let Some(tournament) = self.store.get(tournament_id).await else {
+            return;
+        };
+        if !matches!(tournament.format, TournamentFormat::SingleElimination) {
+            return;
+        }
+        let Some(source) = tournament
+            .matches
+            .iter()
+            .flatten()
+            .find(|m| m.game_id == Some(game_id) && m.status != MatchStatus::Completed)
+        else {
+            return;
+        };
+        let match_index = source.match_index;
+        let next_match = source.next_match_for_winner;
+        if let Some(cfg) = &self.on_chain {
+            let Ok(program_id) = solana_sdk::pubkey::Pubkey::from_str(&cfg.program_id) else {
+                return;
+            };
+            let rpc_url = cfg.rpc_url.clone();
+            let authority = cfg.vps_authority.clone();
+            let winner_pk = match solana_sdk::pubkey::Pubkey::from_str(&winner) {
+                Ok(pk) => pk,
+                Err(_) => return,
+            };
+            let loser_pk = match solana_sdk::pubkey::Pubkey::from_str(&loser) {
+                Ok(pk) => pk,
+                Err(_) => return,
+            };
+            let next = next_match;
+            let result = tokio::task::spawn_blocking(move || {
+                let rpc = crate::signing::solana::make_rpc(&rpc_url);
+                let result_ix = crate::signing::solana::record_result_ix(
+                    &program_id,
+                    tournament_id,
+                    match_index,
+                    &winner_pk,
+                    &loser_pk,
+                    &authority.pubkey(),
+                );
+                crate::signing::solana::sign_and_submit(&rpc, &authority, &[result_ix])
+                    .map_err(|e| format!("record_match_result: {e}"))?;
+                if let Some(next_match) = next {
+                    let advance_ix = crate::signing::solana::advance_winner_ix(
+                        &program_id,
+                        tournament_id,
+                        match_index,
+                        next_match,
+                        &authority.pubkey(),
+                    );
+                    crate::signing::solana::sign_and_submit(&rpc, &authority, &[advance_ix])
+                        .map_err(|e| format!("advance_winner: {e}"))?;
+                }
+                Ok::<(), String>(())
+            })
+            .await;
+            if !matches!(result, Ok(Ok(()))) {
+                error!(
+                    "[tournament-scheduler] On-chain advancement failed for tournament {} match {}: {:?}",
+                    tournament_id, match_index, result
+                );
+                return;
+            }
+        }
+
+        if !self
+            .store
+            .record_result(tournament_id, match_index as usize, winner, loser)
+            .await
+        {
+            error!(
+                "[tournament-scheduler] Failed to persist result for tournament {} match {}",
+                tournament_id, match_index
+            );
         }
     }
 
@@ -420,6 +523,15 @@ impl TournamentScheduler {
             return;
         }
 
+        let assigned = self.store.assign_ready_game_ids(tournament_id).await;
+        if !assigned.is_empty() {
+            info!(
+                "[tournament-scheduler] Assigned {} deterministic game IDs for tournament {}",
+                assigned.len(),
+                tournament_id
+            );
+        }
+
         let player_count = self
             .store
             .get(tournament_id)
@@ -433,51 +545,40 @@ impl TournamentScheduler {
             tournament_id, player_count
         );
 
-        // Broadcast BracketFired so connected players know to fetch their match.
-        let Some(gossip) = &self.gossip else { return };
-        let Some(sender) = gossip.get_topic(tournament_id).await else {
+        // Publish the start so connected players know to fetch their match.
+        //
+        // This used to be a fire-and-forget `BracketFired` gossip message,
+        // which reached only the peers already subscribed at that instant —
+        // anyone joining a second later had no way to learn the bracket had
+        // fired. As a resource, the transition is durable: a late subscriber
+        // reads `status: "started"` straight out of the snapshot.
+        let Some(hub) = &self.braid_hub else {
             warn!(
-                "[tournament-scheduler] No gossip topic for tournament {} — skipping BracketFired broadcast",
+                "[tournament-scheduler] No Braid hub — tournament {} start not published",
                 tournament_id
             );
             return;
         };
-        let msg = SwissMessage::BracketFired {
-            tournament_id,
-            player_count,
-            started_at,
-        };
-        match serde_json::to_vec(&msg) {
-            Ok(bytes) => {
-                if let Err(e) = sender.broadcast(bytes.into()).await {
-                    warn!(
-                        "[tournament-scheduler] BracketFired broadcast failed for {}: {}",
-                        tournament_id, e
-                    );
-                } else {
-                    info!(
-                        "[tournament-scheduler] BracketFired broadcast sent for tournament {}",
-                        tournament_id
-                    );
-                }
-            }
-            Err(e) => warn!("[tournament-scheduler] BracketFired serialize error: {}", e),
-        }
+        bridge::push_bracket_fired(hub, tournament_id, player_count, started_at);
+        info!(
+            "[tournament-scheduler] Published bracket start for tournament {}",
+            tournament_id
+        );
     }
 }
 
 /// Spawn the scheduler as a background task.
 ///
-/// Pass `gossip` so the scheduler can broadcast [`SwissMessage::BracketFired`].
+/// Pass `braid_hub` so the scheduler can publish the bracket-start transition.
 /// Pass `on_chain` so the scheduler fires on-chain txs when starting a tournament.
 pub fn spawn_tournament_scheduler(
     store: TournamentStore,
-    gossip: Option<Arc<TournamentGossipService>>,
+    braid_hub: Option<Arc<ResourceHub>>,
     on_chain: Option<(String, String, Arc<Keypair>, solana_sdk::pubkey::Pubkey)>,
 ) -> mpsc::Sender<TournamentTrigger> {
     let (mut scheduler, trigger_tx) = TournamentScheduler::new(store.clone());
-    if let Some(g) = gossip {
-        scheduler.set_gossip(g);
+    if let Some(hub) = braid_hub {
+        scheduler.set_braid_hub(hub);
     }
     if let Some((program_id, rpc_url, authority, host_treasury)) = on_chain {
         scheduler.set_on_chain(program_id, rpc_url, authority, host_treasury);
@@ -956,8 +1057,16 @@ mod tests {
 
     #[test]
     fn small_prize_pool_never_needs_approval() {
-        assert!(!awaiting_prize_release_approval(1_000_000, false, 5_000_000_000));
-        assert!(!awaiting_prize_release_approval(1_000_000, true, 5_000_000_000));
+        assert!(!awaiting_prize_release_approval(
+            1_000_000,
+            false,
+            5_000_000_000
+        ));
+        assert!(!awaiting_prize_release_approval(
+            1_000_000,
+            true,
+            5_000_000_000
+        ));
     }
 
     #[test]

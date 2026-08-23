@@ -11,12 +11,10 @@ pub mod protocol;
 #[cfg(feature = "proxy")]
 pub mod proxy;
 pub mod subscription;
-pub mod tournament;
 
 pub use discovery::*;
 pub use node::*;
 pub use subscription::*;
-pub use tournament::*;
 
 use std::sync::Arc;
 

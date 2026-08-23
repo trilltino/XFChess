@@ -44,6 +44,7 @@ mod music;
 pub mod new_menu;
 #[path = "main_menu/screens.rs"]
 mod screens;
+pub mod tournament_replay;
 
 pub use board_animation::BoardAnimator;
 use modals::{render_ai_setup_modal, render_controls_popup, render_pgn_input_modal};
@@ -67,8 +68,13 @@ impl Plugin for MainMenuPlugin {
             .init_resource::<new_menu::MenuFocusMode>()
             .init_resource::<board_animation::BoardAnimator>()
             .init_resource::<music::MenuMusic>()
+            .init_resource::<tournament_replay::PgnReplayFetch>()
             .init_resource::<WalletBridgePoller>()
             .init_resource::<FontsLoaded>()
+            .add_systems(
+                Update,
+                tournament_replay::poll_pgn_replay_fetch.run_if(in_state(GameState::MainMenu)),
+            )
             .add_systems(
                 OnEnter(GameState::MainMenu),
                 (
@@ -261,12 +267,23 @@ pub fn wallet_connect_overlay_system(
         "Cancel"
     };
 
+    // `ui.horizontal` allocates the full available width of its parent, so a
+    // single centered button inside it still renders flush left — only a
+    // leaf widget's own rect gets centered by `vertical_centered`. Wrapping
+    // it in `allocate_ui` with the row's real content width turns the row
+    // itself into a leaf-sized block that centers correctly.
+    let button_row_width = if poller.bridge_status_error.is_some() {
+        120.0 + 8.0 + 120.0
+    } else {
+        120.0
+    };
+
     egui::Window::new("##wallet_connect_overlay")
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .fixed_size([340.0, 220.0])
+        .fixed_size([360.0, 230.0])
         .order(egui::Order::Foreground)
         .frame(overlay_frame)
         .show(&ctx, |ui| {
@@ -298,36 +315,13 @@ pub fn wallet_connect_overlay_system(
                     );
                     ui.add_space(10.0);
                 }
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_sized(
-                            [120.0, 34.0],
-                            egui::Button::new(
-                                egui::RichText::new(button_text)
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(180, 180, 200)),
-                            )
-                            .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14))
-                            .corner_radius(6.0)
-                            .stroke(egui::Stroke::new(
-                                1.0,
-                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
-                            )),
-                        )
-                        .clicked()
-                    {
-                        if poller.bridge_status_error.is_some() {
-                            retry = true;
-                        } else {
-                            cancelled = true;
-                        }
-                    }
-                    if poller.bridge_status_error.is_some() {
+                ui.allocate_ui(egui::vec2(button_row_width, 34.0), |ui| {
+                    ui.horizontal(|ui| {
                         if ui
                             .add_sized(
                                 [120.0, 34.0],
                                 egui::Button::new(
-                                    egui::RichText::new("Cancel")
+                                    egui::RichText::new(button_text)
                                         .size(11.0)
                                         .color(egui::Color32::from_rgb(180, 180, 200)),
                                 )
@@ -340,9 +334,34 @@ pub fn wallet_connect_overlay_system(
                             )
                             .clicked()
                         {
-                            cancelled = true;
+                            if poller.bridge_status_error.is_some() {
+                                retry = true;
+                            } else {
+                                cancelled = true;
+                            }
                         }
-                    }
+                        if poller.bridge_status_error.is_some() {
+                            if ui
+                                .add_sized(
+                                    [120.0, 34.0],
+                                    egui::Button::new(
+                                        egui::RichText::new("Cancel")
+                                            .size(11.0)
+                                            .color(egui::Color32::from_rgb(180, 180, 200)),
+                                    )
+                                    .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14))
+                                    .corner_radius(6.0)
+                                    .stroke(egui::Stroke::new(
+                                        1.0,
+                                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+                                    )),
+                                )
+                                .clicked()
+                            {
+                                cancelled = true;
+                            }
+                        }
+                    });
                 });
             });
         });
@@ -560,8 +579,11 @@ pub struct BridgeMeResp {
 #[derive(Resource, Default)]
 pub struct WalletBridgePoller {
     /// Channel for incoming (pubkey, username) from a `/status` poll.
-    pub status_rx:
-        Option<crossbeam_channel::Receiver<Result<(Option<String>, Option<String>), String>>>,
+    pub status_rx: Option<
+        crossbeam_channel::Receiver<
+            Result<(Option<String>, Option<String>, Option<String>), String>,
+        >,
+    >,
     /// Last observed bridge status error, if any.
     pub bridge_status_error: Option<String>,
     /// Channel for incoming (sol_balance, usd_per_sol, gbp_per_sol).
@@ -574,6 +596,13 @@ pub struct WalletBridgePoller {
     pub profile_retry_timer: f32,
     /// Last known pubkey — used to detect new connections.
     pub known_pubkey: Option<String>,
+    /// Provider behind the connected wallet: `phantom`, `solflare` or `privy`.
+    ///
+    /// Read by `sync_bridge_pubkey_to_solana` to set
+    /// `SolanaIntegrationState::wallet_is_embedded`, which gates the no-popup
+    /// global-session flow. `None` (an older bridge that does not report it)
+    /// means "assume not embedded", leaving that flow off.
+    pub wallet_provider: Option<String>,
     /// Shared balance data exposed to the UI via `MainMenuUIContext`.
     pub data: std::sync::Arc<std::sync::Mutex<WalletBridgeData>>,
     /// Only poll after the user explicitly clicks Connect Wallet.
@@ -677,9 +706,10 @@ fn poll_wallet_bridge(
     // --- receive status response ---
     if let Some(ref rx) = poller.status_rx {
         match rx.try_recv() {
-            Ok(Ok((pubkey_opt, username_opt))) => {
+            Ok(Ok((pubkey_opt, username_opt, provider_opt))) => {
                 poller.status_rx = None;
                 poller.bridge_status_error = None;
+                poller.wallet_provider = provider_opt;
                 if let Some(pk) = pubkey_opt {
                     poller.show_connect_overlay = false;
                     // The bridge only ever holds a username from two trustworthy
@@ -695,10 +725,7 @@ fn poll_wallet_bridge(
                     if player_identity.username.as_deref() != username_opt.as_deref() {
                         if let Some(ref uname) = username_opt {
                             if !uname.is_empty() {
-                                info!(
-                                    "[WalletBridge] Username from bridge: {}",
-                                    uname
-                                );
+                                info!("[WalletBridge] Username from bridge: {}", uname);
                                 player_identity.username = Some(uname.clone());
                             }
                         }
@@ -873,7 +900,7 @@ fn sync_bridge_pubkey_to_solana(
         ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
     >,
 ) {
-    use crate::multiplayer::solana::integration::state::{DEVNET_RPC_URL, ProfileStatus};
+    use crate::multiplayer::solana::integration::state::{ProfileStatus, DEVNET_RPC_URL};
 
     let Some(ref mut state) = solana_state else {
         return;
@@ -890,6 +917,14 @@ fn sync_bridge_pubkey_to_solana(
         }
     }
     drop(bridge_data);
+
+    // Track whether the connected wallet is a Privy embedded wallet. This gates
+    // the no-popup global-session flow — see
+    // `integration::systems::authorize_global_session_if_needed`, which is
+    // enabled only for embedded wallets because the one unresolved blocker on
+    // that path (a Solflare cluster mismatch) cannot occur without an extension
+    // carrying its own selected cluster.
+    state.wallet_is_embedded = poller.wallet_provider.as_deref() == Some("privy");
 
     // A wallet switch (the user changes the active account in Phantom/
     // Solflare, or connects a different wallet in the bridge popup) must
@@ -953,7 +988,7 @@ fn sync_bridge_pubkey_to_solana(
 }
 
 /// GET http://localhost:7454/status and extract pubkey + username.
-fn fetch_bridge_status() -> Result<(Option<String>, Option<String>), String> {
+fn fetch_bridge_status() -> Result<(Option<String>, Option<String>, Option<String>), String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
@@ -971,7 +1006,14 @@ fn fetch_bridge_status() -> Result<(Option<String>, Option<String>), String> {
         .as_str()
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    Ok((pubkey, username))
+    // `phantom` | `solflare` | `privy`. Absent on an older bridge build, which
+    // is treated as "not an embedded wallet" — the conservative default, since
+    // it leaves the no-popup session flow off.
+    let provider = json["provider"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    Ok((pubkey, username, provider))
 }
 
 /// Fetch JWT from bridge `GET /token`, then call backend `GET /auth/me`.

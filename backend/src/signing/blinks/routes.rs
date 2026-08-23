@@ -423,7 +423,6 @@ async fn confirm_registration(
             if !t.players.iter().any(|p| p == &player.to_string()) {
                 t.players.push(player.to_string());
                 t.player_elos.push(0);
-                t.prize_pool += t.entry_fee_lamports.saturating_sub(t.platform_fee_lamports);
             }
         })
         .await;

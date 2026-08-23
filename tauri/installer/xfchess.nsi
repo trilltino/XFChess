@@ -89,6 +89,19 @@ Section "Install"
 
   ; Launcher: sets production endpoints, starts the wallet bridge, then the game.
   ; This completes the dev .bat (which started only the bridge).
+  ;
+  ; Kills any already-running bridge/game first: the bridge holds its
+  ; connected wallet (pubkey + username) in memory for as long as the process
+  ; lives, with no expiry, and nothing here used to stop a leftover instance
+  ; from a previous launch before starting a new pair — closing the game
+  ; window doesn't kill the bridge, so it survives indefinitely in the
+  ; background. A later launch would then silently fail to rebind the bridge's
+  ; port (already held by the stale one) while the fresh game instance still
+  ; polled that same stale bridge, showing whichever wallet was connected
+  ; however many sessions ago instead of the one just chosen. Confirmed live:
+  ; a player who reconnected a different wallet kept seeing an old username
+  ; from a session that had never actually been closed. Forcing a clean slate
+  ; on every launch is the only version of this that can't drift.
   SetOutPath "$INSTDIR"
   FileOpen $0 "$INSTDIR\launch.bat" w
   FileWrite $0 "@echo off$\r$\n"
@@ -96,6 +109,9 @@ Section "Install"
   FileWrite $0 "set SCRIPT_DIR=%~dp0$\r$\n"
   FileWrite $0 "set BACKEND_URL=${BACKEND_URL}$\r$\n"
   FileWrite $0 "set SIGNING_SERVICE_URL=${SIGNING_URL}$\r$\n"
+  FileWrite $0 "taskkill /F /IM ${BRIDGE_EXE} >nul 2>&1$\r$\n"
+  FileWrite $0 "taskkill /F /IM ${APP_EXE} >nul 2>&1$\r$\n"
+  FileWrite $0 "timeout /t 1 /nobreak >nul$\r$\n"
   FileWrite $0 "start $\"XFChess Wallet$\" /D $\"%SCRIPT_DIR%$\" $\"%SCRIPT_DIR%${BRIDGE_EXE}$\"$\r$\n"
   FileWrite $0 "start $\"XFChess$\" /D $\"%SCRIPT_DIR%$\" $\"%SCRIPT_DIR%${APP_EXE}$\"$\r$\n"
   FileWrite $0 "endlocal$\r$\n"

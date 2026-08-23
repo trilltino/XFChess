@@ -126,8 +126,23 @@ pub const DEFAULT_HEAP_SIZE: u32 = 256_000;
 /// Lamports per SOL.
 pub const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
-/// SOL price in GBP for cost estimation.
+/// SOL price in GBP for cost estimation. This is a static fallback, not a
+/// live rate — this crate is a standalone offline benchmarking tool with no
+/// wired path to the backend's live rate cache (`backend/src/signing/routes/rates.rs`).
+/// Set `SOL_GBP_RATE_OVERRIDE` (a float) to plug in a fresher figure at
+/// report time without a code change; `sol_gbp_rate()` is what callers should
+/// use instead of the constant directly.
 pub const SOL_GBP_RATE: f64 = 60.0;
+
+/// Resolves the SOL/GBP rate to use for a report: `SOL_GBP_RATE_OVERRIDE` env
+/// var if set and parseable, else the static `SOL_GBP_RATE` fallback.
+pub fn sol_gbp_rate() -> f64 {
+    std::env::var("SOL_GBP_RATE_OVERRIDE")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|r| *r > 0.0)
+        .unwrap_or(SOL_GBP_RATE)
+}
 
 /// Transaction base fee in lamports.
 pub const BASE_TX_FEE: u64 = 5_000;

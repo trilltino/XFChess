@@ -1,9 +1,9 @@
 //! Full Braid-HTTP subscriber for chess game move streams.
 //!
-//! [`ChessSubscriber`] opens a long-lived `GET` with `Subscribe: keep-alive`
+//! [`ChessSubscriber`] opens a long-lived `GET` with `Subscribe: true`
 //! and yields each [`ChessMessage`] as it arrives via server-sent Braid updates.
 //!
-//! Uses `braid-http`'s [`BraidClient`] which handles multipart Braid framing,
+//! Uses `braid-http`'s [`BraidClient`] which handles Braid update framing,
 //! reconnection, and heartbeat detection.
 //!
 //! # Example
@@ -112,7 +112,7 @@ impl ChessSubscriber {
         let url = resource.to_url(&self.base_url);
         debug!("[BRAID SUB] Subscribing to {}", url);
 
-        // Build a subscribe request (BraidClient handles the Subscribe: keep-alive header)
+        // Build a subscribe request (BraidClient sets the Subscribe header)
         let request = BraidRequest::new().subscribe();
 
         let mut subscription: Subscription = self

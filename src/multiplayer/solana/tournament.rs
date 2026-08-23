@@ -37,6 +37,16 @@ pub struct TournamentSummary {
     pub is_private: bool,
 }
 
+/// Tabs in a tournament card: the games happening now, the ones still to
+/// come, and the ones you can replay.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GameTab {
+    #[default]
+    Live,
+    Upcoming,
+    Finished,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum TournamentJoinStatus {
     #[default]
@@ -80,6 +90,24 @@ pub struct TournamentClientState {
         crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentGameListing>>,
     >,
     pub last_games_poll: Option<Instant>,
+    /// Games of the tournament currently expanded in the browser, from
+    /// `GET /api/tournament/{id}/games`.
+    ///
+    /// Separate from `tournament_games` (the cross-tournament walk) because
+    /// this one is *rich* — backend-computed watchability, move counts,
+    /// results — and scoped to one tournament, so it can poll fast without the
+    /// per-tournament bracket fan-out.
+    pub detail_games: Vec<crate::multiplayer::network::vps::TournamentGameListing>,
+    /// Which tournament `detail_games` describes.
+    pub detail_games_for: Option<u64>,
+    pub detail_games_rx: Option<
+        crossbeam_channel::Receiver<
+            Result<Vec<crate::multiplayer::network::vps::TournamentGameListing>, String>,
+        >,
+    >,
+    pub last_detail_poll: Option<Instant>,
+    /// Which of the Live / Upcoming / Finished tabs the expanded card shows.
+    pub detail_tab: GameTab,
     pub bracket_fired_rx: Option<crossbeam_channel::Receiver<BracketFiredEvent>>,
     pub bracket_ready: bool,
     pub password_input: String,
@@ -121,6 +149,20 @@ pub struct TournamentClientState {
     /// Send closure for outbound chat (sends to VPS ws endpoint).
     pub chat_tx: Option<crossbeam_channel::Sender<(String, String)>>,
 
+    /// In-flight `/my-status` poll (see `poll_my_tournament_status`).
+    pub status_rx: Option<
+        crossbeam_channel::Receiver<
+            Result<crate::multiplayer::network::vps::MyTournamentStatus, String>,
+        >,
+    >,
+    /// Latest backend-reported position in the active tournament. Drives the
+    /// waiting-room / eliminated / champion panels.
+    pub my_state: Option<crate::multiplayer::network::vps::PlayerState>,
+    /// Finishing position once known (1 = champion).
+    pub placing: Option<u8>,
+    /// Prize owed for `placing`, in lamports.
+    pub prize_lamports: Option<u64>,
+
     /// Tournament IDs the player dismissed from the browser (e.g. a cancelled
     /// tournament they no longer want cluttering the list). Client-side only —
     /// `available_tournaments` is fully replaced on every poll, so this can't
@@ -143,6 +185,11 @@ impl Default for TournamentClientState {
             tournament_games: Vec::new(),
             games_rx: None,
             last_games_poll: None,
+            detail_games: Vec::new(),
+            detail_games_for: None,
+            detail_games_rx: None,
+            last_detail_poll: None,
+            detail_tab: GameTab::Live,
             bracket_fired_rx: None,
             bracket_ready: false,
             password_input: String::new(),
@@ -164,6 +211,10 @@ impl Default for TournamentClientState {
             chat_input: String::new(),
             chat_tx: None,
             dismissed_ids: std::collections::HashSet::new(),
+            status_rx: None,
+            my_state: None,
+            placing: None,
+            prize_lamports: None,
         }
     }
 }
@@ -302,7 +353,7 @@ pub struct BracketFiredEvent {
 /// Spawn the real on-chain `register_player` transaction (deposits the entry
 /// fee into escrow and adds the player to their tournament shard) on a
 /// background thread. This is separate from — and should run before —
-/// `vps::join_tournament`, which only maintains the off-chain bracket/roster
+/// `vps::confirm_join`, which only maintains the off-chain bracket/roster
 /// and never touches the chain. `password` is unused here (password gating
 /// lives entirely in the off-chain join call); kept for signature stability.
 pub fn spawn_register_tournament(
@@ -329,6 +380,7 @@ pub fn spawn_swiss_subscription(
 ) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
+            use braid_chess::{MatchResult, SwissMessage};
             use braid_iroh::BraidIrohNode;
             use braid_iroh::DiscoveryConfig;
 
@@ -397,16 +449,18 @@ pub fn spawn_swiss_subscription(
                     GossipEvent::Received(message) => message.content,
                     _ => continue,
                 };
-                let Ok(text) = std::str::from_utf8(&payload) else {
+                // The topic carries Braid updates for every one of this
+                // tournament's resources; `SwissMessage::from_update` reads the
+                // resource path off the update and returns `None` for the ones
+                // this client has no event for (roster, meta).
+                let Ok(update) = serde_json::from_slice::<braid_core::Update>(&payload) else {
                     continue;
                 };
-                let Ok(swiss_msg) =
-                    serde_json::from_str::<braid_iroh::tournament::SwissMessage>(text)
-                else {
+                let Some(swiss_msg) = SwissMessage::from_update(&update) else {
                     continue;
                 };
                 match swiss_msg {
-                    braid_iroh::tournament::SwissMessage::RoundStarted {
+                    SwissMessage::RoundStarted {
                         round, pairings, ..
                     } => {
                         let _ = round_tx.send(SwissRoundStartedEvent {
@@ -418,7 +472,7 @@ pub fn spawn_swiss_subscription(
                                 .collect(),
                         });
                     }
-                    braid_iroh::tournament::SwissMessage::ResultRecorded {
+                    SwissMessage::ResultRecorded {
                         round,
                         board,
                         result,
@@ -428,12 +482,8 @@ pub fn spawn_swiss_subscription(
                         // white/black player identifiers are resolved from the pairing
                         // stored alongside the round.
                         let (white, black) = match &result {
-                            braid_iroh::tournament::MatchResult::Win { winner } => {
-                                (winner.clone(), String::new())
-                            }
-                            braid_iroh::tournament::MatchResult::Draw => {
-                                (String::new(), String::new())
-                            }
+                            MatchResult::Win { winner } => (winner.clone(), String::new()),
+                            MatchResult::Draw => (String::new(), String::new()),
                         };
                         let _ = result_tx.send(SwissResultRecordedEvent {
                             tournament_id,
@@ -444,9 +494,7 @@ pub fn spawn_swiss_subscription(
                             result: result.to_string(),
                         });
                     }
-                    braid_iroh::tournament::SwissMessage::StandingsUpdated {
-                        standings, ..
-                    } => {
+                    SwissMessage::StandingsUpdated { standings, .. } => {
                         let _ = standings_tx.send(SwissStandingsUpdatedEvent {
                             tournament_id,
                             standings: standings
@@ -455,7 +503,7 @@ pub fn spawn_swiss_subscription(
                                 .collect(),
                         });
                     }
-                    braid_iroh::tournament::SwissMessage::BracketFired {
+                    SwissMessage::BracketFired {
                         player_count,
                         started_at,
                         ..
@@ -561,6 +609,70 @@ fn poll_tournament_list(
         .detach();
 }
 
+/// Polls `GET /api/tournament/{id}/games` for the tournament the viewer has
+/// expanded, every 3 seconds.
+///
+/// One request for one tournament, against the cross-tournament walk's request
+/// *per advertised tournament* — so this can afford to be three times as fresh
+/// while doing a fraction of the work. Everything the Live/Upcoming/Finished
+/// tabs need arrives already computed.
+fn poll_expanded_tournament_games(mut tournament: ResMut<TournamentClientState>) {
+    if let Some(ref rx) = tournament.detail_games_rx {
+        match rx.try_recv() {
+            Ok(Ok(games)) => {
+                tournament.detail_games = games;
+                tournament.detail_games_rx = None;
+            }
+            Ok(Err(e)) => {
+                warn!("[TOURNAMENT] tournament games fetch failed: {e}");
+                tournament.detail_games_rx = None;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(_) => tournament.detail_games_rx = None,
+        }
+    }
+
+    let Some(expanded) = tournament.expanded_tournament_id else {
+        // Collapsed: drop the list so a stale tournament's games can't render
+        // under a different card later.
+        if tournament.detail_games_for.is_some() {
+            tournament.detail_games.clear();
+            tournament.detail_games_for = None;
+        }
+        return;
+    };
+
+    // Switching cards must not show the previous tournament's games.
+    if tournament.detail_games_for != Some(expanded) {
+        tournament.detail_games.clear();
+        tournament.detail_games_for = Some(expanded);
+        tournament.last_detail_poll = None;
+    }
+
+    if tournament.detail_games_rx.is_some() {
+        return;
+    }
+    let should_poll = tournament
+        .last_detail_poll
+        .map(|t| t.elapsed().as_secs() >= 3)
+        .unwrap_or(true);
+    if !should_poll {
+        return;
+    }
+
+    tournament.last_detail_poll = Some(Instant::now());
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    tournament.detail_games_rx = Some(rx);
+
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            let _ = tx.send(crate::multiplayer::network::vps::fetch_tournament_games(
+                expanded,
+            ));
+        })
+        .detach();
+}
+
 /// Polls the on-chain tournament-games list (bracket matches with a Solana
 /// game_id) while the Tournaments browser is open, every 10 seconds. Feeds the
 /// per-tournament "Watch Live" list.
@@ -631,6 +743,158 @@ fn poll_bracket_fired(mut tournament: ResMut<TournamentClientState>) {
     }
 }
 
+/// How often to ask the backend where we stand in the active tournament.
+const MY_STATUS_POLL_SECS: f32 = 3.0;
+
+/// Drives the client's tournament state from `GET /my-status`.
+///
+/// This is the producer `TournamentMatchAssignedEvent` never had. That event
+/// is consumed by `handle_tournament_match_assigned`, which does *everything*
+/// needed to actually play a tournament match — session key setup, P2P
+/// connect, ER delegation, transition to `InGame` — but nothing in the
+/// codebase ever wrote it, so the handler could never run and the client
+/// could not enter any tournament match, in any round.
+///
+/// It also drives the between-rounds UI: `waiting_for_next_match` was only
+/// ever assigned `false`, so the (fully written) waiting-room panel in
+/// `screens.rs` / `game_ui.rs` was unreachable, and a player who won round 1
+/// was dropped to the menu with no sign the tournament was still running.
+///
+/// See docs/plans/tournament-end-to-end-fix-plan.md §5 Phase 1.
+fn poll_my_tournament_status(
+    time: Res<Time>,
+    mut tournament: ResMut<TournamentClientState>,
+    solana_state: Option<
+        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
+    mut assigned: MessageWriter<TournamentMatchAssignedEvent>,
+) {
+    let Some(tournament_id) = tournament.active_tournament_id else {
+        return;
+    };
+    let Some(wallet) = solana_state.as_ref().and_then(|s| s.wallet_pubkey) else {
+        return;
+    };
+
+    // Collect the in-flight response before issuing another request.
+    if let Some(rx) = tournament.status_rx.as_ref() {
+        match rx.try_recv() {
+            Ok(Ok(status)) => {
+                tournament.status_rx = None;
+                apply_my_status(&mut tournament, tournament_id, status, &mut assigned);
+            }
+            Ok(Err(e)) => {
+                tournament.status_rx = None;
+                tournament.last_poll_error = Some(e);
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => return,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                tournament.status_rx = None;
+            }
+        }
+    }
+
+    tournament.poll_timer += time.delta_secs();
+    if tournament.poll_timer < MY_STATUS_POLL_SECS {
+        return;
+    }
+    tournament.poll_timer = 0.0;
+
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    tournament.status_rx = Some(rx);
+    let wallet_str = wallet.to_string();
+    std::thread::spawn(move || {
+        let result =
+            crate::multiplayer::network::vps::my_tournament_status(tournament_id, &wallet_str);
+        let _ = tx.send(result);
+    });
+}
+
+/// Translates a `/my-status` snapshot into client state + events.
+fn apply_my_status(
+    tournament: &mut TournamentClientState,
+    tournament_id: u64,
+    status: crate::multiplayer::network::vps::MyTournamentStatus,
+    assigned: &mut MessageWriter<TournamentMatchAssignedEvent>,
+) {
+    use crate::multiplayer::network::vps::PlayerState;
+
+    tournament.last_poll_error = None;
+    tournament.my_state = Some(status.state);
+    tournament.placing = status.placing;
+    tournament.prize_lamports = status.prize_lamports;
+
+    if let Some(ref last) = status.last_result {
+        tournament.last_match_result = Some(if last.won {
+            format!("Round {} — win", last.round + 1)
+        } else {
+            format!("Round {} — loss", last.round + 1)
+        });
+    }
+
+    match status.state {
+        PlayerState::MatchReady => {
+            let Some(m) = status.my_match else { return };
+            let Some(game_id) = m.game_id else { return };
+            // Already in this game — nothing to do.
+            if tournament.active_game_id == Some(game_id) {
+                return;
+            }
+            tournament.waiting_for_next_match = false;
+            tournament.status_message = format!(
+                "Round {} — your match is ready",
+                status.round.map(|r| r + 1).unwrap_or(1)
+            );
+            info!(
+                "[TOURNAMENT] Match ready in tournament {} (game {}, vs {})",
+                tournament_id, game_id, m.opponent_pubkey
+            );
+            assigned.write(TournamentMatchAssignedEvent {
+                tournament_id,
+                match_index: m.match_index as u8,
+                game_id: Some(game_id),
+                opponent_pubkey: m.opponent_pubkey,
+                opponent_node_id: m.opponent_node_id,
+                your_color: m.your_color,
+            });
+        }
+        PlayerState::AwaitingOpponent | PlayerState::AwaitingGameId => {
+            // Won (or seated) but nothing to enter yet. Clear the stale game
+            // id so the next MatchReady isn't suppressed by the guard above.
+            tournament.active_game_id = None;
+            tournament.waiting_for_next_match = true;
+            tournament.status_message = match status.blocked_by {
+                Some(ref b) if b.matches_remaining > 0 => format!(
+                    "Waiting for round {} to finish — {} match{} remaining",
+                    b.round + 1,
+                    b.matches_remaining,
+                    if b.matches_remaining == 1 { "" } else { "es" }
+                ),
+                _ => "Waiting for your next opponent…".to_string(),
+            };
+        }
+        PlayerState::Eliminated | PlayerState::Champion | PlayerState::Cancelled => {
+            tournament.waiting_for_next_match = false;
+            tournament.active_game_id = None;
+            tournament.status_message = match status.state {
+                PlayerState::Champion => "You won the tournament".to_string(),
+                PlayerState::Cancelled => "Tournament cancelled".to_string(),
+                _ => match status.placing {
+                    Some(p) => format!("Eliminated — finished #{p}"),
+                    None => "Eliminated".to_string(),
+                },
+            };
+        }
+        PlayerState::Registered => {
+            tournament.waiting_for_next_match = false;
+            tournament.status_message = "Registered — waiting for the tournament to start".into();
+        }
+        PlayerState::NotRegistered => {
+            tournament.waiting_for_next_match = false;
+        }
+    }
+}
+
 pub struct TournamentClientPlugin;
 
 impl Plugin for TournamentClientPlugin {
@@ -643,7 +907,9 @@ impl Plugin for TournamentClientPlugin {
                     poll_tournament_tasks,
                     poll_tournament_list,
                     poll_tournament_games_list,
+                    poll_expanded_tournament_games,
                     poll_bracket_fired,
+                    poll_my_tournament_status,
                 ),
             )
             .add_systems(Update, handle_tournament_match_assigned);
@@ -908,11 +1174,18 @@ fn fetch_registration_info(rpc_base: &str, tournament_id: u64) -> Result<Registr
 /// backend, builds the instruction client-side, signs it via the Tauri
 /// wallet bridge (the same "one popup" mechanism used for wagered games —
 /// see `lobby::async_create_game`), and confirms on-chain before returning.
+/// Returns the confirmed `register_player` transaction signature. The caller
+/// must hand that signature to `vps::confirm_join`, which is what actually
+/// puts the player on the backend's roster: the backend re-reads the tx from
+/// chain and verifies the player signed a real `register_player` for this
+/// tournament before trusting it. Previously this returned a bare `Ok(0)` and
+/// dropped the signature on the floor, which left the caller with nothing to
+/// confirm with.
 pub fn register_tournament(
     tournament_id: u64,
     wallet_pubkey: Pubkey,
     rpc_url: &str,
-) -> Result<u64, String> {
+) -> Result<String, String> {
     use crate::multiplayer::network::vps::vps_base;
     use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
     use crate::multiplayer::solana::tournament_session::build_register_player_ix;
@@ -925,7 +1198,7 @@ pub fn register_tournament(
         Pubkey::from_str(&info.host_treasury).map_err(|e| format!("bad host_treasury: {e}"))?;
 
     // Matches the ELO the off-chain roster join call already uses (see
-    // `vps::join_tournament`) — real ELO-based seeding is a future
+    // `vps::confirm_join`) — real ELO-based seeding is a future
     // enhancement, not something this registration tx needs to solve.
     const DEFAULT_ELO: u32 = 1200;
 
@@ -951,5 +1224,5 @@ pub fn register_tournament(
         "[TOURNAMENT] register_player confirmed for tournament {} ({})",
         tournament_id, sig
     );
-    Ok(0)
+    Ok(sig.to_string())
 }

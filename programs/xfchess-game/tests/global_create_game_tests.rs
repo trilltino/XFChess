@@ -198,6 +198,112 @@ async fn global_create_game_rejects_unreasonable_platform_fee() {
     );
 }
 
+/// The session vault's real lamport balance is a separate constraint from the
+/// soft caps the player authorized, and the two drift apart constantly: every
+/// completed game spends balance while `spending_limit`/`max_wager` stay put.
+///
+/// Before the `GlobalSessionVaultUnderfunded` guard, that shortfall surfaced
+/// from deep inside `debit_program_pda` as a bare insufficient-funds failure
+/// (the "6060" reports), which reads as a program bug rather than "top up your
+/// session" — and was one of the three reasons the no-popup session path was
+/// disabled client-side. This proves the caps passing is *not* sufficient.
+#[tokio::test]
+async fn global_create_game_rejects_an_underfunded_session_vault() {
+    let player = Pubkey::new_unique();
+    let session_signer = Keypair::new();
+    let wager_amount = 10_000_000u64;
+
+    // Caps are deliberately generous, so `has_budget` passes and the ONLY thing
+    // that can reject this is the balance check.
+    let (session_pda, mut session_account_data) = global_session_account(
+        player,
+        session_signer.pubkey(),
+        5_000_000_000,
+        1_000_000_000,
+    );
+
+    // Enough to keep the delegation account itself rent-exempt, but nowhere
+    // near enough to also fund the new Game PDA's rent plus the wager.
+    session_account_data.lamports = 2_000_000;
+
+    let mut ctx = start(vec![(session_pda, session_account_data)]).await;
+
+    let game_id = 45u64;
+    let ix = global_create_game_ix(
+        session_pda,
+        session_signer.pubkey(),
+        player,
+        game_id,
+        wager_amount,
+        MatchType::Rated,
+        0,
+        300,
+        0,
+    );
+
+    let err = send(&mut ctx, ix, &[&session_signer])
+        .await
+        .expect_err("an underfunded session vault must be rejected up front");
+
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(
+            xfchess_game::errors::GameErrorCode::GlobalSessionVaultUnderfunded
+        )),
+        "expected GlobalSessionVaultUnderfunded, got {err:?}"
+    );
+}
+
+/// The guard must not overshoot: a vault that genuinely can cover rent + wager
+/// and stay rent-exempt still has to work. Without this, a too-strict bound
+/// would break every legitimate session and be indistinguishable, from the
+/// client's side, from the bug it replaced.
+#[tokio::test]
+async fn global_create_game_accepts_a_vault_funded_exactly_enough() {
+    let player = Pubkey::new_unique();
+    let session_signer = Keypair::new();
+    let wager_amount = 10_000_000u64;
+
+    let (session_pda, mut session_account_data) = global_session_account(
+        player,
+        session_signer.pubkey(),
+        5_000_000_000,
+        1_000_000_000,
+    );
+
+    // rent-exemption for the delegation account + the Game PDA's rent + the
+    // wager, with a small margin. Well under the 1 SOL the helper defaults to,
+    // so this is a genuinely tight vault rather than a restatement of the
+    // happy-path test above.
+    session_account_data.lamports = 20_000_000;
+
+    let mut ctx = start(vec![(session_pda, session_account_data)]).await;
+
+    let game_id = 46u64;
+    let ix = global_create_game_ix(
+        session_pda,
+        session_signer.pubkey(),
+        player,
+        game_id,
+        wager_amount,
+        MatchType::Rated,
+        0,
+        300,
+        0,
+    );
+
+    send(&mut ctx, ix, &[&session_signer])
+        .await
+        .expect("a vault holding rent + wager + rent-exemption must be accepted");
+
+    let escrow_balance = ctx
+        .banks_client
+        .get_balance(escrow_pda(game_id))
+        .await
+        .unwrap();
+    assert_eq!(escrow_balance, wager_amount);
+}
+
 #[tokio::test]
 async fn global_create_game_works_for_a_free_zero_wager_game() {
     // Rent still has to be funded by the PDA vault even with no wager — this
@@ -322,6 +428,48 @@ fn global_join_game_ix(
         accounts,
         data,
     }
+}
+
+/// Join-side half of the same guard. The joiner's vault is a different account
+/// from the creator's, so a session that could afford to *create* games says
+/// nothing about whether this one can afford to *join* one.
+#[tokio::test]
+async fn global_join_game_rejects_an_underfunded_session_vault() {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+    let session_signer = Keypair::new();
+    let game_id = 101u64;
+    let wager_amount = 20_000_000u64;
+
+    // Generous caps again — only the balance check may reject this.
+    let (session_pda, mut session_account_data) =
+        global_session_account(black, session_signer.pubkey(), 5_000_000_000, 1_000_000_000);
+    session_account_data.lamports = 2_000_000;
+
+    let (game_pda_key, game_account_data) = waiting_game_account(game_id, white, wager_amount);
+    let (white_profile_pda, white_profile_data) = player_profile_account(white);
+    let (black_profile_pda, black_profile_data) = player_profile_account(black);
+
+    let mut ctx = start(vec![
+        (session_pda, session_account_data),
+        (game_pda_key, game_account_data),
+        (white_profile_pda, white_profile_data),
+        (black_profile_pda, black_profile_data),
+    ])
+    .await;
+
+    let ix = global_join_game_ix(session_pda, session_signer.pubkey(), black, white, game_id);
+    let err = send(&mut ctx, ix, &[&session_signer])
+        .await
+        .expect_err("an underfunded joiner vault must be rejected up front");
+
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(
+            xfchess_game::errors::GameErrorCode::GlobalSessionVaultUnderfunded
+        )),
+        "expected GlobalSessionVaultUnderfunded, got {err:?}"
+    );
 }
 
 #[tokio::test]

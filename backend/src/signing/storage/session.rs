@@ -346,6 +346,119 @@ impl SessionStore {
         Ok(())
     }
 
+    // ── Social identities (Privy Google/email → wallet) ────────────────────────
+
+    /// Resolves a social credential to the wallet it is bound to, if any.
+    ///
+    /// `provider`/`subject` is the primary key — for Privy, `subject` is the
+    /// user's DID. Returns `None` for a first-time login.
+    pub async fn find_wallet_by_social(&self, provider: &str, subject: &str) -> Option<String> {
+        sqlx::query_as::<_, (String,)>(
+            "SELECT wallet FROM social_identities WHERE provider = ? AND subject = ?",
+        )
+        .bind(provider)
+        .bind(subject)
+        .fetch_one(&self.pool)
+        .await
+        .ok()
+        .map(|(w,)| w)
+    }
+
+    /// Resolves a provider-asserted email to the wallet already bound to it.
+    ///
+    /// This is the D3 ("one human, one account") lookup: before binding a social
+    /// credential to a NEW wallet, callers check whether that email is already
+    /// spoken for and refuse rather than silently creating a second account.
+    /// Case-insensitive to match `idx_social_identities_email`.
+    pub async fn find_wallet_by_social_email(&self, provider: &str, email: &str) -> Option<String> {
+        sqlx::query_as::<_, (String,)>(
+            "SELECT wallet FROM social_identities WHERE provider = ? AND LOWER(email) = LOWER(?)",
+        )
+        .bind(provider)
+        .bind(email)
+        .fetch_one(&self.pool)
+        .await
+        .ok()
+        .map(|(w,)| w)
+    }
+
+    /// Inserts or refreshes a social credential → wallet binding.
+    ///
+    /// On conflict only `last_login_at` and `login_method` are updated. `wallet`
+    /// is deliberately NOT updated: re-pointing an existing credential at a
+    /// different wallet is an account takeover primitive, and the same refusal
+    /// exists in `link_wallet` for the email/password path. A genuine wallet
+    /// change has to go through support.
+    pub async fn upsert_social_identity(
+        &self,
+        provider: &str,
+        subject: &str,
+        wallet: &str,
+        login_method: &str,
+        email: Option<&str>,
+        embedded: bool,
+    ) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            "INSERT INTO social_identities \
+               (provider, subject, wallet, login_method, email, embedded, created_at, last_login_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+             ON CONFLICT(provider, subject) DO UPDATE SET \
+               last_login_at = excluded.last_login_at, \
+               login_method  = excluded.login_method",
+        )
+        .bind(provider)
+        .bind(subject)
+        .bind(wallet)
+        .bind(login_method)
+        .bind(email)
+        .bind(if embedded { 1 } else { 0 })
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Login methods bound to a wallet, for `GET /auth/me`. Empty for a
+    /// wallet-only (Phantom/Solflare) account.
+    pub async fn social_login_methods(&self, wallet: &str) -> Vec<String> {
+        sqlx::query_as::<_, (String,)>(
+            "SELECT DISTINCT login_method FROM social_identities WHERE wallet = ?",
+        )
+        .bind(wallet)
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| rows.into_iter().map(|(m,)| m).collect())
+        .unwrap_or_default()
+    }
+
+    /// True when this wallet was created by a social provider as an embedded
+    /// wallet. UI-only — it drives "back up your wallet" nudges and the
+    /// un-backed-up balance cap. It must never gate `can_wager`.
+    pub async fn wallet_is_embedded(&self, wallet: &str) -> bool {
+        sqlx::query_as::<_, (i64,)>(
+            "SELECT COUNT(*) FROM social_identities WHERE wallet = ? AND embedded = 1",
+        )
+        .bind(wallet)
+        .fetch_one(&self.pool)
+        .await
+        .map(|(n,)| n > 0)
+        .unwrap_or(false)
+    }
+
+    /// Counts social identities created since `since` from one IP-derived
+    /// bucket. Social signup is ~free, so this is the cheap Sybil signal;
+    /// wagering still requires KYC + CACF, which is the real gate.
+    pub async fn count_social_identities_since(&self, since: i64) -> i64 {
+        sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM social_identities WHERE created_at >= ?")
+            .bind(since)
+            .fetch_one(&self.pool)
+            .await
+            .map(|(n,)| n)
+            .unwrap_or(0)
+    }
+
     /// Overwrites the username for a wallet (used when syncing from on-chain profile).
     pub async fn update_username(&self, wallet: &str, username: &str) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users_v2 SET username = ? WHERE wallet = ?")
@@ -487,6 +600,20 @@ impl SessionStore {
         Ok(pubkey)
     }
 
+    /// Counts sessions this wallet has opened but never activated. Feeds the
+    /// `/session/create` funding cap: each such row corresponds to a session
+    /// key funded out of the fee-payer pool that no setup transaction ever
+    /// consumed, so an unbounded count is an unbounded drain.
+    pub async fn count_pending_for_wallet(&self, wallet: &str) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sessions WHERE wallet = ? AND active = 0",
+        )
+        .bind(wallet)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0)
+    }
+
     /// Like `create`, but stores a caller-supplied keypair instead of
     /// generating a fresh one — used for games created via the global
     /// session flow (`global_create_game`/`global_join_game`), where
@@ -514,11 +641,12 @@ impl SessionStore {
         // reassigning when an ACTIVE row already exists under a DIFFERENT
         // wallet; a re-call for the SAME wallet (retry, idempotent re-track)
         // still proceeds exactly as before.
-        if let Some((existing_wallet, active)) =
-            sqlx::query_as::<_, (String, i64)>("SELECT wallet, active FROM sessions WHERE game_id = ?")
-                .bind(game_id as i64)
-                .fetch_optional(&self.pool)
-                .await?
+        if let Some((existing_wallet, active)) = sqlx::query_as::<_, (String, i64)>(
+            "SELECT wallet, active FROM sessions WHERE game_id = ?",
+        )
+        .bind(game_id as i64)
+        .fetch_optional(&self.pool)
+        .await?
         {
             if active != 0 && existing_wallet != wallet_str {
                 anyhow::bail!(
@@ -806,7 +934,11 @@ mod tests {
             .fetch_one(&store.pool)
             .await
             .expect("raw row");
-        assert_ne!(raw.len(), 64, "global-session keypair must be encrypted too");
+        assert_ne!(
+            raw.len(),
+            64,
+            "global-session keypair must be encrypted too"
+        );
 
         let entry = store.get(3).await.expect("get session");
         assert_eq!(entry.session_pubkey(), expected_pubkey);

@@ -58,7 +58,7 @@ struct StockfishInner {
 impl StockfishInner {
     fn new() -> Result<Self, String> {
         let stockfish_path = resolve_stockfish_path()?;
-        
+
         let mut cmd = Command::new(&stockfish_path);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -70,14 +70,13 @@ impl StockfishInner {
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
 
-        let mut child = cmd.spawn()
-            .map_err(|e| {
-                format!(
-                    "Failed to spawn Stockfish at '{}': {}",
-                    stockfish_path.display(),
-                    e
-                )
-            })?;
+        let mut child = cmd.spawn().map_err(|e| {
+            format!(
+                "Failed to spawn Stockfish at '{}': {}",
+                stockfish_path.display(),
+                e
+            )
+        })?;
 
         let stdin = child.stdin.take().ok_or("Failed to get Stockfish stdin")?;
         let stdout = child

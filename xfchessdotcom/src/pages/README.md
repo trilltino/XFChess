@@ -1,22 +1,28 @@
 # xfchessdotcom/src/pages
 
-One component per route, registered in [../App.tsx](../App.tsx).
+One component per route, registered in [../App.tsx](../App.tsx). Pages are
+grouped into subdirectories by what they're relevant to.
 
-## Main flows
+## Groups
 
-| Pages | Flow |
-|-------|------|
-| [SignIn.tsx](SignIn.tsx), [VerifyProfile.tsx](VerifyProfile.tsx) | Auth: wallet connect → backend challenge/JWT → on-chain profile |
-| [Play.tsx](Play.tsx), [Launch.tsx](Launch.tsx) | Game launch — hands off to the desktop app via the `xfchess://` deep link / localhost bridge |
-| [Tournaments.tsx](Tournaments.tsx), [TournamentDetail.tsx](TournamentDetail.tsx), [TournamentPlay.tsx](TournamentPlay.tsx), [TournamentStandings.tsx](TournamentStandings.tsx) | Tournament browse → register (on-chain) → play → standings |
-| [Spectate.tsx](Spectate.tsx), [Players.tsx](Players.tsx), [ProfileViewer.tsx](ProfileViewer.tsx) | Watch live games (delayed feed), browse players |
-| [Kyc.tsx](Kyc.tsx), [Compliance.tsx](Compliance.tsx), [Legal.tsx](Legal.tsx) | Regulatory |
-| [ChessComputer.tsx](ChessComputer.tsx), [AntiCheat.tsx](AntiCheat.tsx), [Features.tsx](Features.tsx), [Home.tsx](Home.tsx), [NewsRelease.tsx](NewsRelease.tsx) | Marketing/info pages |
-| [LichessCallback.tsx](LichessCallback.tsx) | OAuth return leg for linked Lichess ratings |
+| Directory | Pages | Flow |
+|-----------|-------|------|
+| [marketing/](marketing/) | home.tsx, features.tsx | Landing page and the feature list |
+| [play/](play/) | play.tsx | Platform download links, resolved from the latest GitHub release |
+| [tournaments/](tournaments/) | tournaments.tsx | Live calendar of scheduled events, read from `GET /tournaments` |
+
+The site is deliberately four routes: `/home`, `/play`, `/tournaments`,
+`/features`. Anything else falls through the catch-all in App.tsx to `/home`.
+
+The auth, regulatory, and social groups (sign-in, profile, KYC, identity
+vault, wallet setup, player lookup, spectate, legal, compliance, anti-cheat,
+release notes) and the per-tournament detail/standings/play pages were
+removed deliberately, not lost — recover any of them from git history rather
+than rewriting from scratch.
 
 ## Conventions
 
 - Pages compose [../components/](../components/) and call the backend only through
   [../lib/api/](../lib/api/).
-- Tournament/game pages must route ER-delegated actions through
-  [../lib/magicblock.ts](../lib/magicblock.ts) (`getProgramForDelegated`).
+- Each page's imports reach up two levels (`../../components`, `../../lib`, `../../assets`)
+  since pages live one directory deeper than before, inside their group folder.

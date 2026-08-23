@@ -147,8 +147,9 @@ pub fn sign_and_submit_er(
                 );
                 return Ok(sig);
             }
-            Err(e) if attempt < BLOCKHASH_RETRY_ATTEMPTS
-                && e.to_string().to_lowercase().contains("blockhash not found") =>
+            Err(e)
+                if attempt < BLOCKHASH_RETRY_ATTEMPTS
+                    && e.to_string().to_lowercase().contains("blockhash not found") =>
             {
                 warn!(
                     "[ER] attempt {attempt}/{BLOCKHASH_RETRY_ATTEMPTS} got 'Blockhash not found' via {} — refetching and retrying",
@@ -232,9 +233,6 @@ pub fn cosign_and_submit_tx(
             );
             Ok(sig)
         }
-        Err(e) => Err(anyhow!(
-            "{e} — instructions: {}",
-            ix_summary.join(", ")
-        )),
+        Err(e) => Err(anyhow!("{e} — instructions: {}", ix_summary.join(", "))),
     }
 }

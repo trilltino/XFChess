@@ -186,7 +186,10 @@ fn read_profiles_file() -> ProfilesFile {
             // player's name and PGN history keep working after the update.
             match load_guest_username() {
                 Some(name) => ProfilesFile {
-                    profiles: vec![ProfileEntry { name: name.clone(), save_path: None }],
+                    profiles: vec![ProfileEntry {
+                        name: name.clone(),
+                        save_path: None,
+                    }],
                     names: vec![],
                     active: Some(name),
                 },
@@ -221,7 +224,11 @@ fn write_profiles_file(file: &ProfilesFile) {
 
 /// Names of every local profile ever created, in creation order.
 pub fn list_profiles() -> Vec<String> {
-    read_profiles_file().profiles.into_iter().map(|p| p.name).collect()
+    read_profiles_file()
+        .profiles
+        .into_iter()
+        .map(|p| p.name)
+        .collect()
 }
 
 /// The profile active as of the last launch, if any.

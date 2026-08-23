@@ -38,8 +38,8 @@ pub fn build_time_check_schedule_instruction(
     data.extend_from_slice(
         &anchor_lang::prelude::borsh::to_vec(
             &crate::crank_ix::crank_time_check::CrankTimeCheckData {},
-            )
-            .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?,
+        )
+        .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?,
     );
     let crank_ix = Instruction {
         program_id: crate::ID,

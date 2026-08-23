@@ -12,6 +12,7 @@
 use solana_client::client_error::Result as ClientResult;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
+use solana_sdk::hash::Hash;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -89,6 +90,40 @@ fn record_primary_failure() {
             n
         );
     }
+}
+
+/// Fetches a blockhash for a transaction that a **browser wallet extension**
+/// (Phantom/Solflare) will be asked to sign, at `finalized` commitment rather
+/// than the `confirmed` default `make_rpc` sets.
+///
+/// This is not about durability, it is about the wallet being able to tell
+/// which cluster the transaction belongs to. An extension has no way of
+/// knowing that from the transaction bytes except by looking the blockhash up
+/// on the cluster it is currently set to — and `isBlockhashValid` defaults to
+/// `finalized` commitment. A blockhash fetched at `confirmed` is younger than
+/// the ~32 slot (~13s) finalization lag, so that lookup returns **false** for
+/// a perfectly good devnet blockhash. Solflare reads that as "not a devnet
+/// transaction" and refuses to sign with "Network mismatch: your current
+/// network is set to devnet, but this transaction is for mainnet". Measured
+/// against our own devnet endpoint vs. a second devnet node:
+///
+/// ```text
+/// getLatestBlockhash{confirmed} -> isBlockhashValid{processed} = true
+///                               -> isBlockhashValid{finalized} = false  <- what the wallet sees
+/// getLatestBlockhash{finalized} -> isBlockhashValid{finalized} = true
+/// ```
+///
+/// The cost is ~13s of the ~60s validity window (a finalized blockhash is
+/// already ~32 slots old). The signing paths already retry once on a stale
+/// blockhash, and a slightly shorter window beats a transaction the wallet
+/// refuses to sign at all.
+///
+/// Only for transactions leaving the backend to be signed by a user wallet.
+/// Backend-signed transactions (settlement, treasury, cranks) broadcast
+/// immediately and should keep the faster `confirmed` default.
+pub fn wallet_signable_blockhash(rpc: &RpcClient) -> ClientResult<Hash> {
+    rpc.get_latest_blockhash_with_commitment(CommitmentConfig::finalized())
+        .map(|(hash, _last_valid_block_height)| hash)
 }
 
 /// Run a **read-only** RPC operation against the primary, transparently failing over to

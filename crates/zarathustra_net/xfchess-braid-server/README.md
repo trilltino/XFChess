@@ -14,7 +14,7 @@ This is the relay/fan-out hub the clients ([`braid_chess`](../braid_chess),
 A tournament dashboard or a spectator view needs to reflect server state in real time. Polling
 is wasteful and laggy; a bespoke WebSocket protocol per view is a lot of plumbing. This crate
 exposes any registered resource as a Braid `209` stream: a client `GET`s it once with
-`Subscribe: keep-alive` and receives a **snapshot followed by a live tail** of updates. When
+`Subscribe: true` and receives a **snapshot followed by a live tail** of updates. When
 the Swiss orchestrator advances a round, it patches the standings resource and every connected
 bracket updates instantly.
 
@@ -25,12 +25,37 @@ subscribers via a `tokio::broadcast` channel:
 
 | Kind | Backing | Used for | Update op |
 |------|---------|----------|-----------|
-| [`PatchedDoc`] | a JSON document | tournament `meta`, `standings`, `roster`, `schedule-status`, `pairings` | `patch` (RFC 6902 JSON Patch) or `replace` |
-| [`AppendLog`] | an ordered list | game move sequences | `append` |
+| [`PatchedDoc`] | a JSON document | tournament `meta`, `standings`, `roster`, `schedule-status`, `pairings/{round}` | `patch` (RFC 6902 JSON Patch) or `replace` |
+| [`AppendLog`] | an ordered list | tournament `results`, game move sequences | `append` |
 
 There is **no CRDT/OT merge** — the hub is the single source of truth (server-authoritative).
 `PatchedDoc` applies JSON Patches in order; `AppendLog` is append-only. This is the deliberate
 XFChess simplification of the upstream braid.org engine (see `ATTRIBUTION.md`).
+
+Both shapes travel as a JSON **body**, so the media type is what distinguishes them:
+`application/json` for a snapshot, `application/json-patch+json` for a patch document.
+A receiver that ignores it will mistake a patch for the state.
+
+## One write, two transports
+
+A hub write fans out twice:
+
+1. to local subscribers, over each resource's `tokio::broadcast` channel — what the
+   `209` handler streams to browsers and game clients; and
+2. to the **gossip sink**, if one is installed with [`ResourceHub::set_gossip_sink`] —
+   the same update, carried to P2P peers.
+
+So a fact is written *once* and both transports carry identical versioned bytes. The
+backend installs the sink in `server.rs`, routing each update to its tournament's gossip
+topic; `resource::protocol::encode_for_gossip` tags it with the resource path, since a
+gossip receiver has no request line to read the path from.
+
+This replaced a second, parallel publication path: `SwissService` used to broadcast
+tagged-JSON `SwissMessage`s over gossip beside each hub write — no version, no parents,
+no catch-up. (Those particular broadcasts never actually fired: they were guarded on a
+`gossip` field whose only setter was never called. An unfinished SQLite replay table sat
+beside them for the late-joiner gap; nothing ever wrote to it either.) Subscribe-replay
+covers that case by construction.
 
 ## API
 

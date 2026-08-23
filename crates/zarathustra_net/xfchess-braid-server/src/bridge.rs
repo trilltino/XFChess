@@ -24,6 +24,42 @@ pub fn push_schedule_status(hub: &ResourceHub, tournament_id: u64, status: Value
     );
 }
 
+/// Push the bracket-fired transition: the tournament has started.
+///
+/// This is the resource form of what used to be a `BracketFired` gossip
+/// message. A client that subscribes *after* the start still sees
+/// `status: "started"` in the snapshot, which the fire-and-forget broadcast
+/// could never deliver.
+pub fn push_bracket_fired(
+    hub: &ResourceHub,
+    tournament_id: u64,
+    player_count: u16,
+    started_at: i64,
+) {
+    push_schedule_status(
+        hub,
+        tournament_id,
+        json!({
+            "status": "started",
+            "player_count": player_count,
+            "started_at": started_at,
+        }),
+    );
+}
+
+/// Append one finished board's result to the tournament's results log.
+pub fn push_result(hub: &ResourceHub, tournament_id: u64, round: u8, board: u16, result: Value) {
+    hub.ensure_tournament(tournament_id);
+    hub.append(
+        &format!("tournament/{}/results", tournament_id),
+        json!({
+            "round": round,
+            "board": board,
+            "result": result,
+        }),
+    );
+}
+
 /// Push the full roster after a player registers.
 pub fn push_roster(hub: &ResourceHub, tournament_id: u64, players: &[String]) {
     hub.ensure_tournament(tournament_id);

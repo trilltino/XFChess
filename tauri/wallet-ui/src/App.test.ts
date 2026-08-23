@@ -36,6 +36,17 @@ describe('getConnectedProvider', () => {
     expect(getConnectedProvider()).toBe(phantom);
   });
 
+  // An embedded wallet has no extension behind it. Falling through to the
+  // phantom-then-solflare default handed back a DIFFERENT keypair, which is how
+  // a Google user's profile-creation transaction — fee payer and profile owner
+  // both the Privy address — got routed to Phantom to sign.
+  it('returns null for an embedded (privy) wallet even when both extensions are installed', () => {
+    localStorage.setItem('xfchess_wallet_provider', 'privy');
+    (window as any).solflare = solflare;
+    (window as any).phantom = { solana: phantom };
+    expect(getConnectedProvider()).toBeNull();
+  });
+
   it('falls back to phantom-then-solflare when no provider was ever recorded', () => {
     (window as any).solflare = solflare;
     (window as any).phantom = { solana: phantom };

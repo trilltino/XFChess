@@ -76,7 +76,12 @@ fn settlement_game_account(
         game_type: GameType::PvP,
         match_type,
         country_fee: 0,
-        base_time_seconds: 300,
+        // 1800s = Classical per `elo::rating::bucket_for_time_control` —
+        // this file specifically exercises the `elo_rating` field (the
+        // Classical bucket); a Blitz/Rapid/Bullet time control here would
+        // route the K=32 update to a different field instead and break
+        // every assertion below.
+        base_time_seconds: 1800,
         increment_seconds: 0,
         bump,
         is_delegated: false,
@@ -363,7 +368,9 @@ async fn finalize_game_cannot_be_replayed_to_double_apply_elo() {
     .await;
 
     let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
-    send(&mut ctx, ix, &[]).await.expect("first finalize must succeed");
+    send(&mut ctx, ix, &[])
+        .await
+        .expect("first finalize must succeed");
 
     let after_first = fetch_profile(&mut ctx, &white).await;
     assert!(after_first.elo_rating > white_elo);

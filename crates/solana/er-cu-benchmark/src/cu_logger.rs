@@ -10,6 +10,14 @@ pub struct CuEntry {
     pub cu_requested: u64,
     pub success: bool,
     pub signature: Option<String>,
+    /// Optional balance snapshot for cost attribution. These are wallet
+    /// balances before and after the transaction, not modelled fees.
+    #[serde(default)]
+    pub fee_payer: Option<String>,
+    #[serde(default)]
+    pub pre_balance_lamports: Option<u64>,
+    #[serde(default)]
+    pub post_balance_lamports: Option<u64>,
 }
 
 /// Aggregated CU stats for a group of entries.
@@ -46,12 +54,41 @@ impl CuLogger {
         success: bool,
         signature: Option<String>,
     ) {
+        self.log_with_balance(
+            group,
+            instruction,
+            cu_consumed,
+            cu_requested,
+            success,
+            signature,
+            None,
+            None,
+            None,
+        );
+    }
+
+    /// Log a CU measurement with an optional fee-payer balance delta.
+    pub fn log_with_balance(
+        &mut self,
+        group: &str,
+        instruction: &str,
+        cu_consumed: u64,
+        cu_requested: u64,
+        success: bool,
+        signature: Option<String>,
+        fee_payer: Option<String>,
+        pre_balance_lamports: Option<u64>,
+        post_balance_lamports: Option<u64>,
+    ) {
         let entry = CuEntry {
             instruction: instruction.to_string(),
             cu_consumed,
             cu_requested,
             success,
             signature,
+            fee_payer,
+            pre_balance_lamports,
+            post_balance_lamports,
         };
         self.entries.push(entry.clone());
         self.groups

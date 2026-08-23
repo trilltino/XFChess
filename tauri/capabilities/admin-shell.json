@@ -2,12 +2,17 @@
   "identifier": "admin-shell",
   "description": "Restricted shell access for the tournament-admin window ONLY (VPS operations). The wallet windows deliberately have no shell access.",
   "windows": ["tournament-admin"],
+  "local": true,
+  "remote": {
+    "urls": ["http://localhost:*/*"]
+  },
   "permissions": [
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "cmd": "ssh", "args": true },
+        { "name": "ssh", "cmd": "ssh", "args": true },
         {
+          "name": "powershell",
           "cmd": "powershell",
           "args": [
             "-NoExit",
@@ -20,8 +25,9 @@
     {
       "identifier": "shell:allow-spawn",
       "allow": [
-        { "cmd": "ssh", "args": true },
+        { "name": "ssh", "cmd": "ssh", "args": true },
         {
+          "name": "powershell",
           "cmd": "powershell",
           "args": [
             "-NoExit",

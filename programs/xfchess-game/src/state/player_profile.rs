@@ -16,7 +16,12 @@ pub struct PlayerProfile {
     pub losses: u32,
     pub draws: u32,
     pub games_played: u32,
-    /// Centiscale rating (×100), updated by K=32 Elo in `lifecycle::settlement`. See `elo/README.md`.
+    /// Classical-time-control rating (centiscale, ×100) — also the bucket used
+    /// for `Unlimited`/no-clock games. Updated by K=32 Elo in
+    /// `lifecycle::settlement`. See `elo/README.md`. Per-mode siblings:
+    /// `elo_bullet`, `elo_blitz`, `elo_rapid` (appended at the end of this
+    /// struct, below `seeded_from_external`, so existing byte offsets for
+    /// every field above them are unaffected).
     pub elo_rating: f64,
     /// Unused — reserved from an abandoned Glicko-2 rating attempt; never read or written.
     pub rd: f64,
@@ -64,7 +69,25 @@ pub struct PlayerProfile {
 
     /// Source of the external rating link: 0 = none, 1 = Lichess.
     pub external_elo_source: u8,
-    /// True once `elo_rating` has been seeded from an external link — gates
-    /// the one-time seed logic in `account_ix::link_external_elo::handler`.
+    /// Unused — `link_external_elo` no longer seeds `elo_rating` from a
+    /// linked account (removed: a one-time Lichess-derived seed was
+    /// confusing and gave a wagering-relevant rating a moment of external
+    /// influence). Kept as a dead field rather than removed, since Anchor
+    /// account layout changes require appending, and shrinking would shift
+    /// every field below it. Existing profiles seeded before the removal
+    /// keep whatever value they already had; nothing sets it going forward.
     pub seeded_from_external: bool,
+
+    // ── Per-time-control ratings (centiscale) ──
+    // Appended at the end so every existing field's byte offset — and every
+    // hand-parsed offset reader (e.g. `backend/src/signing/elo_cache.rs`) —
+    // is unaffected. `elo_rating` above doubles as the Classical/Unlimited
+    // bucket; these three cover the rest of `TimeCategory`
+    // (`src/game/time_control.rs`), folding `UltraBullet` into `Bullet`.
+    // Each starts at `0.0` and is lazily seeded to `INITIAL_ELO_CENTISCALE`
+    // the first time a game in that bucket settles — see
+    // `lifecycle::settlement::rating_field_for_time_control`.
+    pub elo_bullet: f64,
+    pub elo_blitz: f64,
+    pub elo_rapid: f64,
 }

@@ -29,6 +29,13 @@ tauri-build = { version = "2.6", features = [] }
 tauri-plugin-deep-link = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
+# Routes the admin panel's HTTP calls through Rust instead of the webview.
+# The webview is served over http://localhost:7454 (embedded axum server, since
+# `frontendDist` is claimed by wallet-ui), which made every backend call a
+# cross-origin request — subject to CORS and to this app's own CSP connect-src.
+# Requests issued from Rust have no browser origin, so neither applies. See
+# docs/plans/tournament-admin-connection-rearchitecture.md §3 Phase 1.
+tauri-plugin-http = "2"
 tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

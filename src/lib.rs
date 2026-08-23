@@ -336,6 +336,7 @@ pub fn build_app(game_config: GameConfig) -> App {
         ui::UiPlugin,
         input::InputPlugin,
         presentation::PresentationPlugin,
+        core::updates::UpdateCheckPlugin,
     ))
     .add_plugins((
         states::main_menu::MainMenuPlugin,

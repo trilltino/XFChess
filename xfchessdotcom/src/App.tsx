@@ -1,39 +1,21 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { ConnectionProvider, WalletProvider, useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { ConnectionProvider, WalletProvider, useWallet } from '@solana/wallet-adapter-react';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { SolanaMobileWalletAdapter, createDefaultAddressSelector, createDefaultAuthorizationResultCache, createDefaultWalletNotFoundHandler } from '@solana-mobile/wallet-adapter-mobile';
 import { clusterApiUrl } from '@solana/web3.js';
-import { Players } from './pages/Players';
-import { VerifyProfile } from './pages/VerifyProfile';
-import PlayPage from './pages/Play';
-import WSetup from './pages/WSetup';
-import CompliancePage from './pages/Compliance';
-import LegalPage from './pages/Legal';
-import AntiCheatPage from './pages/AntiCheat';
-import KycPage from './pages/Kyc';
-import { SignIn } from './pages/SignIn';
-import Launch from './pages/Launch';
-import NewsRelease from './pages/NewsRelease';
-import { Tournaments } from './pages/Tournaments';
-import { ChessComputer } from './pages/ChessComputer';
-import { Home } from './pages/Home';
-import Spectate from './pages/Spectate';
-import TournamentDetail from './pages/TournamentDetail';
-import TournamentStandings from './pages/TournamentStandings';
-import TournamentPlay from './pages/TournamentPlay';
-import { ProfileViewer } from './pages/ProfileViewer';
-import { LichessCallback } from './pages/LichessCallback';
-import { Features } from './pages/Features';
-import { Demo } from './pages/Demo';
+import PlayPage from './pages/play/play';
+import { Tournaments } from './pages/tournaments/tournaments';
+import { Home } from './pages/marketing/home';
+import { Features } from './pages/marketing/features';
 import { OrganizationSchema } from './components/StructuredData';
-import { getAnchorProgram, fetchPlayerProfile } from './lib/anchor_client';
-import { useWalletUsdBalance } from './hooks/useWalletUsdBalance';
 import { Menu, X } from 'lucide-react';
 import { Footer } from './components/Footer';
 import { WalletSelectionModal } from './components/WalletSelectionModal';
+import { PrivyProviderWrapper } from './privy/PrivyProviderWrapper';
+import { PrivyStandardBridge } from './privy/PrivyStandardBridge';
 
 // Default styles that can be overridden by your app
 import '@solana/wallet-adapter-react-ui/styles.css';
@@ -79,33 +61,39 @@ export default function App() {
     // when extension providers aren't found in the standalone window.
     const autoConnect = !isTauri;
 
+    // Privy sits OUTSIDE the wallet-adapter providers: it is the auth layer that
+    // *produces* an embedded wallet, while wallet-adapter is the layer that
+    // *consumes* it. The handoff is PrivyStandardBridge, which must therefore sit
+    // INSIDE WalletProvider — it dispatches `wallet-standard:register-wallet`,
+    // and wallet-adapter wraps the result in a StandardWalletAdapter so the
+    // embedded wallet shows up in `useWallet().wallets` next to Phantom.
+    //
+    // With VITE_PRIVY_APP_ID unset both components render to nothing, so this
+    // nesting is a no-op and the tree is exactly what it was before.
     return (
-        <ConnectionProvider endpoint={endpoint}>
-            <WalletProvider wallets={wallets} autoConnect={autoConnect}>
-                <Router>
-                    <AppContent />
-                </Router>
-            </WalletProvider>
-        </ConnectionProvider>
+        <PrivyProviderWrapper rpcUrl={endpoint}>
+            <ConnectionProvider endpoint={endpoint}>
+                <WalletProvider wallets={wallets} autoConnect={autoConnect}>
+                    <PrivyStandardBridge />
+                    <Router>
+                        <AppContent />
+                    </Router>
+                </WalletProvider>
+            </ConnectionProvider>
+        </PrivyProviderWrapper>
     );
 }
 
 
 function AppContent() {
-    const { connected, publicKey, disconnect } = useWallet();
-    const { connection } = useConnection();
+    const { connected, disconnect } = useWallet();
+
     const location = useLocation();
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const [username, setUsername] = useState<string | null>(null);
     const [navVisible, setNavVisible] = useState(true);
     const lastScrollY = useRef(0);
-
-    const { totalUsdValue, loading: balanceLoading } = useWalletUsdBalance(
-        connected ? connection : null,
-        publicKey
-    );
 
     // Scroll detection for navbar fade
     useEffect(() => {
@@ -130,54 +118,6 @@ function AppContent() {
     }, []);
 
 
-    // `xfchess_token`/`xfchess_username`/`xfchess_wallet` in localStorage are
-    // written by SignIn.tsx's wallet-connect flow and never invalidated on
-    // disconnect (the disconnect button below only calls the wallet-adapter's
-    // disconnect()). If the user later reconnects with a *different* wallet
-    // without an explicit disconnect in between (e.g. switching the active
-    // account inside Phantom), `wallet.publicKey` changes but the cached JWT
-    // still authenticates the OLD wallet — any code reading
-    // localStorage.getItem('xfchess_token') alongside the newly-connected
-    // publicKey (SignIn.tsx's ProfileStep does exactly this) would then act
-    // under a mismatched identity. Clear the stale identity the moment a
-    // connected pubkey stops matching what was cached for it.
-    useEffect(() => {
-        if (!connected || !publicKey) return;
-        const cachedWallet = localStorage.getItem('xfchess_wallet');
-        if (cachedWallet && cachedWallet !== publicKey.toBase58()) {
-            localStorage.removeItem('xfchess_token');
-            localStorage.removeItem('xfchess_username');
-            localStorage.removeItem('xfchess_wallet');
-        }
-    }, [connected, publicKey]);
-
-    useEffect(() => {
-        let isMounted = true;
-        const load = async () => {
-            if (!connected || !publicKey) {
-                if (isMounted) setUsername(null);
-                return;
-            }
-            try {
-                // Cast to unknown then to a compatible structure for read-only profile fetching.
-                // We use a manual cast here instead of importing the Wallet type to avoid runtime module export errors.
-                const program = getAnchorProgram(connection, { publicKey } as unknown as { publicKey: typeof publicKey });
-                const profile = await fetchPlayerProfile(program, publicKey);
-                if (isMounted) {
-                    if (profile && profile.data.username) {
-                        setUsername(profile.data.username);
-                    } else {
-                        setUsername(null);
-                    }
-                }
-            } catch (e) {
-                console.error("Error loading navbar profile:", e);
-                if (isMounted) setUsername(null);
-            }
-        };
-        load();
-        return () => { isMounted = false; };
-    }, [connected, publicKey, connection]);
 
     return (
         <div className="app-container">
@@ -198,37 +138,8 @@ function AppContent() {
                 <div className={`nav-links ${isMenuOpen ? 'active' : ''}`}>
                     <Link to="/home" className="nav-link" onClick={() => setIsMenuOpen(false)}>Home</Link>
                     <Link to="/play" className="nav-link" onClick={() => setIsMenuOpen(false)} style={{ color: 'var(--accent)', fontWeight: 700 }}>Play</Link>
-                    <Link to="/demo" className="nav-link" onClick={() => setIsMenuOpen(false)}>Demo</Link>
-                    {connected && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            {username ? (
-                                <Link to="/profile" className="nav-link" style={{ color: 'var(--accent)', fontWeight: 700 }} onClick={() => setIsMenuOpen(false)}>
-                                    {username}
-                                </Link>
-                            ) : (
-                                <Link
-                                    to="/profile"
-                                    className="nav-link"
-                                    style={{
-                                        color: '#ffffff',
-                                        fontWeight: 700,
-                                        fontSize: '12px',
-                                        background: 'rgba(255,255,255,0.12)',
-                                        border: '1px solid rgba(255,255,255,0.25)',
-                                        padding: '5px 12px',
-                                        borderRadius: '6px',
-                                        letterSpacing: '0.02em',
-                                    }}
-                                    onClick={() => setIsMenuOpen(false)}
-                                >
-                                    Create Profile
-                                </Link>
-                            )}
-                            <span style={{ color: 'var(--text-dim)', fontSize: '12px', fontWeight: 600 }}>
-                                {balanceLoading ? '...' : totalUsdValue !== null ? `$${totalUsdValue.toFixed(2)}` : ''}
-                            </span>
-                        </div>
-                    )}
+                    <Link to="/tournaments" className="nav-link" onClick={() => setIsMenuOpen(false)}>Tournaments</Link>
+                    <Link to="/features" className="nav-link" onClick={() => setIsMenuOpen(false)}>Features</Link>
 
                     <div className="nav-wallet-wrap" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span
@@ -244,9 +155,6 @@ function AppContent() {
                         {connected ? (
                             <button onClick={() => {
                                 disconnect();
-                                localStorage.removeItem('xfchess_token');
-                                localStorage.removeItem('xfchess_username');
-                                localStorage.removeItem('xfchess_wallet');
                                 setIsMenuOpen(false);
                             }} title="Disconnect wallet" aria-label="Disconnect wallet" className="btn-secondary disconnect-btn" style={{ height: '44px', width: '44px', padding: '0', borderRadius: '4px', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <X size={24} />
@@ -265,35 +173,17 @@ function AppContent() {
                     <Routes location={location} key={location.pathname}>
                         <Route path="/" element={<Navigate to="/home" replace />} />
                         <Route path="/home" element={<Home />} />
-                        <Route path="/players" element={<Players />} />
-                        <Route path="/verify" element={<VerifyProfile />} />
                         <Route path="/play" element={<PlayPage />} />
-                        <Route path="/w_setup" element={<WSetup />} />
-                        <Route path="/compliance" element={<CompliancePage />} />
-                        <Route path="/legal" element={<LegalPage />} />
-                        <Route path="/anti-cheat" element={<AntiCheatPage />} />
-                        <Route path="/profile" element={<ProfileViewer />} />
-                        <Route path="/create-profile" element={<ProfileViewer />} />
-                        <Route path="/auth/lichess/callback" element={<LichessCallback />} />
-                        <Route path="/kyc" element={<KycPage />} />
-                        <Route path="/news/release" element={<NewsRelease />} />
-                        <Route path="/login" element={<SignIn defaultMode="login" />} />
-                        {/* Historical duplicate of /login — no internal <Link> ever
-                            pointed at this path (checked before redirecting), so any
-                            hit here is a stale bookmark/external link. Redirect
-                            instead of rendering the same component twice under two
-                            URLs (was flagged as a duplicate-content risk even though
-                            both were noindexed — see docs/plans/xfchessdotcom-seo-sitemap-plan.md §7). */}
-                        <Route path="/auth/login" element={<Navigate to="/login" replace />} />
-                        <Route path="/launch" element={<Launch />} />
                         <Route path="/tournaments" element={<Tournaments />} />
-                        <Route path="/tournament/:id" element={<TournamentDetail />} />
-                        <Route path="/tournament/:id/standings" element={<TournamentStandings />} />
-                        <Route path="/tournament/:id/play" element={<TournamentPlay />} />
-                        <Route path="/spectate/:game_id" element={<Spectate />} />
-                        <Route path="/computer" element={<ChessComputer />} />
                         <Route path="/features" element={<Features />} />
-                        <Route path="/demo" element={<Demo />} />
+                        {/* The site is these four routes. Everything else —
+                            sign-in, profile, KYC, identity vault, wallet setup,
+                            player lookup, spectate, legal, compliance,
+                            anti-cheat, release notes, launch, and the
+                            per-tournament detail/standings/play pages — was
+                            removed deliberately; those paths now land here and
+                            go home rather than rendering an empty shell. */}
+                        <Route path="*" element={<Navigate to="/home" replace />} />
                     </Routes>
                 </AnimatePresence>
             </div>

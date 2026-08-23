@@ -3,7 +3,9 @@
 //! This module centralizes all router construction logic, combining
 //! signing, tournament, and matchmaking routers into a single application router.
 
-use crate::infrastructure::auth_middleware::require_api_key;
+use crate::infrastructure::auth_middleware::{
+    persist_admin_request, require_api_key, require_relay_or_jwt,
+};
 use crate::signing::routes::admin::admin_routes;
 use crate::signing::routes::archive::archive_routes;
 use crate::signing::routes::casual_games::casual_games_routes;
@@ -14,6 +16,7 @@ use crate::signing::routes::kyc::kyc_routes;
 use crate::signing::routes::mailer::mailer_routes;
 use crate::signing::routes::matchmaking::matchmaking_routes;
 use crate::signing::routes::puzzle::{puzzle_admin_routes, puzzle_routes};
+use crate::signing::routes::spectate::routes as spectate_routes;
 use crate::signing::routes::tournament as tournament_routes;
 use crate::signing::social::routes::social_routes;
 use crate::signing::swiss::handlers::{swiss_admin_routes, swiss_read_routes};
@@ -36,6 +39,9 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
 
     // Build tournament router with auth middleware on admin routes
     // Note: tournament routes now use AppState directly
+    let protected_tournament_join_routes = tournament_routes::tournament_join_routes().layer(
+        middleware::from_fn_with_state(signing_state.clone(), require_relay_or_jwt),
+    );
     let tournament_router = base
         .clone()
         // Also mounted under /api/tournament(s) (not just the bare paths): the
@@ -50,15 +56,26 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         .nest("/tournaments", tournament_routes::tournaments_routes())
         .nest("/api/tournament", tournament_routes::tournament_routes())
         .nest("/tournament", tournament_routes::tournament_routes())
+        .nest("/api/tournament", protected_tournament_join_routes.clone())
+        .nest("/tournament", protected_tournament_join_routes)
         .nest("/api/tournament", swiss_read_routes())
         .nest("/tournament", swiss_read_routes())
         .nest(
             "/admin/tournament",
-            swiss_admin_routes().layer(middleware::from_fn(require_api_key)),
+            swiss_admin_routes()
+                .layer(middleware::from_fn_with_state(
+                    signing_state.clone(),
+                    persist_admin_request,
+                ))
+                .layer(middleware::from_fn(require_api_key)),
         )
         .nest(
             "/admin/tournament",
             tournament_routes::admin_tournament_routes()
+                .layer(middleware::from_fn_with_state(
+                    signing_state.clone(),
+                    persist_admin_request,
+                ))
                 .layer(middleware::from_fn(require_api_key)),
         );
 
@@ -80,7 +97,12 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
     // Build dispute router
     let dispute_router = base.clone().nest("/dispute", dispute_routes()).nest(
         "/admin/dispute",
-        admin_dispute_routes().layer(middleware::from_fn(require_api_key)),
+        admin_dispute_routes()
+            .layer(middleware::from_fn_with_state(
+                signing_state.clone(),
+                persist_admin_request,
+            ))
+            .layer(middleware::from_fn(require_api_key)),
     );
 
     // Build metrics endpoint — health/version gauges, core HTTP/RPC/transaction
@@ -135,19 +157,42 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         .merge(
             archive_routes()
                 .with_state(signing_state.clone())
+                .layer(middleware::from_fn_with_state(
+                    signing_state.clone(),
+                    persist_admin_request,
+                ))
                 .layer(middleware::from_fn(require_api_key)),
         )
         .merge(
             admin_routes()
                 .with_state(signing_state.clone())
+                .layer(middleware::from_fn_with_state(
+                    signing_state.clone(),
+                    persist_admin_request,
+                ))
                 .layer(middleware::from_fn(require_api_key)),
         )
         .merge(
             puzzle_admin_routes()
                 .with_state(signing_state.clone())
+                .layer(middleware::from_fn_with_state(
+                    signing_state.clone(),
+                    persist_admin_request,
+                ))
                 .layer(middleware::from_fn(require_api_key)),
         )
         .merge(game_log_routes().with_state(signing_state.clone()))
+        .merge(spectate_routes().with_state(signing_state.clone()))
+        // Braid `209` subscriptions for tournament resources — standings,
+        // pairings, roster, meta, schedule-status, results. The hub behind
+        // these has been written to by the Swiss orchestrator all along; until
+        // this mount there was no route that served it, so nothing could ever
+        // read what it published. `nest_service` (not `nest`) because
+        // `braid_router` returns a router with its own state already applied.
+        .nest_service(
+            "/braid",
+            xfchess_braid_server::braid_router((*signing_state.braid_hub).clone()),
+        )
         .merge(social_router)
         // Records http_requests_total / http_request_duration_ms for every
         // request. This was defined but never registered anywhere — those
@@ -156,6 +201,13 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
             signing_state.clone(),
             crate::telemetry::telemetry_middleware,
         ))
+        // Cap request bodies. Several routes deserialize caller-supplied
+        // base64 transactions and JSON blobs; without a ceiling a single
+        // request can make the process allocate arbitrarily. 1 MiB is far
+        // above any legitimate payload here (a Solana transaction is capped
+        // at 1232 bytes on the wire) while still leaving headroom for the
+        // tournament-template and PGN endpoints.
+        .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
         .layer(cors_layer(&signing_state.config.allowed_origins))
         // Correlation IDs: accept an inbound x-request-id or mint a UUID, include it in
         // the request span (so every log line within the request carries it), and echo

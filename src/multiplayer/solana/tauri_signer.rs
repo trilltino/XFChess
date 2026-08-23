@@ -251,6 +251,24 @@ fn bring_wallet_popup_to_front() {
 #[cfg(not(windows))]
 fn bring_wallet_popup_to_front() {}
 
+/// Fetches a blockhash at `finalized` commitment for a transaction the wallet
+/// extension is about to be asked to sign.
+///
+/// The extension has no other way to tell which cluster a transaction targets:
+/// it looks the blockhash up on whichever cluster it is set to, and
+/// `isBlockhashValid` defaults to `finalized`. A `confirmed` blockhash is
+/// younger than the ~32 slot (~13s) finalization lag, so that lookup fails on a
+/// perfectly good devnet blockhash and Solflare refuses to sign with "Network
+/// mismatch: your current network is set to devnet, but this transaction is for
+/// mainnet". Costs ~13s of the ~60s validity window. Mirrors the backend's
+/// `signing::solana::wallet_signable_blockhash` and the wallet bridge's
+/// `/api/fresh-blockhash`.
+fn wallet_signable_blockhash(rpc: &RpcClient) -> Result<solana_sdk::hash::Hash, String> {
+    rpc.get_latest_blockhash_with_commitment(CommitmentConfig::finalized())
+        .map(|(hash, _last_valid_block_height)| hash)
+        .map_err(|e| format!("get_latest_blockhash: {}", e))
+}
+
 /// Like `sign_and_send_via_tauri` but returns the signed transaction bytes
 /// without submitting to RPC. Used by the VPS flow where the VPS submits.
 ///
@@ -268,9 +286,7 @@ pub fn sign_via_tauri_only(
     let start = Instant::now();
     let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
     let step_start = Instant::now();
-    let blockhash = rpc
-        .get_latest_blockhash()
-        .map_err(|e| format!("get_latest_blockhash: {}", e))?;
+    let blockhash = wallet_signable_blockhash(&rpc)?;
     info!(
         "[TAURI-SIGN] latest blockhash fetched for '{label}' in {:?}",
         step_start.elapsed()
@@ -316,9 +332,7 @@ pub fn sign_and_send_via_tauri(
     let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
 
     let step_start = std::time::Instant::now();
-    let blockhash = rpc
-        .get_latest_blockhash()
-        .map_err(|e| format!("get_latest_blockhash: {}", e))?;
+    let blockhash = wallet_signable_blockhash(&rpc)?;
     info!(
         "[TAURI-SIGN] latest blockhash fetched for '{label}' in {:?}",
         step_start.elapsed()

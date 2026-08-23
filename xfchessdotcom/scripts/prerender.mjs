@@ -32,17 +32,10 @@ const root = path.resolve(__dirname, '..');
 const distDir = path.join(root, 'dist');
 
 const ROUTES = [
-  { path: '/home', file: 'src/pages/Home.tsx', name: 'Home' },
-  { path: '/features', file: 'src/pages/Features.tsx', name: 'Features' },
-  { path: '/demo', file: 'src/pages/Demo.tsx', name: 'Demo' },
-  { path: '/play', file: 'src/pages/Play.tsx', name: 'default' },
-  { path: '/tournaments', file: 'src/pages/Tournaments.tsx', name: 'Tournaments' },
-  { path: '/computer', file: 'src/pages/ChessComputer.tsx', name: 'ChessComputer' },
-  { path: '/legal', file: 'src/pages/Legal.tsx', name: 'default' },
-  { path: '/compliance', file: 'src/pages/Compliance.tsx', name: 'default' },
-  { path: '/anti-cheat', file: 'src/pages/AntiCheat.tsx', name: 'default' },
-  { path: '/news/release', file: 'src/pages/NewsRelease.tsx', name: 'default' },
-  { path: '/launch', file: 'src/pages/Launch.tsx', name: 'default' },
+  { path: '/home', file: 'src/pages/marketing/home.tsx', name: 'Home' },
+  { path: '/play', file: 'src/pages/play/play.tsx', name: 'default' },
+  { path: '/tournaments', file: 'src/pages/tournaments/tournaments.tsx', name: 'Tournaments' },
+  { path: '/features', file: 'src/pages/marketing/features.tsx', name: 'Features' },
 ];
 
 // React 19 hoists <title>/<meta>/<link> to the front of the rendered string

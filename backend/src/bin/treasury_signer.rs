@@ -55,18 +55,27 @@ fn main() {
     let destination = match Pubkey::from_str(&args[0]) {
         Ok(pk) => pk,
         Err(e) => {
-            eprintln!("[treasury_signer] invalid destination pubkey '{}': {e}", args[0]);
+            eprintln!(
+                "[treasury_signer] invalid destination pubkey '{}': {e}",
+                args[0]
+            );
             std::process::exit(1);
         }
     };
     let lamports: u64 = match args[1].parse() {
         Ok(n) if n > 0 => n,
         _ => {
-            eprintln!("[treasury_signer] lamports must be a positive integer, got '{}'", args[1]);
+            eprintln!(
+                "[treasury_signer] lamports must be a positive integer, got '{}'",
+                args[1]
+            );
             std::process::exit(1);
         }
     };
-    let reason = args.get(2).map(String::as_str).unwrap_or("(no reason given)");
+    let reason = args
+        .get(2)
+        .map(String::as_str)
+        .unwrap_or("(no reason given)");
 
     let key_val = std::env::var("TREASURY_AUTHORITY_KEY").unwrap_or_else(|_| {
         eprintln!("[treasury_signer] TREASURY_AUTHORITY_KEY is not set — refusing to run");

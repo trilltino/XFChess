@@ -117,17 +117,10 @@ pub fn handler(
     profile.lichess_last_sync = Clock::get()?.unix_timestamp;
     profile.external_elo_source = 1; // 1 = Lichess
 
-    // Seed on-chain elo_rating if this is the first external link
-    if !profile.seeded_from_external {
-        // Use rapid as the default seed unless blitz is significantly higher
-        let seed_rating = if blitz_rating > rapid_rating + 500 {
-            blitz_rating
-        } else {
-            rapid_rating
-        };
-        profile.elo_rating = crate::elo::rating::external_to_centiscale(seed_rating)? as f64;
-        profile.seeded_from_external = true;
-    }
+    // Deliberately does not touch any elo_* field. Linking is identity
+    // verification plus a reference snapshot of your Lichess ratings — it no
+    // longer seeds or otherwise influences any XFChess rating, which is
+    // earned exclusively from XFChess games (see `lifecycle::settlement`).
 
     Ok(())
 }

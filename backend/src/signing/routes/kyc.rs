@@ -56,6 +56,17 @@ pub struct UserStatus {
     /// True if CACF compliance is satisfied for the user's country.
     pub cacf_compliant: bool,
     pub can_wager: bool,
+    /// Lichess username from `external_elo_links` (DB), independent of the
+    /// on-chain `PlayerProfile.lichess_username` field the client otherwise
+    /// reads. The on-chain write is best-effort (see `lichess_oauth.rs`'s
+    /// `complete_link`) and can fail after the OAuth exchange itself already
+    /// succeeded, leaving the DB linked but the chain field empty — this lets
+    /// the profile UI show "linked" from that case instead of showing the
+    /// player a dead "Link" button forever with no explanation.
+    pub lichess_username: Option<String>,
+    /// True when `external_elo_links.on_chain_tx == 'offchain-pending'` —
+    /// the OAuth link succeeded but the on-chain confirmation didn't.
+    pub lichess_onchain_pending: bool,
 }
 
 /// Validates and stores a KYC submission (tax ID hashed, never stored raw).
@@ -187,6 +198,18 @@ pub async fn user_status(
     // evaluates the full check above.
     let can_wager = state.config.is_devnet() || (has_wallet_account && has_kyc && cacf_ok);
 
+    let lichess_row: Option<(String, String)> = sqlx::query_as(
+        "SELECT username, on_chain_tx FROM external_elo_links WHERE pubkey = ? AND platform = 'lichess'",
+    )
+    .bind(&pubkey)
+    .fetch_optional(&state.store.pool())
+    .await
+    .unwrap_or(None);
+    let lichess_username = lichess_row.as_ref().map(|(username, _)| username.clone());
+    let lichess_onchain_pending = lichess_row
+        .as_ref()
+        .is_some_and(|(_, tx)| tx == "offchain-pending");
+
     Json(UserStatus {
         has_profile: has_wallet_account || has_kyc,
         has_email: user_row.as_ref().and_then(|r| r.2.as_ref()).is_some(),
@@ -194,6 +217,8 @@ pub async fn user_status(
         kyc_status,
         cacf_compliant: cacf_ok,
         can_wager,
+        lichess_username,
+        lichess_onchain_pending,
     })
 }
 

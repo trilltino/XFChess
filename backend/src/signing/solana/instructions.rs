@@ -17,7 +17,10 @@ const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";
 
 /// Computes the Anchor discriminator for a given instruction name.
-fn anchor_discriminator(name: &str) -> [u8; 8] {
+/// `pub(crate)` so `tx_guard` can derive the same discriminators this module's
+/// builders emit — an allow-list that computed them independently could drift
+/// from the instructions actually being built.
+pub(crate) fn anchor_discriminator(name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
     hasher.update(format!("global:{}", name));
     hasher.finalize()[..8]
@@ -473,8 +476,8 @@ pub fn cancel_time_check_ix(
 
 /// Builds a `finalize_game` instruction for devnet.
 ///
-/// Sets game.status = Finished, pays out the wager escrow, and updates ELO.
-/// Winner: Some("white") | Some("black") | None (draw).
+/// Pays out or refunds the wager escrow for a terminal game and updates ELO
+/// for finished games.
 ///
 /// `fee_payer` is the ephemeral rollups relayer pubkey that gets reimbursed from escrow.
 pub fn finalize_game_ix(
@@ -482,7 +485,7 @@ pub fn finalize_game_ix(
     game_id: u64,
     white: &Pubkey,
     black: &Pubkey,
-    winner: Option<&str>,
+    _winner: Option<&str>,
     fee_payer: &Pubkey,
 ) -> Instruction {
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
@@ -494,21 +497,6 @@ pub fn finalize_game_ix(
 
     let mut data = anchor_discriminator("finalize_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
-
-    // GameResult Borsh encoding: 1 = Winner(Pubkey), 2 = Draw
-    match winner {
-        Some("white") => {
-            data.push(1);
-            data.extend_from_slice(white.as_ref());
-        }
-        Some("black") => {
-            data.push(1);
-            data.extend_from_slice(black.as_ref());
-        }
-        _ => {
-            data.push(2);
-        }
-    }
 
     Instruction {
         program_id: *program_id,
@@ -1082,6 +1070,186 @@ pub fn fund_sol_prize_ix(
             AccountMeta::new(tournament_pda, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(*operator, true),
+            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
+        ],
+        data,
+    }
+}
+
+/// Builds the player-signed `register_player` instruction.
+///
+/// Anchor's optional accounts are always represented in the account list. An
+/// absent shard uses the program ID sentinel, matching the benchmark builder
+/// and Anchor's `Option<Account<...>>` deserialization.
+pub fn register_player_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    elo: u32,
+    player: &Pubkey,
+    max_players: u16,
+    host_treasury: &Pubkey,
+) -> Instruction {
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
+    let profile_pda = Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], program_id).0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
+        program_id,
+    )
+    .0;
+    let shard_pda = |shard: u8| {
+        Pubkey::find_program_address(
+            &[
+                TOURNAMENT_PLAYERS_SEED,
+                &[shard],
+                &tournament_id.to_le_bytes(),
+            ],
+            program_id,
+        )
+        .0
+    };
+
+    let mut data = anchor_discriminator("register_player").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&elo.to_le_bytes());
+
+    let shard_meta = |shard: u8, present: bool| {
+        if present {
+            AccountMeta::new(shard_pda(shard), false)
+        } else {
+            AccountMeta::new_readonly(*program_id, false)
+        }
+    };
+    let accounts = vec![
+        AccountMeta::new(tournament_pda, false),
+        AccountMeta::new_readonly(profile_pda, false),
+        AccountMeta::new(*player, true),
+        AccountMeta::new(escrow_pda, false),
+        AccountMeta::new(shard_pda(0), false),
+        shard_meta(1, max_players >= 128),
+        shard_meta(2, max_players >= 256),
+        shard_meta(3, max_players >= 256),
+        AccountMeta::new(*host_treasury, false),
+        AccountMeta::new_readonly(solana_system_interface::program::id(), false),
+    ];
+
+    Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
+}
+
+/// Builds the permissionless Swiss round-advance crank instruction.
+pub fn advance_round_ix(program_id: &Pubkey, tournament_id: u64, cranker: &Pubkey) -> Instruction {
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
+    let mut data = anchor_discriminator("advance_round").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new_readonly(*cranker, true),
+        ],
+        data,
+    }
+}
+
+/// Builds the permissionless Swiss completion crank instruction.
+pub fn complete_swiss_tournament_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    max_players: u16,
+    cranker: &Pubkey,
+) -> Instruction {
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
+    let shard_pda = |shard: u8| {
+        Pubkey::find_program_address(
+            &[
+                TOURNAMENT_PLAYERS_SEED,
+                &[shard],
+                &tournament_id.to_le_bytes(),
+            ],
+            program_id,
+        )
+        .0
+    };
+    let shard_meta = |shard: u8, present: bool| {
+        if present {
+            AccountMeta::new(shard_pda(shard), false)
+        } else {
+            AccountMeta::new_readonly(*program_id, false)
+        }
+    };
+    let mut data = anchor_discriminator("complete_swiss_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(shard_pda(0), false),
+            shard_meta(1, max_players >= 128),
+            shard_meta(2, max_players >= 256),
+            shard_meta(3, max_players >= 256),
+            AccountMeta::new_readonly(*cranker, true),
+        ],
+        data,
+    }
+}
+
+/// Builds the player-signed `record_swiss_result` instruction.
+/// `result_variant`: 0 = win, 1 = loss, 2 = draw.
+pub fn record_swiss_result_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    max_players: u16,
+    round: u8,
+    board: u16,
+    result_variant: u8,
+    player: &Pubkey,
+    opponent: &Pubkey,
+) -> Instruction {
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
+    let shard_pda = |shard: u8| {
+        Pubkey::find_program_address(
+            &[
+                TOURNAMENT_PLAYERS_SEED,
+                &[shard],
+                &tournament_id.to_le_bytes(),
+            ],
+            program_id,
+        )
+        .0
+    };
+    let shard_meta = |shard: u8, present: bool| {
+        if present {
+            AccountMeta::new(shard_pda(shard), false)
+        } else {
+            AccountMeta::new_readonly(*program_id, false)
+        }
+    };
+    let mut data = anchor_discriminator("record_swiss_result").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.push(round);
+    data.extend_from_slice(&board.to_le_bytes());
+    data.push(result_variant);
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(tournament_pda, false),
+            AccountMeta::new(shard_pda(0), false),
+            shard_meta(1, max_players >= 128),
+            shard_meta(2, max_players >= 256),
+            shard_meta(3, max_players >= 256),
+            AccountMeta::new(*player, true),
+            AccountMeta::new_readonly(*opponent, false),
             AccountMeta::new_readonly(solana_system_interface::program::id(), false),
         ],
         data,

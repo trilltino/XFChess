@@ -63,7 +63,12 @@ impl PatchedDoc {
     }
 
     /// Apply a JSON Patch to the document and broadcast the result.
-    pub fn apply(&self, patches: Patch) -> Result<(), json_patch::PatchError> {
+    ///
+    /// Returns the update that was broadcast, so the caller — which knows the
+    /// resource path, and this type does not — can fan it out to transports
+    /// beyond the local subscriber channel (see [`crate::ResourceHub`]'s
+    /// gossip sink).
+    pub fn apply(&self, patches: Patch) -> Result<BraidUpdate, json_patch::PatchError> {
         let mut g = self.inner.write();
         let parent = g.version;
         json_patch::patch(&mut g.doc, &patches)?;
@@ -73,12 +78,14 @@ impl PatchedDoc {
         let patch_value = serde_json::to_value(&patches).unwrap_or(Value::Array(vec![]));
         let update = BraidUpdate::patch(version, parent, patch_value);
         debug!("[braid] patched_doc v{} → v{}", parent, version);
-        let _ = self.tx.send(update);
-        Ok(())
+        let _ = self.tx.send(update.clone());
+        Ok(update)
     }
 
     /// Replace the entire document (used to sync from authoritative source).
-    pub fn replace(&self, new_doc: Value) {
+    ///
+    /// Returns the broadcast update; see [`Self::apply`].
+    pub fn replace(&self, new_doc: Value) -> BraidUpdate {
         let mut g = self.inner.write();
         let parent = g.version;
         g.doc = new_doc.clone();
@@ -86,7 +93,8 @@ impl PatchedDoc {
         let version = g.version;
         let update = BraidUpdate::snapshot(version, new_doc);
         debug!("[braid] patched_doc replaced v{} → v{}", parent, version);
-        let _ = self.tx.send(update);
+        let _ = self.tx.send(update.clone());
+        update
     }
 }
 
@@ -134,7 +142,9 @@ impl AppendLog {
     }
 
     /// Append one entry and broadcast it as a single-element array patch.
-    pub fn append(&self, entry: Value) {
+    ///
+    /// Returns the broadcast update; see [`PatchedDoc::apply`].
+    pub fn append(&self, entry: Value) -> BraidUpdate {
         let mut g = self.inner.write();
         g.entries.push(entry.clone());
         let parent = g.version;
@@ -146,7 +156,8 @@ impl AppendLog {
         ]);
         let update = BraidUpdate::patch(version, parent, patch_value);
         debug!("[braid] append_log appended v{}", version);
-        let _ = self.tx.send(update);
+        let _ = self.tx.send(update.clone());
+        update
     }
 }
 

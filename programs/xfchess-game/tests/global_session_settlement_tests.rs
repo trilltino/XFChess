@@ -83,6 +83,46 @@ fn finished_game_account(
     (pda, program_account(&game, 8 + Game::INIT_SPACE))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn cancelled_game_account(
+    game_id: u64,
+    white: Pubkey,
+    black: Pubkey,
+    fee_payer: Pubkey,
+    wager_amount: u64,
+) -> (Pubkey, solana_sdk::account::Account) {
+    let (pda, bump) = game_pda(game_id);
+    let game = Game {
+        game_id,
+        white,
+        black,
+        status: GameStatus::Cancelled,
+        last_move_timestamp: 0,
+        fees_advanced: 0,
+        fee_payer,
+        result: GameResult::None,
+        board_state: start_board(),
+        move_count: 0,
+        halfmove_clock: 0,
+        turn: 1,
+        created_at: 0,
+        updated_at: 0,
+        wager_amount,
+        wager_token: None,
+        game_type: GameType::PvP,
+        match_type: MatchType::Free,
+        country_fee: 0,
+        base_time_seconds: 300,
+        increment_seconds: 0,
+        bump,
+        is_delegated: false,
+        tournament_id: None,
+        nonce: 0,
+        draw_offered_by: None,
+    };
+    (pda, program_account(&game, 8 + Game::INIT_SPACE))
+}
+
 fn finalize_game_ix(game_id: u64, white: Pubkey, black: Pubkey, fee_payer: Pubkey) -> Instruction {
     let accounts = xfchess_game::__client_accounts_end_game::EndGame {
         game: game_pda(game_id).0,
@@ -172,6 +212,65 @@ async fn finalize_game_pays_the_nonzero_country_fee_to_treasury() {
     assert!(
         closed.is_none(),
         "Game account should be closed after finalize_game"
+    );
+}
+
+#[tokio::test]
+async fn finalize_game_refunds_cancelled_zero_move_game_to_both_players() {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+    let fee_payer = Keypair::new();
+    let game_id = 4046u64;
+    let wager_amount = 2_000_000u64;
+
+    let (game_pda_key, game_account_data) =
+        cancelled_game_account(game_id, white, black, fee_payer.pubkey(), wager_amount);
+    let (white_profile_pda, white_profile_data) = profile_account(white);
+    let (black_profile_pda, black_profile_data) = profile_account(black);
+    let white_start = 10_000_000u64;
+    let black_start = 11_000_000u64;
+    let treasury_start = 1_000_000u64;
+
+    let mut ctx = start(vec![
+        (game_pda_key, game_account_data),
+        (white_profile_pda, white_profile_data),
+        (black_profile_pda, black_profile_data),
+        (white, system_account(white_start)),
+        (black, system_account(black_start)),
+        (fee_payer.pubkey(), system_account(1_000_000)),
+        (escrow_pda(game_id), system_account(wager_amount * 2)),
+        (treasury_vault_pda(), system_account(treasury_start)),
+    ])
+    .await;
+
+    let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
+    send(&mut ctx, ix, &[])
+        .await
+        .expect("finalize_game should refund a Cancelled zero-move game");
+
+    assert_eq!(
+        ctx.banks_client.get_balance(white).await.unwrap(),
+        white_start + wager_amount
+    );
+    assert_eq!(
+        ctx.banks_client.get_balance(black).await.unwrap(),
+        black_start + wager_amount
+    );
+    assert_eq!(
+        ctx.banks_client
+            .get_balance(treasury_vault_pda())
+            .await
+            .unwrap(),
+        treasury_start,
+        "cancelled refunds must not pay treasury"
+    );
+    assert!(
+        ctx.banks_client
+            .get_account(game_pda_key)
+            .await
+            .unwrap()
+            .is_none(),
+        "Game account should be closed after cancelled finalize"
     );
 }
 

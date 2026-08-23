@@ -1229,10 +1229,7 @@ pub fn render_2d_board(
                 ui.add_space(x_offset);
                 ui.vertical(|ui| {
                     ui.set_width(board_size);
-                    crate::ui::game::player_bar::render_player_bar(
-                        ui,
-                        &extras.player_bars.bottom,
-                    );
+                    crate::ui::game::player_bar::render_player_bar(ui, &extras.player_bars.bottom);
                 });
             });
             extras.bar_layout.bottom_h = bottom_bar.response.rect.height();
@@ -1406,9 +1403,10 @@ pub fn render_2d_board(
                 _ => {
                     if let Some(ref s) = extras.sounds {
                         if !extras.settings.muted {
-                            input_params
-                                .commands
-                                .spawn(bevy::audio::AudioPlayer::new(s.illegal.clone()));
+                            crate::game::resources::sounds::play_sfx(
+                                &mut input_params.commands,
+                                s.illegal.clone(),
+                            );
                         }
                     }
                     clear_selection_state(

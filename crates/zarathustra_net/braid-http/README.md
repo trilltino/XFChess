@@ -12,7 +12,7 @@ It is the protocol core of the XFChess `zarathustra_net` networking stack: every
 ## What Braid-HTTP is
 
 Plain HTTP gives you a *snapshot* of a resource on each `GET`. Braid-HTTP turns a
-resource into a **live, versioned stream**: one `GET` with `Subscribe: keep-alive`
+resource into a **live, versioned stream**: one `GET` with `Subscribe: true`
 returns the current state *and then stays open*, pushing each subsequent change as an
 incremental update. Writers `PUT` updates tagged with a `Version` and its `Parents`,
 forming a version DAG (the same shape git uses for commits).
@@ -43,16 +43,24 @@ This buys three things a raw socket does not give you for free:
 
 | Header | Role |
 |--------|------|
-| `Subscribe` | Request a subscription (`keep-alive`) and declare heartbeat interval |
+| `Subscribe` | Request a subscription. The draft leaves the value open — it "may be blank, set to `true`, or contain arbitrary data" — and this crate sends `true`. Servers here also accept the older `keep-alive` spelling. |
+| `Heartbeats` | The keep-alive interval for a subscription |
 | `Version` | The version id this update introduces |
 | `Parents` | The version(s) this update builds on (the DAG edges) |
 | `Merge-Type` | How to reconcile concurrent writes (`replace`, `simpleton`, `diamond`) |
 | `Patch-Type` | The patch encoding when an update is a partial change |
 | `Content-Range` | The byte/unit range a patch applies to |
 
-Header values use **Structured Field Values** (SFV, RFC 8941). A long-lived `209`
-stream frames successive updates as multipart bodies; `protocol::multiplex` manages the
-boundaries and associates each update's metadata with its body.
+Header values use **Structured Field Values** (SFV, RFC 8941) — which is why `Version`
+and `Parents` travel as quoted strings.
+
+A long-lived `209` stream frames successive updates as a header block, a blank line, and
+a payload, one after another — **not** as MIME multipart; Braid has no boundaries. (This
+crate did emit multipart boundaries once, which is why the note survives in older docs:
+our own parser skipped the boundary lines, so nothing here noticed, but no braid.org tool
+could read the stream. See `xfchess-braid-server/src/resource/protocol.rs`.)
+`protocol::multiplex` is a separate thing: the Braid *multiplexing* protocol, for carrying
+several responses down one connection.
 
 ## Module map
 
