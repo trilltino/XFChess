@@ -631,21 +631,36 @@ if ($PSVersionTable.PSVersion.Major -ge 6) {
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 }
-$result = Invoke-RestMethod -Uri "${proto}://${TlsDomain}/api/user/status/11111111111111111111111111111111" @skipCert -ErrorAction SilentlyContinue
-if ($result) {
-    Write-Host "Backend responding: $($result | ConvertTo-Json -Compress)" -ForegroundColor Green
-} else {
-    Write-Host "Backend check failed — check logs: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
+# The backend and nginx were *just* restarted. Instead of firing one request and
+# misreporting a cold-start hiccup as a failed deploy (seen: weird connection
+# errors while the service was actually coming up), wait up to ~60s for /readyz
+# to return 200, then report real status codes for every check.
+$ready = $null
+for ($i = 0; $i -lt 12; $i++) {
+    try {
+        $r = Invoke-WebRequest -Uri "${proto}://${TlsDomain}/readyz" -UseBasicParsing @skipCert -TimeoutSec 5 -ErrorAction Stop
+        $ready = [int]$r.StatusCode
+        if ($ready -eq 200) { break }
+    } catch {
+        $ready = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { "ERR" }
+    }
+    Write-Host "  waiting for /readyz... ($ready)" -ForegroundColor DarkGray
+    Start-Sleep -Seconds 5
 }
-# /health now returns JSON {status, version, git_sha, timestamp}
-$health = Invoke-RestMethod -Uri "${proto}://${TlsDomain}/health" @skipCert -ErrorAction SilentlyContinue
+Write-Host "Readiness (/readyz): $ready (200 = DB reachable)" -ForegroundColor $(if ($ready -eq 200) { 'Green' } else { 'Red' })
+$health = Invoke-RestMethod -Uri "${proto}://${TlsDomain}/health" @skipCert -TimeoutSec 10 -ErrorAction SilentlyContinue
 if ($health.status -eq "ok") {
     Write-Host "Health OK — running git_sha $($health.git_sha), version $($health.version)." -ForegroundColor Green
-} else {
-    Write-Host "Health endpoint failed — check: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
+} elseif ($ready -eq 200) {
+    Write-Host "Backend is up (readyz 200) but /health did not return ok — check: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
 }
-$ready = try { Invoke-WebRequest -Uri "${proto}://${TlsDomain}/readyz" -UseBasicParsing @skipCert -ErrorAction Stop; "200" } catch { $_.Exception.Response.StatusCode.value__ }
-Write-Host "Readiness (/readyz): $ready (200 = DB reachable)" -ForegroundColor DarkGray
+# /api/user/status doubles as an app-level (post-TLS, post-nginx, post-router) check
+$result = Invoke-RestMethod -Uri "${proto}://${TlsDomain}/api/user/status/11111111111111111111111111111111" @skipCert -TimeoutSec 10 -ErrorAction SilentlyContinue
+if ($result) {
+    Write-Host "Backend responding: $($result | ConvertTo-Json -Compress)" -ForegroundColor Green
+} elseif ($ready -ne 200) {
+    Write-Host "Backend check failed — check logs: ssh ${DEST} journalctl -u xfchess-backend -n 50" -ForegroundColor Red
+}
 
 Write-Host "`n=== Deploy complete ===" -ForegroundColor Green
 Write-Host "Frontend: https://${TlsDomain}" -ForegroundColor Cyan
