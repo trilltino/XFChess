@@ -22,8 +22,8 @@ git push origin v0.4.0
 
 This triggers `.github/workflows/release.yml`, which gates on
 `verify-backend` (production health check) before building. It builds and
-uploads installers for all three platforms in parallel:
-`windows` (NSIS `.exe`), `linux` (`.tar.gz`), `macos` (`.dmg`).
+uploads Windows (`.exe`), macOS (`.dmg`), Linux (`.tar.gz`), and Chrome OS
+(Crostini, a relabeled copy of the Linux tarball) assets.
 
 **To test the pipeline without cutting a real release**, use the manual
 trigger instead of a tag:
