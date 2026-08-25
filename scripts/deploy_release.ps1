@@ -10,7 +10,7 @@
 # included):
 #   1. Pushes the current branch + a version tag to `origin`. The tag push
 #      triggers release.yml, which builds and publishes public
-#      Windows/macOS/Linux installers.
+#      Windows/macOS/Linux installers plus the Chrome OS (Crostini) tarball.
 #   2. Waits for that release.yml run to finish.
 #   3. Runs ops\scripts\deploy.ps1 to build and ship the backend + web
 #      frontend to the live Hetzner VPS.
@@ -166,6 +166,17 @@ if ($run.conclusion -ne "success") {
     throw "release.yml run $runId finished with conclusion '$($run.conclusion)'. Not deploying. Logs: gh run view $runId --repo $PUBLIC_REPO --log-failed"
 }
 Write-Host "release.yml succeeded ($Version, $waitElapsed s)." -ForegroundColor Green
+
+# A successful workflow can still produce an incomplete GitHub Release if an
+# asset-attachment job was skipped or failed independently. Verify the Chrome
+# OS asset before moving on to the unrelated VPS deployment.
+$releaseAssets = gh release view $Version --repo $PUBLIC_REPO --json assets --jq '.assets[].name'
+if ($LASTEXITCODE -ne 0) { throw "Could not inspect GitHub Release $Version for expected assets." }
+$chromeOsAsset = "XFChess-chromeos-x86_64-$($Version.TrimStart('v')).tar.gz"
+if ($releaseAssets -notcontains $chromeOsAsset) {
+    throw "GitHub Release $Version is missing the Chrome OS asset '$chromeOsAsset'. Not deploying."
+}
+Write-Host "Chrome OS release asset verified: $chromeOsAsset" -ForegroundColor Green
 
 # -- Step 3: deploy to Hetzner --
 Write-Host ""

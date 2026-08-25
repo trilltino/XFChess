@@ -7,7 +7,8 @@
 # the one public repo — there is no private split anymore, everything
 # including backend/ and ops/ lives here). Pushing the tag triggers
 # .github/workflows/release.yml directly, which builds and publishes the
-# Windows/macOS/Linux installers to this repo's GitHub Releases page.
+# Windows/macOS/Linux installers plus the Chrome OS (Crostini) tarball to
+# this repo's GitHub Releases page.
 #
 # This only does the push + tag. For push + wait-for-build + deploy to the
 # Hetzner VPS in one command, use .\scripts\deploy_release.ps1 instead.
@@ -105,5 +106,5 @@ if ($LASTEXITCODE -ne 0) { throw "git push $REMOTE $Version failed" }
 
 Write-Host ""
 Write-Host "Done. $Version pushed to $REMOTE." -ForegroundColor Green
-Write-Host "This tag triggers release.yml on trilltino/XFChess directly (gates on verify-backend, then builds windows/linux/macos and publishes to Releases)." -ForegroundColor Green
+Write-Host "This tag triggers release.yml on trilltino/XFChess directly (gates on verify-backend, then builds windows/linux/macos/chromeos and publishes to Releases)." -ForegroundColor Green
 Write-Host "Watch it: gh run list --repo trilltino/XFChess --workflow=release.yml --limit 5" -ForegroundColor Green
