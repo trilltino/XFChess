@@ -1440,34 +1440,6 @@ fn open_in_browser(url: &str, force_fresh: bool) {
   }
 }
 
-/// Close the wallet-popup window.
-///
-/// This does NOT use the PID `open_in_browser` recorded from `Command::spawn`.
-/// Chrome (and Edge) enforce one process per user-data-dir: if the user
-/// already has a browser window open — normal for almost everyone — our
-/// `--app=` invocation just forwards the request to that *already-running*
-/// process via Chrome's own single-instance IPC and immediately exits, so
-/// the spawned PID we tracked belongs to a process that's already dead by
-/// the time this runs. `TerminateProcess` on it is therefore a silent no-op,
-/// which is exactly the "Continue doesn't close the window" bug.
-///
-/// Deliberately not using an isolated `--user-data-dir` to sidestep that —
-/// the wallet popup depends on the user's real Chrome profile for the
-/// Phantom/Solflare extensions it talks to via `window.phantom`/`window.solflare`;
-/// a fresh profile would have neither installed.
-///
-/// Instead: find the actual top-level window by title (the page is titled
-/// `XFChess #<port>` — see `tauri/wallet-ui/src/App.tsx`, which stamps its
-/// own bridge port onto `document.title` at load) whose owning process is
-/// chrome.exe/msedge.exe (never the main game, which is a native window
-/// under `xfchess.exe`, so this can't ever match the wrong "XFChess"-titled
-/// window), and post it a real `WM_CLOSE`.
-///
-/// The port suffix matters: with a bare "XFChess" title, two local
-/// instances (e.g. `just dev2`'s P1 on port 7454 and P2 on port 7464) are
-/// indistinguishable to `EnumWindows`, which searches the whole desktop —
-/// either player's popup closing would `WM_CLOSE` *both* players' popups.
-#[cfg(windows)]
 // ── Admin SSH tunnel (PRODUCTION mode) ───────────────────────────────────────
 //
 // Owned here in Rust rather than in the panel's JavaScript, because the
@@ -1598,6 +1570,34 @@ fn kill_admin_tunnel(app: tauri::AppHandle) {
   kill_admin_tunnel_inner(&app);
 }
 
+/// Close the wallet-popup window.
+///
+/// This does NOT use the PID `open_in_browser` recorded from `Command::spawn`.
+/// Chrome (and Edge) enforce one process per user-data-dir: if the user
+/// already has a browser window open — normal for almost everyone — our
+/// `--app=` invocation just forwards the request to that *already-running*
+/// process via Chrome's own single-instance IPC and immediately exits, so
+/// the spawned PID we tracked belongs to a process that's already dead by
+/// the time this runs. `TerminateProcess` on it is therefore a silent no-op,
+/// which is exactly the "Continue doesn't close the window" bug.
+///
+/// Deliberately not using an isolated `--user-data-dir` to sidestep that —
+/// the wallet popup depends on the user's real Chrome profile for the
+/// Phantom/Solflare extensions it talks to via `window.phantom`/`window.solflare`;
+/// a fresh profile would have neither installed.
+///
+/// Instead: find the actual top-level window by title (the page is titled
+/// `XFChess #<port>` — see `tauri/wallet-ui/src/App.tsx`, which stamps its
+/// own bridge port onto `document.title` at load) whose owning process is
+/// chrome.exe/msedge.exe (never the main game, which is a native window
+/// under `xfchess.exe`, so this can't ever match the wrong "XFChess"-titled
+/// window), and post it a real `WM_CLOSE`.
+///
+/// The port suffix matters: with a bare "XFChess" title, two local
+/// instances (e.g. `just dev2`'s P1 on port 7454 and P2 on port 7464) are
+/// indistinguishable to `EnumWindows`, which searches the whole desktop —
+/// either player's popup closing would `WM_CLOSE` *both* players' popups.
+#[cfg(windows)]
 fn kill_wallet_popup() {
   use ::windows::core::BOOL;
   use ::windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
