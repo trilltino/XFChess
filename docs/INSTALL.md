@@ -15,11 +15,17 @@ for how they're cut):
 | macOS | `XFChess-<version>.dmg` | Disk image |
 | Linux | `XFChess-linux-x86_64-<version>.tar.gz` | Tarball |
 | Chrome OS (Crostini) | `XFChess-chromeos-x86_64-<version>.tar.gz` | Tarball |
+| Android | `app-release.apk` | APK, arm64-v8a |
 
 Single-player vs the built-in engine works fully offline. Online multiplayer,
 tournaments, and wager play need an internet connection (the app talks to
 `https://xfchess.com`) and a Solana wallet (e.g. Phantom or Solflare) for
 on-chain features.
+
+Android builds target Android 12+ (`arm64-v8a`) and are landscape locked. The
+APK is intended for dApp Store distribution and sideload testing; see the
+[Android release runbook](runbooks/android-release.md) for prerequisites and
+device installation.
 
 **Signing status:** as of this writing, builds are unsigned (see
 [PUBLISHING.md](PUBLISHING.md#signing-status-check-before-assuming-a-build-is-signed)).
@@ -68,9 +74,9 @@ bypass steps for each are below.
 4. On launch, the app starts the wallet-bridge helper (`xfchess-tauri`)
    alongside the game window automatically.
 
-**System requirement:** macOS 10.15+. Current builds are produced on GitHub's
-`macos-latest` runner, which is Apple Silicon (arm64) — there is no
-universal/Intel binary yet, so the release won't run on an Intel Mac.
+**System requirement:** macOS 10.15+. Current builds target Intel x86_64 and
+run natively on Intel Macs or through Rosetta 2 on Apple Silicon Macs. There
+is no universal arm64 binary yet.
 
 **Uninstalling:** drag `XFChess.app` from Applications to the Trash.
 

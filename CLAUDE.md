@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-XFChess is a 3D chess game built with Rust + Bevy and Solana blockchain integration. It consists of five major components that share a Cargo workspace:
+XFChess is a 3D chess game built with Rust + Bevy and Solana blockchain integration. It consists of six major components that share a Cargo workspace:
 
 | Component | Path | Tech |
 |-----------|------|------|
@@ -13,6 +13,7 @@ XFChess is a 3D chess game built with Rust + Bevy and Solana blockchain integrat
 | Solana program | `programs/xfchess-game/` | Anchor 1.1, Ephemeral Rollups |
 | Web frontend | `xfchessdotcom/` | React 19, Vite, Chakra UI |
 | Desktop wrapper | `tauri/` | Tauri 2.1 |
+| Android wrapper | `mobile/` | Gradle/Kotlin, GameActivity, `src/android/` |
 
 Shared library crates live in `crates/` — see [crates/CLAUDE.md](crates/CLAUDE.md).
 
@@ -115,6 +116,47 @@ $env:OPENSSL_LIB_DIR      = "C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD"
 $env:OPENSSL_INCLUDE_DIR  = "C:\Program Files\OpenSSL-Win64\include"
 anchor build
 ```
+
+### Android
+
+```bash
+# Cross-compile libxfchess.so + assemble the debug APK
+scripts\build_android.bat
+# or directly:
+cargo ndk -t arm64-v8a -P 31 -o mobile\app\src\main\jniLibs build --release --features solana
+cd mobile && gradlew.bat assembleDebug
+
+# Install to a connected device / emulator
+adb install -r mobile\app\build\outputs\apk\debug\app-debug.apk
+```
+
+Requires: Android SDK (`platform-tools`, `platforms;android-35`, `build-tools;35.0.0`),
+NDK r27+ (pinned to `27.2.12479018` in `mobile/app/build.gradle.kts`), `cargo-ndk`
+(`cargo install cargo-ndk`), the `aarch64-linux-android` Rust target
+(`rustup target add aarch64-linux-android`), and JDK 17+. Set `ANDROID_HOME`,
+`ANDROID_NDK_HOME`, and `JAVA_HOME`.
+
+`-P 31` (API level) is required, not optional — `cargo ndk` defaults to platform
+21, whose NDK sysroot has no stub for `-laaudio` (cpal's Android backend), and
+the link fails with `unable to find library -laaudio`. 31 also matches
+`minSdk` (GameActivity's own floor).
+
+`src/android/` is the Rust-side platform glue (`#[bevy_main]` entry point, JNI
+helpers, TLS-verifier init — see the doc comments there); `mobile/` is the
+Gradle/Kotlin shell (`MainActivity : GameActivity`, manifest, packaging). The
+android-activity crate's own README is explicit that `buildFeatures { prefab =
+true }` must **not** be enabled for `GameActivity` — it would link an upstream
+C++ glue layer that conflicts with the one `android-activity` provides itself;
+`mobile/app/build.gradle.kts` deliberately omits it.
+
+The Android build ships without a Stockfish binary — `AIEngine` defaults to
+the in-process `XFChessEngine` (nimzovich) there, and the in-game picker only
+offers that one option. (The `StockfishProcess`/UCI-adapter code in
+`src/game/ai/systems.rs` still compiles for Android — it's unreachable rather
+than cfg'd out, since nothing on Android can select `AIEngine::Stockfish` and
+`resolve_stockfish_path()` fails safely if it somehow were.) Anti-cheat
+analysis is unaffected either way — it runs server-side against every game,
+regardless of which client played it.
 
 ### Full stack
 

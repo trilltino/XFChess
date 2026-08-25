@@ -36,6 +36,13 @@ describe('getConnectedProvider', () => {
     expect(getConnectedProvider()).toBe(phantom);
   });
 
+  it('honors an explicit provider kind over stale local storage', () => {
+    localStorage.setItem('xfchess_wallet_provider', 'phantom');
+    (window as any).solflare = solflare;
+    (window as any).phantom = { solana: phantom };
+    expect(getConnectedProvider('solflare')).toBe(solflare);
+  });
+
   // An embedded wallet has no extension behind it. Falling through to the
   // phantom-then-solflare default handed back a DIFFERENT keypair, which is how
   // a Google user's profile-creation transaction — fee payer and profile owner

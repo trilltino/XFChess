@@ -75,6 +75,8 @@ jobs:
           (cd tauri/wallet-ui && npm ci && npm run build)
 
       - name: Build binaries (release)
+        env:
+          XFCHESS_RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           cargo build --release --bin xfchess --features solana
           cargo build --release -p xfchess-tauri
@@ -199,6 +201,8 @@ jobs:
           (cd tauri/wallet-ui && npm ci && npm run build)
 
       - name: Build binaries (release)
+        env:
+          XFCHESS_RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           cargo build --release --bin xfchess --features solana
           cargo build --release -p xfchess-tauri
@@ -319,7 +323,10 @@ jobs:
   # ───────────────────────────── macOS ─────────────────────────────
   macos:
     needs: verify-backend
-    runs-on: macos-latest
+    # The release Stockfish artifact below is x86_64. Use an Intel runner so
+    # the game, bridge, and engine are one architecture; Apple Silicon Macs
+    # can run this build through Rosetta 2.
+    runs-on: macos-13
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
     steps:
@@ -359,6 +366,8 @@ jobs:
           (cd tauri/wallet-ui && npm ci && npm run build)
 
       - name: Build binaries (release)
+        env:
+          XFCHESS_RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           cargo build --release --bin xfchess --features solana
           cargo build --release -p xfchess-tauri
@@ -393,3 +402,103 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release/XFChess-*.dmg
+
+  # ─────────────────────────────── Android ───────────────────────────────
+  # Debug-signed APK only, for now. Store submission needs a real release
+  # keystore (see mobile/app/build.gradle.kts and docs/plans — the plan this
+  # job implements deliberately treats keystore generation as a step that
+  # needs a human decision, not something to fabricate inside a CI file: it
+  # can never be rotated once the dApp Store has a release built against it,
+  # and this repo has a documented history of a secret reaching public git
+  # — see the "Secret Exposure" incident). Once a keystore exists as a repo
+  # secret, add a signing step here and switch assembleDebug → assembleRelease
+  # + the dapp-store-cli publish step from the plan's §9.
+  android:
+    needs: verify-backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Derive version from tag
+        id: ver
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=${v//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Android SDK + NDK
+        uses: android-actions/setup-android@v3
+      - name: Install NDK r27c
+        run: sdkmanager --install "ndk;27.2.12479018"
+      - name: Install CMake
+        run: sdkmanager --install "cmake;3.22.1"
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Download Stockfish (Android ARMv8)
+        run: |
+          mkdir -p mobile/app/src/main/jniLibs/arm64-v8a /tmp/stockfish
+          curl -fsSL --retry 3 --retry-delay 5 -m 120 -o /tmp/stockfish.tar \
+            https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-android-armv8.tar
+          tar -xf /tmp/stockfish.tar -C /tmp/stockfish
+          find /tmp/stockfish -type f -name 'stockfish-android-armv8' -exec cp {} mobile/app/src/main/jniLibs/arm64-v8a/libstockfish.so \;
+          test -f mobile/app/src/main/jniLibs/arm64-v8a/libstockfish.so
+
+      - name: Build libxfchess.so (release, arm64-v8a)
+        run: |
+          # $ANDROID_HOME is exported by android-actions/setup-android above
+          # (shell-level, via GITHUB_ENV) — read here as a plain shell
+          # variable rather than through a workflow-expression env lookup,
+          # which resolves against the job's static env context rather than
+          # what a prior step exported at run time.
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          # --lib only: the workspace's [[bin]] targets (desktop CLI tools —
+          # tournament_data_gen, on_chain_benchmark, etc.) aren't meaningful
+          # on Android and cross-compiling them alongside the lib (which
+          # shares the package name "xfchess" with the first [[bin]]) hits an
+          # E0463 "can't find crate" — confirmed by hitting it locally without
+          # --lib, root cause not fully diagnosed but irrelevant once scoped
+          # to just what Android actually needs.
+          cargo ndk -t arm64-v8a -P 31 -o mobile/app/src/main/jniLibs \
+            build --release --lib --features solana
+
+      - name: Strip stray cdylib artifacts from jniLibs
+        # cargo-ndk's -o copies every cdylib artifact from cargo's build
+        # cache for this target, not just libxfchess.so — confirmed by
+        # inspection: xfchess-game (the Solana program crate, also
+        # crate-type=["cdylib"]) and internal cdylib byproducts from
+        # iroh/solana-zk-sdk/irpc all land here too. Keep only what
+        # MainActivity.kt actually loads.
+        run: |
+          find mobile/app/src/main/jniLibs/arm64-v8a -name '*.so' ! -name 'libxfchess.so' -delete
+
+      - name: Assemble release APK
+        working-directory: mobile
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Verify libxfchess.so is present and extractable in the built APK
+        # Catches the extractNativeLibs/useLegacyPackaging drift failure mode
+        # documented in the plan (§6c) before it ships silently — a mismatch
+        # there produces a runtime EACCES on-device, not a build error, so
+        # this is the one place that class of bug is cheap to catch.
+        run: |
+          apk="mobile/app/build/outputs/apk/release/app-release-unsigned.apk"
+          if ! unzip -l "$apk" | grep -q "lib/arm64-v8a/libxfchess.so"; then
+            echo "::error::libxfchess.so missing from the built APK"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk-unsigned
+          path: mobile/app/build/outputs/apk/release/app-release-unsigned.apk

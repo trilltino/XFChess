@@ -25,6 +25,24 @@ pub fn set_auth_token(token: Option<String>) {
     }
 }
 
+/// Revoke the current backend JWT, then clear it from this process. Logout is
+/// best-effort over the network, but local credentials are always discarded.
+pub fn logout() {
+    let token = AUTH_TOKEN.read().ok().and_then(|guard| guard.clone());
+    set_auth_token(None);
+    if let Some(token) = token {
+        if let Ok(client) = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+        {
+            let _ = client
+                .post(format!("{}/api/auth/logout", vps_base()))
+                .bearer_auth(token)
+                .send();
+        }
+    }
+}
+
 pub fn vps_base() -> String {
     std::env::var("SIGNING_SERVICE_URL")
         .or_else(|_| std::env::var("BACKEND_URL"))

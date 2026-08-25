@@ -6,6 +6,7 @@ use crate::multiplayer::vps_client::UserStatus;
 use crate::multiplayer::{NetworkMessage, OnlineNetworkState};
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::{debug, error, info, warn, Commands, Local, Res, ResMut, Time};
+#[cfg(not(target_os = "android"))]
 use directories::ProjectDirs;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -440,10 +441,12 @@ pub fn handle_pending_solana_tasks(mut solana_state: ResMut<SolanaIntegrationSta
 pub fn authorize_session_key_on_game_start(
     mut game_start_events: MessageReader<GameStartedEvent>,
     solana_state: Res<SolanaIntegrationState>,
+    mut game_sync: ResMut<crate::multiplayer::solana::addon::SolanaGameSync>,
     network_state: Res<OnlineNetworkState>,
     rollup_manager: Res<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
     braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
 ) {
+    let session_pubkey_update = game_sync.session_pubkey_update.clone();
     for _event in game_start_events.read() {
         let wallet_pubkey = match solana_state.wallet_pubkey {
             Some(pk) => pk,
@@ -497,7 +500,9 @@ pub fn authorize_session_key_on_game_start(
         let braid_heads = braid.heads();
 
         bevy::tasks::IoTaskPool::get()
-            .spawn(async move {
+                .spawn({
+                    let session_pubkey_update = session_pubkey_update.clone();
+                    async move {
                 use crate::multiplayer::vps_client;
 
                 let Some(signing_pubkey) = signing_pubkey_bytes.map(|seed| {
@@ -520,6 +525,9 @@ pub fn authorize_session_key_on_game_start(
                                 Ok(pk) => pk,
                                 Err(_) => break,
                             };
+                            if let Ok(mut update) = session_pubkey_update.lock() {
+                                *update = Some(session_pubkey);
+                            }
                             info!(
                                 "[SESSION] VPS session active for game {} ({})",
                                 game_id, session_pubkey
@@ -572,8 +580,22 @@ pub fn authorize_session_key_on_game_start(
                         game_id
                     );
                 }
+                }
             })
             .detach();
+    }
+}
+
+pub fn poll_session_pubkey_update(
+    mut game_sync: ResMut<crate::multiplayer::solana::addon::SolanaGameSync>,
+) {
+    let session_pubkey = game_sync
+        .session_pubkey_update
+        .lock()
+        .ok()
+        .and_then(|mut update| update.take());
+    if let Some(session_pubkey) = session_pubkey {
+        game_sync.session_pubkey = Some(session_pubkey);
     }
 }
 
@@ -674,12 +696,21 @@ pub fn poll_verified_participants_fetch(
 /// `network::identity::key_path`'s `XFCHESS_NODE_KEY_PATH` override for the
 /// same class of bug on the P2P node key.
 fn get_hot_wallet_path() -> Option<PathBuf> {
-    ProjectDirs::from("com", "trilltino", "XFChess").map(|proj_dirs| {
-        hot_wallet_filename(
-            proj_dirs.config_dir(),
-            std::env::var("XFCHESS_WALLET_PORT").ok().as_deref(),
-        )
-    })
+    #[cfg(target_os = "android")]
+    {
+        crate::core::paths::internal_data_dir().map(|dir| {
+            hot_wallet_filename(&dir, std::env::var("XFCHESS_WALLET_PORT").ok().as_deref())
+        })
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        ProjectDirs::from("com", "trilltino", "XFChess").map(|proj_dirs| {
+            hot_wallet_filename(
+                proj_dirs.config_dir(),
+                std::env::var("XFCHESS_WALLET_PORT").ok().as_deref(),
+            )
+        })
+    }
 }
 
 /// Appends an `_<port>` suffix to `hot_wallet.json` when `wallet_port` is set

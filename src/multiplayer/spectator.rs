@@ -526,6 +526,7 @@ fn dispatch_pending_spectator_moves(
                 to: (to_col, to_row),
                 promotion,
                 expected_fen: None,
+                dedup_version: None,
             });
             session.pending_moves.remove(0);
             session.applied_move_count += 1;
@@ -573,6 +574,7 @@ pub fn apply_braid_resync_to_spectator(
                     to: (to_col, to_row),
                     promotion,
                     expected_fen: Some(next_fen.clone()),
+                    dedup_version: None,
                 });
                 // Advance so the VPS poll (`tick_spectator_poll`) doesn't
                 // re-fetch and re-queue moves already applied via gossip

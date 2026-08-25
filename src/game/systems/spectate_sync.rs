@@ -78,6 +78,7 @@ pub fn sync_spectator_board(
                             to: (to_file, to_rank),
                             promotion,
                             expected_fen: None,
+                            dedup_version: None,
                         });
 
                         sync_status.last_move_uci = Some(uci.clone());

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Android 11+ (API 30+) requires apps to declare which packages/schemes
+         they intend to query or resolve intents against — without this,
+         Mobile Wallet Adapter's association intent (solana-wallet://) and the
+         dApp Store deep link silently fail to resolve any installed handler,
+         even when one is genuinely installed. Wired ahead of the MWA bridge
+         itself landing so the manifest requirement isn't rediscovered later. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="solana-wallet" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="solanadappstore" />
+        </intent>
+    </queries>
+
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:label="XFChess"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/ActivityTheme">
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:exported="true"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- android-activity's #[bevy_main] macro expands to an
+                 `android_main` symbol in libxfchess.so; GameActivity's Java
+                 side loads it by this name via System.loadLibrary("xfchess")
+                 in MainActivity.kt, and this meta-data tells GameActivity
+                 which .so that call actually is. Must match both. -->
+            <meta-data android:name="android.app.lib_name" android:value="xfchess" />
+        </activity>
+    </application>
+
+</manifest>

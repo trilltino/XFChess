@@ -106,7 +106,8 @@ impl Plugin for MultiplayerPlugin {
                 systems::initialize_braid_network,
                 systems::handle_network_events,
                 systems::sweep_stale_move_buffers,
-                systems::dispatch_remote_moves,
+                systems::dispatch_remote_moves
+                    .after(network::braid_transport::drain_braid_messages),
                 systems::handle_resync_response,
                 systems::handle_resync_request,
                 systems::handle_game_control_messages,

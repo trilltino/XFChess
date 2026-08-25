@@ -1,19 +1,3 @@
-import { Link } from 'react-router-dom';
-
-// Every route in App.tsx that a visitor can meaningfully arrive at cold is
-// listed here. The top nav carries five links; this is the complete index.
-// (/spectate/:game_id and /tournament/:id are omitted deliberately — both
-// need an id and are only reachable from a game or a tournament listing.)
-// The site is four routes. This used to be a four-column index of ~16
-// pages; those pages were deleted, so the footer is now the same four links
-// plus the source repo rather than a column layout with nothing to fill it.
-const LINKS: { to: string; label: string; external?: boolean }[] = [
-  { to: "/home", label: "Home" },
-  { to: "/play", label: "Play" },
-  { to: "/tournaments", label: "Tournaments" },
-  { to: "/features", label: "Features" },
-  { to: "https://github.com/trilltino/XFChess", label: "Source", external: true },
-];
 
 const SOCIALS: { href: string; label: string; path: string }[] = [
   {
@@ -42,19 +26,6 @@ export function Footer() {
   return (
     <footer className="site-footer">
       <div className="site-footer-inner">
-        <nav className="footer-links" aria-label="Site">
-          {LINKS.map((link) =>
-            link.external ? (
-              <a key={link.to} href={link.to} target="_blank" rel="noopener noreferrer">
-                {link.label}
-              </a>
-            ) : (
-              <Link key={link.to} to={link.to}>
-                {link.label}
-              </Link>
-            )
-          )}
-        </nav>
 
         <div className="footer-bottom">
           <div className="footer-social">

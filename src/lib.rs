@@ -1,4 +1,6 @@
 /// XFChess library module for decentralized chess on Solana
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod assets;
 pub mod core;
 pub mod engine;
@@ -31,6 +33,14 @@ use std::path::PathBuf;
 /// to go on beyond a screenshot. `Box::leak`ing the guard is the standard
 /// tracing-appender pattern for a writer that must live as long as the app.
 fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
+    // Still useful on Android for offline bug reports even though `adb
+    // logcat` (wired in below) is the primary live-debugging channel there —
+    // see the plan's "Testing on a Samsung Galaxy S23" section.
+    #[cfg(target_os = "android")]
+    let dir = crate::core::paths::internal_data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("logs");
+    #[cfg(not(target_os = "android"))]
     let dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("xfchess")
@@ -40,12 +50,32 @@ fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     Box::leak(Box::new(guard));
     use tracing_subscriber::Layer;
-    Some(
-        tracing_subscriber::fmt::layer()
-            .with_ansi(false)
-            .with_writer(non_blocking)
-            .boxed(),
-    )
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(non_blocking);
+
+    // On Android, compose the file layer with a second layer that writes
+    // directly to logcat via the NDK's `__android_log_write` (the
+    // `paranoid-android` crate) — this is what makes every `info!`/`warn!`/
+    // `error!` call site in this codebase (all `tracing`-based, via
+    // `bevy::prelude::*`) reach `adb logcat -s xfchess:V`, not just the two
+    // early-bootstrap lines in `android::main` that go through the separate
+    // `android_logger`/`log`-facade path (necessarily separate: this
+    // `LogPlugin` layer, like all of Bevy, doesn't exist yet at that point in
+    // startup). `android_logger` alone would not cover this — it bridges the
+    // `log` facade, and this codebase's logging is `tracing`, not `log`.
+    #[cfg(target_os = "android")]
+    {
+        Some(
+            file_layer
+                .and_then(paranoid_android::layer("xfchess"))
+                .boxed(),
+        )
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Some(file_layer.boxed())
+    }
 }
 
 pub use core::persistent_camera::PersistentEguiCamera;
@@ -251,6 +281,14 @@ pub fn build_app(game_config: GameConfig) -> App {
         });
     }
 
+    // `game()` is `Continuous` — renders flat-out regardless of focus, which
+    // is the right call on desktop but drains battery on a phone. `mobile()`
+    // is reactive 60Hz focused / reactive_low_power 1s unfocused, matching
+    // what Bevy's own `examples/mobile` uses and covering most of "don't burn
+    // battery backgrounded" for free.
+    #[cfg(target_os = "android")]
+    app.insert_resource(bevy::winit::WinitSettings::mobile());
+    #[cfg(not(target_os = "android"))]
     app.insert_resource(bevy::winit::WinitSettings::game());
 
     app.insert_resource(game_config.clone())
@@ -336,9 +374,16 @@ pub fn build_app(game_config: GameConfig) -> App {
         ui::UiPlugin,
         input::InputPlugin,
         presentation::PresentationPlugin,
-        core::updates::UpdateCheckPlugin,
-    ))
-    .add_plugins((
+    ));
+
+    // GitHub-release download-panel update checker — meaningless on Android,
+    // which has no Android artifact in the GitHub release pipeline and
+    // updates through the dApp Store instead of a browser download. Desktop
+    // (Windows/macOS/Linux) keeps this exactly as before.
+    #[cfg(not(target_os = "android"))]
+    app.add_plugins(core::updates::UpdateCheckPlugin);
+
+    app.add_plugins((
         states::main_menu::MainMenuPlugin,
         states::game_over::GameOverPlugin,
         states::pause::PausePlugin,

@@ -14,10 +14,9 @@
 //! program, an unlisted instruction, a mismatched game — is rejected before a
 //! signature is ever produced.
 //!
-//! Deliberately strict about which programs are tolerated. Compute-budget
-//! instructions would be harmless to allow, but the game client does not emit
-//! them (verified across `solana/lobby.rs`'s create/join paths), and an
-//! allow-list is only worth having while it stays minimal.
+//! Deliberately strict about which programs are tolerated. The canonical
+//! ComputeBudget program is the one exception: its instructions only tune
+//! transaction execution and cannot move funds or authorize game state.
 
 use solana_sdk::{pubkey::Pubkey, transaction::Transaction};
 
@@ -67,6 +66,10 @@ pub fn validate_cosignable_tx(
             .get(ix.program_id_index as usize)
             .ok_or_else(|| format!("instruction {i} references an out-of-range program index"))?;
 
+        if target == &solana_compute_budget_interface::ID {
+            continue;
+        }
+
         if target != program_id {
             return Err(format!(
                 "instruction {i} targets program {target}, but only the XFChess program \
@@ -105,6 +108,7 @@ pub fn validate_cosignable_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solana_compute_budget_interface::ComputeBudgetInstruction;
     use solana_sdk::{
         instruction::{AccountMeta, Instruction},
         message::Message,
@@ -154,6 +158,33 @@ mod tests {
             &[game_pda],
         )
         .expect("the bundle the game client actually sends must be accepted");
+    }
+
+    #[test]
+    fn accepts_compute_budget_instructions_before_setup() {
+        let program_id = program();
+        let payer = Keypair::new();
+        let game_pda = Pubkey::new_unique();
+        let tx = tx_of(
+            &payer,
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(250_000),
+                ix_for(
+                    &program_id,
+                    "create_game",
+                    &[AccountMeta::new(game_pda, false)],
+                ),
+                ix_for(&program_id, "authorize_session_key", &[]),
+            ],
+        );
+
+        validate_cosignable_tx(
+            &tx,
+            &program_id,
+            &["create_game", "authorize_session_key"],
+            &[game_pda],
+        )
+        .expect("compute budget metadata must not block setup activation");
     }
 
     /// The whole point of the guard: a lamport transfer smuggled into the setup

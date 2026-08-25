@@ -50,6 +50,9 @@ fn key_path() -> PathBuf {
             return pb;
         }
     }
+    #[cfg(target_os = "android")]
+    let base = crate::core::paths::internal_data_dir().unwrap_or_else(|| PathBuf::from("."));
+    #[cfg(not(target_os = "android"))]
     let base = dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("xfchess");
@@ -116,6 +119,13 @@ fn guest_username_path() -> PathBuf {
     // Documents, not config_dir — the same `Documents/xfchess/` folder the
     // Save-PGN feature already writes to, so local player data lives in one
     // discoverable place instead of split between a visible and a hidden dir.
+    // Android has no equivalent shared/visible Documents folder without the
+    // Storage Access Framework (out of scope for v1); `external_data_dir()`
+    // is the closest analog — still app-scoped, but visible via a file
+    // manager and where the PGN-save fallback (game_over_popup.rs) also lands.
+    #[cfg(target_os = "android")]
+    let base = crate::core::paths::external_data_dir().unwrap_or_else(|| PathBuf::from("."));
+    #[cfg(not(target_os = "android"))]
     let base = dirs::document_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("xfchess");
@@ -152,6 +162,9 @@ pub fn save_guest_username(name: &str) {
 // profile automatically so returning players don't see an empty picker.
 
 fn profiles_dir() -> PathBuf {
+    #[cfg(target_os = "android")]
+    let base = crate::core::paths::external_data_dir().unwrap_or_else(|| PathBuf::from("."));
+    #[cfg(not(target_os = "android"))]
     let base = dirs::document_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("xfchess");

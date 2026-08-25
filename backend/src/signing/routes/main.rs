@@ -63,7 +63,10 @@ fn session_create_tracker() -> &'static tokio::sync::Mutex<HashMap<String, Vec<s
 /// Rations `/session/create` against the fee-payer pool: a sliding-window rate
 /// limit per wallet, plus a cap on how many funded-but-unactivated sessions one
 /// wallet may hold. Returns the HTTP error to surface when either is exceeded.
-async fn session_funding_guard(state: &AppState, wallet: &str) -> Result<(), (StatusCode, String)> {
+pub(crate) async fn session_funding_guard(
+    state: &AppState,
+    wallet: &str,
+) -> Result<(), (StatusCode, String)> {
     {
         let mut tracker = session_create_tracker().lock().await;
         let now = std::time::Instant::now();
@@ -259,6 +262,7 @@ pub fn protected_routes() -> Router<AppState> {
     Router::new()
         .route("/session/create", post(create_session))
         .route("/session/activate", post(activate_session))
+        .route("/session/abandon/{game_id}", post(abandon_session))
         .route("/move/record", post(record_move))
         .route("/game/delegate", post(delegate_game))
         .route("/game/undelegate", post(undelegate_game))
@@ -516,6 +520,26 @@ pub async fn activate_session(
         sig: sig.to_string(),
         ..Default::default()
     }))
+}
+
+/// POST /session/abandon/:game_id - Releases a never-activated session.
+pub async fn abandon_session(
+    State(state): State<AppState>,
+    caller: crate::signing::auth::RequireWallet,
+    Path(game_id): Path<u64>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if state.store.abandon_unactivated(game_id, &caller.0).await {
+        info!(
+            "[VPS] Wallet {} abandoned session for game {}",
+            caller.0, game_id
+        );
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            format!("No unactivated session for game {game_id} owned by caller"),
+        ))
+    }
 }
 
 /// GET /session/status/:game_id - Gets session status.
@@ -1131,8 +1155,8 @@ pub async fn delegate_game(
 
 /// Registers the on-chain time-check crank for a freshly-delegated game, so a
 /// stalled clock gets auto-forfeited on the ER even if nothing else calls
-/// `claim_timeout`. 30s interval, unlimited iterations — cancelled by
-/// `cancel_time_check_crank` alongside `undelegate_game`.
+/// `claim_timeout`. 30s interval, effectively-until-cancelled iterations —
+/// cancelled by `cancel_time_check_crank` alongside `undelegate_game`.
 ///
 /// Best-effort: delegation itself already succeeded (the part that matters
 /// for gameplay to continue), so a scheduling failure is logged and counted

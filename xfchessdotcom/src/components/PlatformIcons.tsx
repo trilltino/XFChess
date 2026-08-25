@@ -1,13 +1,18 @@
-import windowsLogo from '../assets/windows-logo.png';
-
 interface IconProps {
   size?: number;
 }
 
-// Windows flag mark, cropped from a user-supplied source image (see
-// project notes) — matted to white-on-transparent to match the SVG icons.
+// Windows four-pane mark, path data from simple-icons (CC0) —
+// https://simpleicons.org/?q=windows. Replaces a raster crop that was matted
+// to fixed white: being a bitmap it softened as soon as the download rows were
+// scaled up, and it could not inherit `currentColor` the way the Apple and
+// Linux marks beside it do.
 export function WindowsIcon({ size = 18 }: IconProps) {
-  return <img src={windowsLogo} alt="" width={size} height={size} style={{ display: 'block' }} />;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+      <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
+    </svg>
+  );
 }
 
 // Apple logo mark, path data from simple-icons (CC0) —

@@ -22,7 +22,7 @@
 use crate::core::GameSettings;
 use bevy::prelude::*;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use directories::ProjectDirs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
@@ -38,17 +38,28 @@ const SETTINGS_FILENAME: &str = "settings.json";
 
 /// Helper to resolve the settings file path
 ///
-/// Returns a path to `settings.json` in the user's configuration directory.
-/// E.g., C:\Users\User\AppData\Roaming\trilltino\XFChess\settings.json
-/// Falls back to local "settings.json" if the system config dir cannot be found.
+/// Desktop: a path to `settings.json` in the user's configuration directory,
+/// e.g. C:\Users\User\AppData\Roaming\trilltino\XFChess\settings.json — falls
+/// back to local "settings.json" if the system config dir cannot be found.
+/// Android: `internal_data_dir()`, private per-package storage that plays the
+/// same role `ProjectDirs::config_dir()` does on desktop.
 #[cfg(not(target_arch = "wasm32"))]
 fn get_settings_path() -> PathBuf {
-    if let Some(proj_dirs) = ProjectDirs::from("com", "trilltino", "XFChess") {
-        let config_dir = proj_dirs.config_dir();
-        config_dir.join(SETTINGS_FILENAME)
-    } else {
-        // Fallback to current directory
-        PathBuf::from(SETTINGS_FILENAME)
+    #[cfg(target_os = "android")]
+    {
+        crate::core::paths::internal_data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(SETTINGS_FILENAME)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Some(proj_dirs) = ProjectDirs::from("com", "trilltino", "XFChess") {
+            let config_dir = proj_dirs.config_dir();
+            config_dir.join(SETTINGS_FILENAME)
+        } else {
+            // Fallback to current directory
+            PathBuf::from(SETTINGS_FILENAME)
+        }
     }
 }
 

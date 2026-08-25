@@ -65,9 +65,14 @@ pub fn initialize_braid_network(
     tokio_runtime: Res<TokioRuntime>,
     player_identity: Res<crate::states::main_menu::PlayerIdentity>,
 ) {
-    if network_state.connected || player_identity.username.is_none() {
+    if network_state.connected
+        || network_state.initialization_in_progress
+        || player_identity.username.is_none()
+    {
         return;
     }
+
+    network_state.initialization_in_progress = true;
 
     let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<NetworkEvent>();
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<NetworkMessage>();
@@ -77,7 +82,7 @@ pub fn initialize_braid_network(
     network_state.event_receiver = Some(event_rx);
     network_state.event_sender = Some(event_tx.clone()); // relay bridge injects incoming here
     network_state.message_sender = Some(msg_tx);
-    network_state.bootstrap_sender = Some(bootstrap_tx);
+    network_state.bootstrap_sender = Some(bootstrap_tx.clone());
     network_state.subscription_sender = Some(sub_tx);
 
     // Cloned `Arc`, not a snapshot — this task reads the *shared* cell fresh
@@ -95,6 +100,9 @@ pub fn initialize_braid_network(
         // proxy's default_peer (browser spectators → local iroh node).
         let derived_node_id: EndpointId = secret_key.public();
 
+        #[cfg(target_os = "android")]
+        let braid_data_dir = crate::core::paths::internal_data_dir().map(|d| d.join("braid"));
+        #[cfg(not(target_os = "android"))]
         let braid_data_dir = dirs::data_local_dir()
             .map(|d| d.join("xfchess").join("braid"))
             .or_else(|| Some(std::path::PathBuf::from("braid-data")));
@@ -129,10 +137,7 @@ pub fn initialize_braid_network(
             Err(e) => {
                 error!("❌ Failed to spawn BraidIrohNode: {}", e);
                 event_tx_clone
-                    .send(NetworkEvent::PeerDisconnected(format!(
-                        "Spawn failed: {}",
-                        e
-                    )))
+                    .send(NetworkEvent::NetworkInitializationFailed(e.to_string()))
                     .ok();
                 return;
             }
@@ -152,6 +157,9 @@ pub fn initialize_braid_network(
             Ok(r) => r,
             Err(e) => {
                 error!("❌ Failed to subscribe to gossip topic: {}", e);
+                event_tx_clone
+                    .send(NetworkEvent::NetworkInitializationFailed(e.to_string()))
+                    .ok();
                 return;
             }
         };
@@ -167,6 +175,8 @@ pub fn initialize_braid_network(
         let node_sub = node_arc.clone();
         let mesh_sub = mesh.clone();
         let mesh_bootstrap = mesh.clone();
+        let bootstrap_tx_sub = bootstrap_tx.clone();
+        let bootstrap_tx_main = bootstrap_tx.clone();
 
         // 1. Outgoing message loop
         let event_tx_error = event_tx_clone.clone();
@@ -278,7 +288,11 @@ pub fn initialize_braid_network(
                 let event_tx_inner = event_tx_sub.clone();
                 match node_sub.subscribe(&topic, bootstrap).await {
                     Ok(rx_new) => {
-                        tokio::spawn(process_gossip_stream(rx_new, event_tx_inner));
+                        tokio::spawn(process_gossip_stream(
+                            rx_new,
+                            event_tx_inner,
+                            bootstrap_tx_sub.clone(),
+                        ));
                     }
                     Err(e) => {
                         error!("Failed to subscribe to topic {}: {}", topic, e);
@@ -307,7 +321,7 @@ pub fn initialize_braid_network(
         });
 
         // 4. Main gossip pump (global topic)
-        process_gossip_stream(rx, event_tx_clone).await;
+        process_gossip_stream(rx, event_tx_clone, bootstrap_tx_main).await;
     });
 }
 
@@ -331,11 +345,17 @@ fn bind_identity(mut signed: SignedNetworkMessage) -> NetworkMessage {
 async fn process_gossip_stream(
     mut rx: iroh_gossip::api::GossipReceiver,
     event_tx: tokio::sync::mpsc::UnboundedSender<NetworkEvent>,
+    bootstrap_tx: tokio::sync::mpsc::UnboundedSender<EndpointId>,
 ) {
     while let Some(result) = rx.next().await {
         match result {
             Ok(IrohEvent::NeighborUp(peer_id)) => {
                 info!("[NET] Peer connected via gossip: {}", peer_id);
+                // The subscription that observed this peer may be the global
+                // topic, while a game topic was subscribed later. Feed the
+                // endpoint into the bootstrap loop so it joins every topic
+                // currently tracked by GossipMesh.
+                bootstrap_tx.send(peer_id).ok();
                 let bs58_id = bs58::encode(peer_id.as_bytes()).into_string();
                 event_tx
                     .send(NetworkEvent::PeerConnected(bs58_id.clone()))
@@ -484,6 +504,7 @@ async fn process_gossip_stream(
 pub fn handle_network_events(
     mut network_state: ResMut<OnlineNetworkState>,
     mut causal: ResMut<crate::multiplayer::types::CausalChainState>,
+    mut start_barrier: ResMut<crate::multiplayer::types::OnlineStartBarrier>,
     mut pending: ResMut<crate::multiplayer::types::PendingMoveBuffer>,
     mut network_events: MessageWriter<NetworkEvent>,
     mut resign_events: MessageWriter<ResignEvent>,
@@ -599,7 +620,12 @@ pub fn handle_network_events(
                     network_state.node_id = Some(*node_id);
                     network_state.secret_key_bytes = Some(*secret_key_bytes);
                     network_state.connected = true;
+                    network_state.initialization_in_progress = false;
                     info!("Braid network initialized with node ID: {}", node_id);
+                }
+                NetworkEvent::NetworkInitializationFailed(reason) => {
+                    network_state.initialization_in_progress = false;
+                    warn!("[NET] Braid network initialization failed: {}", reason);
                 }
                 NetworkEvent::PeerDiscovered(peer_info) => {
                     if !network_state
@@ -627,6 +653,59 @@ pub fn handle_network_events(
                     // `NonceSequencer` before we get here (see above) — by this
                     // point a `Move` has already been confirmed in-order.
                     let game_id = msg.game_id();
+
+                    match msg {
+                        NetworkMessage::GameReady {
+                            game_id: ready_game,
+                            player_pubkey,
+                            ready_token,
+                        } if *ready_game == game_id
+                            && *ready_token == format!("game-{game_id}") =>
+                        {
+                            let wallet_allowed = match causal.verified_wallets.get(ready_game) {
+                                Some((white, black)) => {
+                                    let claimed = player_pubkey.to_string();
+                                    &claimed == white || &claimed == black
+                                }
+                                None => true,
+                            };
+                            if wallet_allowed {
+                                start_barrier.remote_ready = true;
+                                info!("[START] Remote player ready for game {game_id}");
+                                if start_barrier.local_ready && !start_barrier.start_sent {
+                                    if let Some(tx) = &network_state.message_sender {
+                                        if tx
+                                            .send(NetworkMessage::GameStartConfirmed {
+                                                game_id,
+                                                start_token: format!("game-{game_id}"),
+                                            })
+                                            .is_ok()
+                                        {
+                                            start_barrier.start_sent = true;
+                                            start_barrier.start_confirmed = true;
+                                            info!("[START] Sent synchronized start for game {game_id}");
+                                        }
+                                    }
+                                }
+                            } else {
+                                warn!(
+                                    "[START] Rejected readiness for game {game_id}: wallet is not a participant"
+                                );
+                            }
+                        }
+                        NetworkMessage::GameStartConfirmed {
+                            game_id: start_game,
+                            start_token,
+                        } if *start_game == game_id
+                            && *start_token == format!("game-{game_id}") =>
+                        {
+                            if start_barrier.local_ready && start_barrier.remote_ready {
+                                start_barrier.start_confirmed = true;
+                                info!("[START] Synchronized start confirmed for game {game_id}");
+                            }
+                        }
+                        _ => {}
+                    }
 
                     // A2: build the per-game roster of allowed signer keys from
                     // SessionInfo (broadcast only after the VPS confirms a session is
@@ -1055,6 +1134,7 @@ pub fn handle_session_info_from_network(
     mut session_key_manager: ResMut<
         crate::multiplayer::rollup::session_keys::HandshakeOrderingKeyManager,
     >,
+    causal: Res<crate::multiplayer::types::CausalChainState>,
     mut solana_state: Option<
         ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
     >,
@@ -1070,6 +1150,25 @@ pub fn handle_session_info_from_network(
             if game_id != &rollup_manager.game_id {
                 continue;
             }
+
+            let claim_trusted = match causal.verified_wallets.get(game_id) {
+                Some((white, black)) => {
+                    let claimed = player_pubkey.to_string();
+                    claimed == *white || claimed == *black
+                }
+                None => true,
+            };
+
+            if !claim_trusted {
+                warn!(
+                    "[SESSION] Ignored spoofed SessionInfo for game {}: claimed player_pubkey {} is not in verified wallet pair {:?}",
+                    game_id,
+                    player_pubkey,
+                    causal.verified_wallets.get(game_id)
+                );
+                continue;
+            }
+
             if let Some(ref mut state) = solana_state {
                 state.opponent_pubkey = Some(*player_pubkey);
             }
@@ -1255,7 +1354,16 @@ pub fn dispatch_remote_moves(
     }
     for event in network_events.read() {
         if let NetworkEvent::MessageReceived(NetworkMessage::Move {
-            move_uci, next_fen, ..
+            move_uci,
+            next_fen,
+            turn,
+            ..
+        })
+        | NetworkEvent::BraidMove(NetworkMessage::Move {
+            move_uci,
+            next_fen,
+            turn,
+            ..
         }) = event
         {
             if move_uci.len() >= 4 {
@@ -1274,6 +1382,7 @@ pub fn dispatch_remote_moves(
                     to: (to_file, to_rank),
                     promotion,
                     expected_fen: Some(next_fen.clone()),
+                    dedup_version: Some(braid_chess::version_hash(next_fen, *turn as u32)),
                 });
             } else {
                 warn!("[NET] Received malformed UCI move: {:?}", move_uci);
@@ -2206,30 +2315,35 @@ mod session_info_spoof_tests {
     use bevy::prelude::*;
     use solana_sdk::pubkey::Pubkey;
 
-    /// A peer can announce any `player_pubkey` alongside its own freshly
-    /// generated `signing_pubkey` — `handle_session_info_from_network` never
-    /// verifies that the announcing peer actually controls `player_pubkey`,
-    /// it just stores whatever was claimed into `opponent_pubkey`.
+    /// Once the backend has published the authoritative wallet pair for a game,
+    /// a forged `SessionInfo.player_pubkey` must never be trusted into
+    /// `opponent_pubkey` or the per-game roster. This is the client-side
+    /// analogue of the server-side on-chain roster guard.
     #[test]
-    fn handle_session_info_accepts_a_spoofed_player_pubkey_with_no_verification() {
-        let victim_wallet = Pubkey::new_unique(); // the identity being impersonated
-        let attacker_signing_key = Pubkey::new_unique(); // attacker's own gossip key
+    fn handle_session_info_rejects_a_spoofed_player_pubkey_when_verified_wallets_are_known() {
+        let white = Pubkey::new_unique();
+        let black = Pubkey::new_unique();
+        let victim_wallet = Pubkey::new_unique(); // not actually white or black
+        let attacker_signing_key = Pubkey::new_unique();
 
         let mut app = App::new();
-        app.insert_resource(EphemeralRollupManager::new(
-            1,
-            false,
-            "startpos".to_string(),
-        ));
+        let mut rollup = EphemeralRollupManager::new(1, false, "startpos".to_string());
+        rollup.game_id = 1;
+        app.insert_resource(rollup);
         app.insert_resource(HandshakeOrderingKeyManager::default());
         app.insert_resource(SolanaIntegrationState::default());
+        app.insert_resource(CausalChainState::default());
+        app.world_mut()
+            .resource_mut::<CausalChainState>()
+            .verified_wallets
+            .insert(1, (white.to_string(), black.to_string()));
         app.add_message::<NetworkEvent>();
         app.add_systems(Update, handle_session_info_from_network);
 
         app.world_mut()
             .write_message(NetworkEvent::MessageReceived(NetworkMessage::SessionInfo {
                 game_id: 1,
-                player_pubkey: victim_wallet, // claimed, unverified
+                player_pubkey: victim_wallet,
                 session_pubkey: Pubkey::new_unique(),
                 signing_pubkey: attacker_signing_key,
                 expires_at: i64::MAX,
@@ -2238,10 +2352,8 @@ mod session_info_spoof_tests {
 
         let state = app.world().resource::<SolanaIntegrationState>();
         assert_eq!(
-            state.opponent_pubkey,
-            Some(victim_wallet),
-            "the real gap: opponent_pubkey is set from the claimed player_pubkey with no \
-             signature tying it to the sender — see docs/PRE_MAINNET_E2E_PLAN.md §2.3"
+            state.opponent_pubkey, None,
+            "forged SessionInfo claims must not set opponent_pubkey once the wallet pair is known"
         );
     }
 }

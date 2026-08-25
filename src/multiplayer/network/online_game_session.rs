@@ -21,7 +21,8 @@ use braid_chess::MovePayload;
 use tracing::{info, warn};
 
 use crate::multiplayer::network::protocol::NetworkMessage;
-use crate::multiplayer::types::NetworkEvent;
+use crate::multiplayer::types::{is_online_game_mode, NetworkEvent, OnlineStartBarrier};
+use bevy::prelude::*;
 
 /// Configuration + runtime state for a single PvP game.
 #[derive(Resource)]
@@ -135,12 +136,14 @@ pub struct OnlineGameSessionPlugin;
 impl Plugin for OnlineGameSessionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OnlineGameSession>()
+            .init_resource::<OnlineStartBarrier>()
             .add_message::<PublishOnlineResign>()
             .add_message::<PublishOnlineChat>()
             .add_message::<OnlineChatMessage>()
             .add_systems(
                 Update,
                 (
+                    announce_game_readiness,
                     publish_local_move,
                     handle_publish_resign,
                     handle_publish_chat,
@@ -149,8 +152,90 @@ impl Plugin for OnlineGameSessionPlugin {
                     publish_clock_on_move,
                 ),
             );
+        app.add_systems(
+            OnExit(crate::core::states::GameState::InGame),
+            reset_start_barrier,
+        );
         #[cfg(feature = "solana")]
         app.add_systems(Update, broadcast_snapshot_to_new_peer);
+    }
+}
+
+fn reset_start_barrier(mut barrier: ResMut<OnlineStartBarrier>) {
+    barrier.reset(0);
+}
+
+/// Announce readiness once this client has a complete board and, when needed,
+/// has observed the Solana game's ER delegation.
+pub fn announce_game_readiness(
+    session: Res<OnlineGameSession>,
+    mut barrier: ResMut<OnlineStartBarrier>,
+    pieces: Query<&crate::rendering::pieces::Piece>,
+    network_state: Res<crate::multiplayer::OnlineNetworkState>,
+    game_mode: Res<crate::core::GameMode>,
+    #[cfg(feature = "solana")] wallet: Option<Res<crate::multiplayer::solana::addon::SolanaWallet>>,
+    #[cfg(feature = "solana")] sync: Option<Res<crate::multiplayer::solana::addon::SolanaGameSync>>,
+    #[cfg(feature = "solana")] resolver: Option<
+        Res<crate::multiplayer::rollup::magicblock::MagicBlockResolver>,
+    >,
+) {
+    if !is_online_game_mode(*game_mode) || !session.is_configured() {
+        return;
+    }
+
+    let game_id = numeric_game_id(&session.game_id);
+    if barrier.game_id != game_id {
+        barrier.reset(game_id);
+    }
+    if barrier.ready_sent || pieces.iter().count() < 32 {
+        return;
+    }
+
+    #[cfg(feature = "solana")]
+    let player_pubkey = {
+        let Some(wallet) = wallet.as_ref().and_then(|wallet| wallet.pubkey) else {
+            return;
+        };
+        if sync.as_ref().is_some_and(|sync| sync.requires_delegation)
+            && !resolver
+                .as_ref()
+                .is_some_and(|resolver| resolver.is_delegated())
+        {
+            return;
+        }
+        wallet
+    };
+    #[cfg(not(feature = "solana"))]
+    let player_pubkey = crate::multiplayer::network::protocol::Pubkey::default();
+
+    barrier.local_ready = true;
+    let Some(tx) = &network_state.message_sender else {
+        return;
+    };
+    let ready_token = format!("game-{game_id}");
+    if tx
+        .send(NetworkMessage::GameReady {
+            game_id,
+            player_pubkey,
+            ready_token,
+        })
+        .is_ok()
+    {
+        barrier.ready_sent = true;
+        info!("[START] Local player ready for game {game_id}; waiting for opponent");
+        if barrier.remote_ready && !barrier.start_sent {
+            if tx
+                .send(NetworkMessage::GameStartConfirmed {
+                    game_id,
+                    start_token: format!("game-{game_id}"),
+                })
+                .is_ok()
+            {
+                barrier.start_sent = true;
+                barrier.start_confirmed = true;
+                info!("[START] Sent synchronized start for game {game_id}");
+            }
+        }
     }
 }
 
@@ -183,6 +268,16 @@ fn braid_sender_identity(
     } else {
         node_b58.to_string()
     }
+}
+
+#[cfg(feature = "solana")]
+fn braid_session_token(
+    game_sync: Option<&Res<crate::multiplayer::solana::addon::SolanaGameSync>>,
+) -> String {
+    game_sync
+        .and_then(|sync| sync.session_pubkey)
+        .map(|key| key.to_string())
+        .unwrap_or_default()
 }
 
 #[cfg(not(feature = "solana"))]
@@ -294,8 +389,12 @@ fn publish_local_move(
         #[cfg(feature = "solana")]
         let braid_sender_identity =
             braid_sender_identity(solana_state.as_ref(), game_sync.as_ref(), &node_b58);
+        #[cfg(feature = "solana")]
+        let braid_session_token = braid_session_token(game_sync.as_ref());
         #[cfg(not(feature = "solana"))]
         let braid_sender_identity = braid_sender_identity(&node_b58);
+        #[cfg(not(feature = "solana"))]
+        let braid_session_token = String::new();
 
         // Dual transport: also PUT to the Braid moves log so the move lands
         // (and is durably recorded) even when the Iroh gossip link isn't
@@ -306,7 +405,7 @@ fn publish_local_move(
             session.base_url.clone(),
             session.game_id.clone(),
             braid_sender_identity,
-            String::new(),
+            braid_session_token,
             MovePayload::from_uci(
                 uci.clone(),
                 event.next_fen.clone(),
@@ -418,13 +517,17 @@ fn handle_publish_resign(
         #[cfg(feature = "solana")]
         let braid_sender_identity =
             braid_sender_identity(solana_state.as_ref(), game_sync.as_ref(), &node_b58);
+        #[cfg(feature = "solana")]
+        let braid_session_token = braid_session_token(game_sync.as_ref());
         #[cfg(not(feature = "solana"))]
         let braid_sender_identity = braid_sender_identity(&node_b58);
+        #[cfg(not(feature = "solana"))]
+        let braid_session_token = String::new();
         crate::multiplayer::network::braid_transport::publish_resign(
             session.base_url.clone(),
             session.game_id.clone(),
             braid_sender_identity,
-            String::new(),
+            braid_session_token,
             event.player.clone(),
             braid.heads(),
         );
@@ -473,13 +576,17 @@ fn handle_publish_chat(
         #[cfg(feature = "solana")]
         let braid_sender_identity =
             braid_sender_identity(solana_state.as_ref(), game_sync.as_ref(), &node_b58);
+        #[cfg(feature = "solana")]
+        let braid_session_token = braid_session_token(game_sync.as_ref());
         #[cfg(not(feature = "solana"))]
         let braid_sender_identity = braid_sender_identity(&node_b58);
+        #[cfg(not(feature = "solana"))]
+        let braid_session_token = String::new();
         crate::multiplayer::network::braid_transport::publish_chat(
             session.base_url.clone(),
             session.game_id.clone(),
             braid_sender_identity,
-            String::new(),
+            braid_session_token,
             event.player.clone(),
             event.text.clone(),
             event.timestamp_ms,

@@ -17,7 +17,7 @@ const FEEPAYER_THRESHOLD_KEY = "feepayer_threshold_sol";
 function getFeepayerThreshold() { return parseFloat(localStorage.getItem(FEEPAYER_THRESHOLD_KEY) || "0.5"); }
 
 export default function Dashboard() {
-  type MainTab = "CONSOLE" | "MODERATION" | "AUDIT" | "INFRA";
+  type MainTab = "CONSOLE" | "MODERATION" | "AUDIT" | "INFRA" | "TELEMETRY";
   const [activeTab, setActiveTab] = useState<MainTab>("CONSOLE");
   const { authState } = useAuth();
   const backendUrl = authState.backend_url;
@@ -36,6 +36,10 @@ export default function Dashboard() {
   const [txConfirmed, setTxConfirmed] = useState(0);
   const [erStaleCount, setErStaleCount] = useState(0);
   const [erConnected, setErConnected] = useState(false);
+  // Worker metric groups from /admin/metrics/summary. These counters were
+  // always being collected — they just had no route into this panel.
+  type MetricGroup = Record<string, number | null>;
+  const [workers, setWorkers] = useState<Record<string, MetricGroup>>({});
   const [cpuUsage, setCpuUsage] = useState(0);
   const [ramUsage, setRamUsage] = useState(0);
   const [rates, setRates] = useState<Record<string, number>>({});
@@ -83,6 +87,13 @@ export default function Dashboard() {
           setTxConfirmed(ms.data.transactions_confirmed_solana);
           setErStaleCount(ms.data.er_stale_delegated_count);
           setErConnected(ms.data.er_subscription_connected);
+          setWorkers({
+            settlement: ms.data.settlement ?? {},
+            schedulers: ms.data.schedulers ?? {},
+            anticheat: ms.data.anticheat ?? {},
+            prizes: ms.data.prizes ?? {},
+            guards: ms.data.guards ?? {},
+          });
         }
 
         const promQuery = async (q: string) => {
@@ -246,7 +257,7 @@ export default function Dashboard() {
           {/* Tab bar */}
           <div style={{ padding: "0.75rem 1.25rem", backgroundColor: "rgba(255,255,255,0.05)", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", gap: "0.5rem" }}>
-              {(["CONSOLE", "MODERATION", "AUDIT", "INFRA"] as MainTab[]).map(t => (
+              {(["CONSOLE", "MODERATION", "AUDIT", "INFRA", "TELEMETRY"] as MainTab[]).map(t => (
                 <button key={t} onClick={() => setActiveTab(t)} style={tabBtn(t)}>
                   {t}{t === "MODERATION" && reports.length > 0 ? ` (${reports.length})` : ""}
                 </button>
@@ -278,6 +289,20 @@ export default function Dashboard() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TELEMETRY */}
+          {activeTab === "TELEMETRY" && (
+            <div style={{ flex: 1, padding: "1.5rem", overflowY: "auto", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+              <div style={{ fontSize: "10px", color: "var(--text-dim)", fontStyle: "italic" }}>
+                Live counters from the background workers. Values are process-lifetime totals and reset when the backend restarts &mdash; Prometheus holds the history.
+              </div>
+              <MetricGroupPanel title="SETTLEMENT WORKER" group={workers.settlement} />
+              <MetricGroupPanel title="SCHEDULERS" group={workers.schedulers} />
+              <MetricGroupPanel title="ANTI-CHEAT" group={workers.anticheat} />
+              <MetricGroupPanel title="PRIZE DISTRIBUTION" group={workers.prizes} />
+              <MetricGroupPanel title="GUARDS &amp; RATE LIMITS" group={workers.guards} />
             </div>
           )}
 
@@ -494,6 +519,50 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * One worker's counters as a labelled grid.
+ *
+ * Two rendering rules carry meaning rather than style:
+ *  - a `*_age_seconds` key is a heartbeat, so it is coloured by staleness and
+ *    a `null` reads "NEVER" — a worker that has not ticked once is the least
+ *    healthy state, and must not render as a healthy-looking zero.
+ *  - a `*_failed_*` / `*_dropped_*` counter above zero is coloured as a
+ *    problem, because for those the only good value is zero.
+ */
+function MetricGroupPanel({ title, group }: { title: string; group?: Record<string, number | null> }) {
+  const entries = Object.entries(group ?? {});
+  return (
+    <div style={{ padding: "1rem 1.25rem", backgroundColor: "rgba(255,255,255,0.03)", borderRadius: "12px", border: "1px solid var(--border)" }}>
+      <div style={{ fontSize: "10px", color: "var(--text-dim)", fontWeight: "800", letterSpacing: "1px", marginBottom: "12px" }}>{title}</div>
+      {entries.length === 0 ? (
+        <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.25)" }}>No data — backend may predate these metrics.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: "10px 20px" }}>
+          {entries.map(([k, v]) => {
+            const isAge = k.endsWith("_age_seconds");
+            const isBad = /_(failed|dropped|blocked|exhausted|rejected)_/.test(k) || k.endsWith("_failed_total");
+            let color = "#fff";
+            let shown: string;
+            if (isAge) {
+              if (v === null) { color = "#f87171"; shown = "NEVER"; }
+              else { color = v > 180 ? "#f87171" : v > 90 ? "#fbbf24" : "#4ade80"; shown = `${v}s ago`; }
+            } else {
+              shown = v === null ? "—" : String(v);
+              if (isBad && (v ?? 0) > 0) color = "#fbbf24";
+            }
+            return (
+              <div key={k} style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                <div style={{ fontSize: "9px", color: "var(--text-dim)", letterSpacing: "0.5px", textTransform: "uppercase" }}>{k.replace(/_/g, " ")}</div>
+                <div style={{ fontSize: "17px", fontWeight: "700", color, fontVariantNumeric: "tabular-nums" }}>{shown}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

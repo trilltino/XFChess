@@ -472,6 +472,13 @@ impl Default for CompetitiveMenuState {
             show_controls_popup: false,
             show_join_popup: false,
             join_game_id: String::new(),
+            // Stockfish is not part of the Android build (see the AiEngine
+            // picker in modals.rs, which hides the option there too) —
+            // XFChessEngine (nimzovich) is the only engine that ships, so it
+            // must also be the default, not just the picker's fallback.
+            #[cfg(target_os = "android")]
+            ai_engine: crate::game::ai::resource::AIEngine::XFChessEngine,
+            #[cfg(not(target_os = "android"))]
             ai_engine: crate::game::ai::resource::AIEngine::Stockfish,
             lobby_sort: crate::multiplayer::social::LobbySort::default(),
             lobby_tc_min: None,

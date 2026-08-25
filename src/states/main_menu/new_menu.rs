@@ -20,6 +20,23 @@ use crate::ui::system_params::MainMenuUIContext;
 /// this per-call helper is a no-op kept so existing call sites compile unchanged.
 fn play_click(_commands: &mut Commands, _sounds: Option<&MenuSounds>) {}
 
+#[cfg(feature = "solana")]
+fn complete_logout(handle: &tokio::runtime::Handle) {
+    use crate::multiplayer::solana::global_session_manager::GlobalSessionKeyManager;
+
+    // Remove the local no-popup credential before any subsequent connect can
+    // reload it; backend revocation and bridge cleanup continue in background.
+    let _ = GlobalSessionKeyManager::delete();
+    let port = crate::multiplayer::network::vps::wallet_bridge_port();
+    handle.spawn_blocking(move || {
+        crate::multiplayer::network::vps::logout();
+        let client = reqwest::blocking::Client::new();
+        let _ = client
+            .post(format!("http://127.0.0.1:{port}/wallet/disconnect"))
+            .send();
+    });
+}
+
 /// Plays `menu_click.mp3` whenever the user presses the mouse over any egui UI
 /// area (menu items and every popup). The 3D board background is not an egui
 /// area, so clicks there stay silent. Runs while the main menu is active.
@@ -1451,6 +1468,8 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             .clicked()
         {
             play_click(&mut cx.commands, snd);
+            #[cfg(feature = "solana")]
+            complete_logout(cx.tokio_runtime.0.handle());
             cx.wallet_bridge.enabled = false;
             cx.wallet_bridge.known_pubkey = None;
             cx.wallet_bridge.timer = 0.0;
@@ -2254,6 +2273,8 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             .clicked()
         {
             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
+            #[cfg(feature = "solana")]
+            complete_logout(cx.tokio_runtime.0.handle());
             cx.wallet_bridge.enabled = false;
             cx.wallet_bridge.known_pubkey = None;
             cx.wallet_bridge.timer = 0.0;

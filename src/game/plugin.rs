@@ -203,16 +203,31 @@ impl Plugin for GamePlugin {
             Update,
             (
                 // Input set: Handle user input (camera only in TempleOS)
+                //
+                // Android gets one touch-gesture system in place of WASD pan
+                // (camera_movement_system), mouse-drag rotate
+                // (camera_rotation_system), and scroll-wheel zoom
+                // (camera_zoom_input_system) — see camera_touch_gestures'
+                // doc comment. camera_zoom_system (the smoothing/apply step)
+                // stays shared: touch pinch drives the same
+                // CameraController.target_zoom field scroll does on desktop.
+                #[cfg(not(target_os = "android"))]
                 camera_movement_system
                     .in_set(GameSystems::Input)
                     .run_if(super::systems::camera::camera_controls_enabled),
+                #[cfg(target_os = "android")]
+                camera_touch_gestures
+                    .in_set(GameSystems::Input)
+                    .run_if(super::systems::camera::camera_controls_enabled),
                 camera_reset_system.in_set(GameSystems::Input),
+                #[cfg(not(target_os = "android"))]
                 camera_zoom_input_system
                     .in_set(GameSystems::Input)
                     .run_if(super::systems::camera::camera_controls_enabled),
                 camera_zoom_system
                     .in_set(GameSystems::Input)
                     .run_if(super::systems::camera::camera_controls_enabled),
+                #[cfg(not(target_os = "android"))]
                 camera_rotation_system
                     .in_set(GameSystems::Input)
                     .run_if(super::systems::camera::camera_controls_enabled),
@@ -272,7 +287,8 @@ impl Plugin for GamePlugin {
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 // Network Move Verification/Execution
                 crate::game::systems::network_move::handle_network_moves
-                    .in_set(GameSystems::Execution),
+                    .in_set(GameSystems::Execution)
+                    .after(crate::multiplayer::systems::dispatch_remote_moves),
                 // Visual set: Update rendering (disabled in TempleOS)
                 // highlight_possible_moves is gated on Selection changing so the
                 // 64-square iteration and material handle clones only happen when a

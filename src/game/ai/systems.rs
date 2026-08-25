@@ -49,6 +49,20 @@ pub struct AIMovePendingReveal {
 #[derive(Resource, Clone)]
 pub struct XFChessGamePool(pub std::sync::Arc<std::sync::Mutex<Option<nimzovich_engine::Game>>>);
 
+// Deliberately NOT cfg(not(target_os = "android"))-gated, unlike Stockfish's
+// treatment elsewhere in the codebase. `std::process::Command` compiles and
+// links fine on Android (confirmed — this file was part of the first
+// successful Android cross-compile, unmodified) and this code is genuinely
+// unreachable there: the engine picker in modals.rs no longer offers
+// `AIEngine::Stockfish` as an option, and every default in the codebase now
+// resolves to `XFChessEngine` on Android. The only way this runs on Android
+// is a future bug that constructs `AIEngine::Stockfish` some other way, and
+// even then `resolve_stockfish_path()` returns a plain `Err` (no candidate
+// path exists in an Android app's directories) rather than anything unsafe.
+// Cfg-gating it out would need restructuring `AiSpawnParams`' `sf_process`
+// field and the dispatch match in `spawn_ai_task_system` for a benefit that's
+// purely dead-code APK size — not worth the churn versus the actual fix
+// (removing every path that could select this engine).
 struct StockfishInner {
     stdin: std::process::ChildStdin,
     reader: std::io::BufReader<std::process::ChildStdout>,
@@ -118,6 +132,18 @@ fn resolve_stockfish_path() -> Result<PathBuf, String> {
         return Err(format!(
             "STOCKFISH_PATH is set but the file does not exist: {}",
             override_path.display()
+        ));
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        let path = crate::android::platform::native_library_dir()?.join("libstockfish.so");
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "Stockfish library not found in Android nativeLibraryDir: {}",
+            path.display()
         ));
     }
 
@@ -479,6 +505,13 @@ fn spawn_stockfish_task_persistent(
                 if line.trim() == "uciok" {
                     break;
                 }
+            }
+            #[cfg(target_os = "android")]
+            {
+                writeln!(guard.stdin, "setoption name Threads value 2")
+                    .map_err(|e| e.to_string())?;
+                writeln!(guard.stdin, "setoption name Hash value 32").map_err(|e| e.to_string())?;
+                guard.stdin.flush().map_err(|e| e.to_string())?;
             }
             writeln!(guard.stdin, "isready").map_err(|e| e.to_string())?;
             guard.stdin.flush().map_err(|e| e.to_string())?;

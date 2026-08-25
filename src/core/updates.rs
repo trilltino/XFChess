@@ -402,8 +402,17 @@ struct SkipState {
 }
 
 fn skip_file_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("com", "trilltino", "XFChess")
-        .map(|dirs| dirs.config_dir().join(SKIP_FILENAME))
+    // The in-app update checker this file implements is Windows/macOS/Linux
+    // installer-update logic (GitHub release downloads) — it doesn't apply to
+    // Android at all, which updates through the dApp Store instead. Kept
+    // buildable on Android only because this module isn't itself cfg-gated
+    // out of the crate; `internal_data_dir()` here is unreachable code, not a
+    // real Android code path.
+    #[cfg(target_os = "android")]
+    return crate::core::paths::internal_data_dir().map(|d| d.join(SKIP_FILENAME));
+    #[cfg(not(target_os = "android"))]
+    return directories::ProjectDirs::from("com", "trilltino", "XFChess")
+        .map(|dirs| dirs.config_dir().join(SKIP_FILENAME));
 }
 
 fn load_skipped_version() -> Option<String> {

@@ -115,7 +115,6 @@ export function Tournaments() {
     return (
         <main className="mp mp-wide">
             <SeoHead meta={PAGE_METADATA.tournaments} />
-            <div className="mp-eyebrow">Calendar</div>
             <h1 className="mp-title">Tournaments</h1>
 
             {tournaments === null && <p className="mp-lede">Loading…</p>}

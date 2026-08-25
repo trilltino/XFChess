@@ -2273,6 +2273,10 @@ async fn tournament_session_create_game(
         return Err(StatusCode::PRECONDITION_FAILED);
     }
 
+    crate::signing::routes::main::session_funding_guard(&state, &req.wallet_pubkey)
+        .await
+        .map_err(|(status, _)| status)?;
+
     let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {
         error!(
             "[TOURNAMENT] create session for game {}: {}",
@@ -2317,6 +2321,10 @@ async fn tournament_session_join_game(
         );
         return Err(StatusCode::PRECONDITION_FAILED);
     }
+
+    crate::signing::routes::main::session_funding_guard(&state, &req.wallet_pubkey)
+        .await
+        .map_err(|(status, _)| status)?;
 
     // get-or-create: the session key is shared between both players.
     let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {

@@ -84,7 +84,34 @@ pub fn fund_account(
         }
     }
 
-    let ix = system_instruction::transfer(&payer.pubkey(), dest, lamports);
+    // Pre-flight the PAYER balance before building+sending, so a depleted
+    // feepayer-pool wallet fails here with an actionable message instead of
+    // on-chain with the opaque `InstructionError(0, Custom(1))` (= System
+    // Program ResultWithNegativeLamports). The runtime requires the payer to
+    // end the tx at/above its own rent-exempt reserve AND pay the signature
+    // fee, so the real floor is reserve + fee + `lamports`.
+    let payer_pubkey = payer.pubkey();
+    match rpc.get_balance(&payer_pubkey) {
+        Ok(payer_balance) => {
+            let reserve = rpc
+                .get_minimum_balance_for_rent_exemption(0)
+                .unwrap_or(890_880); // ~2 years rent-exempt minimum for a wallet
+            const TX_FEE_LAMPORTS: u64 = 5_000;
+            let needed = reserve
+                .saturating_add(TX_FEE_LAMPORTS)
+                .saturating_add(lamports);
+            if payer_balance < needed {
+                return Err(anyhow!(
+                    "fee payer {payer_pubkey} is depleted: balance {payer_balance} lamports, \
+                     needs >= {needed} ({lamports} transfer + {TX_FEE_LAMPORTS} fee + \
+                     {reserve} rent-exempt reserve) — top up FEE_PAYER_KEYS"
+                ));
+            }
+        }
+        Err(e) => warn!("[SOLANA_TX] fund_account payer pre-flight lookup failed (non-fatal): {e}"),
+    }
+
+    let ix = system_instruction::transfer(&payer_pubkey, dest, lamports);
     let blockhash = rpc.get_latest_blockhash()?;
     let tx = Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
 

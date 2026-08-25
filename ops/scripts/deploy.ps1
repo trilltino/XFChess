@@ -411,7 +411,7 @@ foreach ($src in $keyFiles.Keys) {
 
 # ── Step 5b: Upload .env (only if the server has none — never clobber prod secrets) ──
 Write-Host "`n=== Checking .env ===" -ForegroundColor Green
-$envFile = "$ROOT\ops\.env.production"
+$envFile = "$ROOT\ops\backend\.env.production"
 $serverHasEnv = (& ssh @SSH_ARGS $DEST "test -f /opt/xfchess/.env && echo yes" 2>$null) -eq "yes"
 if ($serverHasEnv) {
     Write-Host "Server already has /opt/xfchess/.env — preserving it (secrets kept as-is)." -ForegroundColor Green

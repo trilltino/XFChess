@@ -21,6 +21,7 @@ impl Plugin for SolanaIntegrationPlugin {
         app.add_systems(Update, handle_pending_solana_tasks);
         app.add_systems(Update, sync_session_key_to_network);
         app.add_systems(Update, authorize_session_key_on_game_start);
+        app.add_systems(Update, poll_session_pubkey_update);
         app.add_systems(Update, spawn_verified_participants_fetch);
         app.add_systems(Update, poll_verified_participants_fetch);
         app.add_systems(

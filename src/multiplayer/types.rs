@@ -110,6 +110,8 @@ pub struct CausalChainState {
     /// which transport it came from — is recognized as the same move and
     /// skipped before it reaches `dispatch_remote_moves`.
     pub applied_versions: HashMap<u64, std::collections::HashSet<String>>,
+    /// Braid versions emitted toward the board but not confirmed applied yet.
+    pub pending_versions: HashMap<u64, std::collections::HashSet<String>>,
     /// game_id → backend-verified `(white_wallet_b58, black_wallet_b58)`,
     /// fetched once at game start
     /// (`multiplayer::solana::integration::systems::spawn_verified_participants_fetch`,
@@ -133,6 +135,7 @@ pub struct OnlineNetworkState {
     pub node_id: Option<EndpointId>,
     pub secret_key_bytes: Option<[u8; 32]>,
     pub connected: bool,
+    pub initialization_in_progress: bool,
     pub discovered_peers: Vec<PeerInfo>,
     pub connected_peers: std::collections::HashSet<String>,
     pub active_session: Option<GameSession>,
@@ -168,6 +171,7 @@ impl Default for OnlineNetworkState {
             node_id: None,
             secret_key_bytes: None,
             connected: false,
+            initialization_in_progress: false,
             discovered_peers: Vec::new(),
             connected_peers: std::collections::HashSet::new(),
             active_session: None,
@@ -186,6 +190,78 @@ impl Default for OnlineNetworkState {
 #[derive(Resource, Default)]
 pub struct OnlineGameSync {
     pub pending_patches: Vec<Vec<u8>>,
+}
+
+/// Coordinates the local game start across both online participants.
+#[derive(Resource, Debug, Default)]
+pub struct OnlineStartBarrier {
+    pub game_id: u64,
+    pub local_ready: bool,
+    pub remote_ready: bool,
+    pub start_confirmed: bool,
+    pub ready_sent: bool,
+    pub start_sent: bool,
+}
+
+impl OnlineStartBarrier {
+    pub fn reset(&mut self, game_id: u64) {
+        *self = Self {
+            game_id,
+            ..Self::default()
+        };
+    }
+
+    pub fn is_complete(&self, game_id: u64) -> bool {
+        self.game_id == game_id && self.local_ready && self.remote_ready && self.start_confirmed
+    }
+}
+
+pub fn is_online_game_mode(mode: crate::core::GameMode) -> bool {
+    matches!(
+        mode,
+        crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
+    )
+}
+
+#[cfg(test)]
+mod start_barrier_tests {
+    use super::OnlineStartBarrier;
+
+    #[test]
+    fn barrier_requires_both_ready_and_start_confirmation() {
+        let mut barrier = OnlineStartBarrier::default();
+        barrier.reset(42);
+        assert!(!barrier.is_complete(42));
+
+        barrier.local_ready = true;
+        barrier.remote_ready = true;
+        assert!(!barrier.is_complete(42));
+
+        barrier.start_confirmed = true;
+        assert!(barrier.is_complete(42));
+        assert!(!barrier.is_complete(43));
+    }
+
+    #[test]
+    fn reset_discards_readiness_from_previous_game() {
+        let mut barrier = OnlineStartBarrier {
+            game_id: 42,
+            local_ready: true,
+            remote_ready: true,
+            start_confirmed: true,
+            ready_sent: true,
+            start_sent: true,
+        };
+
+        barrier.reset(43);
+
+        assert_eq!(barrier.game_id, 43);
+        assert!(!barrier.local_ready);
+        assert!(!barrier.remote_ready);
+        assert!(!barrier.start_confirmed);
+        assert!(!barrier.ready_sent);
+        assert!(!barrier.start_sent);
+    }
 }
 
 /// Per-game nonce reordering buffer for the dual gossip+relay transport.
@@ -252,10 +328,15 @@ pub enum NetworkEvent {
         node_id: EndpointId,
         secret_key_bytes: [u8; 32],
     },
+    NetworkInitializationFailed(String),
     PeerDiscovered(PeerInfo),
     GameInviteReceived(String, GamePreferences),
     GameInviteAccepted(String),
     MessageReceived(NetworkMessage),
+    /// A move delivered by the authenticated Braid history/live stream.
+    /// Braid has version-based ordering, not a gossip nonce, so it must not
+    /// pass through the gossip nonce sequencer.
+    BraidMove(NetworkMessage),
     GameEnded(String),
     PeerConnected(String),
     PeerDisconnected(String),

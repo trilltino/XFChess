@@ -8,6 +8,7 @@ use crate::game::resources::{
 use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
 use crate::multiplayer::network::online_game_session::OnlineGameSession;
 use crate::multiplayer::network::protocol::NetworkMessage;
+use crate::multiplayer::types::CausalChainState;
 use crate::multiplayer::OnlineNetworkState;
 use bevy::prelude::*;
 
@@ -26,6 +27,7 @@ pub fn handle_network_moves(
     mut remote_applied: MessageWriter<RemoteMoveApplied>,
     network_state: Option<Res<OnlineNetworkState>>,
     session: Option<Res<OnlineGameSession>>,
+    mut causal: Option<ResMut<CausalChainState>>,
 ) {
     for event in events.read() {
         info!(
@@ -40,12 +42,37 @@ pub fn handle_network_moves(
             .map(|(e, p, _)| (e, *p));
 
         if let Some((entity, piece)) = source_data {
+            let release_pending = |causal: &mut Option<ResMut<CausalChainState>>,
+                                   version: &Option<String>,
+                                   applied: bool| {
+                if let (Some(causal), Some(version)) = (causal.as_mut(), version) {
+                    let game_id = session
+                        .as_ref()
+                        .map(|session| {
+                            crate::multiplayer::network::online_game_session::numeric_game_id(
+                                &session.game_id,
+                            )
+                        })
+                        .unwrap_or_default();
+                    if let Some(pending) = causal.pending_versions.get_mut(&game_id) {
+                        pending.remove(version);
+                    }
+                    if applied {
+                        causal
+                            .applied_versions
+                            .entry(game_id)
+                            .or_default()
+                            .insert(version.clone());
+                    }
+                }
+            };
             // 2. Validate turn: remote player must be the side to move
             if piece.color != engine.current_turn {
                 warn!(
                     "[NETWORK_MOVE] Rejected move: it's {:?}'s turn but {:?} tried to move",
                     engine.current_turn, piece.color
                 );
+                release_pending(&mut causal, &event.dedup_version, false);
                 continue;
             }
 
@@ -56,6 +83,7 @@ pub fn handle_network_moves(
                     "[NETWORK_MOVE] Rejected illegal move {:?} -> {:?} for {:?}",
                     event.from, event.to, piece.color
                 );
+                release_pending(&mut causal, &event.dedup_version, false);
                 continue;
             }
 
@@ -74,6 +102,7 @@ pub fn handle_network_moves(
                     })
                 } else {
                     warn!("[NETWORK_MOVE] Attempted move to occupied square of same color!");
+                    release_pending(&mut causal, &event.dedup_version, false);
                     None
                 }
             } else {
@@ -117,6 +146,7 @@ pub fn handle_network_moves(
                 None, // BoardStateSync — network moves don't broadcast
                 &current_turn,
             );
+            release_pending(&mut causal, &event.dedup_version, true);
 
             // Emit RemoteMoveApplied so the rollup can record the opponent's move on-chain.
             // The engine is fully updated by execute_move above, so current_fen() is correct.
@@ -175,6 +205,21 @@ pub fn handle_network_moves(
             }
         } else {
             warn!("[NETWORK_MOVE] Source piece not found at {:?}", event.from);
+            if let (Some(causal), Some(version)) = (causal.as_mut(), &event.dedup_version) {
+                let game_id = session
+                    .as_ref()
+                    .map(|session| {
+                        crate::multiplayer::network::online_game_session::numeric_game_id(
+                            &session.game_id,
+                        )
+                    })
+                    .unwrap_or_default();
+                causal
+                    .pending_versions
+                    .entry(game_id)
+                    .or_default()
+                    .remove(version);
+            }
         }
     }
 }

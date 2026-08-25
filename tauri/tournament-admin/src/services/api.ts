@@ -334,6 +334,14 @@ class ApiClient {
       er_subscription_connected: boolean;
       er_last_push_age_seconds: number | null;
       feepayer_balance_lamports: number;
+      // Worker detail. Optional so an older backend that predates these
+      // groups still type-checks and simply renders the panels empty rather
+      // than crashing the dashboard.
+      settlement?: Record<string, number | null>;
+      schedulers?: Record<string, number | null>;
+      anticheat?: Record<string, number | null>;
+      prizes?: Record<string, number | null>;
+      guards?: Record<string, number | null>;
     }>("/admin/metrics/summary");
   }
 

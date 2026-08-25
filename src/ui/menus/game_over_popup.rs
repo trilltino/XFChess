@@ -838,6 +838,10 @@ pub fn game_over_popup_system(
         // `Documents/xfchess/` folder if no profile is active yet.
         let dir = match player_identity.username.as_deref() {
             Some(name) => crate::multiplayer::network::identity::profile_pgn_dir(name),
+            #[cfg(target_os = "android")]
+            None => crate::core::paths::external_data_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from(".")),
+            #[cfg(not(target_os = "android"))]
             None => dirs::document_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("xfchess"),

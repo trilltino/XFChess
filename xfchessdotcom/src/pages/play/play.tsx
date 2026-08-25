@@ -52,20 +52,25 @@ const PlayPage = () => {
 
         <div className="mp-eyebrow">Download</div>
         <h1 className="mp-title">Play XFChess</h1>
-        <p className="mp-lede">Free, open source, and the same build on every platform.</p>
 
-        <div className="mp-rows">
+        <div className="mp-rows mp-downloads">
           {PLATFORMS.map(({ id, label, Icon }) => (
-            <button type="button" key={id} className="mp-dl" onClick={() => downloadPlatform(id)}>
+            <div key={id} className="mp-dl">
               <span className="mp-dl-name">
-                <Icon size={24} />
-                {label}
+                <Icon size={40} />
+                <button
+                  type="button"
+                  className="mp-dl-trigger"
+                  onClick={() => downloadPlatform(id)}
+                  aria-label={`Download XFChess for ${label}`}
+                >
+                  {label}
+                </button>
               </span>
-              <span className="mp-dl-cta">Download →</span>
-            </button>
+              <span className="mp-dl-cta"> </span>
+            </div>
           ))}
         </div>
-
         <p className="mp-note">
           <a href={INSTRUCTIONS_URL} target="_blank" rel="noopener noreferrer">Instructions</a>
           {' · '}
@@ -75,5 +80,4 @@ const PlayPage = () => {
     </motion.div>
   );
 };
-
 export default PlayPage;

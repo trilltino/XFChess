@@ -13,6 +13,14 @@ pub struct ComplianceState {
     pub error_msg: Option<String>,
     pub status: SubmissionStatus,
     pub pubkey: Option<String>,
+    /// GDPR consent checkbox — the backend rejects `/identity/register`
+    /// outright (`400 GDPR consent is required`) without this being `true`.
+    pub consent_kyc: bool,
+    /// In-flight submission result, polled by `poll_compliance_submission`.
+    /// `Ok(())` = the backend accepted the registration; `Err` carries either
+    /// a network failure or the backend's rejection reason (verbatim HTTP
+    /// status/body) so a real failure is visible instead of assumed away.
+    tx_rx: Option<tokio::sync::oneshot::Receiver<Result<(), String>>>,
 }
 
 #[derive(Default, PartialEq, Eq)]
@@ -37,6 +45,8 @@ impl Default for ComplianceState {
             error_msg: None,
             status: SubmissionStatus::Idle,
             pubkey: None,
+            consent_kyc: false,
+            tx_rx: None,
         }
     }
 }
@@ -45,8 +55,37 @@ pub struct CompliancePlugin;
 
 impl Plugin for CompliancePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ComplianceState>()
-            .add_systems(Update, draw_compliance_modal);
+        app.init_resource::<ComplianceState>().add_systems(
+            Update,
+            (poll_compliance_submission, draw_compliance_modal).chain(),
+        );
+    }
+}
+
+/// Drains the in-flight submission's result, if any landed this frame.
+/// Separated from `draw_compliance_modal` (rather than polled inline) so the
+/// UI closure below only ever reads a already-resolved `SubmissionStatus`,
+/// matching the `lobby.tx_rx` poll-then-draw pattern already used for
+/// `create_game`/`join_game` elsewhere in this codebase.
+fn poll_compliance_submission(mut state: ResMut<ComplianceState>) {
+    let Some(rx) = state.tx_rx.as_mut() else {
+        return;
+    };
+    match rx.try_recv() {
+        Ok(Ok(())) => {
+            state.status = SubmissionStatus::Success;
+            state.tx_rx = None;
+        }
+        Ok(Err(e)) => {
+            state.status = SubmissionStatus::Error(e);
+            state.tx_rx = None;
+        }
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+        Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+            state.status =
+                SubmissionStatus::Error("Submission task ended without a result".to_string());
+            state.tx_rx = None;
+        }
     }
 }
 
@@ -110,10 +149,15 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
                     egui::ComboBox::from_label("")
                         .selected_text(&state.country)
                         .show_ui(ui, |ui| {
+                            // Matches the four jurisdictions CLAUDE.md's legal
+                            // review actually covers (UK/Brazil/Germany/
+                            // Canada) — the previous list offered "United
+                            // States" (uncovered by that review) and omitted
+                            // Germany (which the review does cover).
                             ui.selectable_value(&mut state.country, "United Kingdom".to_string(), "United Kingdom");
                             ui.selectable_value(&mut state.country, "Brazil".to_string(), "Brazil");
+                            ui.selectable_value(&mut state.country, "Germany".to_string(), "Germany");
                             ui.selectable_value(&mut state.country, "Canada".to_string(), "Canada");
-                            ui.selectable_value(&mut state.country, "United States".to_string(), "United States");
                         });
                 });
 
@@ -136,14 +180,20 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
                     let tax_label = match state.country.as_str() {
                         "United Kingdom" => "National Insurance (NI) Number",
                         "Brazil" => "CPF (11-digit)",
+                        "Germany" => "Steuer-ID (11-digit)",
                         "Canada" => "Social Insurance Number (SIN)",
-                        "United States" => "Social Security Number (SSN)",
                         _ => "National Tax ID",
                     };
                     ui.label(egui::RichText::new(tax_label).strong());
                     ui.text_edit_singleline(&mut state.tax_id);
                     ui.label(egui::RichText::new("Used strictly once to generate an anonymous blind-index.").small().color(egui::Color32::LIGHT_GRAY));
                 });
+
+                ui.add_space(10.0);
+                ui.checkbox(
+                    &mut state.consent_kyc,
+                    "I consent to the collection and processing of my personal data",
+                );
 
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
@@ -155,44 +205,11 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
                     if ui.button("Submit Securely ").clicked() {
                         if state.tax_id.is_empty() {
                             state.error_msg = Some("Tax ID cannot be blank".to_string());
+                        } else if !state.consent_kyc {
+                            state.error_msg = Some("Consent is required to continue".to_string());
                         } else {
-                            // Launch background async thread to submit
-                            let payload = serde_json::json!({
-                                "pubkey": state.pubkey.clone().unwrap_or_else(|| "11111111111111111111111111111111".to_string()),
-                                "full_name": state.full_name,
-                                "dob": state.dob,
-                                "address": state.address,
-                                "country": state.country,
-                                "tax_id": state.tax_id,
-                                "timestamp": std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_else(|e| {
-                                        tracing::error!("Failed to get timestamp: {}", e);
-                                        std::time::Duration::from_secs(0)
-                                    })
-                                    .as_secs(),
-                                "signature": "1111111111111111111111111111111111111111111111111111111111111111" // mock signature for now
-                            });
-
-                            let url = format!(
-                                "{}/identity/register",
-                                crate::multiplayer::network::vps::vps_base()
-                            );
-                            state.status = SubmissionStatus::Submitting;
-
-                            // Because we can't easily spawn a Bevy task from inside the UI closure without
-                            // a system param wrapper, we'll spawn a native thread that shoots the request.
-                            std::thread::spawn(move || {
-                                let client = reqwest::blocking::Client::new();
-                                let _res = client.post(&url)
-                                    .json(&payload)
-                                    .send();
-                                // We don't poll back the exact success yet in this snippet to keep it simple,
-                                // we'd normally wire a oneshot::channel back to Bevy.
-                            });
-
-                            // Mock instant success for UI demo purposes since thread is fire-and-forget
-                            state.status = SubmissionStatus::Success;
+                            state.error_msg = None;
+                            submit_identity(&mut state);
                         }
                     }
                 });
@@ -207,4 +224,85 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
                 ui.colored_label(egui::Color32::RED, format!(" {}", err));
             }
         });
+}
+
+/// Signs `register_identity:{pubkey}:{timestamp}` with the connected wallet
+/// and POSTs the full registration payload to `/identity/register`,
+/// threading the real result back through `state.tx_rx`.
+///
+/// Replaces what used to be here: a hardcoded placeholder signature
+/// (`sig.verify` on the backend fails on that unconditionally → 401), no
+/// `consent_kyc` field at all (→ 400 "GDPR consent is required" even before
+/// the signature is checked), a fire-and-forget request whose result was
+/// never read, and `state.status` set to `Success` synchronously — before
+/// the request had even been sent, let alone answered. The visible symptom
+/// was "Verification complete!" on every submission regardless of what the
+/// backend actually did with it — see the CARF/KYC audit this fixes.
+fn submit_identity(state: &mut ComplianceState) {
+    let pubkey = state
+        .pubkey
+        .clone()
+        .unwrap_or_else(|| "11111111111111111111111111111111".to_string());
+    let full_name = state.full_name.clone();
+    let dob = state.dob.clone();
+    let address = state.address.clone();
+    let country = state.country.clone();
+    let tax_id = state.tax_id.clone();
+    let consent_kyc = state.consent_kyc;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state.tx_rx = Some(rx);
+    state.status = SubmissionStatus::Submitting;
+
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            let result = (|| -> Result<(), String> {
+                let message = format!("register_identity:{pubkey}:{timestamp}");
+
+                #[cfg(all(feature = "solana", not(target_os = "android")))]
+                let signature_bytes = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(
+                    &message,
+                    "Identity verification",
+                )?;
+                // MWA bridge (plan §4/§5b) isn't built yet — this is the same
+                // seam `sign_message_via_tauri` fills on desktop
+                // (`signMessages` in MWA terms), not a separate design. Fail
+                // honestly rather than fabricate a signature the backend
+                // would reject anyway.
+                #[cfg(any(target_os = "android", not(feature = "solana")))]
+                let signature_bytes: Vec<u8> = {
+                    return Err(
+                        "Identity verification isn't available on Android yet — wallet message signing requires the Mobile Wallet Adapter bridge, not yet implemented.".to_string(),
+                    );
+                };
+
+                let signature = bs58::encode(&signature_bytes).into_string();
+
+                // Already-typed, already-correct client helper — same
+                // struct the backend deserializes, same URL, same error
+                // handling. It existed the whole time; this UI just never
+                // called it, building its own raw untyped payload instead.
+                let payload = crate::multiplayer::network::vps::IdentityPayload {
+                    pubkey,
+                    full_name,
+                    dob,
+                    address,
+                    country,
+                    tax_id,
+                    signature,
+                    timestamp,
+                    consent_kyc,
+                    consent_retention_years: 7,
+                };
+                crate::multiplayer::network::vps::register_identity(&payload)
+            })();
+
+            let _ = tx.send(result);
+        })
+        .detach();
 }

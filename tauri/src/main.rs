@@ -87,10 +87,17 @@ struct WalletJwt(Arc<Mutex<Option<String>>>);
 #[derive(Default, Clone)]
 struct WalletLastSeen(Arc<Mutex<Option<std::time::Instant>>>);
 
-/// Type alias for in-flight signing request: the raw tx bytes, a short
-/// human-readable label describing what's being signed (e.g. "Joining game"),
-/// and the channel to deliver the signed result back to the blocked Bevy thread.
-type PendingTxInner = Option<(Vec<u8>, String, oneshot::Sender<Result<Vec<u8>, String>>)>;
+/// One correlated signing request. There is deliberately only one active
+/// request: the Bevy caller blocks until this request finishes, so accepting a
+/// second request would otherwise overwrite the first one's response channel.
+struct PendingRequest {
+  id: String,
+  tx: Vec<u8>,
+  label: String,
+  response: oneshot::Sender<Result<Vec<u8>, String>>,
+}
+
+type PendingTxInner = Option<PendingRequest>;
 type PendingTx = Arc<Mutex<PendingTxInner>>;
 
 /// Change notification for `PendingTx` — fired (value is a no-op unit) every
@@ -281,9 +288,10 @@ async fn http_server(
 
   fn pending_json(pending: &PendingTx) -> serde_json::Value {
     let lock = pending.lock().unwrap();
-    let tx_b64 = lock.as_ref().map(|(bytes, _, _)| B64.encode(bytes));
-    let label = lock.as_ref().map(|(_, label, _)| label.clone());
-    serde_json::json!({ "tx": tx_b64, "label": label })
+    let tx_b64 = lock.as_ref().map(|request| B64.encode(&request.tx));
+    let label = lock.as_ref().map(|request| request.label.clone());
+    let request_id = lock.as_ref().map(|request| request.id.clone());
+    serde_json::json!({ "tx": tx_b64, "label": label, "request_id": request_id })
   }
 
   // GET /pending — wallet-ui polls; returns {"tx":"<b64>","label":"<str>"} or {"tx":null}
@@ -323,14 +331,33 @@ async fn http_server(
     Sse::new(stream).keep_alive(KeepAlive::default())
   }
 
-  // POST /resolved — wallet-ui posts {"signed":"<b64>"} after signing
+  // POST /resolved — wallet-ui posts {"request_id":"...","signed":"<b64>"}
   async fn post_resolved(
     State(s): State<LocalState>,
     Json(body): Json<serde_json::Value>,
   ) -> impl IntoResponse {
+    let request_id = body["request_id"].as_str().unwrap_or("");
     let signed_b64 = body["signed"].as_str().unwrap_or("").to_string();
     let mut lock = s.pending.lock().unwrap();
-    if let Some((_, _, sender)) = lock.take() {
+    let Some(request) = lock.as_ref() else {
+      tracing::warn!(
+        request_id,
+        event = "STALE_RESOLVED",
+        "no active signing request"
+      );
+      return StatusCode::CONFLICT;
+    };
+    if request.id != request_id {
+      tracing::warn!(request_id, active_id = %request.id, event = "STALE_RESOLVED", "request id mismatch");
+      return StatusCode::CONFLICT;
+    }
+    if let Some(request) = lock.take() {
+      let sender = request.response;
+      tracing::info!(
+        request_id,
+        event = "SIGN_RESOLVED",
+        cancelled = signed_b64.is_empty()
+      );
       if signed_b64.is_empty() {
         let _ = sender.send(Err("User cancelled".to_string()));
       } else {
@@ -346,6 +373,30 @@ async fn http_server(
     }
     drop(lock);
     let _ = s.notify.send(());
+    StatusCode::OK
+  }
+
+  // POST /cancel — wallet-ui posts {"request_id":"...","reason":"..."}
+  async fn post_cancel(
+    State(s): State<LocalState>,
+    Json(body): Json<serde_json::Value>,
+  ) -> impl IntoResponse {
+    let request_id = body["request_id"].as_str().unwrap_or("");
+    let reason = body["reason"].as_str().unwrap_or("Cancelled by wallet UI");
+    let mut lock = s.pending.lock().unwrap();
+    let Some(request) = lock.as_ref() else {
+      return StatusCode::CONFLICT;
+    };
+    if request.id != request_id {
+      tracing::warn!(request_id, active_id = %request.id, event = "STALE_CANCEL", "request id mismatch");
+      return StatusCode::CONFLICT;
+    }
+    if let Some(request) = lock.take() {
+      let _ = request.response.send(Err(reason.to_string()));
+    }
+    drop(lock);
+    let _ = s.notify.send(());
+    tracing::info!(request_id, event = "SIGN_CANCELLED", reason);
     StatusCode::OK
   }
 
@@ -393,6 +444,18 @@ async fn http_server(
           .unwrap_or("<unset>")
       );
     }
+    StatusCode::OK
+  }
+
+  // POST /wallet/disconnect — clear all wallet identity cached by the bridge.
+  // The game client calls this on logout so a later login cannot inherit the
+  // previous wallet, username, provider, or JWT.
+  async fn post_wallet_disconnect(State(s): State<LocalState>) -> impl IntoResponse {
+    *s.wallet_pubkey.0.lock().unwrap() = None;
+    *s.wallet_username.0.lock().unwrap() = None;
+    *s.wallet_provider.0.lock().unwrap() = None;
+    *s.wallet_jwt.0.lock().unwrap() = None;
+    tracing::info!("[HTTP] Wallet disconnected and bridge auth state cleared");
     StatusCode::OK
   }
 
@@ -1051,7 +1114,9 @@ async fn http_server(
     .route("/pending", get(get_pending))
     .route("/pending/stream", get(get_pending_stream))
     .route("/resolved", post(post_resolved))
+    .route("/cancel", post(post_cancel))
     .route("/wallet", post(post_wallet))
+    .route("/wallet/disconnect", post(post_wallet_disconnect))
     .route("/hide", post(post_hide))
     .route("/status", get(get_status))
     .route("/token", get(get_token).post(post_token))
@@ -2270,10 +2335,27 @@ fn main() {
                   }
 
                   let (resp_tx, resp_rx) = oneshot::channel();
-                  {
+                  let request_id = uuid::Uuid::new_v4().to_string();
+                  let request_busy = {
                     let mut guard = pending2.lock().unwrap();
-                    *guard = Some((tx_bytes, label, resp_tx));
+                    if guard.is_some() {
+                      true
+                    } else {
+                      *guard = Some(PendingRequest {
+                        id: request_id.clone(),
+                        tx: tx_bytes,
+                        label,
+                        response: resp_tx,
+                      });
+                      false
+                    }
+                  };
+                  if request_busy {
+                    tracing::warn!(request_id = %request_id, event = "SIGN_REJECTED_BUSY", "another signing request is active");
+                    let _ = stream.write_all(&0xFFFF_FFFFu32.to_le_bytes()).await;
+                    return;
                   }
+                  tracing::info!(request_id = %request_id, event = "SIGN_QUEUED", "signing request accepted");
                   let _ = notify2.send(());
                   // Ensure the popup is open/focused so the user can approve.
                   // Dedup-guarded on the Rust side (see process_is_alive in
@@ -2294,15 +2376,25 @@ fn main() {
                     }
                     other => {
                       if let Err(e) = &other {
-                        tracing::warn!("[WalletBridge] signing timed out: {e}");
+                        tracing::warn!(request_id = %request_id, event = "SIGN_TIMED_OUT", "[WalletBridge] signing timed out: {e}");
                       } else if let Ok(Ok(Err(e))) = &other {
-                        tracing::info!("[WalletBridge] signing rejected: {e}");
+                          tracing::info!(request_id = %request_id, event = "SIGN_FAILED", "[WalletBridge] signing rejected: {e}");
                       }
                       // Clear a stale pending entry left by a timeout — a
                       // real /resolved call already takes() it, so this is a
                       // no-op in that case.
-                      *pending2.lock().unwrap() = None;
-                      let _ = notify2.send(());
+                      let cleared = {
+                        let mut pending = pending2.lock().unwrap();
+                        if pending.as_ref().is_some_and(|request| request.id == request_id) {
+                          *pending = None;
+                          true
+                        } else {
+                          false
+                        }
+                      };
+                      if cleared {
+                        let _ = notify2.send(());
+                      }
                       let _ = stream.write_all(&0xFFFF_FFFFu32.to_le_bytes()).await;
                     }
                   }

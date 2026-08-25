@@ -203,6 +203,18 @@ impl GlobalSessionKeyManager {
     /// see `integration::systems::get_hot_wallet_path`'s doc comment for why
     /// two same-machine instances must not share this directory.
     fn storage_dir() -> PathBuf {
+        // This is the most important of the paths this module resolves — it's
+        // where the encrypted global session key lives. Desktop's fallback
+        // (`env::temp_dir()`) already tolerates `ProjectDirs` failing; on
+        // Android that fallback resolves to a location apps generally cannot
+        // write to, which would silently degrade to "re-authorize the wallet
+        // every launch" instead of erroring — so Android gets its own
+        // explicit, always-writable branch rather than falling through to
+        // the desktop fallback chain.
+        #[cfg(target_os = "android")]
+        let base = crate::core::paths::internal_data_dir()
+            .unwrap_or_else(|| std::env::temp_dir().join("XFChess"));
+        #[cfg(not(target_os = "android"))]
         let base = directories::ProjectDirs::from("com", "xfchess", "XFChess")
             .map(|dirs| dirs.data_local_dir().to_path_buf())
             .unwrap_or_else(|| std::env::temp_dir().join("XFChess"));

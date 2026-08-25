@@ -37,6 +37,8 @@ pub struct GameParticipantsCache {
     rpc: Arc<RpcClient>,
     program_id: Pubkey,
     cache: Arc<Mutex<HashMap<u64, CachedParticipants>>>,
+    #[cfg(test)]
+    session_keys: Arc<Mutex<HashMap<(u64, Pubkey), Pubkey>>>,
 }
 
 impl GameParticipantsCache {
@@ -45,6 +47,8 @@ impl GameParticipantsCache {
             rpc,
             program_id,
             cache: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            session_keys: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -63,6 +67,41 @@ impl GameParticipantsCache {
                 cached_at: Instant::now(),
             },
         );
+    }
+
+    #[cfg(test)]
+    pub fn seed_session_for_test(&self, game_id: u64, wallet: Pubkey, session_key: Pubkey) {
+        self.session_keys
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((game_id, wallet), session_key);
+    }
+
+    pub async fn session_key_authorized(
+        &self,
+        game_id: u64,
+        wallet: &Pubkey,
+        claimed_session_key: &Pubkey,
+    ) -> bool {
+        #[cfg(test)]
+        if self
+            .session_keys
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&(game_id, *wallet))
+            == Some(claimed_session_key)
+        {
+            return true;
+        }
+
+        is_session_key_authorized(
+            &self.rpc,
+            &self.program_id,
+            game_id,
+            wallet,
+            claimed_session_key,
+        )
+        .await
     }
 
     /// Returns `(white, black)` for `game_id` — from cache if fresh,

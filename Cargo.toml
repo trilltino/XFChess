@@ -3,6 +3,15 @@ name = "xfchess"
 version = "0.1.0"
 edition = "2021"
 
+# crate-type matches Bevy's own examples/mobile/Cargo.toml exactly: "lib" keeps
+# the desktop `[[bin]]` targets below linking against this crate as a normal
+# rlib, "cdylib" is what cargo-ndk needs to produce libxfchess.so for Android's
+# GameActivity to dlopen. Inert on every other target.
+[lib]
+name = "xfchess"
+path = "src/lib.rs"
+crate-type = ["lib", "cdylib"]
+
 [[bin]]
 name = "xfchess"
 path = "src/main.rs"
@@ -106,7 +115,7 @@ edition = "2021"
 version = "0.1.0"
 authors = ["trilltino"]
 publish = false
-license = "MIT/Apache-2.0"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/trilltino/XFChess"
 documentation = "https://github.com/trilltino/XFChess"
 homepage = "https://github.com/trilltino/XFChess"
@@ -158,7 +167,7 @@ chess-logic-on-chain = { path = "crates/solana/chess-logic-on-chain" }
 # rc.3-era API surface, not just the 0.19 line in general; bumping needs those
 # checked, not just a version-string edit. See docs/PUBLISHING.md's "Bevy API
 # drift" note for a concrete case where feature-gated code silently drifted.
-bevy = { version = "=0.19.0", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg", "hdr"] }
+bevy = { version = "=0.19.0", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg", "hdr", "android-game-activity"] }
 bevy_sprite = "=0.19.0"
 bevy_text = "=0.19.0"
 bevy_ui = "=0.19.0"
@@ -258,7 +267,6 @@ aes-gcm = "0.10.3"
 dirs = "5.0.1"
 chrono.workspace = true
 serde_bytes.workspace = true
-rfd = "0.15"
 iroh.workspace = true
 crossbeam-channel.workspace = true
 thiserror.workspace = true
@@ -292,6 +300,52 @@ windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+# Android target support (see mobile/ and src/android/). jni is pinned to the
+# same 0.22.4 that bevy_android's android-activity dependency already resolves
+# to (verified against Cargo.lock), so there is exactly one `jni` crate major
+# in the Android dependency graph rather than two incompatible ones.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "=0.22.4", default-features = false }
+ndk-context = "=0.1.1"
+# tracing_subscriber::Layer that writes directly to logcat via the NDK's
+# __android_log_write — composed with the existing file_log_layer in lib.rs
+# so every info!/warn!/error! call site in this codebase (all tracing-based,
+# via bevy::prelude::*) reaches `adb logcat`, not just the two bootstrap-time
+# lines in android/mod.rs. Deliberately not `android_logger` (a `log`-facade
+# bridge) for the app's own logging — this codebase's ~800+ log call sites
+# are all `tracing`, and a `log`-facade bridge would miss all of them without
+# an additional tracing→log shim.
+paranoid-android = "=0.2.2"
+# android_logger + log cover the narrow pre-`build_app()` bootstrap window in
+# android/mod.rs (TLS-verifier init, before Bevy's App/LogPlugin — and so
+# before the tracing subscriber paranoid-android hooks into — exists at all;
+# a bare `tracing::error!` there would silently go nowhere, since tracing
+# events with no subscriber registered are dropped, not buffered).
+android_logger = "=0.15.1"
+# Not exact-pinned like most deps here: `log` is a near-universal facade many
+# unrelated transitive deps (wgpu-types via bevy_egui, jni, rustls-platform-
+# verifier) each declare their own compatible-range constraint on; an exact
+# pin here produced a real resolution conflict against wgpu-types' `^0.4.29`.
+log = "0.4"
+# reqwest's `rustls` feature already pulls this in transitively (its Cargo.toml
+# unconditionally depends on rustls-platform-verifier), but it must be a direct
+# dependency here too so `android::init_with_env` is nameable from
+# src/android/mod.rs. That call is mandatory before any HTTP client is
+# constructed on Android — without it every HTTPS request fails at the TLS
+# handshake, since the crate's Android verifier calls into a Kotlin class that
+# needs an Android Context first.
+rustls-platform-verifier = "=0.7.0"
+
+# `rfd` genuinely does not compile for Android — confirmed by attempting the
+# cross-compile, not assumed: every one of its dialog-backend traits
+# (FilePickerDialogImpl, FileSaveDialogImpl, MessageDialogImpl, and their
+# Async* counterparts) is simply unimplemented for this target, so it fails
+# at the crate level regardless of whether any call site is cfg-gated. See
+# the cfg-gated call in profile_onboarding.rs — Android always takes the
+# `save_path: None` branch there instead.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rfd = "0.15"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "allow" }
