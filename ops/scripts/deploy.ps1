@@ -14,7 +14,7 @@ param(
 )
 
 $SSH_KEY  = "$env:USERPROFILE\.ssh\xfchess_vps"
-$SSH_ARGS = @('-i', $SSH_KEY, '-o', 'StrictHostKeyChecking=accept-new')
+$SSH_ARGS = @('-i', $SSH_KEY, '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3')
 $DEST     = "${User}@${Server}"
 $ROOT     = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent   # repo root
 $TlsDomain = if ($Domain) { $Domain } else { $Server }
@@ -66,10 +66,94 @@ if (-not (Test-SSHKey)) {
     if ($LASTEXITCODE -ne 0) { Write-Host "SSH auth failed." -ForegroundColor Red; exit 1 }
 }
 
-function Run-Remote($cmd) {
+# ── Safe remote execution with a watchdog ─────────────────────────────────────
+# Plain `& ssh` can hang permanently: on Windows OpenSSH there is a known race
+# where the server closes a session's channel but the ssh.exe client never
+# exits, leaving the process alive with no socket and the deploy blocked with
+# no timeout and no recovery. (That is exactly what stalled a previous run after
+# the backend build finished.) So every remote command runs through Safe-Ssh --
+# one ssh per command, started detached with output captured, waited on with a
+# hard per-command timeout, and killed + retried on a wedged/transport failure.
+# A genuine remote command failure (non-zero exit) is still surfaced unchanged.
+
+function Quote-Arg([string]$s) {
+    # CommandLineToArgvW-compliant quoting: wrap in double quotes and escape
+    # embedded quotes/backslashes so ssh receives each argv token byte-exact.
+    $sb = New-Object System.Text.StringBuilder
+    $null = $sb.Append('"')
+    $backslashes = 0
+    foreach ($ch in $s.ToCharArray()) {
+        if ($ch -eq '\') { $backslashes++ }
+        elseif ($ch -eq '"') {
+            for ($i = 0; $i -lt $backslashes * 2; $i++) { $null = $sb.Append('\') }
+            $backslashes = 0
+            $null = $sb.Append('\"')
+        }
+        else {
+            for ($i = 0; $i -lt $backslashes; $i++) { $null = $sb.Append('\') }
+            $backslashes = 0
+            $null = $sb.Append($ch)
+        }
+    }
+    for ($i = 0; $i -lt $backslashes * 2; $i++) { $null = $sb.Append('\') }
+    $null = $sb.Append('"')
+    return $sb.ToString()
+}
+
+function Safe-Ssh([string]$RemoteCmd, [int]$TimeoutSec = 240, [int]$Retries = 3) {
+    $arg = (@($SSH_ARGS) + @($DEST) + @($RemoteCmd) | ForEach-Object { Quote-Arg $_.ToString() }) -join ' '
+    $attempt = 0
+    while ($attempt -lt $Retries) {
+        $attempt++
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = 'ssh'
+        $psi.Arguments = $arg
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        try {
+            $proc = New-Object System.Diagnostics.Process
+            $proc.StartInfo = $psi
+            $null = $proc.Start()
+        } catch {
+            Write-Host "  Failed to start ssh: $($_.Exception.Message) (attempt $attempt/$Retries)." -ForegroundColor DarkYellow
+            Start-Sleep -Seconds 5
+            continue
+        }
+        # Drain stdout/stderr asynchronously so a verbose remote command (apt,
+        # git fetch, monitoring setup, ...) can never deadlock the pipe, then
+        # wait with a hard timeout. Timed-out clients are killed and retried;
+        # the remote command may already have completed (every command this
+        # script issues is idempotent), so re-running it is safe.
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+        if ($proc.WaitForExit($TimeoutSec * 1000)) {
+            try { $outText = $stdoutTask.GetAwaiter().GetResult() } catch { $outText = '' }
+            try { $errText = $stderrTask.GetAwaiter().GetResult() } catch { $errText = '' }
+            $code = $proc.ExitCode
+            $outLines = @($outText -split '\r?\n' | Where-Object { $_ -ne '' })
+            $errLines = @($errText -split '\r?\n' | Where-Object { $_ -ne '' })
+            if ($code -eq 255 -and $attempt -lt $Retries) {
+                Write-Host "  ssh transport error (exit 255) — retry $attempt/$Retries." -ForegroundColor DarkYellow
+                Start-Sleep -Seconds 5
+                continue
+            }
+            return @{ ExitCode = $code; Output = $outLines; Error = $errLines }
+        }
+        Write-Host "  ssh did not respond within ${TimeoutSec}s — killing and retrying ($attempt/$Retries)." -ForegroundColor DarkYellow
+        try { $proc.Kill() } catch {}
+        Start-Sleep -Seconds 5
+    }
+    return @{ ExitCode = 255; Output = @(); Error = @("ssh exceeded ${TimeoutSec}s after $Retries attempts") }
+}
+
+function Run-Remote($cmd, [int]$TimeoutSec = 240) {
     Write-Host ">> $cmd" -ForegroundColor Cyan
-    & ssh @SSH_ARGS $DEST $cmd
-    if ($LASTEXITCODE -ne 0) { throw "Remote command failed: $cmd" }
+    $r = Safe-Ssh $cmd $TimeoutSec
+    foreach ($line in $r.Output) { Write-Host $line }
+    foreach ($line in $r.Error) { Write-Host $line -ForegroundColor DarkGray }
+    if ($r.ExitCode -ne 0) { throw "Remote command failed: $cmd (exit $($r.ExitCode))" }
 }
 
 function Upload($local, $remote) {
@@ -139,11 +223,11 @@ Run-Remote "mkdir -p /home/xfchess && chown xfchess:xfchess /home/xfchess"
 Run-Remote "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups /opt/xfchess/keys /opt/xfchess/src"
 Run-Remote "chown -R xfchess:xfchess /opt/xfchess"
 
-Run-Remote "apt-get update -qq && apt-get install -y -qq nginx sqlite3 git curl build-essential pkg-config libssl-dev ca-certificates certbot python3-certbot-nginx ufw logrotate"
+Run-Remote "apt-get update -qq && apt-get install -y -qq nginx sqlite3 git curl build-essential pkg-config libssl-dev ca-certificates certbot python3-certbot-nginx ufw logrotate" 900
 # Install rustup FOR the xfchess build user (shell overridden — xfchess is nologin),
 # with CARGO_HOME/RUSTUP_HOME under /opt/xfchess so the build in Step 3 can find cargo.
 $rustupCmd = 'su -s /bin/bash xfchess -c ''export CARGO_HOME=/opt/xfchess/.cargo RUSTUP_HOME=/opt/xfchess/.rustup HOME=/opt/xfchess; [ -x $CARGO_HOME/bin/cargo ] || (curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh && sh /tmp/rustup.sh -y --no-modify-path --default-toolchain stable)'''
-Run-Remote $rustupCmd
+Run-Remote $rustupCmd 900
 
 # ── Step 2a: Deploy user with restricted sudo ─────────────────────────────────
 Write-Host "`n=== Creating deploy user ===" -ForegroundColor Green
@@ -327,7 +411,7 @@ if (-not $SkipBuild) {
     # and fetching tags aborts the whole chain if a local tag ref (e.g. left over
     # from a prior origin pointing at a different repo history) collides with a
     # same-named tag pointing at a different commit upstream.
-    Run-Remote "cd /opt/xfchess/src && git fetch --all --prune && git checkout -f $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src"
+    Run-Remote "cd /opt/xfchess/src && git fetch --all --prune && git checkout -f $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src" 900
     # Build as the (nologin) xfchess user via -s /bin/bash, with cargo on PATH; this is a
     # workspace, so build with -p backend from the repo root.
     #
@@ -358,7 +442,8 @@ chown xfchess:xfchess /opt/xfchess/build_backend.sh
     while ($buildElapsed -lt $buildTimeoutSec) {
         Start-Sleep -Seconds 15
         $buildElapsed += 15
-        $check = & ssh @SSH_ARGS $DEST "test -f /tmp/xfchess_build.done && cat /tmp/xfchess_build.done" 2>&1
+        $pollR = Safe-Ssh 'test -f /tmp/xfchess_build.done && cat /tmp/xfchess_build.done' 30 5
+        $check = ($pollR.Output + $pollR.Error) -join "`n"
         if ($check -match '^\d+$') { $buildExit = [int]$check; break }
         if ($buildElapsed % 60 -eq 0) { Write-Host "  [${buildElapsed}s] backend still building..." -ForegroundColor DarkGray }
     }
@@ -468,7 +553,8 @@ Run-Remote "mkdir -p /var/www/certbot"
 # SSL certificate: prefer Let's Encrypt (real domain), fall back to self-signed (IP)
 if ($Domain) {
     Write-Host "`n=== Obtaining Let's Encrypt certificate for $Domain ===" -ForegroundColor Green
-    $certExists = (& ssh @SSH_ARGS $DEST "test -f /etc/letsencrypt/live/$Domain/fullchain.pem && echo yes" 2>$null) -eq "yes"
+    $certR = Safe-Ssh "test -f /etc/letsencrypt/live/$Domain/fullchain.pem && echo yes" 60 2
+    $certExists = (($certR.Output + $certR.Error) -join "`n") -match 'yes'
     if (-not $certExists) {
         # Chicken-and-egg: the just-uploaded xfchess config's HTTPS block already
         # references /etc/letsencrypt/live/$Domain/fullchain.pem, which doesn't
@@ -524,7 +610,7 @@ test -f /etc/letsencrypt/live/${Server}/fullchain.pem || \
 # extending it here would undo the whole point of deploy's restricted sudo).
 Write-Host "`n=== Deploying monitoring stack ===" -ForegroundColor Green
 if ($User -eq "root") {
-    Run-Remote "cd /opt/xfchess/src/ops/monitoring && chmod +x setup.sh && ./setup.sh"
+    Run-Remote "cd /opt/xfchess/src/ops/monitoring && chmod +x setup.sh && ./setup.sh" 1800
     Write-Host "Monitoring stack deployed/updated." -ForegroundColor DarkGray
     Write-Host "  First run only: check the output above for ACTION REQUIRED Telegram bot setup steps." -ForegroundColor Yellow
 } else {
