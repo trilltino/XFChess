@@ -70,6 +70,12 @@ jobs:
         shell: bash
         env:
           VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
+          # Privy's public app ID — must be set at vite build time or the
+          # kill switch in wallet-ui/src/privy/config.ts compiles social login
+          # out of the bundle entirely. Public value, so the inline fallback is
+          # safe; the repo secret (if present) wins so it can be rotated
+          # without touching this file.
+          VITE_PRIVY_APP_ID: ${{ secrets.VITE_PRIVY_APP_ID || 'cmt4t5mz200920ekywk04lspv' }}
         run: |
           (cd xfchessdotcom && npm ci && npm run build)
           (cd tauri/wallet-ui && npm ci && npm run build)
@@ -197,6 +203,8 @@ jobs:
       - name: Build web frontends
         env:
           VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
+          # Same as Windows/macOS: unset ⇒ Privy compiled out of wallet-ui dist.
+          VITE_PRIVY_APP_ID: ${{ secrets.VITE_PRIVY_APP_ID || 'cmt4t5mz200920ekywk04lspv' }}
         run: |
           (cd tauri/wallet-ui && npm ci && npm run build)
 
@@ -361,6 +369,8 @@ jobs:
       - name: Build web frontends
         env:
           VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
+          # Same as Windows: unset ⇒ Privy compiled out of wallet-ui dist.
+          VITE_PRIVY_APP_ID: ${{ secrets.VITE_PRIVY_APP_ID || 'cmt4t5mz200920ekywk04lspv' }}
         run: |
           (cd xfchessdotcom && npm ci && npm run build)
           (cd tauri/wallet-ui && npm ci && npm run build)
