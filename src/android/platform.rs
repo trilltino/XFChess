@@ -69,17 +69,21 @@ pub fn native_library_dir() -> Result<PathBuf, String> {
         let application = env
             .call_method(
                 &activity,
-                "getApplicationInfo",
-                "()Landroid/content/pm/ApplicationInfo;",
+                jni::jni_str!("getApplicationInfo"),
+                jni::jni_str!("()Landroid/content/pm/ApplicationInfo;"),
                 &[],
             )?
             .l()?;
         let native_dir = env
-            .get_field(&application, "nativeLibraryDir", "Ljava/lang/String;")?
+            .get_field(
+                &application,
+                jni::jni_str!("nativeLibraryDir"),
+                jni::jni_str!("Ljava/lang/String;"),
+            )?
             .l()?;
         let native_dir = jni::objects::JString::from(native_dir);
         let native_dir: String = env.get_string(&native_dir)?.into();
         Ok(PathBuf::from(native_dir))
     })
-    .map_err(|e| format!("nativeLibraryDir lookup failed: {e}"))?
+    .map_err(|e| format!("nativeLibraryDir lookup failed: {e}"))
 }
