@@ -51,27 +51,7 @@ default:
 
 # Stop all running XFChess processes (PID file first, then port owner, then name)
 kill:
-    @$ErrorActionPreference = 'SilentlyContinue'; \
-     Write-Host "[CLEANUP] Stopping XFChess processes..." -ForegroundColor Cyan; \
-     $pidFile = "backend/.backend.pid"; \
-     if (Test-Path $pidFile) { \
-         $oldPid = Get-Content $pidFile; \
-         Stop-Process -Id $oldPid -Force; \
-         Remove-Item $pidFile; \
-         Write-Host "  Killed backend PID $oldPid" \
-     }; \
-     foreach ($p in 5173, 5174, 5175, 8090) { \
-         Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { \
-             Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue; \
-             Write-Host "  Killed port-$p owner PID $($_.OwningProcess)" \
-         } \
-     }; \
-     Stop-Process -Name "signing-server" -Force; \
-     Stop-Process -Name "xfchess" -Force; \
-     Stop-Process -Name "xfchess-tauri" -Force; \
-     Stop-Process -Name "xfchess-viz" -Force; \
-     Start-Sleep -Milliseconds 500; \
-     Write-Host "[CLEANUP] Done" -ForegroundColor Green
+    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/kill_stale_xfchess_dev.ps1"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 

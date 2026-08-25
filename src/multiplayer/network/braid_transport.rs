@@ -607,15 +607,23 @@ pub fn drain_braid_messages(
         match msg {
             ChessMessage::Move(payload) => {
                 let version = braid_chess::version_hash(&payload.fen_after, payload.move_number);
-                let first_time_seen = causal
+                let already_seen = causal
                     .applied_versions
-                    .entry(game_id_u64)
-                    .or_default()
-                    .insert(version);
-                if !first_time_seen {
+                    .get(&game_id_u64)
+                    .is_some_and(|versions| versions.contains(&version))
+                    || causal
+                        .pending_versions
+                        .get(&game_id_u64)
+                        .is_some_and(|versions| versions.contains(&version));
+                if already_seen {
                     continue; // already applied via gossip — see module doc comment
                 }
-                network_events.write(NetworkEvent::MessageReceived(NetworkMessage::Move {
+                causal
+                    .pending_versions
+                    .entry(game_id_u64)
+                    .or_default()
+                    .insert(version.clone());
+                network_events.write(NetworkEvent::BraidMove(NetworkMessage::Move {
                     game_id: game_id_u64,
                     turn: payload.move_number as u16,
                     move_uci: payload.uci,
@@ -647,6 +655,24 @@ pub fn drain_braid_messages(
                 signing_pubkey,
                 expires_at,
             } => {
+                let claim_trusted = match causal.verified_wallets.get(&game_id_u64) {
+                    Some((white, black)) => {
+                        let claimed = player_pubkey.clone();
+                        claimed == *white || claimed == *black
+                    }
+                    None => true,
+                };
+
+                if !claim_trusted {
+                    warn!(
+                        "[braid-transport] Ignored spoofed SessionInfo for game {}: claimed player_pubkey {} is not in verified wallet pair {:?}",
+                        game_id_u64,
+                        player_pubkey,
+                        causal.verified_wallets.get(&game_id_u64)
+                    );
+                    continue;
+                }
+
                 // Mirrors `handle_network_events`'s gossip-side roster
                 // building exactly (`systems.rs`) — this is the durable
                 // fallback for the same real bug described at this

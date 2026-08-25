@@ -137,6 +137,7 @@ pub struct GameLogState {
     /// a known, lower-severity, documented gap (no money at stake), tracked
     /// separately (`docs/plans/networking-hardening-plan.md`'s Phase D).
     roster: RwLock<HashMap<String, Vec<String>>>,
+    session_roster: RwLock<HashMap<String, HashMap<String, String>>>,
     /// On-chain-verified `(white, black)` lookups, cached. `None` in tests
     /// / anywhere a live RPC client isn't available — falls back to the
     /// original SessionInfo-only bootstrap behavior for every game in that
@@ -167,6 +168,7 @@ impl GameLogState {
             pool,
             channels: RwLock::new(HashMap::new()),
             roster: RwLock::new(HashMap::new()),
+            session_roster: RwLock::new(HashMap::new()),
             participants,
             casual_identities: RwLock::new(HashMap::new()),
         }
@@ -265,10 +267,33 @@ impl GameLogState {
         content_version: &str,
         content_parent: &str,
     ) -> Result<i64, PutEventError> {
+        self.put_event_with_session(
+            game_id,
+            stream,
+            player_pubkey,
+            "",
+            message,
+            content_version,
+            content_parent,
+        )
+        .await
+    }
+
+    async fn put_event_with_session(
+        &self,
+        game_id: &str,
+        stream: &str,
+        player_pubkey: &str,
+        session_token: &str,
+        message: &ChessMessage,
+        content_version: &str,
+        content_parent: &str,
+    ) -> Result<i64, PutEventError> {
         let kind = kind_of(message);
 
         if requires_participant_check(kind) {
-            self.check_participant(game_id, player_pubkey).await?;
+            self.check_participant(game_id, player_pubkey, session_token)
+                .await?;
         }
 
         let payload_json = serde_json::to_string(message)
@@ -330,8 +355,14 @@ impl GameLogState {
 
         tx.commit().await.map_err(PutEventError::Db)?;
 
-        if let ChessMessage::SessionInfo { player_pubkey, .. } = message {
-            self.learn_session_info_claim(game_id, player_pubkey).await;
+        if let ChessMessage::SessionInfo {
+            player_pubkey,
+            session_pubkey,
+            ..
+        } = message
+        {
+            self.learn_session_info_claim(game_id, player_pubkey, session_pubkey)
+                .await;
         }
 
         let tx_chan = self.channel(game_id, stream).await;
@@ -356,17 +387,35 @@ impl GameLogState {
         &self,
         game_id: &str,
         player_pubkey: &str,
+        session_token: &str,
     ) -> Result<(), PutEventError> {
         {
             let roster = self.roster.read().await;
             if let Some(allowed) = roster.get(game_id) {
                 if allowed.iter().any(|p| p == player_pubkey) {
+                    if player_pubkey.parse::<solana_sdk::pubkey::Pubkey>().is_ok() {
+                        let sessions = self.session_roster.read().await;
+                        if sessions
+                            .get(game_id)
+                            .and_then(|entries| entries.get(player_pubkey))
+                            != Some(&session_token.to_string())
+                        {
+                            return Err(PutEventError::NotAParticipant);
+                        }
+                    }
                     return Ok(());
                 }
             }
         }
 
-        match self.verify_claim(game_id, player_pubkey).await {
+        match self
+            .verify_claim(
+                game_id,
+                player_pubkey,
+                (!session_token.is_empty()).then_some(session_token),
+            )
+            .await
+        {
             OnChainCheck::Verified => {
                 self.add_to_roster(game_id, player_pubkey).await;
                 Ok(())
@@ -396,9 +445,26 @@ impl GameLogState {
     /// not added. The `SessionInfo` PUT itself always still succeeds either
     /// way (posting isn't gated the way gameplay actions are) — this only
     /// controls whether the claim gets *trusted* afterward.
-    async fn learn_session_info_claim(&self, game_id: &str, player_pubkey: &str) {
-        match self.verify_claim(game_id, player_pubkey).await {
-            OnChainCheck::Verified => self.add_to_roster(game_id, player_pubkey).await,
+    async fn learn_session_info_claim(
+        &self,
+        game_id: &str,
+        player_pubkey: &str,
+        session_pubkey: &str,
+    ) {
+        match self
+            .verify_claim(game_id, player_pubkey, Some(session_pubkey))
+            .await
+        {
+            OnChainCheck::Verified => {
+                self.add_to_roster(game_id, player_pubkey).await;
+                if player_pubkey.parse::<solana_sdk::pubkey::Pubkey>().is_ok() {
+                    let mut sessions = self.session_roster.write().await;
+                    sessions
+                        .entry(game_id.to_string())
+                        .or_default()
+                        .insert(player_pubkey.to_string(), session_pubkey.to_string());
+                }
+            }
             OnChainCheck::Mismatch => {
                 // Ground truth exists (on-chain, or a JOIN_ACK-verified
                 // casual pair) and this claimant matches neither identity —
@@ -416,8 +482,16 @@ impl GameLogState {
     /// available for `game_id`: the on-chain `Game` account first (Phase B,
     /// wagered games), then the JOIN_ACK-verified casual-identity pair
     /// (Phase D, casual games) if the former found nothing to check against.
-    async fn verify_claim(&self, game_id: &str, player_pubkey: &str) -> OnChainCheck {
-        match self.on_chain_check(game_id, player_pubkey).await {
+    async fn verify_claim(
+        &self,
+        game_id: &str,
+        player_pubkey: &str,
+        claimed_session_key: Option<&str>,
+    ) -> OnChainCheck {
+        match self
+            .on_chain_check(game_id, player_pubkey, claimed_session_key)
+            .await
+        {
             OnChainCheck::Unavailable => self.casual_identity_check(game_id, player_pubkey).await,
             other => other,
         }
@@ -449,7 +523,12 @@ impl GameLogState {
 
     /// Checks `player_pubkey` against `game_id`'s on-chain `Game` account,
     /// if one exists and a participants cache is configured.
-    async fn on_chain_check(&self, game_id: &str, player_pubkey: &str) -> OnChainCheck {
+    async fn on_chain_check(
+        &self,
+        game_id: &str,
+        player_pubkey: &str,
+        claimed_session_key: Option<&str>,
+    ) -> OnChainCheck {
         let Some(participants) = &self.participants else {
             return OnChainCheck::Unavailable;
         };
@@ -459,7 +538,21 @@ impl GameLogState {
         let Some((white, black)) = participants.get(gid).await else {
             return OnChainCheck::Unavailable;
         };
-        if player_pubkey == white.to_string() || player_pubkey == black.to_string() {
+        let Ok(wallet) = player_pubkey.parse::<solana_sdk::pubkey::Pubkey>() else {
+            return OnChainCheck::Mismatch;
+        };
+        if wallet != white && wallet != black {
+            return OnChainCheck::Mismatch;
+        }
+        let Some(session_key) =
+            claimed_session_key.and_then(|key| key.parse::<solana_sdk::pubkey::Pubkey>().ok())
+        else {
+            return OnChainCheck::Mismatch;
+        };
+        if participants
+            .session_key_authorized(gid, &wallet, &session_key)
+            .await
+        {
             OnChainCheck::Verified
         } else {
             OnChainCheck::Mismatch
@@ -744,10 +837,11 @@ async fn put_event_handler(
     for attempt in 1..=DB_LOCK_RETRY_ATTEMPTS {
         let result = state
             .game_log
-            .put_event(
+            .put_event_with_session(
                 game_id,
                 stream,
                 &req.sender_identity,
+                &req.session_token,
                 &req.message,
                 &req.content_version,
                 &req.content_parent,
@@ -1127,9 +1221,13 @@ mod tests {
         let alice = solana_sdk::pubkey::Pubkey::new_unique();
         let bob = solana_sdk::pubkey::Pubkey::new_unique();
         let mallory = solana_sdk::pubkey::Pubkey::new_unique();
+        let alice_session = solana_sdk::pubkey::Pubkey::new_unique();
+        let bob_session = solana_sdk::pubkey::Pubkey::new_unique();
         // Simulates a confirmed on-chain read: g1's real Game account has
         // alice (white) and bob (black) — mallory is neither.
         participants.seed_for_test(1, alice, bob);
+        participants.seed_session_for_test(1, alice, alice_session);
+        participants.seed_session_for_test(1, bob, bob_session);
         let state = GameLogState::new(pool, Some(participants));
 
         // Mallory races and posts HER forged SessionInfo before either real
@@ -1180,7 +1278,7 @@ mod tests {
         // and can play.
         let alice_info = ChessMessage::SessionInfo {
             player_pubkey: alice.to_string(),
-            session_pubkey: "alice-session".to_string(),
+            session_pubkey: alice_session.to_string(),
             signing_pubkey: "alice-signing".to_string(),
             expires_at: 0,
         };
@@ -1199,7 +1297,15 @@ mod tests {
         let alice_move = move_message("fen2", 1);
         let va = braid_chess::version_hash("fen2", 1);
         let seq = state
-            .put_event("1", "moves", &alice.to_string(), &alice_move, &va, &v_alice)
+            .put_event_with_session(
+                "1",
+                "moves",
+                &alice.to_string(),
+                &alice_session.to_string(),
+                &alice_move,
+                &va,
+                &v_alice,
+            )
             .await
             .unwrap();
         assert_eq!(seq, 3);

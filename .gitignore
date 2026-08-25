@@ -132,5 +132,17 @@ xfchessdotcom/src/lib/*.json
 # WASM package
 xfchess-wasm/pkg/
 
+# Android (mobile/) build output — libxfchess.so lands in jniLibs/ via
+# `cargo ndk -o`, not committed; Gradle's own build dirs and local SDK-path
+# file are all machine-specific/regenerable. gradlew / gradlew.bat /
+# gradle/wrapper/gradle-wrapper.{jar,properties} ARE committed (standard
+# practice — they're what lets a fresh checkout build without a pre-installed
+# Gradle).
+mobile/app/src/main/jniLibs/
+mobile/build/
+mobile/app/build/
+mobile/.gradle/
+mobile/local.properties
+
 # Temp markdown files
 xfchess-anticheat-crate-*.md

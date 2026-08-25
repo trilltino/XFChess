@@ -271,6 +271,11 @@ pub fn start_timer_when_ready(
     game_phase: Res<crate::game::resources::CurrentGamePhase>,
     move_history: Res<crate::game::resources::MoveHistory>,
     mut engine_inited: Local<bool>,
+    game_mode: Res<crate::core::GameMode>,
+    start_barrier: Res<crate::multiplayer::types::OnlineStartBarrier>,
+    online_session: Option<
+        Res<crate::multiplayer::network::online_game_session::OnlineGameSession>,
+    >,
 ) {
     if game_timer.is_running {
         *engine_inited = false; // reset for next game
@@ -294,13 +299,25 @@ pub fn start_timer_when_ready(
         );
     }
 
-    // The clock does not start until the first move has actually been played.
-    // This keeps either player's clock from ticking during the lobby/handshake
-    // (e.g. while the host waits to begin) and gives the side to move its first
-    // move "for free", matching the agreed multiplayer behaviour.
-    if *engine_inited && !move_history.is_empty() {
+    let online_ready = if crate::multiplayer::types::is_online_game_mode(*game_mode) {
+        online_session.as_ref().is_some_and(|session| {
+            start_barrier.is_complete(
+                crate::multiplayer::network::online_game_session::numeric_game_id(&session.game_id),
+            )
+        })
+    } else {
+        false
+    };
+
+    // Online clocks begin on the shared start confirmation. Other game modes
+    // retain their existing first-move start behavior.
+    if *engine_inited
+        && (online_ready
+            || (!crate::multiplayer::types::is_online_game_mode(*game_mode)
+                && !move_history.is_empty()))
+    {
         game_timer.is_running = true;
-        info!("[GAME_INIT] Timer started after first move played");
+        info!("[GAME_INIT] Timer started after synchronized game start");
     }
 }
 

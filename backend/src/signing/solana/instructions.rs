@@ -410,7 +410,9 @@ pub fn undelegate_game_ix(
 /// clock has expired. Must be submitted through the Ephemeral Rollup, signed
 /// by the same payer used to delegate the game. `task_id` is always
 /// `game_id`, matching `cancel_time_check_ix` and the on-chain crank's
-/// idempotent forfeit check.
+/// idempotent forfeit check. MagicBlock requires a positive iteration count,
+/// so the maximum positive signed value is used as the effectively-until-
+/// cancelled schedule.
 pub fn schedule_time_check_ix(
     program_id: &Pubkey,
     payer: &Pubkey,
@@ -427,7 +429,7 @@ pub fn schedule_time_check_ix(
     let mut data = anchor_discriminator("schedule_time_check").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes()); // task_id
     data.extend_from_slice(&check_interval_millis.to_le_bytes());
-    let iterations: u64 = 0; // unlimited until cancelled
+    let iterations = i64::MAX as u64; // effectively unlimited until cancelled
     data.extend_from_slice(&iterations.to_le_bytes());
 
     Ok(Instruction {
@@ -1584,8 +1586,8 @@ mod tests {
         assert_eq!(&ix.data[16..24], &interval_ms.to_le_bytes());
         assert_eq!(
             &ix.data[24..32],
-            &0u64.to_le_bytes(),
-            "iterations must be 0 (unlimited)"
+            &(i64::MAX as u64).to_le_bytes(),
+            "iterations must be positive and effectively unlimited"
         );
     }
 

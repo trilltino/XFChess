@@ -303,6 +303,11 @@ pub fn spawn_create_game(
                 global_session_keypair_bytes,
             )
             .await;
+            if let Ok(game_id) = &result {
+                if wager_lamports > 0 {
+                    crate::multiplayer::solana::wager_recovery::record(*game_id);
+                }
+            }
             let _ = tx.send(result);
         })
         .detach();
@@ -477,6 +482,9 @@ pub fn spawn_join_game(
                 global_session_keypair_bytes,
             )
             .await;
+            if let Ok(game_id) = &result {
+                crate::multiplayer::solana::wager_recovery::record(*game_id);
+            }
             let _ = tx.send(result);
         })
         .detach();
@@ -771,63 +779,139 @@ async fn async_create_game_via_global_session(
     Ok(game_id)
 }
 
+/// Outcome of an attempted on-chain cancel.
+#[derive(Debug)]
+pub enum CancelOutcome {
+    /// `cancel_game` landed — the escrowed wager was refunded.
+    Refunded(solana_sdk::signature::Signature),
+    /// Nothing on-chain to cancel (missing account, free game, already
+    /// terminal) — no wallet popup was spent.
+    NothingToRefund(String),
+}
+
+/// True for errors that mean the user refused to sign — retrying would just
+/// fire another popup they already declined. Everything else (RPC hiccups,
+/// blockhash expiry, bridge timeouts) is worth retrying: a failed cancel
+/// leaves real money stranded in escrow, so err on the side of retrying.
+fn is_user_rejection(e: &str) -> bool {
+    let l = e.to_lowercase();
+    l.contains("reject")
+        || l.contains("denied")
+        || l.contains("declined")
+        || l.contains("user cancel")
+        || l.contains("user closed")
+}
+
 /// Cancels a wagered lobby on-chain, refunding the escrowed wager back to
 /// `white`/`black`. This is a real transaction — before this existed,
 /// "cancelling" a hosted lobby only left the P2P relay listing (see
 /// `p2p_leave_game`) and permanently stranded any wager in `escrow_pda`,
 /// since nothing ever called the on-chain `cancel_game` instruction.
 ///
-/// Fetches the `Game` account first (rather than trusting client-side
-/// state) so `black` is correct even if a joiner's on-chain `join_game` beat
-/// this cancel — passing a stale/default `black` when someone actually
-/// joined would make the on-chain `black_authority` constraint fail closed
-/// (safe) rather than silently skip their refund.
+/// Fetches the `Game` account first (rather than trusting client-side state)
+/// so `black` is correct even if a joiner's on-chain `join_game` beat this
+/// cancel — passing a stale/default `black` when someone actually joined
+/// would make the on-chain `black_authority` constraint fail closed (safe)
+/// rather than silently skip their refund.
+///
+/// Also verifies from chain state that a cancel is possible *before* popping
+/// the wallet: a missing/terminal/free game resolves without ever asking for
+/// a signature, instead of a popup followed by a guaranteed on-chain failure.
 pub fn cancel_game_on_chain(
     rpc_url: String,
     program_id: Pubkey,
     wallet_pubkey: Pubkey,
     game_id: u64,
-) -> Result<solana_sdk::signature::Signature, String> {
+) -> Result<CancelOutcome, String> {
     use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
     use crate::solana::instructions::cancel_game_ix;
 
     let rpc = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::confirmed());
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
-    let data = rpc
-        .get_account_data(&game_pda)
-        .map_err(|e| format!("fetch game account: {e}"))?;
+    let data = match rpc.get_account_data(&game_pda) {
+        Ok(d) => d,
+        Err(e) => {
+            let s = e.to_string();
+            if s.contains("not found") || s.contains("AccountNotFound") {
+                return Ok(CancelOutcome::NothingToRefund(
+                    "game account does not exist".to_string(),
+                ));
+            }
+            return Err(format!("fetch game account: {s}"));
+        }
+    };
     // Anchor discriminator (8) + game_id (8) precede white/black — see
     // `settlement_worker.rs::parse_game_account` for the same layout used
     // server-side.
-    let white = data
-        .get(16..48)
-        .map(Pubkey::try_from)
-        .and_then(Result::ok)
-        .ok_or_else(|| "game account too short for white pubkey".to_string())?;
-    let black = data
-        .get(48..80)
-        .map(Pubkey::try_from)
-        .and_then(Result::ok)
-        .ok_or_else(|| "game account too short for black pubkey".to_string())?;
+    let white = data.get(16..48).map(Pubkey::try_from).and_then(Result::ok);
+    let black = data.get(48..80).map(Pubkey::try_from).and_then(Result::ok);
+    let (Some(white), Some(black)) = (white, black) else {
+        return Ok(CancelOutcome::NothingToRefund(
+            "game account malformed/empty".to_string(),
+        ));
+    };
+
+    // Status byte follows white/black; wager_amount offset is pinned by the
+    // program's `wager_amount_offset_is_212` test (+8 discriminator).
+    // Statuses: 0=Pending 1=WaitingForOpponent 2=Active 3=Inactive 4=Disputed
+    // 5=Finished 6=Settled 7=Expired 8=Cancelled (state/game.rs).
+    const STATUS_OFFSET: usize = 8 + 8 + 32 + 32;
+    const WAGER_OFFSET: usize = 8 + 212;
+    let status = data.get(STATUS_OFFSET).copied().unwrap_or(0);
+    let wager_amount = data
+        .get(WAGER_OFFSET..WAGER_OFFSET + 8)
+        .map(|b| u64::from_le_bytes(b.try_into().expect("8-byte slice")))
+        .unwrap_or(0);
+
+    if matches!(status, 5..=8) {
+        return Ok(CancelOutcome::NothingToRefund(match status {
+            5 => "game already finished".to_string(),
+            6 => "game already settled".to_string(),
+            7 => "game already expired".to_string(),
+            _ => "game already cancelled".to_string(),
+        }));
+    }
+    if status != 1 && status != 2 {
+        // Pending / Inactive / Disputed — the on-chain cancel would reject
+        // these states; don't burn a wallet popup on a doomed transaction.
+        return Err(format!(
+            "game {game_id} cannot be cancelled right now (status {status})"
+        ));
+    }
 
     let ix = cancel_game_ix(program_id, wallet_pubkey, white, black, game_id)
         .map_err(|e| format!("build cancel_game_ix: {e}"))?;
 
-    sign_and_send_via_tauri(
-        &rpc_url,
-        wallet_pubkey,
-        &[ix],
-        &[],
-        "Cancelling wagered game",
-    )
-    .map(|sig| {
-        info!(
-            "[CANCEL_GAME] game {} cancelled on-chain, sig {}",
-            game_id, sig
-        );
-        sig
-    })
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match sign_and_send_via_tauri(
+            &rpc_url,
+            wallet_pubkey,
+            &[ix.clone()],
+            &[],
+            "Cancelling wagered game",
+        ) {
+            Ok(sig) => {
+                info!(
+                    "[CANCEL_GAME] game {} cancelled on-chain, sig {}",
+                    game_id, sig
+                );
+                return Ok(CancelOutcome::Refunded(sig));
+            }
+            Err(e) => {
+                if attempt >= 3 || is_user_rejection(&e) {
+                    return Err(e);
+                }
+                warn!(
+                    "[CANCEL_GAME] attempt {} failed for game {}: {}, retrying...",
+                    attempt, game_id, e
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+            }
+        }
+    }
 }
 
 async fn async_lookup_game(

@@ -143,6 +143,20 @@ pub fn session_status(game_id: u64) -> Result<SessionStatus, String> {
         .map_err(|e| format!("vps session_status parse: {e}"))
 }
 
+/// Release a per-game session whose setup transaction never activated.
+pub fn abandon_session(game_id: u64) -> Result<(), String> {
+    let response = client_fast()?
+        .post(format!("{}/session/abandon/{game_id}", vps_base()))
+        .send()
+        .map_err(|e| format!("vps abandon_session: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("vps abandon_session: HTTP {status} — {body}"));
+    }
+    Ok(())
+}
+
 // ── Item 8: Global session verify ─────────────────────────────────────────────
 
 /// Check whether the VPS holds an active global session for `wallet_pubkey`.

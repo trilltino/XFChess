@@ -166,6 +166,17 @@ pub enum NetworkMessage {
         white_display: String,
         black_display: String,
     },
+    /// Sent after a participant has initialized its board and is allowed to start.
+    GameReady {
+        game_id: u64,
+        player_pubkey: Pubkey,
+        ready_token: String,
+    },
+    /// Sent after both participants have announced readiness.
+    GameStartConfirmed {
+        game_id: u64,
+        start_token: String,
+    },
     GameStateBroadcast {
         game_id: u64,
         fen: String,
@@ -271,6 +282,8 @@ impl NetworkMessage {
             NetworkMessage::GameInvite { game_id, .. } => *game_id,
             NetworkMessage::InviteResponse { game_id, .. } => *game_id,
             NetworkMessage::GameStart { game_id, .. } => *game_id,
+            NetworkMessage::GameReady { game_id, .. } => *game_id,
+            NetworkMessage::GameStartConfirmed { game_id, .. } => *game_id,
             NetworkMessage::GameStateBroadcast { game_id, .. } => *game_id,
             NetworkMessage::DrawOffer { game_id, .. } => *game_id,
             NetworkMessage::DrawResponse { game_id, .. } => *game_id,
@@ -306,6 +319,8 @@ impl NetworkMessage {
             NetworkMessage::GameInvite { .. } => "GameInvite",
             NetworkMessage::InviteResponse { .. } => "InviteResponse",
             NetworkMessage::GameStart { .. } => "GameStart",
+            NetworkMessage::GameReady { .. } => "GameReady",
+            NetworkMessage::GameStartConfirmed { .. } => "GameStartConfirmed",
             NetworkMessage::GameStateBroadcast { .. } => "GameStateBroadcast",
             NetworkMessage::DrawOffer { .. } => "DrawOffer",
             NetworkMessage::DrawResponse { .. } => "DrawResponse",
@@ -320,6 +335,35 @@ impl NetworkMessage {
             NetworkMessage::Clock { .. } => "Clock",
             NetworkMessage::Chat { .. } => "Chat",
         }
+    }
+}
+
+#[cfg(test)]
+mod synchronized_start_tests {
+    use super::{NetworkMessage, Pubkey};
+
+    #[test]
+    fn synchronized_start_messages_round_trip() {
+        let ready = NetworkMessage::GameReady {
+            game_id: 7,
+            player_pubkey: Pubkey::default(),
+            ready_token: "game-7".to_string(),
+        };
+        let encoded = bincode::serialize(&ready).expect("ready message serializes");
+        let decoded: NetworkMessage =
+            bincode::deserialize(&encoded).expect("ready message decodes");
+        assert_eq!(decoded.game_id(), 7);
+        assert_eq!(decoded.kind_str(), "GameReady");
+
+        let start = NetworkMessage::GameStartConfirmed {
+            game_id: 7,
+            start_token: "game-7".to_string(),
+        };
+        let encoded = bincode::serialize(&start).expect("start message serializes");
+        let decoded: NetworkMessage =
+            bincode::deserialize(&encoded).expect("start message decodes");
+        assert_eq!(decoded.game_id(), 7);
+        assert_eq!(decoded.kind_str(), "GameStartConfirmed");
     }
 }
 

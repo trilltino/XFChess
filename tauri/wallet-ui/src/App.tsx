@@ -25,7 +25,18 @@ import { PRIVY_ENABLED, SOLANA_CHAIN } from "./privy/config";
 const BRIDGE_PORT = import.meta.env.DEV
   ? (import.meta.env.VITE_BRIDGE_PORT ?? "7454")
   : (window.location.port || "7454");
-const API_BASE = `http://localhost:${BRIDGE_PORT}`;
+// The bridge's axum server binds IPv4 loopback ONLY (see bind_http_port in
+// tauri/src/main.rs: `([127, 0, 0, 1], port)`), so `localhost` must not be
+// used here: on Windows Chrome resolves `localhost` to `::1` FIRST and only
+// falls back to IPv4 after the attempt is refused. Every EventSource
+// connect/reconnect then logs `ERR_CONNECTION_REFUSED` on
+// `:7454/pending/stream` + `[SIGNER] SSE connection error` even though the
+// stream eventually succeeds over IPv4 — the exact console spam that made
+// this look broken. Hitting 127.0.0.1 directly skips the doomed `::1` hop.
+// The page origin stays `http://localhost:PORT` (Privy/extension trust and
+// the Tauri CSP connect-src list are all keyed to that), and the bridge's
+// CORS predicate already permits `http://127.0.0.1:` origins.
+const API_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
 
 // Every instance's popup window is otherwise titled the same static
 // "XFChess" (see index.html) — indistinguishable to Windows' EnumWindows.
@@ -93,6 +104,19 @@ async function apiGet<T = unknown>(path: string): Promise<T> {
 // fall back to window.close() if the bridge itself is unreachable.
 async function closePopup() {
   try {
+    const pending = await fetch(`${API_BASE}/pending`, {
+      headers: { "X-Session-Id": SESSION_ID },
+    });
+    if (pending.ok) {
+      const state = await pending.json() as { request_id?: string | null };
+      if (state.request_id) {
+        await fetch(`${API_BASE}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Session-Id": SESSION_ID },
+          body: JSON.stringify({ request_id: state.request_id, reason: "Wallet window closed" }),
+        });
+      }
+    }
     await fetch(`${API_BASE}/hide`, { method: "POST", headers: { "X-Session-Id": SESSION_ID } });
   } catch {
     window.close();
@@ -107,8 +131,8 @@ async function closePopup() {
 // a valid-looking fee, but for an account the player never funded, which
 // surfaces as a confusing "not enough SOL" even though their actual wallet
 // has plenty.
-export function getConnectedProvider(): any {
-  const kind = localStorage.getItem("xfchess_wallet_provider");
+export function getConnectedProvider(expectedKind?: string | null): any {
+  const kind = expectedKind ?? localStorage.getItem("xfchess_wallet_provider");
   if (kind === "solflare") return (window as any).solflare;
   if (kind === "phantom") return (window as any).phantom?.solana;
   // An embedded wallet has no extension to hand back, and the fallback below
@@ -699,7 +723,7 @@ function SocialLoginBlock({
     setError(null);
     logLifecycle("PRIVY_CREATE_WALLET_START");
     try {
-      await createWallet();
+      await withTimeout(createWallet(), 45000, "Google wallet setup");
       logLifecycle("PRIVY_CREATE_WALLET_OK");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1060,28 +1084,67 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
 function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   const [pendingTx, setPendingTx] = useState<string | null>(null);
   const [pendingLabel, setPendingLabel] = useState<string | null>(null);
+  const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Privy hooks are safe to call unconditionally: PrivyProviderWrapper renders
   // a passthrough when VITE_PRIVY_APP_ID is unset, and these return empty
   // state rather than throwing.
+  const { ready: privyReady, authenticated: privyAuthenticated } = usePrivy();
   const { wallets: privyWallets } = useWallets();
   const { signTransaction: privySignTransaction } = useSignTransaction();
   const hasPrivyWallet = PRIVY_ENABLED && !!privyWallets[0]?.address;
+  const [bridgeProvider, setBridgeProvider] = useState<string | null>(null);
+  const [bridgeStatusLoaded, setBridgeStatusLoaded] = useState(false);
+  const isPrivySession = bridgeProvider === "privy";
   // Tracks which pending tx we've already auto-attempted, so the polling
   // effect doesn't re-fire signTransaction() every second while the user is
   // busy approving (or rejecting) it inside Phantom's own popup.
   const autoAttempted = useRef<string | null>(null);
 
-  const resolveAndHide = async (signedB64: string) => {
-    await fetch(`${API_BASE}/resolved`, {
+  // The Tauri bridge owns the authenticated wallet session. Reading its
+  // provider here prevents a stale browser localStorage value from routing a
+  // Google/Privy transaction to Phantom or Solflare.
+  useEffect(() => {
+    let cancelled = false;
+    void withTimeout(apiGet<{ pubkey?: string; provider?: string | null }>("/status"), 5000, "Wallet session lookup")
+      .then((status) => {
+        if (cancelled) return;
+        if (status.pubkey && status.pubkey !== _pubkey) {
+          setError("The wallet session changed. Close this window and reopen the signing request.");
+          return;
+        }
+        setBridgeProvider(status.provider ?? null);
+        setBridgeStatusLoaded(true);
+      })
+      .catch((e: any) => {
+        if (!cancelled) setError(e?.message || String(e));
+      });
+    return () => { cancelled = true; };
+  }, [_pubkey]);
+
+  const cancelRequest = async (requestId: string, reason: string) => {
+    const response = await fetch(`${API_BASE}/cancel`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Session-Id": SESSION_ID },
-      body: JSON.stringify({ signed: signedB64 }),
+      body: JSON.stringify({ request_id: requestId, reason }),
     });
+    if (!response.ok && response.status !== 409) {
+      throw new Error(`Wallet bridge rejected cancellation (${response.status})`);
+    }
+  };
+
+  const resolveAndHide = async (requestId: string, signedB64: string) => {
+    const response = await fetch(`${API_BASE}/resolved`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Session-Id": SESSION_ID },
+      body: JSON.stringify({ request_id: requestId, signed: signedB64 }),
+    });
+    if (!response.ok) throw new Error(`Wallet bridge rejected signing response (${response.status})`);
     sessionStorage.removeItem("xfchess_auto_attempted_tx");
     setPendingTx(null);
     setPendingLabel(null);
+    setCurrentRequestId(null);
     setError(null);
     await closePopup();
   };
@@ -1109,12 +1172,13 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
     return tx.serialize().toString("base64");
   };
 
-  const handleAutoSign = async (txB64: string, secret: string) => {
+  const handleAutoSign = async (requestId: string, txB64: string, secret: string) => {
     setSigning(true);
     try {
       const kp = web3.Keypair.fromSecretKey(new Uint8Array(JSON.parse(secret)));
-      await resolveAndHide(await signTxBytes(txB64, kp));
+      await resolveAndHide(requestId, await signTxBytes(txB64, kp));
     } catch (e: any) {
+      await cancelRequest(requestId, e.message).catch(() => {});
       setError(e.message);
     } finally {
       setSigning(false);
@@ -1134,7 +1198,7 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   // `ensureDevnet` is deliberately NOT called here: an embedded wallet has no
   // user-selected cluster to nudge, so there is nothing to correct and
   // `isNetworkMismatchError` is unreachable on this path.
-  const signWithPrivy = async (txB64: string) => {
+  const signWithPrivy = async (requestId: string, txB64: string) => {
     setSigning(true);
     setError(null);
     try {
@@ -1161,10 +1225,11 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
       );
       logLifecycle("SIGNATURE_RECEIVED");
 
-      await resolveAndHide(Buffer.from(signedTransaction).toString("base64"));
+      await resolveAndHide(requestId, Buffer.from(signedTransaction).toString("base64"));
       logLifecycle("TX_COMPLETE");
     } catch (e: any) {
       logLifecycle("FAILED", { message: e?.message || String(e) });
+      await cancelRequest(requestId, e?.message || String(e)).catch(() => {});
       setError(e?.message || String(e));
     } finally {
       setSigning(false);
@@ -1178,11 +1243,11 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   // to click "Sign with Extension" on this page first. The button stays as
   // a manual retry for when no provider was connected yet, or the user
   // dismissed/rejected the extension popup and wants to try again.
-  const signWithExtension = async (txB64: string) => {
+  const signWithExtension = async (requestId: string, txB64: string) => {
     setSigning(true);
     setError(null);
     try {
-      const provider = getConnectedProvider();
+      const provider = getConnectedProvider(bridgeProvider);
       if (!provider) throw new Error("No Phantom/Solflare extension detected");
       // `getConnectedProvider()` only checks a persisted preference plus
       // whether the extension object exists on `window` — it says nothing
@@ -1211,10 +1276,11 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         "Wallet signature",
       );
       logLifecycle("SIGNATURE_RECEIVED");
-      await resolveAndHide(Buffer.from(signed.serialize()).toString("base64"));
+      await resolveAndHide(requestId, Buffer.from(signed.serialize()).toString("base64"));
       logLifecycle("TX_COMPLETE");
     } catch (e: any) {
       logLifecycle("FAILED", { message: e?.message || String(e) });
+      await cancelRequest(requestId, e?.message || String(e)).catch(() => {});
       setError(isNetworkMismatchError(e) ? NETWORK_MISMATCH_MESSAGE : e.message || String(e));
     } finally {
       setSigning(false);
@@ -1228,10 +1294,19 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   // EventSource retries the connection natively on drop, so no manual
   // reconnect/backoff logic is needed here.
   useEffect(() => {
-    const handleUpdate = (data: { tx?: string | null; label?: string | null }) => {
+    const handleUpdate = (data: { tx?: string | null; label?: string | null; request_id?: string | null }) => {
       if (data.tx && data.tx !== pendingTx) {
+        if (!data.request_id) {
+          setError("Wallet bridge sent a signing request without a request ID.");
+          return;
+        }
         setPendingTx(data.tx);
         setPendingLabel(typeof data.label === "string" && data.label ? data.label : null);
+        setCurrentRequestId(data.request_id);
+        logLifecycle("SIGN_REQUEST_RECEIVED", {
+          request_id: data.request_id,
+          label: data.label ?? null,
+        });
         const secret = sessionStorage.getItem("xfchess_session_key");
         // Persisted (not just the in-memory ref) so a popup reload mid-sign
         // — the exact "browser refresh during signing" case — doesn't
@@ -1245,9 +1320,12 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         // tx shows up.
         const alreadyAttempted = sessionStorage.getItem("xfchess_auto_attempted_tx") === data.tx;
         if (secret) {
-          handleAutoSign(data.tx, secret);
+          handleAutoSign(data.request_id, data.tx, secret);
         } else if (
-          (hasPrivyWallet || getConnectedProvider()) &&
+          bridgeStatusLoaded &&
+          ((hasPrivyWallet && isPrivySession) ||
+            (!isPrivySession && (bridgeProvider === "phantom" || bridgeProvider === "solflare") &&
+              getConnectedProvider(bridgeProvider))) &&
           autoAttempted.current !== data.tx &&
           !alreadyAttempted
         ) {
@@ -1258,13 +1336,14 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
           // `getConnectedProvider()` only checks a persisted preference plus
           // whether an extension object exists on `window` — it can be true for
           // an extension that has nothing to do with the current session.
-          if (hasPrivyWallet) signWithPrivy(data.tx);
-          else signWithExtension(data.tx);
+          if (hasPrivyWallet) signWithPrivy(data.request_id, data.tx);
+          else signWithExtension(data.request_id, data.tx);
         }
       } else if (!data.tx) {
         sessionStorage.removeItem("xfchess_auto_attempted_tx");
         setPendingTx(null);
         setPendingLabel(null);
+        setCurrentRequestId(null);
       }
     };
 
@@ -1276,10 +1355,31 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         console.warn("[SIGNER] Bad SSE payload", e);
       }
     };
-    source.onerror = (e) => console.warn("[SIGNER] SSE connection error (will auto-retry)", e);
+    source.onopen = () => logLifecycle("SSE_CONNECTED");
+    source.onerror = (e) => console.warn(
+      `[SIGNER] SSE connection error (will auto-retry) base=${API_BASE} readyState=${source.readyState}`,
+      e,
+    );
     return () => source.close();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingTx]);
+  }, [pendingTx, hasPrivyWallet, isPrivySession, bridgeProvider, bridgeStatusLoaded]);
+
+  // SSE may deliver a transaction while Privy's wallet list is still empty.
+  // In that case the transaction is already in state when the wallet hydrates,
+  // so there is no new SSE event to trigger the normal handler above.
+  useEffect(() => {
+    if (
+      !pendingTx ||
+      !hasPrivyWallet ||
+      !isPrivySession ||
+      !bridgeStatusLoaded ||
+      sessionStorage.getItem("xfchess_session_key") ||
+      autoAttempted.current === pendingTx
+    ) return;
+    autoAttempted.current = pendingTx;
+    sessionStorage.setItem("xfchess_auto_attempted_tx", pendingTx);
+    void signWithPrivy(currentRequestId ?? "", pendingTx);
+  }, [pendingTx, currentRequestId, hasPrivyWallet, isPrivySession, bridgeStatusLoaded]);
 
   if (!pendingTx) return null;
 
@@ -1305,9 +1405,19 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
       {error && <ErrorMsg msg={error} />}
       {!signing && !sessionStorage.getItem("xfchess_session_key") && (
         hasPrivyWallet ? (
-          <PrimaryBtn onClick={() => signWithPrivy(pendingTx)}>Sign</PrimaryBtn>
+          <PrimaryBtn onClick={() => signWithPrivy(currentRequestId ?? "", pendingTx)}>Sign with Google</PrimaryBtn>
+        ) : !bridgeStatusLoaded ? (
+          <div style={{ color: TEXT_DIM, fontSize: 12, textAlign: "center" }}>
+            Checking your wallet session...
+          </div>
+        ) : isPrivySession ? (
+          <div style={{ color: TEXT_DIM, fontSize: 12, textAlign: "center" }}>
+            {!privyReady || !privyAuthenticated
+              ? "Reconnecting to Google..."
+              : "Loading your Google wallet..."}
+          </div>
         ) : (
-          <PrimaryBtn onClick={() => signWithExtension(pendingTx)}>Sign with Extension</PrimaryBtn>
+          <PrimaryBtn onClick={() => signWithExtension(currentRequestId ?? "", pendingTx)}>Sign with Extension</PrimaryBtn>
         )
       )}
     </div>
@@ -1984,7 +2094,16 @@ function Onboarding() {
         </Card>
       )}
 
-      {pubkey && <TransactionSigner pubkey={pubkey} />}
+      {/* The signer mounts ONLY when this popup was actually opened at
+          ?step=sign. The game's signing path (open_wallet_popup_for_signing
+          in tauri/src/main.rs) always kills any existing popup and spawns a
+          fresh ?step=sign window for a signing request, so every legitimate
+          signature lands here — while a popup sitting on the connect/login or
+          splash step can never be hijacked by a pending tx (e.g. one left
+          over from an earlier, unrelated session) the way the old
+          unconditional render did. That hijack is exactly the "I clicked
+          Connect wallet and it asked me to sign" confusion. */}
+      {step === "sign" && pubkey && <TransactionSigner pubkey={pubkey} />}
     </div>
   );
 }

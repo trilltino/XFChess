@@ -33,8 +33,20 @@ pub fn tick_first_move_deadline(
     game_over: Res<GameOverState>,
     time: Res<Time>,
     mut flag_timeout: MessageWriter<FlagTimeoutEvent>,
+    game_mode: Res<GameMode>,
+    barrier: Res<crate::multiplayer::types::OnlineStartBarrier>,
+    session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
 ) {
     if !deadline.active {
+        return;
+    }
+    if crate::multiplayer::types::is_online_game_mode(*game_mode)
+        && !session.as_ref().is_some_and(|session| {
+            barrier.is_complete(
+                crate::multiplayer::network::online_game_session::numeric_game_id(&session.game_id),
+            )
+        })
+    {
         return;
     }
     if !move_history.is_empty() || game_over.is_game_over() {

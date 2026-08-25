@@ -1165,21 +1165,84 @@ async fn tasks_status() -> Result<Json<serde_json::Value>, StatusCode> {
 async fn metrics_summary(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    use crate::telemetry::worker_metrics::{
-        ER_LAST_PUSH_UNIX, ER_SUBSCRIPTION_CONNECTED, SETTLEMENT_STALE_DELEGATED_GAUGE,
-    };
+    use crate::telemetry::worker_metrics::*;
     use std::sync::atomic::Ordering;
 
     let now = now_secs();
     let last_push = ER_LAST_PUSH_UNIX.load(Ordering::Relaxed);
+
+    // Age of a heartbeat, or None when the worker has never ticked. `None`
+    // rather than 0 matters: a worker that has not run once is a different
+    // state from one that ticked this second, and 0 would render as the
+    // healthiest possible value for the least healthy case.
+    let age = |unix: u64| -> Option<u64> {
+        if unix == 0 {
+            None
+        } else {
+            Some(now.saturating_sub(unix))
+        }
+    };
+    let n = |m: &std::sync::atomic::AtomicU64| m.load(Ordering::Relaxed);
+
     Ok(Json(json!({
+        // ── headline ────────────────────────────────────────────────────
         "online_count": state.presence.count_in_game(),
         "games_in_progress": state.presence.count_games_in_progress(),
         "transactions_confirmed_solana": state.metrics.transactions_confirmed("solana"),
         "er_stale_delegated_count": SETTLEMENT_STALE_DELEGATED_GAUGE.load(Ordering::Relaxed),
         "er_subscription_connected": ER_SUBSCRIPTION_CONNECTED.load(Ordering::Relaxed) == 1,
-        "er_last_push_age_seconds": if last_push == 0 { None } else { Some(now.saturating_sub(last_push)) },
+        "er_last_push_age_seconds": age(last_push),
         "feepayer_balance_lamports": state.metrics.feepayer_balance(0),
+
+        // ── worker detail ───────────────────────────────────────────────
+        // Everything below was already being collected by the workers and
+        // exported to Prometheus, but had no path into the admin panel — so
+        // it was only visible to someone with a Grafana session. Grouped by
+        // the worker that owns it so the UI can panel them directly.
+        "settlement": {
+            "ticks_total": n(&SETTLEMENT_TICKS_TOTAL),
+            "tick_millis": n(&SETTLEMENT_TICK_MILLIS),
+            "last_tick_age_seconds": age(n(&SETTLEMENT_LAST_TICK_UNIX)),
+            "games_scanned_total": n(&SETTLEMENT_GAMES_SCANNED_TOTAL),
+            "finalized_total": n(&SETTLEMENT_FINALIZED_TOTAL),
+            "undelegated_total": n(&SETTLEMENT_UNDELEGATED_TOTAL),
+            "rpc_calls_total": n(&SETTLEMENT_RPC_CALLS_TOTAL),
+            "redelegate_retried_total": n(&SETTLEMENT_REDELEGATE_RETRIED_TOTAL),
+            "redelegate_failed_total": n(&SETTLEMENT_REDELEGATE_FAILED_TOTAL),
+            "force_undelegated_awaiting_recovery": n(&FORCE_UNDELEGATED_AWAITING_RECOVERY_TOTAL),
+            "stuck_delegation_auto_recovered": n(&STUCK_DELEGATION_AUTO_RECOVERED_TOTAL)
+        },
+        "schedulers": {
+            "tournament_last_tick_age_seconds": age(n(&TOURNAMENT_SCHEDULER_LAST_TICK_UNIX)),
+            "prize_distributor_last_tick_age_seconds": age(n(&PRIZE_DISTRIBUTOR_LAST_TICK_UNIX)),
+            "time_check_scheduled_total": n(&TIME_CHECK_SCHEDULED_TOTAL),
+            "time_check_schedule_failed_total": n(&TIME_CHECK_SCHEDULE_FAILED_TOTAL),
+            "time_check_cancelled_total": n(&TIME_CHECK_CANCELLED_TOTAL),
+            "time_check_cancel_failed_total": n(&TIME_CHECK_CANCEL_FAILED_TOTAL)
+        },
+        "anticheat": {
+            "queue_depth": n(&ANTICHEAT_QUEUE_DEPTH),
+            "enqueued_total": n(&ANTICHEAT_ENQUEUED_TOTAL),
+            "dropped_total": n(&ANTICHEAT_DROPPED_TOTAL),
+            "screened_out_total": n(&ANTICHEAT_SCREENED_OUT_TOTAL),
+            "telemetry_discarded_total": n(&TELEMETRY_DISCARDED_TOTAL),
+            "linkage_flagged_total": n(&LINKAGE_FLAGGED_TOTAL),
+            "linkage_hard_blocked_total": n(&LINKAGE_HARD_BLOCKED_TOTAL)
+        },
+        "prizes": {
+            "distributed_total": n(&PRIZE_DISTRIBUTED_TOTAL),
+            "held_total": n(&PRIZE_DISTRIBUTION_HELD_TOTAL),
+            "flagged_total": n(&PRIZE_DISTRIBUTION_FLAGGED_TOTAL),
+            "awaiting_approval_total": n(&PRIZE_DISTRIBUTION_AWAITING_APPROVAL_TOTAL)
+        },
+        "guards": {
+            "auth_unconfigured_relay_rejected_total": n(&AUTH_UNCONFIGURED_RELAY_REJECTED_TOTAL),
+            "session_create_throttled_total": n(&SESSION_CREATE_THROTTLED_TOTAL),
+            "sponsorship_budget_exhausted_total": n(&SPONSORSHIP_BUDGET_EXHAUSTED_TOTAL),
+            "rates_fetch_failed_total": n(&RATES_FETCH_FAILED_TOTAL),
+            "rates_sanity_rejected_total": n(&RATES_SANITY_REJECTED_TOTAL),
+            "rates_source_divergence_total": n(&RATES_SOURCE_DIVERGENCE_TOTAL)
+        }
     })))
 }
 

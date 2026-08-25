@@ -224,9 +224,21 @@ fn draw_profile_onboarding(
         } else if existing.iter().any(|n| n == trimmed) {
             state.error = Some("That name is already taken on this device.".to_string());
         } else {
+            // `rfd` has no Android backend (every dialog trait is simply
+            // unimplemented for that target — confirmed by attempting the
+            // cross-compile, not assumed). `create_profile`'s `save_path:
+            // None` is already a first-class state elsewhere in this module
+            // (PGN saves fall back to `profile_pgn_dir`/the documents
+            // default), so on Android this just always takes that path
+            // instead of offering a custom location — matching the "default
+            // to `documents_dir()`" plan for a v1 that has no
+            // Storage-Access-Framework picker yet.
+            #[cfg(not(target_os = "android"))]
             let folder = rfd::FileDialog::new()
                 .set_title("Choose Save Location")
                 .pick_folder();
+            #[cfg(target_os = "android")]
+            let folder = None;
             identity::create_profile(trimmed, folder);
             player_identity.username = Some(trimmed.to_string());
             player_identity.is_guest = true;

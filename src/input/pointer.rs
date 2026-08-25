@@ -1,4 +1,16 @@
 //! Advanced pointer interaction system with hover effects and cursor management
+//!
+//! Not cfg-gated on Android, and deliberately so: `bevy_picking`'s touch
+//! backend (`bevy_picking::input::touch_pick_events`, verified against the
+//! pinned 0.19.0 source, not assumed) only ever emits `TouchPhase::Started/
+//! Moved/Ended/Canceled`-derived press/move/release events — it never
+//! synthesizes `Pointer<Over>`/`Pointer<Out>`, which is what every observer
+//! in this file listens for. So on a touch-only device these observers are
+//! attached (six times over in `rendering/pieces/pieces.rs`, once in
+//! `rendering/board/board.rs`) but never fire — genuinely inert, not merely
+//! untested. Tap-to-select relies on `Pointer<Click>` in
+//! `game/systems/input.rs`, which touch does generate, and needs none of
+//! this file's hover-driven legal-move-preview or cursor-icon logic to work.
 
 use crate::game::components::GamePhase;
 use crate::game::resources::{CurrentGamePhase, CurrentTurn, Selection};

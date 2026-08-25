@@ -395,6 +395,7 @@ fn uci_to_event(uci: &str) -> Option<NetworkMoveEvent> {
         to: (tf as u8, tr as u8),
         promotion,
         expected_fen: None,
+        dedup_version: None,
     })
 }
 

@@ -37,6 +37,11 @@ impl SolanaWallet {
 #[derive(Resource, Debug, Clone)]
 pub struct SolanaGameSync {
     pub game_id: Option<u64>,
+    /// SessionDelegation key authorized for the active on-chain game. Sent
+    /// with durable Braid writes so the backend can bind each write to the
+    /// wallet's enabled per-game session.
+    pub session_pubkey: Option<Pubkey>,
+    pub session_pubkey_update: std::sync::Arc<std::sync::Mutex<Option<Pubkey>>>,
     pub moves_submitted: u32,
     pub wager_amount: u64,
     pub pending_confirmation: bool,
@@ -59,6 +64,8 @@ impl Default for SolanaGameSync {
     fn default() -> Self {
         Self {
             game_id: None,
+            session_pubkey: None,
+            session_pubkey_update: std::sync::Arc::new(std::sync::Mutex::new(None)),
             moves_submitted: 0,
             wager_amount: 0,
             pending_confirmation: false,

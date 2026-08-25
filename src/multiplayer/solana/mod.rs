@@ -7,3 +7,4 @@ pub mod tauri_signer;
 pub mod tournament;
 pub mod tournament_session;
 pub mod wager_rate;
+pub mod wager_recovery;

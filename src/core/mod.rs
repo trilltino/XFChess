@@ -2,6 +2,8 @@
 
 pub mod crash;
 pub mod error_handling;
+#[cfg(target_os = "android")]
+pub mod paths;
 pub mod persistent_camera;
 pub mod plugin;
 pub mod resources;

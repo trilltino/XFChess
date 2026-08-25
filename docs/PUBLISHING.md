@@ -1,6 +1,6 @@
 # Publishing a Release
 
-How to cut a Windows/macOS/Linux release, what actually gets verified before
+How to cut a Windows/macOS/Linux/Chrome OS release, what actually gets verified before
 it ships, and the landmines already dug out of `release.yml`/`ci.yml` so
 they don't have to be rediscovered.
 
@@ -62,6 +62,20 @@ Required secrets, if/when signing is provisioned: `AZURE_TENANT_ID`,
 `AZURE_TS_ACCOUNT`, `AZURE_TS_PROFILE` (Windows); `APPLE_CERTIFICATE`,
 `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
 `APPLE_PASSWORD`, `APPLE_TEAM_ID` (macOS).
+
+- **Android**: no keystore exists yet, deliberately — the `android` job builds
+  and uploads a **debug-signed** APK only (`assembleDebug`, not
+  `assembleRelease`), which is fine for device testing but cannot go to the
+  dApp Store. Generating the release keystore is a one-way decision (the same
+  key is required for every future update — losing it forfeits the ability to
+  update the listing at all) and this repo has a documented history of a
+  secret reaching public git (see the "Secret Exposure" incident), so it is
+  not something to fabricate inside a CI file or generate speculatively. When
+  ready: generate with `keytool` (see `mobile/app/build.gradle.kts`'s
+  comments), store it out of the repo as `ANDROID_KEYSTORE_BASE64` +
+  `ANDROID_KEYSTORE_PASSWORD` + `ANDROID_KEY_ALIAS` + `ANDROID_KEY_PASSWORD`
+  secrets, add a signing config + `assembleRelease` step to the `android` job,
+  and switch the `dapp-store-cli` publish step on.
 
 ## Watching a run
 

@@ -72,7 +72,8 @@ impl SessionStore {
                 game_id   INTEGER PRIMARY KEY,
                 keypair   BLOB    NOT NULL,
                 wallet    TEXT    NOT NULL,
-                active    INTEGER NOT NULL DEFAULT 0
+                active    INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0
             );
             "#,
         )
@@ -85,6 +86,10 @@ impl SessionStore {
         let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0")
             .execute(&self.pool)
             .await;
+        let _ =
+            sqlx::query("ALTER TABLE sessions ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")
+                .execute(&self.pool)
+                .await;
 
         // Per-wallet activation record (migration 025) — mirrors migrations/
         // for deployments that don't run sqlx migrations. See that file's
@@ -581,21 +586,32 @@ impl SessionStore {
             .encrypt_bytes(&keypair_bytes)
             .map_err(|e| anyhow::anyhow!("Failed to encrypt session keypair: {e}"))?;
 
-        sqlx::query(
+        let insert = sqlx::query(
             r#"
-            INSERT OR IGNORE INTO sessions (game_id, keypair, wallet, active)
-            VALUES (?1, ?2, ?3, 0)
+            INSERT OR IGNORE INTO sessions (game_id, keypair, wallet, active, created_at)
+            VALUES (?1, ?2, ?3, 0, strftime('%s', 'now'))
             "#,
         )
         .bind(game_id as i64)
         .bind(&encrypted[..])
-        .bind(wallet_str)
+        .bind(&wallet_str)
         .execute(&self.pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to insert session: {}", e);
-            anyhow::anyhow!("Failed to insert session: {}", e)
-        })?;
+        .await;
+        if let Err(e) = insert {
+            if !e.to_string().contains("no column named created_at") {
+                return Err(anyhow::anyhow!("Failed to insert session: {e}"));
+            }
+            sqlx::query(
+                "INSERT OR IGNORE INTO sessions (game_id, keypair, wallet, active)
+                 VALUES (?1, ?2, ?3, 0)",
+            )
+            .bind(game_id as i64)
+            .bind(&encrypted[..])
+            .bind(wallet_str)
+            .execute(&self.pool)
+            .await
+            .map_err(|fallback| anyhow::anyhow!("Failed to insert session: {fallback}"))?;
+        }
 
         Ok(pubkey)
     }
@@ -606,12 +622,37 @@ impl SessionStore {
     /// consumed, so an unbounded count is an unbounded drain.
     pub async fn count_pending_for_wallet(&self, wallet: &str) -> i64 {
         sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM sessions WHERE wallet = ? AND active = 0",
+            "SELECT COUNT(*) FROM sessions s
+                         WHERE s.wallet = ? AND s.active = 0
+                             AND s.created_at >= strftime('%s', 'now') - 1800
+                             AND NOT EXISTS (
+                                     SELECT 1 FROM session_wallet_activations a
+                                     WHERE a.game_id = s.game_id
+                             )",
         )
         .bind(wallet)
         .fetch_one(&self.pool)
         .await
         .unwrap_or(0)
+    }
+
+    /// Deletes a session only when its setup transaction never activated.
+    /// Activated rows remain available for settlement and recovery.
+    pub async fn abandon_unactivated(&self, game_id: u64, wallet: &str) -> bool {
+        sqlx::query(
+            "DELETE FROM sessions
+             WHERE game_id = ? AND wallet = ? AND active = 0
+               AND NOT EXISTS (
+                   SELECT 1 FROM session_wallet_activations a
+                   WHERE a.game_id = sessions.game_id
+               )",
+        )
+        .bind(game_id as i64)
+        .bind(wallet)
+        .execute(&self.pool)
+        .await
+        .map(|result| result.rows_affected() == 1)
+        .unwrap_or(false)
     }
 
     /// Like `create`, but stores a caller-supplied keypair instead of
@@ -661,9 +702,14 @@ impl SessionStore {
             .map_err(|e| anyhow::anyhow!("Failed to encrypt session keypair: {e}"))?;
         sqlx::query(
             r#"
-            INSERT INTO sessions (game_id, keypair, wallet, active, is_global)
-            VALUES (?1, ?2, ?3, 1, 1)
-            ON CONFLICT(game_id) DO UPDATE SET keypair = excluded.keypair, wallet = excluded.wallet, active = 1, is_global = 1
+            INSERT INTO sessions (game_id, keypair, wallet, active, is_global, created_at)
+            VALUES (?1, ?2, ?3, 1, 1, strftime('%s', 'now'))
+            ON CONFLICT(game_id) DO UPDATE SET
+                keypair = excluded.keypair,
+                wallet = excluded.wallet,
+                active = 1,
+                is_global = 1,
+                created_at = COALESCE(created_at, strftime('%s', 'now'))
             "#,
         )
         .bind(game_id as i64)
@@ -987,5 +1033,28 @@ mod tests {
                 .await
                 .expect("raw row");
         assert_eq!(recorded_wallet, wallet_a.to_string());
+    }
+
+    #[tokio::test]
+    async fn create_with_keypair_sets_created_at_timestamp() {
+        let store = test_store().await;
+        let wallet = Keypair::new().pubkey();
+        let kp = Keypair::new();
+
+        store
+            .create_with_keypair(11, wallet, kp.to_bytes())
+            .await
+            .expect("create_with_keypair should succeed");
+
+        let (created_at,): (i64,) =
+            sqlx::query_as("SELECT created_at FROM sessions WHERE game_id = 11")
+                .fetch_one(&store.pool)
+                .await
+                .expect("created_at row");
+
+        assert!(
+            created_at > 0,
+            "global-session tracked rows must get a real created_at timestamp"
+        );
     }
 }

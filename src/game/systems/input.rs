@@ -27,6 +27,7 @@ use crate::game::resources::{
 use crate::game::systems::shared::{
     execute_move, find_piece_on_square, CapturedTarget, MoveContext,
 };
+use crate::multiplayer::network::online_game_session::OnlineGameSession;
 use crate::multiplayer::network::protocol::NetworkMessage;
 #[cfg(feature = "solana")]
 use crate::multiplayer::rollup::magicblock::MagicBlockResolver;
@@ -84,6 +85,8 @@ pub struct InputSystemParams<'w, 's> {
     pub move_events: MessageWriter<'w, crate::game::events::MoveMadeEvent>,
     pub players: Res<'w, Players>,
     pub game_mode: Res<'w, crate::core::states::GameMode>,
+    pub start_barrier: Res<'w, crate::multiplayer::types::OnlineStartBarrier>,
+    pub online_session: Option<Res<'w, OnlineGameSession>>,
     pub pending_promotion: Res<'w, PendingPromotion>,
     #[cfg(feature = "solana")]
     pub game_sync: Option<Res<'w, SolanaGameSync>>,
@@ -110,6 +113,17 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
     // First check if it's a human turn at all
     if !is_human_turn(params) {
         return false;
+    }
+
+    if crate::multiplayer::types::is_online_game_mode(*params.game_mode) {
+        let Some(session) = params.online_session.as_ref() else {
+            return false;
+        };
+        let game_id =
+            crate::multiplayer::network::online_game_session::numeric_game_id(&session.game_id);
+        if !params.start_barrier.is_complete(game_id) {
+            return false;
+        }
     }
 
     // Gate only games that genuinely require Ephemeral-Rollup delegation

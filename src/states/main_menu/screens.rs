@@ -403,6 +403,34 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
                 Layout::small_space(ui);
                 if ui.small_button("Cancel").clicked() {
+                    #[cfg(feature = "solana")]
+                    if lobby.wager_sol > 0.0 {
+                        let gid = game_id;
+                        if let Some(wallet_pubkey) = ctx.solana_state.as_ref().and_then(|s| s.wallet_pubkey) {
+                            std::thread::spawn(move || {
+                                let program_id: solana_sdk::pubkey::Pubkey =
+                                    crate::solana::instructions::PROGRAM_ID.parse().unwrap();
+                                match crate::multiplayer::solana::lobby::cancel_game_on_chain(
+                                    crate::multiplayer::solana::integration::state::DEVNET_RPC_URL.to_string(),
+                                    program_id,
+                                    wallet_pubkey,
+                                    gid,
+                                ) {
+                                    Ok(crate::multiplayer::solana::lobby::CancelOutcome::Refunded(sig)) => {
+                                        info!("[LOBBY] cancel_game landed on-chain for {gid}, sig {sig} — wager refunded");
+                                        crate::multiplayer::solana::wager_recovery::forget(gid);
+                                    }
+                                    Ok(crate::multiplayer::solana::lobby::CancelOutcome::NothingToRefund(msg)) => {
+                                        info!("[LOBBY] cancel_game for {gid}: nothing to refund ({msg})");
+                                        crate::multiplayer::solana::wager_recovery::forget(gid);
+                                    }
+                                    Err(e) => warn!("[LOBBY] cancel_game failed for {gid}: {e} — wager may still be in escrow"),
+                                }
+                            });
+                        } else {
+                            warn!("[LOBBY] Cancel Hosting: wagered lobby {} but no wallet pubkey available", gid);
+                        }
+                    }
                     lobby.status = LobbyStatus::Idle;
                     lobby.opponent_poll_rx = None;
                 }
@@ -499,7 +527,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 }
             }
 
-            LobbyStatus::WaitingForHostStart { .. } => {
+            LobbyStatus::WaitingForHostStart { game_id } => {
                 ui.spinner();
                 ui.label(
                     egui::RichText::new("Joined! Waiting for the host to start the match...")
@@ -511,6 +539,39 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                         .size(12.0)
                         .color(egui::Color32::LIGHT_GRAY),
                 );
+                Layout::small_space(ui);
+                if ui.small_button("Leave").clicked() {
+                    #[cfg(feature = "solana")]
+                    if lobby.wager_sol > 0.0 {
+                        let gid = game_id;
+                        if let Some(wallet_pubkey) = ctx.solana_state.as_ref().and_then(|s| s.wallet_pubkey) {
+                            std::thread::spawn(move || {
+                                let program_id: solana_sdk::pubkey::Pubkey =
+                                    crate::solana::instructions::PROGRAM_ID.parse().unwrap();
+                                match crate::multiplayer::solana::lobby::cancel_game_on_chain(
+                                    crate::multiplayer::solana::integration::state::DEVNET_RPC_URL.to_string(),
+                                    program_id,
+                                    wallet_pubkey,
+                                    gid,
+                                ) {
+                                    Ok(crate::multiplayer::solana::lobby::CancelOutcome::Refunded(sig)) => {
+                                        info!("[LOBBY] cancel_game landed on-chain for {gid}, sig {sig} — wager refunded");
+                                        crate::multiplayer::solana::wager_recovery::forget(gid);
+                                    }
+                                    Ok(crate::multiplayer::solana::lobby::CancelOutcome::NothingToRefund(msg)) => {
+                                        info!("[LOBBY] cancel_game for {gid}: nothing to refund ({msg})");
+                                        crate::multiplayer::solana::wager_recovery::forget(gid);
+                                    }
+                                    Err(e) => warn!("[LOBBY] cancel_game failed for {gid}: {e} — wager may still be in escrow"),
+                                }
+                            });
+                        } else {
+                            warn!("[LOBBY] Leave Game: wagered lobby {} but no wallet pubkey available", gid);
+                        }
+                    }
+                    lobby.status = LobbyStatus::Idle;
+                    lobby.opponent_poll_rx = None;
+                }
             }
 
             LobbyStatus::Fetched { .. } => {}
@@ -1125,8 +1186,10 @@ fn render_join_tab(
         let global_session_pending = global_session_setup_in_progress
             && !has_global_session
             && global_session_unavailable_reason.is_none();
-        let can_join =
-            lobby.cached_keypair_bytes.is_some() && sufficient && !global_session_pending;
+        let can_join = !matches!(lobby.status, LobbyStatus::Pending)
+            && lobby.cached_keypair_bytes.is_some()
+            && sufficient
+            && !global_session_pending;
 
         if !sufficient {
             ui.colored_label(egui::Color32::RED, "Insufficient balance to join");
@@ -1339,7 +1402,8 @@ fn render_solana_browse_tab(
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let joinable = game.status == "Open";
                             let full = !joinable || game.players_joined >= game.capacity;
-                            let can_join = lobby.cached_keypair_bytes.is_some()
+                            let can_join = !matches!(lobby.status, LobbyStatus::Pending)
+                                && lobby.cached_keypair_bytes.is_some()
                                 && lobby.cached_balance >= game.stake_amount + 0.002
                                 && joinable
                                 && game.players_joined < game.capacity;
@@ -3479,9 +3543,14 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                                 wallet_pubkey,
                                 game_id_u64,
                             ) {
-                                Ok(sig) => info!(
-                                    "[LOBBY] cancel_game landed on-chain for {game_id_u64}, sig {sig} — wager refunded"
-                                ),
+                                Ok(crate::multiplayer::solana::lobby::CancelOutcome::Refunded(sig)) => {
+                                    info!("[LOBBY] cancel_game landed on-chain for {game_id_u64}, sig {sig} — wager refunded");
+                                    crate::multiplayer::solana::wager_recovery::forget(game_id_u64);
+                                }
+                                Ok(crate::multiplayer::solana::lobby::CancelOutcome::NothingToRefund(msg)) => {
+                                    info!("[LOBBY] cancel_game for {game_id_u64}: nothing to refund ({msg})");
+                                    crate::multiplayer::solana::wager_recovery::forget(game_id_u64);
+                                }
                                 Err(e) => warn!(
                                     "[LOBBY] cancel_game failed for {game_id_u64}: {e} — wager may still be in escrow, retry from the lobby"
                                 ),

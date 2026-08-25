@@ -165,15 +165,27 @@ pub(super) fn render_ai_setup_modal(
             );
             ui.add_space(6.0);
 
+            // Stockfish is not part of the Android build (see plan §2b) —
+            // offering it there would let a player select an engine no code
+            // path can actually run. `Vec` rather than a fixed-size array
+            // literal since the two platforms offer different counts.
+            #[cfg(target_os = "android")]
+            let engine_options: Vec<(&str, crate::game::ai::resource::AIEngine)> = vec![(
+                "XFChessEngine",
+                crate::game::ai::resource::AIEngine::XFChessEngine,
+            )];
+            #[cfg(not(target_os = "android"))]
+            let engine_options: Vec<(&str, crate::game::ai::resource::AIEngine)> = vec![
+                ("Stockfish", crate::game::ai::resource::AIEngine::Stockfish),
+                (
+                    "XFChessEngine",
+                    crate::game::ai::resource::AIEngine::XFChessEngine,
+                ),
+            ];
+
             ui.vertical_centered(|ui| {
                 ui.horizontal(|ui| {
-                    for (label, engine) in [
-                        ("Stockfish", crate::game::ai::resource::AIEngine::Stockfish),
-                        (
-                            "XFChessEngine",
-                            crate::game::ai::resource::AIEngine::XFChessEngine,
-                        ),
-                    ] {
+                    for (label, engine) in engine_options {
                         let selected = competitive.ai_engine == engine;
                         let response =
                             StyledButton::chip(ui, label, selected, egui::Vec2::new(100.0, 28.0));

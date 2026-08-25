@@ -72,6 +72,7 @@ braid_chess = { path = "../crates/zarathustra_net/braid_chess" }
 solana-sdk = { workspace = true }
 solana-client = { workspace = true }
 solana-transaction-status = { workspace = true }
+solana-compute-budget-interface = "3"
 
 # System resource checks for /health/detailed (memory, disk)
 sysinfo = "0.33"

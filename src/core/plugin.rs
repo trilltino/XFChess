@@ -123,6 +123,14 @@ impl Plugin for CorePlugin {
             ),
         );
 
+        // Android app-backgrounding handling (pause/resume audio) — see
+        // android::handle_app_lifecycle's doc comment for why this is the
+        // only piece of "don't burn battery/CPU backgrounded" that needs an
+        // explicit system, rather than falling out of WinitSettings::mobile()
+        // for free like the render loop does.
+        #[cfg(target_os = "android")]
+        app.add_systems(Update, crate::android::handle_app_lifecycle);
+
         // Add state lifecycle logging (OnEnter/OnExit for all states)
         app.add_systems(OnEnter(GameState::MainMenu), log_state_entry);
         app.add_systems(OnEnter(GameState::InGame), log_state_entry);

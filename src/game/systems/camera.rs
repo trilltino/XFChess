@@ -45,6 +45,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::camera::ClearColorConfig;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
+    input::touch::{Touch, Touches},
     prelude::*,
 };
 use std::f32::consts::PI;
@@ -446,6 +447,114 @@ pub fn camera_rotation_system(
             // Order: ZYX (roll=0, yaw, pitch) matches Bevy reference
             transform.rotation =
                 Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+        }
+    }
+}
+
+/// Touch-driven camera control for Android, replacing WASD pan, Q/E rotate,
+/// and scroll-wheel zoom (`camera_movement_system`, `camera_rotation_system`,
+/// `camera_zoom_input_system` — none of which are registered on Android; see
+/// `game::plugin`). Feeds the same `CameraController.target_zoom` and
+/// `yaw`/`pitch` fields those desktop systems drive, so `camera_zoom_system`
+/// (the smoothing/apply system) and the rotation `Transform` application
+/// below are shared, not duplicated.
+///
+/// Pattern matches Bevy's own `examples/mobile/src/lib.rs` `touch_camera`
+/// system: read `Touches` (not raw `TouchInput` events), track cross-frame
+/// state via `Local`. Gestures:
+/// - **One finger, not dragging a piece**: drag-to-pan (opposite direction
+///   the finger moves, matching the standard "grab the world" convention —
+///   same world→right/forward-XZ-plane projection `camera_movement_system`
+///   uses for WASD, just driven by a screen-space delta instead of a
+///   normalized key-direction).
+/// - **Two fingers**: pinch (inter-touch distance delta) zooms, independent
+///   of the two touches' midpoint delta, which orbits (yaw/pitch) — the same
+///   two measurements from one gesture, not two competing gestures.
+///
+/// The one thing this cannot be, from a desktop machine with no touchscreen
+/// attached: playtested. Sensitivity constants below are a starting point,
+/// not a tuned value — see the plan's on-device verification steps.
+pub fn camera_touch_gestures(
+    touches: Res<Touches>,
+    selection: Res<Selection>,
+    mut two_touch_state: Local<Option<(Vec2, f32)>>, // (previous midpoint, previous distance)
+    mut query: Query<(&mut Transform, &mut CameraController)>,
+) {
+    const TOUCH_PAN_SENSITIVITY: f32 = 0.01;
+    const TOUCH_PINCH_ZOOM_SENSITIVITY: f32 = 0.02;
+
+    let active: Vec<&Touch> = touches.iter().collect();
+
+    match active.as_slice() {
+        [touch] => {
+            two_touch_state.take();
+            if selection.is_dragging {
+                return;
+            }
+            let delta = touch.delta();
+            if delta == Vec2::ZERO {
+                return;
+            }
+            for (mut transform, controller) in query.iter_mut() {
+                let forward = transform.forward();
+                let right = transform.right();
+                let up = transform.up();
+                let is_vertical = forward.y.abs() > 0.9;
+                let forward_xz = if is_vertical {
+                    Vec3::new(up.x, 0.0, up.z).normalize_or_zero()
+                } else {
+                    Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero()
+                };
+                let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
+
+                // Negative: dragging a finger up/right should move the *view*
+                // as if grabbing the board surface, i.e. the camera moves
+                // down/left relative to the drag.
+                let world_delta = (forward_xz * delta.y - right_xz * delta.x)
+                    * TOUCH_PAN_SENSITIVITY
+                    * controller.move_speed;
+
+                transform.translation.x += world_delta.x;
+                transform.translation.z += world_delta.z;
+            }
+        }
+        [a, b] => {
+            let pos_a = a.position();
+            let pos_b = b.position();
+            let midpoint = (pos_a + pos_b) * 0.5;
+            let distance = pos_a.distance(pos_b);
+
+            if let Some((prev_midpoint, prev_distance)) = *two_touch_state {
+                let midpoint_delta = midpoint - prev_midpoint;
+                let distance_delta = distance - prev_distance;
+
+                for (mut transform, mut controller) in query.iter_mut() {
+                    if distance_delta != 0.0 {
+                        // Fingers spreading apart (distance increasing) zooms
+                        // in — decreases target_zoom, matching
+                        // camera_zoom_input_system's "scroll up = zoom in"
+                        // sign convention.
+                        controller.target_zoom = (controller.target_zoom
+                            - distance_delta * TOUCH_PINCH_ZOOM_SENSITIVITY)
+                            .clamp(controller.min_zoom, controller.max_zoom);
+                    }
+
+                    if midpoint_delta != Vec2::ZERO {
+                        controller.pitch = (controller.pitch
+                            - midpoint_delta.y * RADIANS_PER_DOT * controller.rotation_sensitivity)
+                            .clamp(-PI / 2.0, PI / 2.0);
+                        controller.yaw -=
+                            midpoint_delta.x * RADIANS_PER_DOT * controller.rotation_sensitivity;
+                        transform.rotation =
+                            Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+                    }
+                }
+            }
+
+            *two_touch_state = Some((midpoint, distance));
+        }
+        _ => {
+            two_touch_state.take();
         }
     }
 }

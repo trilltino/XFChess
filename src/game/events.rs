@@ -44,6 +44,9 @@ pub struct NetworkMoveEvent {
     /// FEN the remote reported after applying this move; compared against local
     /// computation to detect board desync.
     pub expected_fen: Option<String>,
+    /// Version reserved by the Braid ingress path until board application succeeds.
+    #[serde(default)]
+    pub dedup_version: Option<String>,
 }
 
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]

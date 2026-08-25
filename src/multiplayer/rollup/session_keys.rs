@@ -134,9 +134,14 @@ impl HandshakeOrderingKeyManager {
     }
 
     fn get_key_path(&self) -> Result<PathBuf, SessionKeyError> {
-        let path = dirs::data_dir()
+        #[cfg(target_os = "android")]
+        let base =
+            crate::core::paths::internal_data_dir().ok_or(SessionKeyError::DataDirNotFound)?;
+        #[cfg(not(target_os = "android"))]
+        let base = dirs::data_dir()
             .ok_or(SessionKeyError::DataDirNotFound)?
-            .join("xfchess")
+            .join("xfchess");
+        let path = base
             .join("session_keys")
             .join(format!("game_{}.key", self.game_id));
         Ok(path)

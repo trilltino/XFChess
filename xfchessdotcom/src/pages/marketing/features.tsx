@@ -17,8 +17,6 @@ const FEATURES: Feature[] = [
     {
         title: 'Player vs player',
         desc: 'Peer-to-peer matches. Moves land the moment you make them.',
-        to: '/play',
-        cta: 'Download',
     },
     {
         title: 'Wagered play',
