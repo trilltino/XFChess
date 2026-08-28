@@ -95,8 +95,8 @@ x509-parser = "0.18"
 # pinned to match what's already resolved in Cargo.lock.
 rustls = "0.23.37"
 
-# Chess engine for SAN generation
-nimzovich_engine = { path = "../crates/engine/nimzovich_engine", features = ["std", "search"] }
+# Extracted 2026-08-28 into the standalone repo at ..\..\nimzovich (path dep).
+nimzovich_engine = { path = "../../nimzovich/nimzovich_engine", features = ["std", "search"] }
 
 # Anti-cheat analysis engine
 xfchess-anticheat = { path = "../crates/shared/xfchess-anticheat" }
