@@ -8,6 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |-------|---------------|---------|
 | `nimzovich_engine` | `std` feature for game client; `no_std`-compatible for on-chain | Game client, backend, `chess-logic-on-chain` |
 | `nimzovich-uci` | UCI protocol adapter binary for the engine | Match testing via `cutechess-cli`, not linked into the app |
+
+> **Note (2026-08-28):** `nimzovich_engine` and `nimzovich-uci` were extracted from
+> `crates/engine/` into the standalone repo at `..\nimzovich`. They are path
+> dependencies (`../nimzovich/nimzovich_engine`) and are **no longer workspace
+> members of this repo** — their source, tests, and CI live in that repo.
 | `chess-logic-on-chain` | **must stay `no_std`** | Solana program (`move-validation` feature) |
 | `xfchess-anticheat` | Engine-move-correlation anti-cheat | Backend |
 | `solana-chess-client` | Anchor + Solana SDK | Game client (`--features solana`) |

@@ -66,7 +66,6 @@ resolver = "2"
 members = [
     "crates/zarathustra_net/*",
     "crates/solana/*",
-    "crates/engine/*",
     "crates/shared/*",
     "programs/*",
     "tauri",
@@ -159,7 +158,9 @@ braid_chess = { path = "crates/zarathustra_net/braid_chess" }
 # is also the exact version published on crates.io — no local patches existed.
 # "net" is already in iroh-gossip's own default features.
 iroh-gossip = { version = "0.101.0" }
-nimzovich_engine = { path = "crates/engine/nimzovich_engine" }
+# Extracted 2026-08-28 into the standalone repo at ..\\nimzovich (path dep).
+# TODO: switch to a git dependency once the engine repo is published on GitHub.
+nimzovich_engine = { path = "../nimzovich/nimzovich_engine" }
 xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
 chess-logic-on-chain = { path = "crates/solana/chess-logic-on-chain" }
 # Exact-pinned because several call sites and feature flags in this repo

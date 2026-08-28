@@ -23,10 +23,11 @@ if "%RUSTIC%"==""    set RUSTIC=rustic.exe
 if "%ROUNDS%"==""    set ROUNDS=100
 if "%TC%"==""        set TC=10+0.1
 
-REM Build the adapter first
-cargo build --release -p nimzovich-uci || exit /b 1
+REM Build the adapter first (engine was extracted 2026-08-28 into the
+REM standalone repo at ..\nimzovich, sibling of this repo).
+cargo build --release --manifest-path %~dp0..\..\nimzovich\nimzovich-uci\Cargo.toml || exit /b 1
 
-set NIMZO=%~dp0..\target\release\nimzovich-uci.exe
+set NIMZO=%~dp0..\..\nimzovich\target\release\nimzovich-uci.exe
 
 set BOOKARGS=
 if not "%BOOK%"=="" set BOOKARGS=-openings file=%BOOK% format=pgn order=random

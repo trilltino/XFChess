@@ -7,7 +7,8 @@ description = "Shared chess logic and validation for XFChess (On-chain version)"
 
 [dependencies]
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
-nimzovich_engine = { path = "../../engine/nimzovich_engine", default-features = false, features = [] }
+# Extracted 2026-08-28 into the standalone repo at ..\..\..\nimzovich (path dep).
+nimzovich_engine = { path = "../../../../nimzovich/nimzovich_engine", default-features = false, features = [] }
 serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
 
 [features]
@@ -18,4 +19,5 @@ std = ["nimzovich_engine/std"]
 # Tests run on the host with std; the engine's `std` feature unlocks helpers like
 # `game_from_fen`. This only affects test/bench builds — the Solana program builds
 # chess-logic-on-chain as a normal (no_std) dependency, unaffected by dev-deps.
-nimzovich_engine = { path = "../../engine/nimzovich_engine", features = ["std"] }
+# Extracted 2026-08-28 into the standalone repo at ..\..\..\nimzovich (path dep).
+nimzovich_engine = { path = "../../../../nimzovich/nimzovich_engine", features = ["std"] }

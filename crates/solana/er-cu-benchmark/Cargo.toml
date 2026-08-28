@@ -21,7 +21,8 @@ solana-system-interface = { version = "3", features = ["bincode"] }
 solana-commitment-config = "3"
 solana-compute-budget-interface = "3"
 sha2 = "0.10"
-nimzovich_engine = { path = "../../engine/nimzovich_engine" }
+# Extracted 2026-08-28 into the standalone repo at ..\..\..\nimzovich (path dep).
+nimzovich_engine = { path = "../../../../nimzovich/nimzovich_engine" }
 ephemeral-rollups-sdk = { workspace = true }
 # Async HTTP for the raw-JSON-RPC load test (precise 429 detection + concurrency).
 reqwest.workspace = true
