@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AnimatePresence } from 'framer-motion';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
 import PlayPage from './pages/play/play';
 import { Tournaments } from './pages/tournaments/tournaments';
 import { Home } from './pages/marketing/home';
@@ -25,8 +24,6 @@ export default function App() {
 
 
 function AppContent() {
-    const location = useLocation();
-
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
 
@@ -68,23 +65,21 @@ function AppContent() {
             </nav>
 
             <div style={{ flex: 1 }}>
-                <AnimatePresence mode="wait">
-                    <Routes location={location} key={location.pathname}>
-                        <Route path="/" element={<Navigate to="/home" replace />} />
-                        <Route path="/home" element={<Home />} />
-                        <Route path="/play" element={<PlayPage />} />
-                        <Route path="/tournaments" element={<Tournaments />} />
-                        <Route path="/features" element={<Features />} />
-                        {/* The site is these four routes. Everything else —
-                            sign-in, profile, KYC, identity vault, wallet setup,
-                            player lookup, spectate, legal, compliance,
-                            anti-cheat, release notes, launch, and the
-                            per-tournament detail/standings/play pages — was
-                            removed deliberately; those paths now land here and
-                            go home rather than rendering an empty shell. */}
-                        <Route path="*" element={<Navigate to="/home" replace />} />
-                    </Routes>
-                </AnimatePresence>
+                <Routes>
+                    <Route path="/" element={<Home />} />
+                    <Route path="/home" element={<Home />} />
+                    <Route path="/play" element={<PlayPage />} />
+                    <Route path="/tournaments" element={<Tournaments />} />
+                    <Route path="/features" element={<Features />} />
+                    {/* The site is these four routes. Everything else —
+                        sign-in, profile, KYC, identity vault, wallet setup,
+                        player lookup, spectate, legal, compliance,
+                        anti-cheat, release notes, launch, and the
+                        per-tournament detail/standings/play pages — was
+                        removed deliberately; those paths now land here and
+                        go home rather than rendering an empty shell. */}
+                    <Route path="*" element={<Navigate to="/home" replace />} />
+                </Routes>
             </div>
 
             <Footer />

@@ -18,12 +18,13 @@ test.describe('Homepage', () => {
     await expect(page.getByRole('heading', { name: 'Open Source' })).toBeVisible();
   });
 
-  test('top nav is visible with Home and Play links', async ({ page }) => {
+  test('top nav is visible with Play, Tournaments, and Features links', async ({ page }) => {
     await page.goto('/home');
 
     const nav = page.locator('nav.navbar');
     await expect(nav).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Home' })).toBeVisible();
     await expect(nav.getByRole('link', { name: 'Play' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Tournaments' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Features' })).toBeVisible();
   });
 });
