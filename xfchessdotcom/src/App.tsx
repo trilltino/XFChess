@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import PlayPage from './pages/play/play';
@@ -29,29 +29,17 @@ function AppContent() {
 
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
-    const lastScrollY = useRef(0);
 
     // Scroll detection for navbar fade
     useEffect(() => {
         const handleScroll = () => {
-            const currentScrollY = window.scrollY;
-            const isScrollingDown = currentScrollY > lastScrollY.current;
-            const isNearTop = currentScrollY < 50;
-            
-            if (isNearTop) {
-                setNavVisible(true);
-            } else if (isScrollingDown) {
-                setNavVisible(false);
-            } else {
-                setNavVisible(true);
-            }
-            
-            lastScrollY.current = currentScrollY;
+            setNavVisible(window.scrollY === 0);
         };
 
         window.addEventListener('scroll', handleScroll, { passive: true });
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
+
 
 
 
@@ -72,7 +60,6 @@ function AppContent() {
                 </div>
                 
                 <div className={`nav-links ${isMenuOpen ? 'active' : ''}`}>
-                    <Link to="/home" className="nav-link" onClick={() => setIsMenuOpen(false)}>Home</Link>
                     <Link to="/play" className="nav-link" onClick={() => setIsMenuOpen(false)}>Play</Link>
                     <Link to="/tournaments" className="nav-link" onClick={() => setIsMenuOpen(false)}>Tournaments</Link>
                     <Link to="/features" className="nav-link" onClick={() => setIsMenuOpen(false)}>Features</Link>

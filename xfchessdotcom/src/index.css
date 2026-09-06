@@ -1,4 +1,4 @@
-﻿@font-face {
+@font-face {
     font-family: 'Cinzel';
     src: url('/fonts/Cinzel-Regular.ttf') format('truetype');
     font-weight: 400;
@@ -1420,7 +1420,7 @@ body {
 .mp {
     max-width: 760px;
     margin: 0 auto;
-    padding: 160px 24px 120px;
+    padding: 72px 24px 120px;
     min-height: 100vh;
 }
 
@@ -1472,16 +1472,15 @@ body {
 /* Label/value rows — the workhorse layout. Left column names the thing,
    right column says one sentence about it. No cards, no icons. */
 .mp-rows {
-    margin-top: 72px;
-    border-top: 1px solid var(--border);
+    margin-top: 24px;
 }
 
 .mp-row {
     display: grid;
-    grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 110px) minmax(0, 1fr);
+    align-items: center;
     gap: 40px;
     padding: 28px 0;
-    border-bottom: 1px solid var(--border);
 }
 
 .mp-row-k {
