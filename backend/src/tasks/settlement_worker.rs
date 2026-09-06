@@ -124,6 +124,14 @@ pub fn spawn_settlement_worker(state: Arc<AppState>) {
             "[settlement] Auto-settlement worker started ({}s interval)",
             SETTLEMENT_TICK.as_secs()
         );
+        match reconcile_startup_sessions(&state).await {
+            Ok(deactivated) if deactivated > 0 => info!(
+                "[settlement] Startup reconciliation deactivated {} terminal session(s)",
+                deactivated
+            ),
+            Ok(_) => info!("[settlement] Startup reconciliation found no terminal sessions"),
+            Err(e) => warn!("[settlement] Startup reconciliation failed: {e}"),
+        }
         let mut ticker = tokio::time::interval(SETTLEMENT_TICK);
         ticker.tick().await; // skip the immediate first tick
 
@@ -151,6 +159,52 @@ pub fn spawn_settlement_worker(state: Arc<AppState>) {
                 .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
         }
     });
+}
+
+/// Reconciles durable active-session rows before the periodic recovery loop.
+///
+/// A session row can survive a backend restart even after its on-chain account
+/// was closed by settlement. Only terminal or missing accounts are safe to
+/// deactivate here; live, delegated, malformed, or unknown accounts remain in
+/// the worker's queue for the normal recovery logic.
+async fn reconcile_startup_sessions(state: &Arc<AppState>) -> Result<u64, String> {
+    let game_ids = state.store.list_active_game_ids().await;
+    if game_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let program_id =
+        Pubkey::from_str(&state.config.program_id).map_err(|e| format!("bad program_id: {e}"))?;
+    let pdas: Vec<Pubkey> = game_ids
+        .iter()
+        .map(|id| Pubkey::find_program_address(&[GAME_SEED, &id.to_le_bytes()], &program_id).0)
+        .collect();
+    let fetched = fetch_accounts_batched(
+        state.config.solana_rpc_url.clone(),
+        pdas,
+        state.metrics.clone(),
+    )
+    .await;
+    if fetched.len() != game_ids.len() {
+        return Err("startup reconciliation returned the wrong account count".into());
+    }
+
+    let mut deactivated = 0;
+    for (game_id, fetched) in game_ids.into_iter().zip(fetched) {
+        let terminal = match fetched {
+            Fetched::Missing => true,
+            Fetched::Found(account) => parse_game_account(&account.data)
+                .map(|snapshot| matches!(snapshot.status, STATUS_SETTLED | STATUS_EXPIRED))
+                .unwrap_or(false),
+            Fetched::Unknown => false,
+        };
+        if terminal {
+            state.store.deactivate(game_id).await;
+            deactivated += 1;
+        }
+    }
+
+    Ok(deactivated)
 }
 
 /// One scan pass: batch-fetch every active game's devnet account, settle what

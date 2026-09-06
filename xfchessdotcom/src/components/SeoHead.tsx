@@ -1,19 +1,7 @@
 import type { PageMetadata } from '../lib/seo/metadata';
 import { canonicalUrl, ogImageUrl, SITE_NAME } from '../lib/seo/metadata';
 
-/**
- * Per-route <head> metadata. Uses React 19's native support for rendering
- * <title>/<meta>/<link> anywhere in the tree — React hoists them into
- * <head> itself, so no react-helmet-async (or any extra dependency) is
- * needed here. See docs/plans/xfchessdotcom-seo-sitemap-plan.md §4.2/§4.3.
- *
- * Important limitation this component does NOT solve on its own: this is
- * still a client-side render, so it only helps real browsers and Google's
- * second-wave JS rendering pass — zero-JS bots (social link-preview bots,
- * many non-Google crawlers) never see tags injected this way. That gap is
- * covered separately by the build-time prerendering step (plan §5/Phase 3),
- * which bakes the same tags into real static HTML per public route.
- */
+/** Per-route metadata; build-time prerendering handles zero-JavaScript bots. */
 export function SeoHead({ meta }: { meta: PageMetadata }) {
   const url = canonicalUrl(meta.path);
   const image = ogImageUrl(meta);

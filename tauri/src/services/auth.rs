@@ -1,7 +1,4 @@
-//! Unused auth-state scaffold (`#![allow(dead_code)]` below is deliberate).
-//! `AuthState` is registered via `app.manage(auth_state)` in `main.rs`, but no
-//! `#[tauri::command]` handler in `services::ipc` ever reads or writes it —
-//! the bridge's real wallet/JWT state is `WalletPubkey`/`WalletJwt` in `main.rs`.
+//! Legacy authentication state scaffold retained for compatibility.
 
 #![allow(dead_code)]
 use std::sync::Arc;

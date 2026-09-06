@@ -82,8 +82,8 @@ pub struct SquareMaterials {
 impl FromWorld for SquareMaterials {
     fn from_world(world: &mut World) -> Self {
         // Use fixed Classic theme colors (Cream and Green)
-        let light_color = Color::srgb(0.93, 0.93, 0.82); // Cream
-        let dark_color = Color::srgb(0.46, 0.59, 0.34); // Green
+        let light_color = Color::srgb(0.97, 0.97, 0.88); // Cream
+        let dark_color = Color::srgb(0.52, 0.65, 0.40); // Green
 
         // Now get materials (mutable borrow)
         // Note: Assets<StandardMaterial> should always be available (part of DefaultPlugins)

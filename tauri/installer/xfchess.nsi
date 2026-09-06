@@ -107,13 +107,19 @@ Section "Install"
   FileWrite $0 "@echo off$\r$\n"
   FileWrite $0 "setlocal$\r$\n"
   FileWrite $0 "set SCRIPT_DIR=%~dp0$\r$\n"
+  ; Strip the trailing backslash that %~dp0 always appends.  Without this,
+  ; start /D \"%SCRIPT_DIR%\" becomes start /D \"C:\\path\\\" — the \\\" is
+  ; parsed by cmd.exe as an escaped quote, swallowing the closing quote and
+  ; corrupting the /D argument, leaving the game with the wrong cwd so that
+  ; assets/ is never found relative to it.
+  FileWrite $0 "set SCRIPT_DIR_Q=%SCRIPT_DIR:~0,-1%$\r$\n"
   FileWrite $0 "set BACKEND_URL=${BACKEND_URL}$\r$\n"
   FileWrite $0 "set SIGNING_SERVICE_URL=${SIGNING_URL}$\r$\n"
   FileWrite $0 "taskkill /F /IM ${BRIDGE_EXE} >nul 2>&1$\r$\n"
   FileWrite $0 "taskkill /F /IM ${APP_EXE} >nul 2>&1$\r$\n"
   FileWrite $0 "timeout /t 1 /nobreak >nul$\r$\n"
-  FileWrite $0 "start $\"XFChess Wallet$\" /D $\"%SCRIPT_DIR%$\" $\"%SCRIPT_DIR%${BRIDGE_EXE}$\"$\r$\n"
-  FileWrite $0 "start $\"XFChess$\" /D $\"%SCRIPT_DIR%$\" $\"%SCRIPT_DIR%${APP_EXE}$\"$\r$\n"
+  FileWrite $0 "start $\"XFChess Wallet$\" /D $\"%SCRIPT_DIR_Q%$\" $\"%SCRIPT_DIR%${BRIDGE_EXE}$\"$\r$\n"
+  FileWrite $0 "start $\"XFChess$\" /D $\"%SCRIPT_DIR_Q%$\" $\"%SCRIPT_DIR%${APP_EXE}$\"$\r$\n"
   FileWrite $0 "endlocal$\r$\n"
   FileClose $0
 
@@ -140,12 +146,13 @@ Section "Install"
   FileWrite $2 "@echo off$\r$\n"
   FileWrite $2 "setlocal$\r$\n"
   FileWrite $2 "set SCRIPT_DIR=%~dp0$\r$\n"
+  FileWrite $2 "set SCRIPT_DIR_Q=%SCRIPT_DIR:~0,-1%$\r$\n"
   FileWrite $2 "set BACKEND_URL=${BACKEND_URL}$\r$\n"
   FileWrite $2 "set SIGNING_SERVICE_URL=${SIGNING_URL}$\r$\n"
   FileWrite $2 "set XFCHESS_WALLET_PORT=7464$\r$\n"
   FileWrite $2 "set XFCHESS_NODE_KEY_PATH=%LOCALAPPDATA%\xfchess\node_key_2$\r$\n"
-  FileWrite $2 "start $\"XFChess Wallet (2nd)$\" /D $\"%SCRIPT_DIR%$\" $\"%SCRIPT_DIR%${BRIDGE_EXE}$\"$\r$\n"
-  FileWrite $2 "start $\"XFChess (2nd)$\" /D $\"%SCRIPT_DIR%$\" $\"%SCRIPT_DIR%${APP_EXE}$\"$\r$\n"
+  FileWrite $2 "start $\"XFChess Wallet (2nd)$\" /D $\"%SCRIPT_DIR_Q%$\" $\"%SCRIPT_DIR%${BRIDGE_EXE}$\"$\r$\n"
+  FileWrite $2 "start $\"XFChess (2nd)$\" /D $\"%SCRIPT_DIR_Q%$\" $\"%SCRIPT_DIR%${APP_EXE}$\"$\r$\n"
   FileWrite $2 "endlocal$\r$\n"
   FileClose $2
 

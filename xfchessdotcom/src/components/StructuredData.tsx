@@ -1,16 +1,6 @@
 import { SITE_URL, SITE_NAME } from '../lib/seo/metadata';
 
-/**
- * JSON-LD structured data. Rendered as a plain inline
- * <script type="application/ld+json">, which is valid anywhere in the
- * document (Google's structured-data parser doesn't require <head>
- * placement), so no hoisting behavior is needed here — unlike SeoHead.
- *
- * Each schema type is its own component so a page only carries the JSON-LD
- * that's actually about it (see js_handyman/food_man/backend/src/seo.rs's
- * `render_index`: the home page gets its business schema, /checkout gets
- * none — resist the temptation to stamp the same block on every page).
- */
+/** Renders JSON-LD as an inline script for the current page. */
 
 function JsonLd({ data }: { data: Record<string, unknown> }) {
   return (
@@ -20,11 +10,7 @@ function JsonLd({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-/** Organization schema — mount once, site-wide (e.g. in the root layout).
- * Called out in 2026 research as specifically high-value for AI
- * answer-engine trust/citation, not just classic rich snippets: a clear,
- * consistent Organization block with real sameAs links is what lets an LLM
- * verify "is this a real, identifiable source." */
+/** Organization schema; mount once site-wide. */
 export function OrganizationSchema() {
   return (
     <JsonLd

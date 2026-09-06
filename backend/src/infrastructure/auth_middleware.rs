@@ -1,7 +1,4 @@
-//! API Key authentication middleware for admin routes.
-//!
-//! Protects sensitive endpoints by requiring a valid `X-API-Key` header.
-//! The expected key is set via the `ADMIN_API_KEY` environment variable.
+//! API-key authentication middleware for admin routes.
 
 use axum::{
     extract::{Request, State},
@@ -90,15 +87,7 @@ fn resolve_admin_actor(provided_key: &str) -> Result<String, StatusCode> {
     }
 }
 
-/// Middleware function that validates the X-API-Key header.
-///
-/// # Arguments
-/// * `request` - The incoming request
-/// * `next` - The next middleware/handler in the chain
-///
-/// # Returns
-/// Response with 401 Unauthorized if API key is missing or invalid,
-/// otherwise passes through to the next handler.
+/// Validates the `X-API-Key` header and scopes the resolved admin actor.
 pub async fn require_api_key(request: Request, next: Next) -> Result<Response, StatusCode> {
     let provided_key = request
         .headers()

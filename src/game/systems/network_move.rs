@@ -1,6 +1,6 @@
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{HasMoved, Piece, PieceType};
-use crate::game::events::{NetworkMoveEvent, RemoteMoveApplied, ResignEvent};
+use crate::game::events::{MoveMadeEvent, NetworkMoveEvent, RemoteMoveApplied, ResignEvent};
 use crate::game::resources::{
     CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingTurnAdvance,
     Selection,
@@ -25,6 +25,7 @@ pub fn handle_network_moves(
     game_sounds: Option<Res<GameSounds>>,
     current_turn: Res<CurrentTurn>,
     mut remote_applied: MessageWriter<RemoteMoveApplied>,
+    mut move_events: MessageWriter<MoveMadeEvent>,
     network_state: Option<Res<OnlineNetworkState>>,
     session: Option<Res<OnlineGameSession>>,
     mut causal: Option<ResMut<CausalChainState>>,
@@ -142,7 +143,7 @@ pub fn handle_network_moves(
                 &mut captured_pieces,
                 &mut engine,
                 &mut pieces_query,
-                None, // No MoveMadeEvent writer — avoid local echo
+                Some(&mut move_events),
                 None, // BoardStateSync — network moves don't broadcast
                 &current_turn,
             );

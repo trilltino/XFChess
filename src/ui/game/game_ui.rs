@@ -3,6 +3,7 @@
 use crate::core::GameMode;
 use crate::game::components::GamePhase;
 use crate::game::resources::system_params::GameStateParams;
+use crate::game::view_mode::ViewMode;
 use crate::rendering::pieces::PieceColor;
 use crate::ui::styles::*;
 use crate::ui::system_params::GameUIParams;
@@ -255,7 +256,12 @@ pub fn game_status_ui(mut params: GameUIParams) {
 
     // === CHECK / CHECKMATE INDICATOR ===
     match params.game_state.game_phase.0 {
-        GamePhase::Checkmate => render_checkmate_banner(&ctx, &params.game_state),
+        GamePhase::Checkmate => render_checkmate_banner(
+            &ctx,
+            &params.game_state,
+            params.view_mode.as_ref(),
+            params.board_2d_layout.rect,
+        ),
         GamePhase::Check => render_check_banner(&ctx),
         _ => {}
     }
@@ -776,7 +782,7 @@ pub(crate) fn render_moves_and_controls(
 pub(crate) fn render_compact_user_row(
     ui: &mut egui::Ui,
     name: &str,
-    elo: &str,
+    _elo: &str,
     online: Option<bool>,
 ) {
     let display_name = if name.is_empty() { "Player" } else { name };
@@ -819,16 +825,6 @@ pub(crate) fn render_compact_user_row(
                 .color(UiColors::TEXT_PRIMARY)
                 .strong(),
         );
-        // ELO — right-aligned if present (never show a bare "0" placeholder)
-        if !elo.is_empty() && elo != "0" {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(elo)
-                        .size(11.0)
-                        .color(UiColors::TEXT_TERTIARY),
-                );
-            });
-        }
     });
 }
 
@@ -1017,7 +1013,9 @@ pub(crate) fn render_captured_pieces_tray(
     };
     sorted.sort_by_key(order);
 
-    ui.horizontal_wrapped(|ui| {
+    // Keep captures on one stable row so adding a captured piece cannot grow
+    // the player bar and resize the 2D board underneath it.
+    ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for pt in &sorted {
             let sym = if is_dark {
@@ -1120,7 +1118,12 @@ fn render_check_banner(ctx: &egui::Context) {
 }
 
 /// Render a minimal checkmate pill — small, unobtrusive, top-center.
-fn render_checkmate_banner(ctx: &egui::Context, game_state: &GameStateParams) {
+fn render_checkmate_banner(
+    ctx: &egui::Context,
+    game_state: &GameStateParams,
+    view_mode: &ViewMode,
+    board_rect: Option<egui::Rect>,
+) {
     let (winner_text, _) = match game_state.game_over.winner() {
         Some(PieceColor::White) => ("White wins", egui::Color32::from_rgb(240, 240, 240)),
         Some(PieceColor::Black) => ("Black wins", egui::Color32::from_rgb(200, 200, 200)),
@@ -1129,11 +1132,10 @@ fn render_checkmate_banner(ctx: &egui::Context, game_state: &GameStateParams) {
 
     let label = format!("Checkmate  \u{2022}  {}", winner_text);
 
-    egui::Window::new("checkmate_banner")
+    let mut banner = egui::Window::new("checkmate_banner")
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
-        .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
         .frame(
             egui::Frame::default()
                 .fill(egui::Color32::from_rgba_unmultiplied(12, 12, 14, 210))
@@ -1143,8 +1145,17 @@ fn render_checkmate_banner(ctx: &egui::Context, game_state: &GameStateParams) {
                     1.0,
                     egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30),
                 )),
-        )
-        .show(ctx, |ui| {
+        );
+    if *view_mode == ViewMode::Standard2D {
+        if let Some(rect) = board_rect {
+            banner = banner
+                .pivot(egui::Align2::CENTER_BOTTOM)
+                .fixed_pos(egui::pos2(rect.center().x, rect.min.y - 8.0));
+        }
+    } else {
+        banner = banner.anchor(egui::Align2::CENTER_TOP, [0.0, 16.0]);
+    }
+    banner.show(ctx, |ui| {
             ui.label(
                 egui::RichText::new(label)
                     .size(13.0)
@@ -1928,6 +1939,8 @@ pub fn game_over_prompt_banner(
     game_over: Res<crate::game::resources::GameOverState>,
     mut pending: ResMut<crate::game::resources::PendingGameOver>,
     mut next_state: ResMut<NextState<crate::core::GameState>>,
+    view_mode: Res<ViewMode>,
+    board_layout: Res<crate::ui::game::game_2d::Board2DLayout>,
 ) {
     if *state.get() != crate::core::GameState::InGame
         || !pending.active
@@ -1947,19 +1960,27 @@ pub fn game_over_prompt_banner(
     let gold_border = egui::Color32::from_rgba_unmultiplied(244, 187, 68, border_alpha);
 
     let mut clicked = false;
-    egui::Window::new("game_over_prompt")
+    let mut prompt = egui::Window::new("game_over_prompt")
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
-        .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -96.0])
         .frame(
             egui::Frame::default()
                 .fill(egui::Color32::from_rgba_unmultiplied(13, 17, 23, 235))
                 .stroke(egui::Stroke::new(1.5, gold_border))
                 .corner_radius(8.0)
                 .inner_margin(12.0),
-        )
-        .show(ctx, |ui| {
+        );
+    if *view_mode == ViewMode::Standard2D {
+        if let Some(rect) = board_layout.rect {
+            prompt = prompt
+                .pivot(egui::Align2::CENTER_TOP)
+                .fixed_pos(egui::pos2(rect.center().x, rect.max.y + 8.0));
+        }
+    } else {
+        prompt = prompt.anchor(egui::Align2::CENTER_BOTTOM, [0.0, -96.0]);
+    }
+    prompt.show(ctx, |ui| {
             let resp = ui.add(
                 egui::Button::new(
                     egui::RichText::new("Press Enter to see game stats")

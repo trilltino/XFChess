@@ -2,11 +2,7 @@ interface IconProps {
   size?: number;
 }
 
-// Windows four-pane mark, path data from simple-icons (CC0) —
-// https://simpleicons.org/?q=windows. Replaces a raster crop that was matted
-// to fixed white: being a bitmap it softened as soon as the download rows were
-// scaled up, and it could not inherit `currentColor` the way the Apple and
-// Linux marks beside it do.
+// Windows path data from Simple Icons (CC0): https://simpleicons.org/?q=windows
 export function WindowsIcon({ size = 18 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
@@ -15,12 +11,7 @@ export function WindowsIcon({ size = 18 }: IconProps) {
   );
 }
 
-// Apple logo mark, path data from simple-icons (CC0) —
-// https://simpleicons.org/?q=apple. Was previously a raster crop of the
-// logo (apple-logo.png) that clipped the top of the leaf — the source
-// crop was missing that content outright, not just tightly margined, so
-// there was nothing to recover by resizing; a clean vector path sidesteps
-// the problem entirely and matches how the Linux icon is already sourced.
+// Apple path data from Simple Icons (CC0): https://simpleicons.org/?q=apple
 export function MacIcon({ size = 18 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -29,7 +20,7 @@ export function MacIcon({ size = 18 }: IconProps) {
   );
 }
 
-// Tux (Linux mascot) mark, path data from simple-icons (CC0) — https://simpleicons.org/?q=linux
+// Linux path data from Simple Icons (CC0): https://simpleicons.org/?q=linux
 export function LinuxIcon({ size = 18 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">

@@ -424,6 +424,9 @@ jobs:
   # secret, add a signing step here and switch assembleDebug → assembleRelease
   # + the dapp-store-cli publish step from the plan's §9.
   android:
+    # Android is intentionally excluded from this desktop release until the
+    # mobile signing and store-delivery path is complete.
+    if: ${{ false }}
     needs: verify-backend
     runs-on: ubuntu-latest
     steps:

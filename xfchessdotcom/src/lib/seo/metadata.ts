@@ -1,15 +1,4 @@
-/**
- * Per-route SEO metadata registry.
- *
- * Mirrors the `PageMetadata` pattern already proven out in this codebase's
- * sibling project (js_handyman/handyman/shared/src/metadata.rs) — a typed
- * struct with per-page-type factory constructors, kept as the single source
- * of truth so <SeoHead> never has route-specific logic embedded in it.
- *
- * `noindex` defaults to true and public routes must opt in explicitly
- * (deny-by-default), matching the same posture used in public/robots.txt
- * and in the reference project's `page_meta()` fallback.
- */
+/** Per-route SEO metadata registry with explicit public-route indexing. */
 
 const SITE_URL = 'https://xfchess.com';
 const DEFAULT_OG_IMAGE = `${SITE_URL}/og-image.png`;
@@ -51,13 +40,6 @@ export const PAGE_METADATA: Record<string, PageMetadata> = {
     'Ranked matchmaking, wagered PvP, Swiss-format tournaments, and on-chain game verification — see what XFChess offers.',
   ),
 };
-
-// PRIVATE_PAGE_METADATA, the privatePage() constructor, and forTournament()
-// went with the pages that used them (verify, w_setup, profile,
-// create-profile, kyc, login, the Lichess OAuth return leg, and
-// /tournament/:id). Every surviving route is public and indexable, so the
-// noindex path has no callers — reinstate it from git history if a
-// wallet-gated route comes back.
 
 export function canonicalUrl(path: string): string {
   return `${SITE_URL}${path}`;

@@ -161,11 +161,11 @@ pub fn spawn_menu_bg_board(
     // lit PBR materials, Cream light squares / Green dark squares. Lit (not unlit)
     // so the board takes the same shading + piece shadows as during a game.
     let light = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.93, 0.93, 0.82), // Cream
+        base_color: Color::srgb(0.97, 0.97, 0.88), // Cream
         ..default()
     });
     let dark = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.46, 0.59, 0.34), // Green
+        base_color: Color::srgb(0.52, 0.65, 0.40), // Green
         ..default()
     });
 
@@ -472,25 +472,9 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     render_hint_bar(ctx);
     render_board_caption(ctx, cx);
 
-    // ── Per-panel fade-in ────────────────────────────────────────────────────
-    // Detect panel changes via egui temp storage; when the panel changes,
-    // remove the new panel's animation state so it restarts from 0→1.
+    // Panel navigation is rendered immediately. Fading the entire new panel
+    // from opacity 0 made every click look like a dropped or delayed frame.
     let current = *cx.new_menu_panel;
-    let prev_id = egui::Id::new("xfc_prev_panel");
-    let prev: NewMenuPanel = ctx.data(|d| d.get_temp(prev_id).unwrap_or_default());
-    if prev != current {
-        ctx.data_mut(|d| {
-            d.insert_temp(prev_id, current);
-            d.remove::<bool>(egui::Id::new(("panel_fade", current.discriminant())));
-        });
-    }
-    // ~0.4s ease-in-out — a slow, natural fade when navigating between
-    // panels (fast enough to feel responsive, slow enough to notice).
-    let alpha = ctx.animate_bool_with_time(
-        egui::Id::new(("panel_fade", current.discriminant())),
-        true,
-        0.4,
-    );
 
     // ── Exit confirmation dialog ─────────────────────────────────────────────
     if cx.exit_confirm.visible {
@@ -556,7 +540,9 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
-        .min_size(egui::vec2(340.0, 360.0))
+        // Keep the centered window footprint stable as panels change height;
+        // otherwise egui moves the top edge on every section click.
+        .fixed_size(egui::vec2(340.0, 600.0))
         .anchor(egui::Align2::LEFT_CENTER, egui::vec2(36.0, 0.0))
         .frame(egui::Frame {
             fill: egui::Color32::TRANSPARENT,
@@ -564,7 +550,6 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             ..egui::Frame::NONE
         })
         .show(ctx, |ui| {
-            ui.set_opacity(alpha);
             match current {
                 NewMenuPanel::Main => render_main_panel(ui, cx),
                 NewMenuPanel::PlayOnline => render_play_online_panel(ui, cx),
@@ -577,8 +562,6 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                 NewMenuPanel::Profile => render_profile_panel(ui, cx),
                 NewMenuPanel::Updates => render_updates_panel(ui, cx),
             }
-
-            ui.set_opacity(1.0);
         });
 }
 
@@ -706,12 +689,6 @@ fn render_hint_bar(ctx: &egui::Context) {
                 ui.label(egui::RichText::new("|").size(size).color(sep_color));
                 ui.label(
                     egui::RichText::new("ESC - Exit Game")
-                        .size(size)
-                        .color(hint_color),
-                );
-                ui.label(egui::RichText::new("|").size(size).color(sep_color));
-                ui.label(
-                    egui::RichText::new("F11 - Minimise / Maximise")
                         .size(size)
                         .color(hint_color),
                 );

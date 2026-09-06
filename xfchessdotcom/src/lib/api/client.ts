@@ -1,11 +1,4 @@
-/**
- * Shared HTTP client and base URL resolution for XFChess backend calls.
- *
- * All feature modules under `lib/api/*` use `request()` from here so we
- * get consistent JSON headers, error handling, and base URL resolution.
- * The base URL is taken from `VITE_BACKEND_URL` at build time and falls
- * back to `http://localhost:8090` for local dev.
- */
+/** Shared JSON client and backend URL resolution. */
 
 export const BACKEND_URL: string =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ||

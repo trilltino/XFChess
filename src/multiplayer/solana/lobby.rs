@@ -83,6 +83,21 @@ pub enum LobbyStatus {
     EnterGame {
         game_id: u64,
     },
+    /// On-chain cancellation and relay removal are in flight.
+    Cancelling {
+        game_id: u64,
+    },
+    /// Cancellation completed. The lobby may now be left safely.
+    Cancelled {
+        game_id: u64,
+        refunded: bool,
+        message: String,
+    },
+    /// Cancellation failed. Keep the game id available so the user can retry.
+    CancelFailed {
+        game_id: u64,
+        error: String,
+    },
     Error(String),
 }
 
@@ -120,6 +135,8 @@ pub struct SolanaLobbyState {
     /// Channel receiving notification that the host marked the game
     /// in-progress on the relay (see `spawn_poll_game_start`).
     pub game_start_poll_rx: Option<oneshot::Receiver<Result<(), String>>>,
+    /// Channel receiving the result of on-chain cancellation plus relay cleanup.
+    pub cancel_rx: Option<oneshot::Receiver<Result<CancelOutcome, String>>>,
     // Cached from SolanaIntegrationState each frame.
     pub cached_balance: f64,
     pub cached_keypair_bytes: Option<Vec<u8>>,
@@ -211,6 +228,7 @@ impl Default for SolanaLobbyState {
             lookup_rx: None,
             opponent_poll_rx: None,
             game_start_poll_rx: None,
+            cancel_rx: None,
             cached_balance: 0.0,
             cached_keypair_bytes: None,
             cached_rpc_url: DEVNET_RPC_URL.to_string(),
@@ -914,6 +932,57 @@ pub fn cancel_game_on_chain(
     }
 }
 
+/// Cancel a Solana lobby and remove its VPS relay listing as one user-visible
+/// operation. The UI stays in `LobbyStatus::Cancelling` until this finishes so
+/// backing out cannot make a live room disappear locally while it remains
+/// discoverable to other players or leaves escrow unresolved.
+pub fn spawn_cancel_lobby(
+    rpc_url: String,
+    program_id: Pubkey,
+    wallet_pubkey: Option<Pubkey>,
+    game_id: u64,
+    wager_lamports: u64,
+    node_id: Option<String>,
+    tx: oneshot::Sender<Result<CancelOutcome, String>>,
+) {
+    bevy::tasks::IoTaskPool::get()
+        .spawn(async move {
+            let on_chain = if wager_lamports > 0 {
+                let wallet = wallet_pubkey.ok_or_else(|| {
+                    "Wallet unavailable; the wager could not be cancelled".to_string()
+                });
+                wallet.and_then(|wallet| {
+                    cancel_game_on_chain(rpc_url, program_id, wallet, game_id)
+                })
+            } else {
+                Ok(CancelOutcome::NothingToRefund(
+                    "free game; no escrow to refund".to_string(),
+                ))
+            };
+
+            let relay_error = node_id.and_then(|node_id| {
+                crate::multiplayer::vps_client::p2p_leave_game_fast(
+                    game_id.to_string(),
+                    &node_id,
+                )
+                .err()
+            });
+            if let Some(error) = relay_error {
+                warn!(
+                    "[LOBBY] Relay cleanup failed for cancelled game {}: {}",
+                    game_id, error
+                );
+            }
+
+            let result = match on_chain {
+                Ok(outcome) => Ok(outcome),
+                Err(error) => Err(error),
+            };
+            let _ = tx.send(result);
+        })
+        .detach();
+}
+
 async fn async_lookup_game(
     rpc_url: String,
     program_id: solana_sdk::pubkey::Pubkey,
@@ -1179,6 +1248,68 @@ fn poll_lobby_tasks(
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
     mut p2p_vps: ResMut<crate::multiplayer::network::p2p_vps::P2PVpsState>,
 ) {
+    // Cancellation owns both the on-chain refund and relay removal. Do not
+    // transition back to Idle until the result is known to the user.
+    if let Some(ref mut rx) = lobby.cancel_rx {
+        match rx.try_recv() {
+            Ok(Ok(outcome)) => {
+                let game_id = match lobby.status {
+                    LobbyStatus::Cancelling { game_id } => game_id,
+                    _ => 0,
+                };
+                let (refunded, message) = match outcome {
+                    CancelOutcome::Refunded(sig) => {
+                        crate::multiplayer::solana::wager_recovery::forget(game_id);
+                        (true, format!("Wager refunded. Transaction: {sig}"))
+                    }
+                    CancelOutcome::NothingToRefund(message) => {
+                        crate::multiplayer::solana::wager_recovery::forget(game_id);
+                        (false, message)
+                    }
+                };
+                lobby.status = LobbyStatus::Cancelled {
+                    game_id,
+                    refunded,
+                    message,
+                };
+                lobby.cancel_rx = None;
+                lobby.opponent_poll_rx = None;
+                lobby.game_start_poll_rx = None;
+                let game_id = game_id.to_string();
+                if p2p_vps.hosting_game_id.as_deref() == Some(game_id.as_str()) {
+                    p2p_vps.hosting_game_id = None;
+                }
+                if p2p_vps.joining_game_id.as_deref() == Some(game_id.as_str()) {
+                    p2p_vps.joining_game_id = None;
+                }
+                sync.game_id = None;
+                competitive.game_id = None;
+                competitive.active = false;
+                rollup_manager.game_id = 0;
+            }
+            Ok(Err(error)) => {
+                let game_id = match lobby.status {
+                    LobbyStatus::Cancelling { game_id } => game_id,
+                    _ => 0,
+                };
+                lobby.status = LobbyStatus::CancelFailed { game_id, error };
+                lobby.cancel_rx = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            Err(_) => {
+                let game_id = match lobby.status {
+                    LobbyStatus::Cancelling { game_id } => game_id,
+                    _ => 0,
+                };
+                lobby.status = LobbyStatus::CancelFailed {
+                    game_id,
+                    error: "Cancellation task stopped unexpectedly".to_string(),
+                };
+                lobby.cancel_rx = None;
+            }
+        }
+    }
+
     // Poll transaction receiver.
     if let Some(ref mut rx) = lobby.tx_rx {
         match rx.try_recv() {

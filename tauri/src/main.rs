@@ -1,22 +1,4 @@
-//! XFChess Tauri Application
-//!
-//! This is the main entry point for the XFChess desktop application.
-//! It initializes the Tauri runtime, sets up window management,
-//! and configures IPC communication between frontend and backend.
-//!
-//! # Architecture
-//!
-//! - **Multi-window**: Main app, wallet popup, and tournament admin windows
-//! - **IPC Communication**: Commands for window control and system integration
-//! - **Shared State**: Global state for wallet and authentication
-//! - **Deep Links**: Custom URL scheme handling (xfchess://)
-//!
-//! # Features
-//!
-//! - `wallet`: Wallet integration functionality
-//! - `tournament-admin`: Tournament administration interface
-//! - `dev`: Development-specific features
-//! - `all`: Enable all features
+//! Tauri desktop entry point for window management, IPC, shared state, and deep links.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 

@@ -1,7 +1,4 @@
-//! Router building and merging for the XFChess backend.
-//!
-//! This module centralizes all router construction logic, combining
-//! signing, tournament, and matchmaking routers into a single application router.
+//! Application router construction and composition.
 
 use crate::infrastructure::auth_middleware::{
     persist_admin_request, require_api_key, require_relay_or_jwt,
@@ -23,22 +20,12 @@ use crate::signing::swiss::handlers::{swiss_admin_routes, swiss_read_routes};
 use crate::signing::{build_router, AppState};
 use axum::{extract::State, middleware, Router};
 
-/// Builds the complete application router by merging all sub-routers.
-///
-/// # Arguments
-/// * `signing_state` - The shared application state for all routes
-///
-/// # Returns
-/// A merged Axum Router with all route handlers registered
+/// Builds the complete application router.
 pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
-    // Build signing router (includes tournament routes via build_router)
     let signing_router = build_router(signing_state.clone());
 
-    // Base router with AppState so all nested/merged routers share the same type
     let base = Router::new().with_state(signing_state.clone());
 
-    // Build tournament router with auth middleware on admin routes
-    // Note: tournament routes now use AppState directly
     let protected_tournament_join_routes = tournament_routes::tournament_join_routes().layer(
         middleware::from_fn_with_state(signing_state.clone(), require_relay_or_jwt),
     );
@@ -79,19 +66,14 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                 .layer(middleware::from_fn(require_api_key)),
         );
 
-    // Build matchmaking router — state provided by parent .with_state()
     let matchmaking_router = base.clone().nest("/matchmaking", matchmaking_routes());
 
-    // Build mailer router (no auth required for signup)
     let mail_router = mailer_routes();
 
-    // Build KYC / user-status router (needs AppState for vault_pool + store)
     let kyc_router = kyc_routes();
 
-    // Build casual (off-chain) game recording router
     let casual_games_router = casual_games_routes();
 
-    // Build game history router
     let history_router = history_routes();
 
     // Build dispute router
@@ -139,11 +121,9 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         }),
     );
 
-    // Social (friends, presence, lobby invites)
     let social_router =
         social_routes(signing_state.invite_store.clone()).with_state(signing_state.clone());
 
-    // Merge all routers and add CORS
     signing_router
         .merge(tournament_router)
         .merge(matchmaking_router)

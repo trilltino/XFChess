@@ -14,7 +14,6 @@ export function Home() {
             <SeoHead meta={PAGE_METADATA.home} />
             <VideoGameSchema />
 
-            {/* HERO */}
             <section className="home-hero">
                 <div className="home-hero-glow" />
                 <img src={boardSilhouette} alt="" aria-hidden="true" className="home-hero-board-silhouette" />
@@ -23,7 +22,6 @@ export function Home() {
                 </h1>
             </section>
 
-            {/* 01 — WAGERED PVP */}
             <section className="fullscreen-section">
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>
@@ -38,7 +36,6 @@ export function Home() {
                 </div>
             </section>
 
-            {/* 02 — HIGH FIDELITY */}
             <section className="fullscreen-section">
                 <div className="section-content" style={{ display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>
@@ -53,7 +50,6 @@ export function Home() {
                 </div>
             </section>
 
-            {/* 03 — TOURNAMENTS */}
             <section className="fullscreen-section">
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>
                     <div style={{ flex: '1' }}>

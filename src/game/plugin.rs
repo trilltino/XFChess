@@ -334,6 +334,7 @@ impl Plugin for GamePlugin {
         app.init_resource::<crate::ui::game::game_2d::DragState2D>();
         app.init_resource::<crate::ui::game::game_2d::PremoveState>();
         app.init_resource::<crate::ui::game::game_2d::PieceAnim2D>();
+        app.init_resource::<crate::ui::game::game_2d::Board2DLayout>();
         app.add_systems(
             Update,
             crate::ui::game::game_2d::trigger_piece_anim_2d.run_if(in_state(GameState::InGame)),
@@ -539,9 +540,6 @@ impl Plugin for GamePlugin {
             Update,
             toggle_fullscreen.run_if(input_just_pressed(KeyCode::F11)),
         );
-
-        // F11 hint overlay (bottom-right, visible only when fullscreen)
-        app.add_systems(Update, render_fullscreen_hint);
 
         // ESC key to exit to main menu (forfeit/leave game)
         app.add_systems(

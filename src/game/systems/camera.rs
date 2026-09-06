@@ -195,14 +195,14 @@ impl Default for CameraController {
             smoothing: 0.3,
             zoom_speed: 2.0,
             zoom_smoothing: 0.15, // Slower than movement for cinematic feel
-            current_zoom: 15.0,   // Typical chess board viewing height
-            target_zoom: 15.0,
-            min_zoom: 5.0,             // Close enough to see piece details
-            max_zoom: 30.0,            // Far enough for full board overview
-            pitch: 0.0,                // Will be initialized from Transform
-            yaw: 0.0,                  // Will be initialized from Transform
+            current_zoom: 11.5,   // Pull the board in more so it reads as larger
+            target_zoom: 11.5,
+            min_zoom: 3.5,            // Keep close-up detail without clipping
+            max_zoom: 20.0,           // Keep a slightly tighter overview range so the board remains dominant
+            pitch: 0.0,               // Will be initialized from Transform
+            yaw: 0.0,                 // Will be initialized from Transform
             rotation_sensitivity: 1.0, // Bevy reference default
-            initialized: false,        // Needs initialization
+            initialized: false,       // Needs initialization
         }
     }
 }
@@ -1002,8 +1002,8 @@ pub fn setup_game_camera(
     rotation_state.is_rotating = false;
     rotation_state.last_turn_color = Some(current_turn.color);
 
-    let initial_height = 16.0;
-    let distance_behind = 8.0;
+    let initial_height = 11.5;
+    let distance_behind = 6.5;
 
     let xz_dist = distance_behind + 3.5;
     let white_ref = board_center + Vec3::new(0.0, initial_height, -xz_dist);
@@ -1069,8 +1069,8 @@ pub fn setup_game_camera(
     commands.entity(board_entity).insert(CameraController {
         current_zoom: new_transform.translation.y,
         target_zoom: new_transform.translation.y,
-        min_zoom: if is_2d { 5.0 } else { 3.0 },
-        max_zoom: if is_2d { 20.0 } else { 30.0 },
+        min_zoom: if is_2d { 3.5 } else { 2.0 },
+        max_zoom: if is_2d { 17.0 } else { 20.0 },
         initialized: false,
         ..Default::default()
     });

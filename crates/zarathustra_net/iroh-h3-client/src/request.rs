@@ -1,12 +1,4 @@
-//! HTTP/3 request building and sending.
-//!
-//! This module provides [`RequestBuilder`] and [`Request`] types for constructing HTTP/3 requests
-//! and sending them via an [`IrohH3Client`].
-//!
-//! Features include:
-//! - Setting headers and extensions
-//! - Sending plain text, binary, or JSON payloads (with the `json` feature)
-//! - Automatic setting of appropriate `Content-Type` headers
+//! HTTP/3 request construction and sending.
 
 use bytes::Bytes;
 #[cfg(feature = "json")]
@@ -22,14 +14,10 @@ use crate::body::Body;
 use crate::middleware::Service;
 use crate::{error::Error, response::Response};
 
-/// Alias to the Request with its client set to IrohH3Client
+/// A request using [`IrohH3Client`].
 pub type ClientRequest = Request<IrohH3Client>;
 
-/// A builder for constructing HTTP/3 requests.
-///
-/// This struct provides methods to configure and send HTTP/3 requests using
-/// the [`IrohH3Client`]. It allows setting headers, extensions, and the
-/// request body in various formats.
+/// Builder for HTTP/3 requests.
 #[derive(Debug)]
 #[must_use]
 pub struct RequestBuilder<C: Service> {
@@ -38,7 +26,6 @@ pub struct RequestBuilder<C: Service> {
 }
 
 impl<C: Service> RequestBuilder<C> {
-    /// Adds an extension to the request.
     #[inline]
     pub fn extension<T>(mut self, extension: T) -> Self
     where
@@ -48,7 +35,6 @@ impl<C: Service> RequestBuilder<C> {
         self
     }
 
-    /// Adds a header to the request.
     #[inline]
     pub fn header<K, V>(mut self, key: K, value: V) -> Self
     where
@@ -61,7 +47,6 @@ impl<C: Service> RequestBuilder<C> {
         self
     }
 
-    /// Builds a request with the given body.
     #[inline]
     pub fn body(self, body: Body) -> Result<Request<C>, Error> {
         let request = self.inner.body(body)?;
@@ -71,19 +56,11 @@ impl<C: Service> RequestBuilder<C> {
         })
     }
 
-    /// Builds a request with an empty body.
     #[inline]
     pub fn build(self) -> Result<Request<C>, Error> {
         self.body(Body::empty())
     }
 
-    /// Ensures that the request has a `Content-Type` header set.
-    ///
-    /// If a `Content-Type` is not already present, this method adds it
-    /// using the provided value. Returns the modified builder.
-    ///
-    /// This helper is used by [`Self::text`], [`Self::bytes`], and
-    /// [`Self::json`] to avoid overwriting manually specified headers.
     #[inline]
     fn ensure_content_type(mut self, value: HeaderValue) -> Self {
         if self
@@ -96,13 +73,7 @@ impl<C: Service> RequestBuilder<C> {
         self
     }
 
-    /// Sets the request body to the given UTF-8 text.
-    ///
-    /// Automatically sets the `Content-Type` header to
-    /// `"text/plain; charset=utf-8"` **if it is not already set**.
-    ///
-    /// # Errors
-    /// Returns an [`Error`] if the request cannot be constructed.
+    /// Sets a UTF-8 text body and a default content type when absent.
     #[inline]
     pub fn text(self, text: impl AsRef<str>) -> Result<Request<C>, Error> {
         const MIME_TEXT: HeaderValue = HeaderValue::from_static("text/plain; charset=utf-8");
@@ -112,13 +83,7 @@ impl<C: Service> RequestBuilder<C> {
             .body(Body::bytes(body_bytes))
     }
 
-    /// Sets the request body to the given binary bytes.
-    ///
-    /// Automatically sets the `Content-Type` header to
-    /// `"application/octet-stream"` **if it is not already set**.
-    ///
-    /// # Errors
-    /// Returns an [`Error`] if the request cannot be constructed.
+    /// Sets a binary body and a default content type when absent.
     #[inline]
     pub fn bytes(self, bytes: impl Into<Bytes>) -> Result<Request<C>, Error> {
         const MIME_BIN: HeaderValue = HeaderValue::from_static("application/octet-stream");
@@ -127,12 +92,7 @@ impl<C: Service> RequestBuilder<C> {
             .body(Body::bytes(bytes.into()))
     }
 
-    /// Sets the body of the request to JSON-serialized data.
-    ///
-    /// Automatically sets the `Content-Type` header to
-    /// `"application/json"` **if it is not already set**.
-    ///
-    /// Requires the `"json"` feature.
+    /// Sets a JSON body and a default content type when absent.
     #[cfg(feature = "json")]
     #[inline]
     pub fn json<T: Serialize>(self, data: &T) -> Result<Request<C>, Error> {
@@ -143,17 +103,7 @@ impl<C: Service> RequestBuilder<C> {
             .body(Body::bytes(Bytes::from(body)))
     }
 
-    /// Sets the body of the request to NDJSON-serialized data from a stream.
-    ///
-    /// NDJSON (Newline-Delimited JSON) is a format where each JSON object is
-    /// written on a single line, separated by `\n`. This method consumes a
-    /// [`Stream`] of serializable items, serializes each one, and appends a
-    /// newline between them.
-    ///
-    /// The `Content-Type` header is automatically set to `"application/x-ndjson"`
-    /// if it is not already present.
-    ///
-    /// Requires the `"json"` feature.
+    /// Sets an NDJSON stream body and a default content type when absent.
     #[cfg(feature = "json")]
     #[inline]
     pub fn ndjson<T: Serialize>(
@@ -180,7 +130,6 @@ impl<C: Service> RequestBuilder<C> {
         self.ensure_content_type(MIME_NDJSON).body(Body::from(body))
     }
 
-    /// Sends the request with an empty body.
     #[inline]
     #[instrument(skip(self))]
     pub async fn send(self) -> Result<Response, Error> {
@@ -188,7 +137,7 @@ impl<C: Service> RequestBuilder<C> {
     }
 }
 
-/// Represents an HTTP/3 request constructed by [`RequestBuilder`].
+/// HTTP/3 request constructed by [`RequestBuilder`].
 #[must_use]
 #[derive(Debug)]
 pub struct Request<C: Service> {
@@ -197,7 +146,6 @@ pub struct Request<C: Service> {
 }
 
 impl<C: Service> Request<C> {
-    /// Sends this request using the associated [`IrohH3Client`].
     #[inline]
     #[instrument(skip(self))]
     pub async fn send(self) -> Result<Response, Error> {

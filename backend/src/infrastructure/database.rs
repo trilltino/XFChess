@@ -1,10 +1,4 @@
-//! Database initialization and migrations for the XFChess backend.
-//!
-//! This module handles SQLite pool initialization and schema migrations
-//! for sessions, vault, and audit log tables.
-//!
-//! Both pools use WAL journal mode for concurrent read performance and
-//! a busy timeout to avoid immediate lock errors under load.
+//! SQLite pool initialization and schema migrations.
 
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use tracing::info;
@@ -67,17 +61,7 @@ pub async fn initialize_pools(
     })
 }
 
-/// Runs database migrations for all tables.
-///
-/// This function creates all necessary tables if they don't exist:
-/// - Sessions table (for game session keys)
-/// - Users table (for authentication)
-/// - Vault table (for encrypted identity data)
-/// - Audit log table (for GDPR compliance)
-/// - KYC records table and users column extensions (migration 002)
-///
-/// # Arguments
-/// * `pools` - Database pools to run migrations on
+/// Runs the embedded migrations on both application databases.
 pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     // Helper to run a semicolon-separated SQL script on a pool
     async fn run_script(

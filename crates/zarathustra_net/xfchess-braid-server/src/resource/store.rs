@@ -1,12 +1,4 @@
-//! Resource store backends.
-//!
-//! Two implementations:
-//! * [`PatchedDoc`] — JSON document mutated via RFC 6902 JSON Patch. Used for
-//!   standings, pairings, roster, and tournament meta.
-//! * [`AppendLog`] — ordered list of JSON values. Used for move streams.
-//!
-//! Both expose a [`BraidResource`] trait with `subscribe()`, `apply_patch()`,
-//! and `append()` as appropriate.
+//! Versioned JSON document and append-log resource stores.
 
 use crate::resource::protocol::{BraidUpdate, Version};
 use json_patch::Patch;
@@ -18,8 +10,6 @@ use tracing::debug;
 
 /// Channel capacity: at most this many buffered updates per subscriber.
 const BROADCAST_CAPACITY: usize = 256;
-
-// ── PatchedDoc ────────────────────────────────────────────────────────────────
 
 /// A versioned JSON document that accepts RFC 6902 patches.
 ///
@@ -48,13 +38,13 @@ impl PatchedDoc {
         }
     }
 
-    /// Current snapshot.
+    /// Returns the current snapshot.
     pub fn snapshot(&self) -> (Value, Version) {
         let g = self.inner.read();
         (g.doc.clone(), g.version)
     }
 
-    /// Subscribe: returns the current snapshot and a live update receiver.
+    /// Returns the current snapshot and a live update receiver.
     pub fn subscribe(&self) -> (BraidUpdate, broadcast::Receiver<BraidUpdate>) {
         let rx = self.tx.subscribe();
         let (doc, ver) = self.snapshot();
@@ -62,12 +52,7 @@ impl PatchedDoc {
         (snap, rx)
     }
 
-    /// Apply a JSON Patch to the document and broadcast the result.
-    ///
-    /// Returns the update that was broadcast, so the caller — which knows the
-    /// resource path, and this type does not — can fan it out to transports
-    /// beyond the local subscriber channel (see [`crate::ResourceHub`]'s
-    /// gossip sink).
+    /// Applies a JSON Patch and broadcasts the resulting update.
     pub fn apply(&self, patches: Patch) -> Result<BraidUpdate, json_patch::PatchError> {
         let mut g = self.inner.write();
         let parent = g.version;
@@ -82,9 +67,7 @@ impl PatchedDoc {
         Ok(update)
     }
 
-    /// Replace the entire document (used to sync from authoritative source).
-    ///
-    /// Returns the broadcast update; see [`Self::apply`].
+    /// Replaces the document and broadcasts a snapshot.
     pub fn replace(&self, new_doc: Value) -> BraidUpdate {
         let mut g = self.inner.write();
         let parent = g.version;
@@ -97,8 +80,6 @@ impl PatchedDoc {
         update
     }
 }
-
-// ── AppendLog ─────────────────────────────────────────────────────────────────
 
 /// An append-only log of JSON values.
 ///
@@ -127,13 +108,13 @@ impl AppendLog {
         }
     }
 
-    /// Snapshot of all current entries.
+    /// Returns all current entries.
     pub fn snapshot(&self) -> (Value, Version) {
         let g = self.inner.read();
         (Value::Array(g.entries.clone()), g.version)
     }
 
-    /// Subscribe: returns the snapshot and a live receiver.
+    /// Returns the snapshot and a live receiver.
     pub fn subscribe(&self) -> (BraidUpdate, broadcast::Receiver<BraidUpdate>) {
         let rx = self.tx.subscribe();
         let (entries, ver) = self.snapshot();
@@ -141,9 +122,7 @@ impl AppendLog {
         (snap, rx)
     }
 
-    /// Append one entry and broadcast it as a single-element array patch.
-    ///
-    /// Returns the broadcast update; see [`PatchedDoc::apply`].
+    /// Appends an entry and broadcasts a single-element array patch.
     pub fn append(&self, entry: Value) -> BraidUpdate {
         let mut g = self.inner.write();
         g.entries.push(entry.clone());

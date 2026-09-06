@@ -1,22 +1,5 @@
 #![allow(dead_code)]
-//! Configuration management for XFChess Tauri application.
-//!
-//! This module provides centralized access to environment variables
-//! and configuration values used throughout the application.
-//!
-//! **Unused** — confirmed via search that none of the functions below are
-//! called from anywhere outside this file's own tests. `main.rs` defines its
-//! own separate, locally-scoped `get_backend_url()` (and equivalent inline
-//! logic for the others) instead of importing these.
-//!
-//! # Environment Variables
-//!
-//! - `SIGNING_SERVICE_URL`: Backend signing service URL
-//! - `BACKEND_URL`: Alternative backend URL (fallback)
-//! - `ADMIN_API_KEY`: API key for admin operations
-//! - `XFCHESS_WALLET_PORT`: Port for wallet popup service
-//! - `NODE_ENV`: Environment mode (development/production)
-//! - `RUST_LOG`: Logging level configuration
+//! Environment-backed configuration helpers retained for legacy tests.
 
 /// Get the backend URL for API communication.
 ///

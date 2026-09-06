@@ -110,11 +110,10 @@ impl Layout {
     /// Small spacing
     pub const SMALL_SPACING: f32 = 8.0;
 
-    /// Fixed width for the in-game left/right side panels. Both panels use
-    /// this exact (non-resizable) width so the board column left between
-    /// them is identical in size regardless of which side is measured —
-    /// this is also what keeps the 2D and 3D board renders the same size.
-    pub const SIDE_PANEL_WIDTH: f32 = 320.0;
+    /// Fixed width for the in-game left/right side panels. This stays narrow so
+    /// the center board claims more of the viewport without crowding the HUD in
+    /// either 2D or 3D.
+    pub const SIDE_PANEL_WIDTH: f32 = 260.0;
 
     /// Add section spacing
     pub fn section_space(ui: &mut egui::Ui) {

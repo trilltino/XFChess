@@ -67,6 +67,7 @@ pub struct GameUIParams<'w, 's> {
         Res<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
     pub current_turn: Res<'w, CurrentTurn>,
     pub eval_history: Res<'w, crate::ui::game::game_2d::EvalHistory>,
+    pub board_2d_layout: Res<'w, crate::ui::game::game_2d::Board2DLayout>,
     pub p2p_conn: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>,
     pub hourglass: Res<'w, crate::ui::game::game_ui::TimeoutHourglassState>,
     pub avatar_cache: ResMut<'w, crate::ui::game::game_ui::AvatarCache>,

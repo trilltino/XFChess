@@ -295,16 +295,18 @@ async fn get_bootstrap_peers(
 async fn create_tournament(
     State(state): State<AppState>,
     Json(req): Json<CreateTournamentReq>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = &state.tournament_store;
     // Parse tournament format
     let format = match req.format.as_str() {
         "Swiss" => {
-            let rounds = req.swiss_rounds.ok_or_else(|| StatusCode::BAD_REQUEST)?;
+            let rounds = req.swiss_rounds.ok_or_else(|| {
+                (StatusCode::BAD_REQUEST, "Swiss tournaments require a round count".to_string())
+            })?;
             TournamentFormat::Swiss { rounds }
         }
         "SingleElimination" | "" => TournamentFormat::SingleElimination,
-        _ => return Err(StatusCode::BAD_REQUEST),
+        _ => return Err((StatusCode::BAD_REQUEST, "Unsupported tournament format".to_string())),
     };
 
     // Validate the player count. Single-elimination needs a full power-of-2
@@ -314,12 +316,18 @@ async fn create_tournament(
     match format {
         TournamentFormat::SingleElimination => {
             if !VALID_PLAYER_COUNTS.contains(&req.max_players) {
-                return Err(StatusCode::BAD_REQUEST);
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "Single-elimination tournaments require a power-of-two player count".to_string(),
+                ));
             }
         }
         TournamentFormat::Swiss { .. } => {
             if req.max_players < 2 {
-                return Err(StatusCode::BAD_REQUEST);
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "Swiss tournaments require at least two players".to_string(),
+                ));
             }
         }
     }
@@ -335,7 +343,10 @@ async fn create_tournament(
             .rate_cache
             .gbp_to_lamports(0.50)
             .await
-            .ok_or(StatusCode::SERVICE_UNAVAILABLE)?,
+            .ok_or((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SOL/GBP rate is not available yet".to_string(),
+            ))?,
     };
     let entry_fee_lamports = match req.entry_fee_lamports {
         Some(v) => v,
@@ -343,7 +354,10 @@ async fn create_tournament(
             .rate_cache
             .gbp_to_lamports(3.00)
             .await
-            .ok_or(StatusCode::SERVICE_UNAVAILABLE)?,
+            .ok_or((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SOL/GBP rate is not available yet".to_string(),
+            ))?,
     };
 
     // Default competitive prize shares based on tournament size
@@ -375,7 +389,10 @@ async fn create_tournament(
             "[tournament] Refusing to create {} — tournament_id already in use",
             req.tournament_id
         );
-        return Err(StatusCode::CONFLICT);
+        return Err((
+            StatusCode::CONFLICT,
+            format!("Tournament ID {} is already in use", req.tournament_id),
+        ));
     }
 
     let estimate =
@@ -383,7 +400,10 @@ async fn create_tournament(
     let required_working_capital = estimate
         .get("working_capital_lamports")
         .and_then(serde_json::Value::as_u64)
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        .ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Unable to calculate tournament working capital".to_string(),
+        ))?;
     let available_balance = state
         .solana_rpc
         .get_balance(&state.vps_authority.pubkey())
@@ -392,14 +412,22 @@ async fn create_tournament(
                 "[tournament] affordability check failed for {}: {}",
                 req.tournament_id, e
             );
-            StatusCode::SERVICE_UNAVAILABLE
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("Tournament affordability check failed: {e}"),
+            )
         })?;
     if available_balance < required_working_capital {
         warn!(
             "[tournament] refusing {}: {} lamports available, {} required",
             req.tournament_id, available_balance, required_working_capital
         );
-        return Err(StatusCode::PAYMENT_REQUIRED);
+        return Err((
+            StatusCode::PAYMENT_REQUIRED,
+            format!(
+                "VPS authority needs {required_working_capital} lamports but has {available_balance}"
+            ),
+        ));
     }
 
     // ── On-chain setup (3 sequential VPS-signed transactions) ────────────────
@@ -409,7 +437,12 @@ async fn create_tournament(
     // failing with "account already in use". This only fires for tournament
     // IDs with no store row yet, per the guard just above.
     let program_id = Pubkey::from_str(&state.config.program_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Configured Solana program ID is invalid".to_string(),
+            )
+        })?;
     let authority = state.vps_authority.clone();
 
     let tid_bytes = req.tournament_id.to_le_bytes();
@@ -492,11 +525,17 @@ async fn create_tournament(
     .await
     .map_err(|e| {
         error!("[tournament] on-chain setup task panicked for {tournament_id}: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Tournament setup task failed: {e}"),
+        )
     })?
     .map_err(|msg| {
         error!("[tournament] {msg}");
-        StatusCode::INTERNAL_SERVER_ERROR
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Tournament on-chain setup failed: {msg}"),
+        )
     })?;
 
     if already_complete {
@@ -549,7 +588,10 @@ async fn create_tournament(
                     "[tournament] failed to hash join password for {}",
                     req.tournament_id
                 );
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Unable to secure the tournament join password".to_string(),
+                ));
             }
         }
     }

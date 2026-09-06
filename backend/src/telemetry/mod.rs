@@ -1,7 +1,4 @@
-//! Telemetry module for XFChess backend
-//!
-//! Provides structured logging, metrics collection, and request tracing
-//! for observability into API performance, Solana transactions, and game sessions.
+//! Backend telemetry, metrics, middleware, and structured logging.
 
 pub mod logging;
 pub mod metrics;
