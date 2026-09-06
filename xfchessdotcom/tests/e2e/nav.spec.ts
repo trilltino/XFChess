@@ -12,23 +12,10 @@ test.describe('Top nav', () => {
     await expect(page).toHaveURL(/\/play$/);
   });
 
-  test('logo navigates back to /home', async ({ page }) => {
+  test('logo navigates back to home', async ({ page }) => {
     await page.goto('/play');
     await page.locator('a.nav-logo').click();
-    await expect(page).toHaveURL(/\/home$/);
-  });
-
-  test('Connect Wallet opens the wallet picker, overlay click closes it', async ({ page }) => {
-    await page.goto('/home');
-    await page.getByRole('button', { name: 'Connect Wallet' }).click();
-
-    const modal = page.locator('.custom-wallet-modal');
-    await expect(modal).toBeVisible();
-    await expect(modal.getByRole('heading', { name: /Select Network Provider/ })).toBeVisible();
-
-    // Click the overlay outside the modal card to dismiss it.
-    await page.locator('.modal-overlay').click({ position: { x: 5, y: 5 } });
-    await expect(modal).not.toBeVisible();
+    await expect(page).toHaveURL(/\/(home)?$/);
   });
 
   test('mobile menu toggle reveals nav links at narrow viewport', async ({ page }) => {

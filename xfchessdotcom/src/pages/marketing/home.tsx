@@ -29,8 +29,7 @@ export function Home() {
                     <div style={{ flex: '1' }}>
                         <h2 className="feature-title">Stake Your Rating</h2>
                         <p className="feature-desc">
-                            Play anyone, anytime. Enter tournaments, queue casual games, or risk your
-                            rating in competitive PvP matches.
+                            Play casual games, enter high-stakes brackets, or back your rating in competitive 1v1s.
                         </p>
                     </div>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end' }}>
@@ -45,8 +44,7 @@ export function Home() {
                     <div style={{ flex: '1' }}>
                         <h2 className="feature-title">2D or 3D</h2>
                         <p className="feature-desc">
-                            Switch between a classic 2D board and a full 3D experience without leaving
-                            the game.
+                            Toggle seamlessly between a classic 2D board and an immersive 3D view mid-match.
                         </p>
                     </div>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-start' }}>
@@ -61,8 +59,7 @@ export function Home() {
                     <div style={{ flex: '1' }}>
                         <h2 className="feature-title">Open Source</h2>
                         <p className="feature-desc">
-                            The entire stack is AGPL-3.0. Client, backend, and smart contracts. Nothing
-                            hidden. Everything is verifiable.
+                            Every line of code is public under AGPL-3.0. Inspect the contracts, build from source, or host your own instance.
                         </p>
                     </div>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end' }}>
