@@ -59,7 +59,7 @@ export function Home() {
                     <div style={{ flex: '1' }}>
                         <h2 className="feature-title">Open Source</h2>
                         <p className="feature-desc">
-                            Every line of code is public under AGPL-3.0. Inspect the contracts, build from source, or host your own instance.
+                            Every line of code is public under AGPL-3.0. Build from source, or host your own instance.
                         </p>
                     </div>
                     <div style={{ flex: '1', display: 'flex', justifyContent: 'flex-end' }}>
