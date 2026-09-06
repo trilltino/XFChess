@@ -96,8 +96,15 @@ pub struct PieceAnim2D {
     pub pixels_ready: bool,
 }
 
+/// Last board rectangle used to anchor 2D-only overlays to the board rather
+/// than to the full application viewport.
+#[derive(Resource, Default)]
+pub struct Board2DLayout {
+    pub rect: Option<egui::Rect>,
+}
+
 impl PieceAnim2D {
-    const DURATION: f32 = 0.15;
+    const DURATION: f32 = 0.30;
     pub fn t(&self) -> f32 {
         (self.elapsed / Self::DURATION).min(1.0)
     }
@@ -472,6 +479,7 @@ pub fn render_2d_board(
     fading_captures: Query<&FadingCapture>,
     theme: Res<Board2DTheme>,
     mut extras: Board2DExtras,
+    mut board_layout: ResMut<Board2DLayout>,
 ) {
     if *view_mode != ViewMode::Standard2D {
         return;
@@ -527,11 +535,12 @@ pub fn render_2d_board(
     let current_theme = *theme;
 
     // Collect active capture flashes: board square → animation progress (0..1).
-    // initial_pos.x = file, initial_pos.z = rank (board coord formula).
+    // Captured-piece world X is mirrored (`7 - file`); convert it back to the
+    // logical file before placing the 2D capture flash.
     let capture_flashes: HashMap<(u8, u8), f32> = fading_captures
         .iter()
         .map(|fc| {
-            let file = fc.initial_pos.x.round() as u8;
+            let file = 7u8.saturating_sub(fc.initial_pos.x.round() as u8);
             let rank = fc.initial_pos.z.round() as u8;
             (file, rank, fc.timer.fraction())
         })
@@ -560,19 +569,17 @@ pub fn render_2d_board(
     // Variables filled inside the closure for premove.
     let mut premove_click: Option<(u8, u8)> = None;
 
+    // Keep the 2D board transparent, but do not force it to a different
+    // footprint from the normal in-game layout. That extra panel offset was the
+    // source of the ghost board behind the 3D board and the weird side shift when
+    // toggling views. We now center on the standard board area and remove the
+    // gray background under it entirely.
     egui::CentralPanel::default()
-        .frame(egui::Frame::NONE.fill(egui::Color32::from_rgb(30, 30, 35)))
+        .frame(egui::Frame::NONE)
         .show(ctx, |ui| {
             let available = ui.available_size();
-            // Reserve room for the opponent/local player bars directly
-            // above/below the board. Instead of trusting a fixed constant we
-            // use the heights the bars *actually* rendered at last frame
-            // (they grow when captured-piece trays appear) plus a small
-            // headroom per bar, so the whole stack — top bar, board, bottom
-            // bar — always fits inside the available 2D space and the bottom
-            // player name is never clipped at the window edge.
-            const BAR_GAP: f32 = 8.0; // gap between each bar and the board
-            const BAR_HEADROOM: f32 = 8.0; // safety margin per bar
+            const BAR_GAP: f32 = 8.0;
+            const BAR_HEADROOM: f32 = 8.0;
             let bars_h = extras.bar_layout.top_h
                 + extras.bar_layout.bottom_h
                 + BAR_HEADROOM * 2.0
@@ -600,6 +607,7 @@ pub fn render_2d_board(
                     egui::Vec2::splat(board_size),
                     egui::Sense::click_and_drag(),
                 );
+                board_layout.rect = Some(board_rect);
                 // Determine color kind from modifier keys
                 let arrow_kind: u8 = if extras
                     .keyboard

@@ -1,20 +1,7 @@
-//! Online game session transport.
+//! Owns live networking for casual, wagered, and tournament games.
 //!
-//! Owns the live networking session for casual games, Solana wager games, and
-//! tournament matches. Moves, resigns, and chat are sent over Iroh gossip and
-//! mirrored to the durable Braid moves/chat log by
-//! [`crate::multiplayer::network::braid_transport`] so games still work (and
-//! move history survives a backend restart) when direct gossip is
-//! unavailable. Heartbeats and clock snapshots stay gossip-only.
-//!
-//! What this module does:
-//! - Owns `OnlineGameSession` (session config + move counter + nonce)
-//! - Fires `PublishOnlineResign` / `PublishOnlineChat` events into the online transport
-//! - Broadcasts `NetworkMessage::Clock` after each local move
-//! - Broadcasts `NetworkMessage::Chat` for outgoing messages
-//! - Drains incoming `NetworkMessage::Chat` / `NetworkMessage::Clock`
-//!   into Bevy events for UI consumers
-//! - Sends `GameSnapshot` when a new peer joins mid-game
+//! Moves, resignations, and chat use Iroh gossip and are mirrored to the
+//! durable Braid log; heartbeats and clock snapshots remain gossip-only.
 
 use bevy::prelude::*;
 use braid_chess::MovePayload;

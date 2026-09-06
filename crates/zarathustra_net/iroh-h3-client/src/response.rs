@@ -1,13 +1,4 @@
 //! HTTP/3 response handling.
-//!
-//! This module defines the [`Response`] type, which provides access to HTTP/3 response headers
-//! and bodies.
-//!
-//! Features include:
-//! - Reading the full response body as [`Bytes`] or [`String`]
-//! - Streaming response bodies incrementally for large payloads
-//! - JSON deserialization when the `json` feature is enabled
-//! - UTF-8 validation for text responses
 
 #[cfg(feature = "json")]
 pub mod ndjson;
@@ -30,11 +21,7 @@ use crate::body::Body;
 use crate::error::Error;
 use crate::response::sse::{SseEvent, SseStream};
 
-/// Represents an HTTP/3 response received from an [`IrohH3Client`](crate::IrohH3Client).
-///
-/// This type provides access to the response’s headers and body, which can be
-/// consumed all at once via [`bytes`](Self::bytes), or streamed incrementally
-/// using [`bytes_stream`](Self::bytes_stream).
+/// HTTP/3 response with header access and buffered or streaming body readers.
 #[must_use]
 pub struct Response {
     pub(crate) inner: http::response::Parts,
@@ -58,15 +45,6 @@ impl Deref for Response {
 
 impl Response {
     /// Reads the full response body into a contiguous [`Bytes`] buffer.
-    ///
-    /// This method consumes all HTTP/3 DATA frames from the response stream until
-    /// the end of the stream or a graceful connection close.
-    ///
-    /// # Returns
-    /// A [`Bytes`] object containing the entire response body.
-    ///
-    /// # Errors
-    /// Returns an [`Error`] if a connection or stream error occurs during reading.
     ///
     /// # Example
     /// ```rust
@@ -94,18 +72,7 @@ impl Response {
         Ok(Bytes::from(buf))
     }
 
-    /// Reads the full response body and returns it as a UTF-8 [`String`].
-    ///
-    /// This method consumes all HTTP/3 DATA frames from the response stream and
-    /// attempts to interpret the resulting bytes as UTF-8 text.
-    ///
-    /// # Returns
-    /// A [`String`] containing the entire response body.
-    ///
-    /// # Errors
-    /// Returns an [`Error`] if:
-    /// - Reading the response body fails.
-    /// - The response body contains invalid UTF-8 data.
+    /// Reads the full response body as UTF-8 text.
     ///
     /// # Example
     /// ```rust
@@ -130,22 +97,7 @@ impl Response {
         Ok(string)
     }
 
-    /// Reads the response body in full and attempts to deserialize it as JSON.
-    ///
-    /// This method validates that the `Content-Type` header is set to
-    /// `application/json`, then reads and parses the body into the specified type.
-    ///
-    /// # Type Parameters
-    /// - `T`: The type to deserialize the JSON into. Must implement [`DeserializeOwned`].
-    ///
-    /// # Returns
-    /// A value of type `T` deserialized from the response body.
-    ///
-    /// # Errors
-    /// Returns an [`Error`] if:
-    /// - The `Content-Type` header is missing or not `application/json`.
-    /// - The response body cannot be read.
-    /// - The response body cannot be parsed as valid JSON for the target type.
+    /// Deserializes the response body as JSON.
     ///
     /// # Example
     /// ```rust
@@ -173,17 +125,7 @@ impl Response {
         Ok(value)
     }
 
-    /// Returns an asynchronous stream of response body chunks.
-    ///
-    /// This method yields [`Bytes`] chunks as HTTP/3 DATA frames are received from
-    /// the server, allowing you to process large or streaming responses without
-    /// buffering the entire body in memory.
-    ///
-    /// # Returns
-    /// A [`Stream`] that yields [`Result<Bytes, Error>`] values.
-    ///
-    /// # Errors
-    /// Each stream item may return an [`Error`] if reading from the connection fails.
+    /// Streams response body chunks without buffering the full body.
     ///
     /// # Example
     /// ```rust

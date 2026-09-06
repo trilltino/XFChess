@@ -17,6 +17,7 @@ use bevy_egui::egui;
 /// layout math (`game_2d::render_2d_board`) and the 3D floating `Area`s
 /// (`render_center_player_bars_3d`) so the two never drift apart.
 pub const PLAYER_BAR_HEIGHT: f32 = 64.0;
+const CAPTURE_ROW_HEIGHT: f32 = 22.0;
 
 /// Last-frame measured heights of the two 2D player bars. The 2D board
 /// layout (`game_2d::render_2d_board`) reserves this much space above and
@@ -268,23 +269,27 @@ pub fn render_player_bar(ui: &mut egui::Ui, data: &PlayerBarData) {
                             .size(11.5)
                             .color(UiColors::TEXT_SECONDARY),
                     );
-                    if !data.captures.is_empty() {
-                        ui.add_space(2.0);
-                        ui.horizontal(|ui| {
-                            crate::ui::game::game_ui::render_captured_pieces_tray(
-                                ui,
-                                &data.captures,
-                                data.is_dark_captures,
-                            );
-                            if data.capture_delta > 0 {
-                                ui.label(
-                                    egui::RichText::new(format!("+{}", data.capture_delta))
-                                        .size(11.0)
-                                        .color(UiColors::TEXT_TERTIARY),
+                    // Reserve the capture row even before the first capture;
+                    // otherwise the bar grows after a capture and the 2D
+                    // board recalculates to a smaller square size.
+                    ui.allocate_ui(egui::Vec2::new(ui.available_width(), CAPTURE_ROW_HEIGHT), |ui| {
+                        if !data.captures.is_empty() {
+                            ui.horizontal(|ui| {
+                                crate::ui::game::game_ui::render_captured_pieces_tray(
+                                    ui,
+                                    &data.captures,
+                                    data.is_dark_captures,
                                 );
-                            }
-                        });
-                    }
+                                if data.capture_delta > 0 {
+                                    ui.label(
+                                        egui::RichText::new(format!("+{}", data.capture_delta))
+                                            .size(11.0)
+                                            .color(UiColors::TEXT_TERTIARY),
+                                    );
+                                }
+                            });
+                        }
+                    });
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

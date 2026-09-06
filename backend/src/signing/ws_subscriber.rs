@@ -1,8 +1,4 @@
-//! WebSocket subscription client for Solana account updates (L1 and ER).
-//! Not currently wired up anywhere — see `tasks/mod.rs`'s module doc for why
-//! (no producer sends it events yet) and what "wiring it in properly" means
-//! before spawning it. The RPC-response parsing and connection load-balancing
-//! below are also still placeholders (see the inline comments).
+//! WebSocket client for Solana account updates on L1 and ER.
 
 use futures::{SinkExt, Stream, StreamExt};
 use solana_sdk::pubkey::Pubkey;

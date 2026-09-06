@@ -10,15 +10,12 @@
 //!
 //! # Difficulty Levels
 //!
-//! AI difficulty is controlled by search time, which directly affects search depth:
+//! AI difficulty combines a search budget with Stockfish strength limiting on
+//! the lower levels. Exact strength varies by engine version and hardware.
 //!
-//! | Difficulty | Time/Move | Typical Depth | Strength          |
-//! |------------|-----------|---------------|-------------------|
-//! | Level 1    | 0.05s     | 1 ply         | Beginner (400)    |
-//! | Level 4    | 0.6s      | 6 ply         | Club (1300)       |
-//! | Level 8    | 3.0s      | 24 ply        | Master (2500+)    |
-//!
-//! Depth increases with search time thanks to iterative deepening in the engine.
+//! Lower levels use `UCI_LimitStrength`/`UCI_Elo`; the strongest levels use
+//! unrestricted Stockfish. Search time is also capped by the selected game
+//! time control.
 //!
 //! # Integration
 //!
@@ -274,6 +271,21 @@ impl AIDifficulty {
         }
     }
 
+    /// Stockfish's native playing-strength target for the lower levels.
+    /// `None` leaves the strongest levels unrestricted instead of pretending
+    /// that a fixed Elo value is universal across hardware and versions.
+    pub fn stockfish_elo(self) -> Option<u16> {
+        match self {
+            Self::Level1 => Some(1320),
+            Self::Level2 => Some(1450),
+            Self::Level3 => Some(1600),
+            Self::Level4 => Some(1750),
+            Self::Level5 => Some(1900),
+            Self::Level6 => Some(2100),
+            Self::Level7 | Self::Level8 => None,
+        }
+    }
+
     /// Time per move in seconds.
     pub fn seconds_per_move(self) -> f32 {
         self.stockfish_movetime_ms().unwrap_or(0) as f32 / 1000.0
@@ -303,65 +315,61 @@ impl AIDifficulty {
         }
     }
 
-    /// Approximate ELO rating for this difficulty, for display next to the
-    /// "Computer" name in the in-game HUD (see [`Self::description`] for the
-    /// combined name+ELO string used elsewhere).
+    /// Legacy display label for callers that still show a compact strength.
+    /// These are Stockfish targets, not universal player ratings.
     pub fn elo_label(self) -> &'static str {
         match self {
-            Self::Level1 => "400",
-            Self::Level2 => "700",
-            Self::Level3 => "1000",
-            Self::Level4 => "1300",
-            Self::Level5 => "1600",
-            Self::Level6 => "1900",
-            Self::Level7 => "2200",
-            Self::Level8 => "2500+",
+            Self::Level1 => "1320 target",
+            Self::Level2 => "1450 target",
+            Self::Level3 => "1600 target",
+            Self::Level4 => "1750 target",
+            Self::Level5 => "1900 target",
+            Self::Level6 => "2100 target",
+            Self::Level7 | Self::Level8 => "unrestricted",
         }
     }
 
-    /// Friendly description for UI with ELO equivalent
+    /// Friendly description for the player-facing difficulty selector.
     pub fn description(self) -> &'static str {
         match self {
-            Self::Level1 => "Beginner (400 ELO)",
-            Self::Level2 => "Casual (700 ELO)",
-            Self::Level3 => "Amateur (1000 ELO)",
-            Self::Level4 => "Club (1300 ELO)",
-            Self::Level5 => "Intermediate (1600 ELO)",
-            Self::Level6 => "Advanced (1900 ELO)",
-            Self::Level7 => "Expert (2200 ELO)",
-            Self::Level8 => "Master (2500+ ELO)",
+            Self::Level1 => "Beginner",
+            Self::Level2 => "Casual",
+            Self::Level3 => "Amateur",
+            Self::Level4 => "Club",
+            Self::Level5 => "Intermediate",
+            Self::Level6 => "Advanced",
+            Self::Level7 => "Expert",
+            Self::Level8 => "Master",
         }
     }
 
-    /// Longer hover-tooltip text describing how this level actually plays,
-    /// grounded in its real search depth/movetime (see
-    /// [`Self::stockfish_depth`] / [`Self::stockfish_movetime_ms`]) rather
-    /// than just restating the ELO number.
+    /// Longer hover-tooltip text describing the practical playing behavior of
+    /// this level without presenting an uncalibrated player rating as fact.
     pub fn tooltip(self) -> &'static str {
         match self {
             Self::Level1 => {
-                "Beginner · 400 ELO\nLooks only 1 move ahead and replies almost instantly. Expect frequent blunders and missed tactics."
+                "Beginner\nFrequent tactical mistakes and missed threats."
             }
             Self::Level2 => {
-                "Casual · 700 ELO\n2-ply search, ~150ms per move. Still misses most tactics, but avoids the worst one-move blunders."
+                "Casual\nAvoids some simple blunders but still misses many short tactics."
             }
             Self::Level3 => {
-                "Amateur · 1000 ELO\n4-ply search, ~300ms per move. Spots simple tactics and short-term threats."
+                "Amateur\nSpots basic tactics and short-term threats, with noticeable positional mistakes."
             }
             Self::Level4 => {
-                "Club · 1300 ELO (default)\n6-ply search, ~600ms per move. Solid club-level play with occasional tactical slips."
+                "Club\nA balanced opponent with reliable tactics and occasional inaccuracies."
             }
             Self::Level5 => {
-                "Intermediate · 1600 ELO\n10-ply search, up to 1s per move. Reliable positional and tactical play."
+                "Intermediate\nReliable tactical and positional play. Mistakes are less frequent and less obvious."
             }
             Self::Level6 => {
-                "Advanced · 1900 ELO\n14-ply search, up to 1.5s per move. Strong tactical vision, few mistakes."
+                "Advanced\nStrong tactical vision and consistent punishment of obvious errors."
             }
             Self::Level7 => {
-                "Expert · 2200 ELO\n18-ply search, up to 2s per move. Near-master accuracy, very hard to outplay tactically."
+                "Expert\nVery difficult to outplay tactically, with strong calculation and consistent pressure."
             }
             Self::Level8 => {
-                "Master · 2500+ ELO\n24-ply search, up to 3s per move. Engine-strength play — expect precise, punishing chess."
+                "Master\nPrecise, punishing play with very few tactical mistakes."
             }
         }
     }
@@ -468,5 +476,38 @@ mod tests {
 
         assert!(low_time < med_time);
         assert!(med_time < high_time);
+    }
+
+    #[test]
+    fn stockfish_strength_policy_is_monotonic_and_bounded() {
+        let levels = [
+            AIDifficulty::Level1,
+            AIDifficulty::Level2,
+            AIDifficulty::Level3,
+            AIDifficulty::Level4,
+            AIDifficulty::Level5,
+            AIDifficulty::Level6,
+            AIDifficulty::Level7,
+            AIDifficulty::Level8,
+        ];
+        let mut previous_elo = 0;
+        for level in levels {
+            if let Some(elo) = level.stockfish_elo() {
+                assert!((1320..=2100).contains(&elo));
+                assert!(elo > previous_elo);
+                previous_elo = elo;
+            }
+        }
+        assert_eq!(AIDifficulty::Level7.stockfish_elo(), None);
+        assert_eq!(AIDifficulty::Level8.stockfish_elo(), None);
+    }
+
+    #[test]
+    fn every_difficulty_has_a_search_budget() {
+        for value in 1..=8 {
+            let level = AIDifficulty::from_u8(value);
+            assert!(level.stockfish_movetime_ms().unwrap() > 0);
+            assert!(level.stockfish_depth().unwrap() > 0);
+        }
     }
 }

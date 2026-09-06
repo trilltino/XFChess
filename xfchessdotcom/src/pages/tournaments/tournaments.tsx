@@ -3,9 +3,6 @@ import { listTournaments, type TournamentSummaryResponse } from '../../lib/api';
 import { SeoHead } from '../../components/SeoHead';
 import { PAGE_METADATA } from '../../lib/seo/metadata';
 
-// Was a static explainer (registration → brackets → payout, three tournament
-// tiers, entry requirements). It now lists what the backend actually has, so
-// the page is only worth loading when there is something to enter.
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 

@@ -8,6 +8,19 @@ interface CreateTournamentProps {
   onCancel: () => void;
 }
 
+const generatedTournamentId = (): number => Date.now();
+
+const generatedTournamentName = (
+  format: CreateTournamentRequest["format"],
+  maxPlayers: number,
+  swissRounds?: number,
+): string => {
+  const label = format === "Swiss"
+    ? `Swiss ${swissRounds || 5}-round`
+    : "Single-elimination";
+  return `${maxPlayers}-player ${label}`;
+};
+
 export default function CreateTournament({ onTournamentCreated, onCancel }: CreateTournamentProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -18,8 +31,8 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
 
   // Form state
   const [formData, setFormData] = useState<CreateTournamentRequest>({
-    tournament_id: 0,
-    name: "",
+    tournament_id: generatedTournamentId(),
+    name: generatedTournamentName("SingleElimination", 16),
     entry_fee_lamports: 0,
     platform_fee_lamports: 4000000,
     max_players: 16,
@@ -73,7 +86,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
   const validateStep = () => {
     switch (currentStep) {
       case 1:
-        return formData.tournament_id > 0 && formData.name.trim() !== "";
+        return formData.tournament_id > 0;
       case 2:
         return formData.entry_fee_lamports >= 0 && prizeShareTotalBps(formData.prize_shares) <= 10000;
       case 3:
@@ -107,7 +120,10 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
     setError("");
 
     try {
-      const response = await apiClient.createTournament(formData);
+      const response = await apiClient.createTournament({
+        ...formData,
+        name: generatedTournamentName(formData.format, formData.max_players, formData.swiss_rounds),
+      });
       if (response.ok) {
         onTournamentCreated();
       } else {
@@ -136,6 +152,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
       return {
         ...prev,
         max_players: capacity as CreateTournamentRequest["max_players"],
+        name: generatedTournamentName(prev.format, capacity, prev.swiss_rounds),
         prize_shares: (untouched ? defaultSharesFor(capacity) : prev.prize_shares) as any,
       };
     });
@@ -143,28 +160,16 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
 
   const renderStep1 = () => (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-      <SectionTitle>Basic Infrastructure</SectionTitle>
+      <SectionTitle>Tournament Setup</SectionTitle>
       
       <div>
-        <label style={labelStyle}>TOURNAMENT ID <span style={{ color: "var(--primary)" }}>*</span></label>
-        <input
-          type="number"
-          value={formData.tournament_id || ""}
-          onChange={(e) => updateFormData("tournament_id", parseInt(e.target.value) || 0)}
-          style={inputStyle}
-          placeholder="Unique sequence number"
-        />
-      </div>
-
-      <div>
-        <label style={labelStyle}>NAME <span style={{ color: "var(--primary)" }}>*</span></label>
-        <input
-          type="text"
-          value={formData.name}
-          onChange={(e) => updateFormData("name", e.target.value)}
-          style={inputStyle}
-          placeholder="Match designator"
-        />
+        <label style={labelStyle}>GENERATED TOURNAMENT</label>
+        <div style={{ ...inputStyle, color: "var(--text-dim)", background: "rgba(255,255,255,0.03)" }}>
+          {generatedTournamentName(formData.format, formData.max_players, formData.swiss_rounds)}
+        </div>
+        <div style={{ fontSize: "11px", color: "var(--text-dim)", marginTop: "8px" }}>
+          The tournament name and internal ID are generated automatically from your settings.
+        </div>
       </div>
     </div>
   );

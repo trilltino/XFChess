@@ -309,9 +309,26 @@ pub fn build_app(game_config: GameConfig) -> App {
                 meta_check: AssetMetaCheck::Never,
                 #[cfg(not(target_arch = "wasm32"))]
                 file_path: {
+                    // Resolve the assets directory in order of preference:
+                    //   1. "assets/" relative to cwd (dev workflow: `cargo run`)
+                    //   2. "assets/" next to the executable (installed build)
+                    //   3. CARGO_MANIFEST_DIR/assets (last resort — only useful
+                    //      on the build machine itself, never in a release install)
                     let cwd_assets = std::path::PathBuf::from("assets");
+                    let exe_assets = std::env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|d| d.join("assets")));
                     if cwd_assets.exists() && cwd_assets.is_dir() {
                         "assets".to_string()
+                    } else if exe_assets
+                        .as_ref()
+                        .map(|p| p.exists() && p.is_dir())
+                        .unwrap_or(false)
+                    {
+                        exe_assets
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned()
                     } else {
                         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                             .join("assets")

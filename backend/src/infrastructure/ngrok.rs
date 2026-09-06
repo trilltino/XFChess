@@ -1,25 +1,12 @@
-//! Ngrok integration for local development.
-//!
-//! This module provides utilities for exposing the signing server
-//! via ngrok during local development for testing and debugging.
+//! Utilities for starting and inspecting the local ngrok tunnel.
 
 use std::process::Command;
 use tracing::{error, info, warn};
 
-/// Starts ngrok tunnel for the signing server.
-///
-/// This function launches ngrok in the background to expose
-/// the local signing server to the internet for testing.
-///
-/// # Arguments
-/// * `port` - The local port to expose (default: 8090)
-///
-/// # Returns
-/// The ngrok URL if successful, or an error message
+/// Starts an ngrok tunnel for the signing server.
 pub fn start_ngrok_tunnel(port: u16) -> Result<String, String> {
     info!("[Ngrok] Starting tunnel for port {}", port);
 
-    // Check if ngrok is installed
     let check_result = Command::new("ngrok").arg("version").output();
 
     match check_result {
@@ -33,7 +20,6 @@ pub fn start_ngrok_tunnel(port: u16) -> Result<String, String> {
         }
     }
 
-    // Start ngrok tunnel
     let result = Command::new("ngrok")
         .args(["http", "--log=stdout", &port.to_string()])
         .spawn();
@@ -53,14 +39,7 @@ pub fn start_ngrok_tunnel(port: u16) -> Result<String, String> {
     }
 }
 
-/// Gets the ngrok tunnel URL.
-///
-/// This function queries the ngrok API to get the current tunnel URL.
-///
-/// # Returns
-/// The ngrok public URL if available
+/// Returns the current ngrok tunnel URL, when available.
 pub fn get_ngrok_url() -> Option<String> {
-    // ngrok exposes a local API at http://localhost:4040/api/tunnels
-    // For simplicity, this returns None and users should check the ngrok dashboard
     None
 }

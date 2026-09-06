@@ -1,178 +1,51 @@
-//! Game phase tracking and move recording components
+//! Components for chess phases and move history.
 //!
-//! This module defines components that track the overall game state and individual move history.
-//! These are distinct from [`crate::core::GameState`] (LaunchMenu vs Multiplayer) - this tracks
-//! chess-specific phases within active gameplay.
-//!
-//! # Components
-//!
-//! - **[`GamePhase`]**: Current phase of the chess game (Setup/Playing/Check/Checkmate/Stalemate)
-//! - **[`MoveRecord`]**: Complete record of a single chess move with all metadata
-//!
-//! # Architecture Notes
-//!
-//! [`GamePhase`] is a component rather than a resource to allow:
-//! - Multiple simultaneous games (future multiplayer/spectator modes)
-//! - Easy state serialization per-game
-//! - Clean ECS queries like `Query<&GamePhase, With<ActiveGame>>`
-//!
-//! # Integration
-//!
-//! Used by:
-//! - [`crate::game::systems::game_logic`] - Detects check/checkmate/stalemate
-//! - [`crate::game::resources::MoveHistory`] - Stores MoveRecord sequences
-//! - [`crate::ui::game_ui`] - Displays current phase to player
-//!
-//! # Reference
-//!
-//! Game phase patterns inspired by:
-//! - `reference/chess_engine/src/types.rs` - Engine game state representation
-//! - `reference/bevy-3d-chess/src/board.rs` - ECS game state tracking
-//!
-//! For usage examples, see `tests/components/game_state_tests.rs`
+//! `GamePhase` is distinct from [`crate::core::GameState`], which controls
+//! application-level state rather than the phase of an active chess game.
 
 use crate::rendering::pieces::{PieceColor, PieceType};
 use bevy::prelude::*;
 
-/// Current phase of an active chess game
-///
-/// Tracks the progression of a chess game from initial setup through to conclusion.
-/// This is separate from [`crate::core::GameState`] which controls app-level state
-/// (menu vs gameplay).
-///
-/// # Phase Flow
-///
-/// ```text
-/// Setup → Playing ⇄ Check → Checkmate/Stalemate
-/// ```
-///
-/// # Phase Descriptions
-///
-/// - **Setup**: Pieces are being placed on the board (initial load)
-/// - **Playing**: Normal play, neither player in check
-/// - **Check**: Current player's king is under attack (must respond)
-/// - **Checkmate**: Current player's king is in check with no legal moves (game over)
-/// - **Stalemate**: Current player has no legal moves but isn't in check (draw)
-///
-/// For usage examples, see `tests/components/game_state_tests.rs`
+/// Current phase of an active chess game.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
 pub enum GamePhase {
-    /// Initial board setup phase
-    ///
-    /// Pieces are being spawned and positioned. Player input disabled until
-    /// transition to Playing.
+    /// Initial board setup phase.
     #[default]
     Setup,
 
-    /// Active gameplay with no check condition
-    ///
-    /// Both players can make any legal move. Most common state during a game.
+    /// Active gameplay with no check condition.
     Playing,
 
-    /// Current player's king is under attack
-    ///
-    /// Player must make a move that:
-    /// - Moves the king out of check
-    /// - Blocks the attacking piece
-    /// - Captures the attacking piece
+    /// Current player's king is under attack.
     Check,
 
-    /// Game over: Current player is in check with no legal moves
-    ///
-    /// Attacking player wins. Game cannot continue.
+    /// Game over: current player is in check with no legal moves.
     Checkmate,
 
-    /// Game over: Current player has no legal moves but is not in check
-    ///
-    /// Result is a draw. Common in endgames with insufficient material.
+    /// Game over: current player has no legal moves but is not in check.
     Stalemate,
 }
 
-/// Complete record of a single chess move with all metadata
-///
-/// Stores everything needed to:
-/// - Display the move in algebraic notation (e4, Nf3, O-O, etc.)
-/// - Animate the move visually
-/// - Implement undo/redo functionality
-/// - Analyze the game (detect threats, evaluate positions)
-/// - Export to PGN (Portable Game Notation) format
-///
-/// # Design: Value Object
-///
-/// `MoveRecord` is a plain data struct (not a Component) because:
-/// - Moves are stored in collections (Vec in MoveHistory resource)
-/// - Multiple moves can reference the same piece
-/// - Move records are immutable once created
-///
-/// # Fields
-///
-/// ## Piece Information
-/// - `piece_type`: What kind of piece moved (Pawn, Knight, etc.)
-/// - `piece_color`: Which player made the move (White or Black)
-///
-/// ## Position Information
-/// - `from`: Starting square (x, y) coordinates
-/// - `to`: Destination square (x, y) coordinates
-///
-/// ## Special Move Flags
-/// - `captured`: Type of piece captured (if any)
-/// - `is_castling`: King-rook special move (O-O or O-O-O)
-/// - `is_en_passant`: Pawn captures pawn diagonally in passing
-/// - `is_check`: Move puts opponent in check
-/// - `is_checkmate`: Move ends the game (checkmate)
-///
-/// For usage examples, see `tests/components/game_state_tests.rs`
+/// Record of a chess move and its special-move status.
 #[derive(Clone, Copy, Debug, Reflect)]
 pub struct MoveRecord {
-    /// Type of piece that moved (Pawn, Rook, Knight, Bishop, Queen, King)
     pub piece_type: PieceType,
 
-    /// Color of the piece that moved (White or Black)
     pub piece_color: PieceColor,
 
-    /// Starting position (x, y) where x,y ∈ [0,7]
-    ///
-    /// Coordinates: (file, rank)
-    /// - x=0 is file 'a', x=7 is file 'h'
-    /// - y=0 is rank 1, y=7 is rank 8
     pub from: (u8, u8),
 
-    /// Destination position (x, y) where x,y ∈ [0,7]
     pub to: (u8, u8),
 
-    /// Type of piece captured during this move, if any
-    ///
-    /// - `None`: Move to empty square
-    /// - `Some(PieceType)`: Capture move (piece removed from board)
     pub captured: Option<PieceType>,
 
-    /// Whether this move was a castling maneuver
-    ///
-    /// Castling involves moving both king and rook:
-    /// - Kingside (O-O): King moves 2 squares right
-    /// - Queenside (O-O-O): King moves 2 squares left
     pub is_castling: bool,
 
-    /// Whether this was an en passant capture
-    ///
-    /// Special pawn capture where:
-    /// - Opponent's pawn just moved 2 squares forward
-    /// - Your pawn captures it diagonally as if it moved only 1 square
     pub is_en_passant: bool,
 
-    /// Whether this move puts the opponent's king in check
-    ///
-    /// Used for:
-    /// - Displaying "+" in algebraic notation (e.g., "Qf7+")
-    /// - Triggering check visual effects
-    /// - Validating opponent must respond to check
     pub is_check: bool,
 
-    /// Whether this move ends the game in checkmate
-    ///
-    /// Check AND no legal moves available to opponent.
-    /// Displayed as "#" in notation (e.g., "Qf7#")
     pub is_checkmate: bool,
 }
 

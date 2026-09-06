@@ -1,7 +1,4 @@
-//! Multiplayer Module
-//!
-//! Provides P2P networking, VPS relay, and Solana integration for multiplayer chess.
-//! This module is organized into specialized submodules for network, rollup, and solana logic.
+//! Multiplayer networking, VPS relay, and Solana integration.
 
 use bevy::prelude::*;
 use tokio::runtime::Runtime;

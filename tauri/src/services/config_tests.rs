@@ -1,8 +1,4 @@
-//! Unit tests for configuration module.
-//!
-//! This module contains comprehensive tests for the configuration
-//! functions in services/config.rs to ensure they work correctly
-//! with various environment variable configurations.
+//! Tests for environment-based configuration resolution.
 
 #[cfg(test)]
 mod tests {

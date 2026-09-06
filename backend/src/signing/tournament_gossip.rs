@@ -1,24 +1,4 @@
-//! Tournament gossip service for real-time Swiss tournament updates.
-//!
-//! Manages gossip topics for tournaments using braid-iroh's gossip protocol,
-//! and carries the Braid updates published by the [`ResourceHub`] out to peers.
-//! Provides topic lifecycle management, update broadcasting, and bootstrap
-//! peer discovery.
-//!
-//! # Late joiners
-//!
-//! This service carried a `tournament_gossip_log` SQLite table, plus
-//! `persist_message` / `get_missed_messages` / `replay_missed_messages`, meant
-//! to replay to a late peer whatever it had missed. None of it ever ran:
-//! `server.rs` created the table at startup, and nothing anywhere called
-//! `persist_message`, so the table stayed empty and the replay had nothing to
-//! replay. It was scaffolding for a mechanism that was never finished.
-//!
-//! That is now the transport's job rather than this service's. Every fact is a
-//! versioned update on a hub resource, so a late or reconnecting client gets
-//! the current snapshot followed by the live tail by subscribing — over HTTP
-//! `209` from [`crate::infrastructure::build_app_router`]'s `/braid` mount, or
-//! over gossip from here. Nothing to persist, nothing to replay by hand.
+//! Broadcasts versioned tournament updates over the Braid gossip transport.
 //!
 //! [`ResourceHub`]: xfchess_braid_server::ResourceHub
 

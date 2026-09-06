@@ -1,11 +1,4 @@
-//! Infrastructure layer for the XFChess backend.
-//!
-//! This module provides low-level infrastructure components:
-//! - Database initialization and migrations
-//! - Router building and merging
-//! - Background task spawning
-//! - Ngrok integration for development
-//! - Authentication middleware
+//! Backend infrastructure for storage, routing, authentication, tasks, and development tools.
 
 pub mod auth_middleware;
 pub mod database;

@@ -1,10 +1,4 @@
-/**
- * Tournament list endpoint.
- *
- * The Swiss round/pairings/standings/result helpers that used to live here
- * went with the pages that called them (tournament_detail, _standings,
- * _play). Only the calendar remains.
- */
+/** Backend tournament-list API helpers. */
 
 import { request } from './client';
 
@@ -32,9 +26,6 @@ export interface TournamentSummaryResponse {
 
 /** List every tournament the backend knows about. */
 export function listTournaments(): Promise<TournamentSummaryResponse[]> {
-  // NOT the bare `/tournaments` — that path is also a page on this site,
-  // and nginx resolves it to the SPA catch-all, answering 200 text/html.
-  // Verified against production: `/tournaments` -> text/html,
-  // `/api/tournaments` -> application/json.
+  // The frontend SPA owns `/tournaments`; the API is mounted under `/api`.
   return request('/api/tournaments', { method: 'GET' });
 }

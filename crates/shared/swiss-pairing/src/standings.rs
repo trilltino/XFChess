@@ -3,12 +3,7 @@
 
 use crate::{MatchResult, Pairing, StandingsEntry, SwissPlayer, SwissRound};
 
-/// Calculate tournament standings
-///
-/// Tiebreak order:
-/// 1. Buchholz (sum of opponents' scores)
-/// 2. Sonneborn-Berger (sum of defeated opponents' scores + 0.5 * drawn opponents)
-/// 3. Rating (higher rated player wins tie)
+/// Calculates standings using Buchholz, Sonneborn-Berger, then rating tiebreaks.
 pub fn calculate_standings(
     players: &[SwissPlayer],
     rounds: &[SwissRound],

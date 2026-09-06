@@ -1,25 +1,7 @@
-//! Central registry of all Braid resources.
+//! Registry and fan-out hub for live Braid resources.
 //!
-//! A [`ResourceHub`] maps resource paths (e.g. `tournament/42/standings`) to
-//! either a [`PatchedDoc`] or an [`AppendLog`]. Callers obtain handles to
-//! individual resources and push updates; the hub fans those out to all active
-//! subscribers.
-//!
-//! # One write, two fan-outs
-//!
-//! Every fact enters through exactly one hub write. The hub then delivers the
-//! resulting [`BraidUpdate`] to:
-//!
-//! 1. local subscribers, over each resource's `tokio::broadcast` channel —
-//!    what the HTTP `209` handler streams; and
-//! 2. the optional **gossip sink** ([`ResourceHub::set_gossip_sink`]) — what
-//!    carries the same update to P2P peers.
-//!
-//! Before the sink existed, the backend wrote tournament facts twice: once
-//! into the hub, and once as a separate tagged-JSON gossip broadcast that had
-//! no version, no parents, and no way for a late peer to catch up. The two
-//! could and did drift. Now the gossip payload *is* the Braid update, so both
-//! transports carry the same versioned bytes.
+//! Each write is sent to local HTTP subscribers and, when configured, the
+//! optional gossip sink.
 
 use crate::resource::{
     protocol::BraidUpdate,
@@ -39,16 +21,11 @@ enum ResourceEntry {
     Log(AppendLog),
 }
 
-/// A destination for every update the hub publishes, beyond its own local
-/// subscribers — in practice, the P2P gossip transport.
-///
-/// Called synchronously with the resource path and the update just published.
-/// Implementations must not block: the hub's mutators are sync and run on
-/// whatever task performed the write. Hand the update to a channel or spawn a
-/// task and return.
+/// Receives each published update for another transport such as P2P gossip.
+/// The callback must return quickly because writes invoke it synchronously.
 pub type GossipSink = Arc<dyn Fn(&str, &BraidUpdate) + Send + Sync>;
 
-/// Shared registry of all live resources and their subscriber channels.
+/// Shared registry of live resources and subscriber channels.
 #[derive(Clone, Default)]
 pub struct ResourceHub {
     inner: Arc<RwLock<HashMap<String, ResourceEntry>>>,
@@ -74,9 +51,7 @@ impl ResourceHub {
         }
     }
 
-    // ── Registration ─────────────────────────────────────────────────────────
-
-    /// Register a patched-doc resource with an initial JSON value.
+    /// Registers a patched document with an initial JSON value.
     pub fn register_doc(&self, path: impl Into<String>, initial: Value) {
         let path = path.into();
         debug!("[braid-hub] register_doc {}", path);
@@ -85,10 +60,7 @@ impl ResourceHub {
             .insert(path, ResourceEntry::Doc(PatchedDoc::new(initial)));
     }
 
-    /// Register an append-log resource (starts empty).
-    ///
-    /// Replaces any existing resource at `path` — which drops its history and
-    /// its subscribers. Use [`Self::ensure_log`] unless you mean that.
+    /// Registers an empty append log, replacing any existing resource.
     pub fn register_log(&self, path: impl Into<String>) {
         let path = path.into();
         debug!("[braid-hub] register_log {}", path);
@@ -97,10 +69,7 @@ impl ResourceHub {
             .insert(path, ResourceEntry::Log(AppendLog::new()));
     }
 
-    /// Register an append-log only if `path` is not already registered.
-    ///
-    /// Returns `true` when it created one — the caller's cue to backfill it
-    /// from durable storage before anyone subscribes.
+    /// Registers an append log only when `path` is absent.
     pub fn ensure_log(&self, path: &str) -> bool {
         if self.inner.read().contains_key(path) {
             return false;
@@ -109,14 +78,12 @@ impl ResourceHub {
         true
     }
 
-    /// Whether a resource is registered at `path`.
+    /// Returns whether a resource is registered at `path`.
     pub fn has(&self, path: &str) -> bool {
         self.inner.read().contains_key(path)
     }
 
-    // ── Read ─────────────────────────────────────────────────────────────────
-
-    /// Current JSON state of a resource.
+    /// Returns the current JSON state of a resource.
     pub async fn current_json(&self, path: &str) -> Option<Value> {
         let entry = self.inner.read().get(path)?.clone();
         Some(match entry {
@@ -125,7 +92,7 @@ impl ResourceHub {
         })
     }
 
-    /// Subscribe to a resource: returns (snapshot, live receiver).
+    /// Returns the current snapshot and a live update receiver.
     pub async fn subscribe(
         &self,
         path: &str,
@@ -137,9 +104,7 @@ impl ResourceHub {
         })
     }
 
-    // ── Mutation ─────────────────────────────────────────────────────────────
-
-    /// Apply a JSON Patch to a patched-doc resource.
+    /// Applies a JSON Patch to a patched document.
     pub fn patch(&self, path: &str, patch: Patch) {
         if let Some(ResourceEntry::Doc(doc)) = self.inner.read().get(path).cloned() {
             match doc.apply(patch) {
@@ -149,7 +114,7 @@ impl ResourceHub {
         }
     }
 
-    /// Replace a patched-doc resource's entire document.
+    /// Replaces a patched document and broadcasts the new snapshot.
     pub fn replace(&self, path: &str, new_doc: Value) {
         if let Some(ResourceEntry::Doc(doc)) = self.inner.read().get(path).cloned() {
             let update = doc.replace(new_doc);
@@ -157,7 +122,7 @@ impl ResourceHub {
         }
     }
 
-    /// Append an entry to an append-log resource.
+    /// Appends an entry to an append log.
     pub fn append(&self, path: &str, entry: Value) {
         if let Some(ResourceEntry::Log(log)) = self.inner.read().get(path).cloned() {
             let update = log.append(entry);
@@ -165,13 +130,7 @@ impl ResourceHub {
         }
     }
 
-    // ── Helpers for tournament resources ────────────────────────────────────
-
-    /// Ensure the standard resources for a tournament exist.
-    ///
-    /// `standings` starts as an array rather than an object: it is always a
-    /// ranked list, and a subscriber that connects before the first result is
-    /// recorded should get an empty list, not an empty object it cannot parse.
+    /// Ensures the standard resources for a tournament exist.
     pub fn ensure_tournament(&self, tournament_id: u64) {
         let tid = tournament_id;
         let docs = [
@@ -190,15 +149,13 @@ impl ResourceHub {
             self.register_doc(standings, Value::Array(Vec::new()));
         }
 
-        // Results are append-only — one entry per finished board, in the
-        // order they were recorded. A late subscriber replays the whole log.
         let results = format!("tournament/{}/results", tid);
         if !self.inner.read().contains_key(results.as_str()) {
             self.register_log(results);
         }
     }
 
-    /// Ensure the pairings resource for a round exists.
+    /// Ensures the pairings resource for a round exists.
     pub fn ensure_pairings(&self, tournament_id: u64, round: u8) {
         let path = format!("tournament/{}/pairings/{}", tournament_id, round);
         if !self.inner.read().contains_key(&path) {

@@ -1,7 +1,4 @@
-//! Swiss Pairing Engine - FIDE Dutch System Implementation
-//!
-//! This crate provides a complete Swiss-system tournament pairing engine
-//! implementing the FIDE Dutch system with color balancing.
+//! FIDE Dutch Swiss-system pairing with color balancing.
 #![warn(missing_docs)]
 
 pub mod color;
@@ -17,7 +14,6 @@ pub use error::*;
 pub use standings::*;
 pub use types::*;
 
-/// Re-export core functions for convenience
 pub use pairing::generate_pairings;
 pub use standings::calculate_standings;
 pub use types::{ManualPairing, PairingConfig};

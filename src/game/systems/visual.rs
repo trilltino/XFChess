@@ -229,9 +229,10 @@ pub fn setup_game_scene(
     use crate::core::DespawnOnExit;
     use crate::core::GameState;
 
-    // Reset global ambient so menu lighting never bleeds into the game.
-    global_ambient.color = Color::WHITE;
-    global_ambient.brightness = 0.0;
+    // Keep the same restrained ambient baseline as the menu so dark pieces and
+    // board details remain readable alongside the overhead and fill lights.
+    global_ambient.color = Color::srgb(0.9, 0.92, 1.0);
+    global_ambient.brightness = 95.0;
 
     // Set background color based on view mode
     if view_mode.is_templeos() {

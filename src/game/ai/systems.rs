@@ -3,6 +3,7 @@ use crate::engine::board_state::ChessEngine;
 use crate::game::components::GamePhase;
 use crate::game::components::HasMoved;
 use crate::game::components::Piece;
+use crate::game::events::MoveMadeEvent;
 use crate::game::resources::{CapturedPieces, CurrentGamePhase, CurrentTurn, MoveHistory};
 use crate::game::system_sets::GameSystems;
 use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
@@ -64,6 +65,7 @@ pub struct XFChessGamePool(pub std::sync::Arc<std::sync::Mutex<Option<nimzovich_
 // purely dead-code APK size — not worth the churn versus the actual fix
 // (removing every path that could select this engine).
 struct StockfishInner {
+    child: std::process::Child,
     stdin: std::process::ChildStdin,
     reader: std::io::BufReader<std::process::ChildStdout>,
     initialized: bool,
@@ -98,12 +100,19 @@ impl StockfishInner {
             .take()
             .ok_or("Failed to get Stockfish stdout")?;
         let reader = std::io::BufReader::new(stdout);
-        drop(child);
         Ok(Self {
+            child,
             stdin,
             reader,
             initialized: false,
         })
+    }
+}
+
+impl Drop for StockfishInner {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -120,6 +129,7 @@ pub struct AIMove {
     pub score: i32,
     pub depth: u8,
     pub thinking_time: f32,
+    pub nodes: i64,
 }
 
 fn resolve_stockfish_path() -> Result<PathBuf, String> {
@@ -282,10 +292,16 @@ fn compute_think_params(
     let base_secs = tc.base_seconds();
     let inc_secs = tc.increment_seconds();
 
-    // Remaining-time budget: base / estimated_moves_left (never less than 5)
+    // Remaining-time budget: base / estimated_moves_left (never less than 5),
+    // with most of the increment available to the engine. Keep a reserve so
+    // repeated long searches cannot flag the AI in a real clocked game.
     let think_time = if base_secs > 0 {
         let est_moves_left = (40.0 - half_moves_played as f32 / 2.0).max(5.0);
-        base_think.min(base_secs as f32 / est_moves_left)
+        let increment_bonus = inc_secs as f32 * 0.8;
+        let per_move_budget = base_secs as f32 / est_moves_left + increment_bonus;
+        base_think
+            .min(base_think + inc_secs as f32 * 0.5)
+            .min(per_move_budget)
     } else {
         base_think
     };
@@ -303,6 +319,7 @@ fn compute_think_params(
 /// System params for polling AI task
 #[derive(SystemParam)]
 pub struct AiPollParams<'w, 's> {
+    pub ai_config: Res<'w, ChessAIResource>,
     pub task_resource: Option<ResMut<'w, PendingAIMove>>,
     pub pending_reveal: Option<Res<'w, AIMovePendingReveal>>,
     pub pieces_queries: ParamSet<
@@ -320,6 +337,9 @@ pub struct AiPollParams<'w, 's> {
     pub pending_turn: ResMut<'w, crate::game::resources::PendingTurnAdvance>,
     pub engine: ResMut<'w, ChessEngine>,
     pub sounds: Option<Res<'w, crate::game::resources::GameSounds>>,
+    pub active_tc: Option<Res<'w, crate::game::resources::active_time_control::ActiveTimeControl>>,
+    pub game_pool: Option<Res<'w, XFChessGamePool>>,
+    pub move_events: MessageWriter<'w, MoveMadeEvent>,
 }
 
 fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
@@ -348,8 +368,18 @@ fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
     match params.ai_config.engine {
         crate::game::ai::resource::AIEngine::Stockfish => {
             info!("[AI] Spawning Stockfish task (persistent process)");
-            let depth = depth.unwrap_or(12);
-            let movetime = movetime_ms.unwrap_or(1500);
+            let base_think = movetime_ms.unwrap_or(1500) as f32 / 1000.0;
+            let (think_time, max_depth) = compute_think_params(
+                base_think,
+                params.move_history.len(),
+                params.active_tc.as_deref(),
+            );
+            let depth = max_depth
+                .map(|cap| depth.unwrap_or(cap).min(cap))
+                .or(depth)
+                .unwrap_or(12);
+            let movetime = (think_time * 1000.0).round().max(1.0) as u64;
+            let strength_elo = params.ai_config.difficulty.stockfish_elo();
 
             // Get or create the persistent process Arc, then clone it for the task.
             let sf_arc = if let Some(sf) = params.sf_process.as_ref() {
@@ -368,7 +398,7 @@ fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
                 }
             };
 
-            let task = spawn_stockfish_task_persistent(fen, depth, movetime, sf_arc);
+            let task = spawn_stockfish_task_persistent(fen, depth, movetime, strength_elo, sf_arc);
             commands.insert_resource(PendingAIMove {
                 task,
                 spawned_at,
@@ -469,6 +499,7 @@ fn spawn_xf_engine_task(
             score: mv.score as i32,
             depth: depth_reached,
             thinking_time: start_time.elapsed().as_secs_f32(),
+            nodes: 0,
         })
     })
 }
@@ -479,6 +510,7 @@ fn spawn_stockfish_task_persistent(
     fen: String,
     depth: u8,
     movetime_ms: u64,
+    strength_elo: Option<u16>,
     sf: std::sync::Arc<std::sync::Mutex<StockfishInner>>,
 ) -> Task<Result<AIMove, String>> {
     AsyncComputeTaskPool::get().spawn(async move {
@@ -532,20 +564,41 @@ fn spawn_stockfish_task_persistent(
             guard.initialized = true;
         }
 
+        // Apply the level policy on every search so a reused process cannot
+        // retain the previous game's strength setting.
+        for command in stockfish_strength_commands(strength_elo) {
+            writeln!(guard.stdin, "{}", command).map_err(|e| e.to_string())?;
+        }
+        writeln!(guard.stdin, "ucinewgame").map_err(|e| e.to_string())?;
+        writeln!(guard.stdin, "isready").map_err(|e| e.to_string())?;
+        guard.stdin.flush().map_err(|e| e.to_string())?;
+        loop {
+            let mut line = String::new();
+            if guard
+                .reader
+                .read_line(&mut line)
+                .map_err(|e| e.to_string())?
+                == 0
+            {
+                return Err("Stockfish exited while applying strength settings".to_string());
+            }
+            if line.trim() == "readyok" {
+                break;
+            }
+        }
+
         // Send position and search command.
         writeln!(guard.stdin, "position fen {}", fen).map_err(|e| e.to_string())?;
         guard.stdin.flush().map_err(|e| e.to_string())?;
-        if movetime_ms > 0 {
-            writeln!(guard.stdin, "go movetime {}", movetime_ms).map_err(|e| e.to_string())?;
-        } else {
-            writeln!(guard.stdin, "go depth {}", depth).map_err(|e| e.to_string())?;
-        }
+        writeln!(guard.stdin, "{}", stockfish_search_command(depth, movetime_ms))
+            .map_err(|e| e.to_string())?;
         guard.stdin.flush().map_err(|e| e.to_string())?;
 
         // Read until bestmove.
         let mut best_move = String::new();
         let mut score = 0i32;
         let mut search_depth = 0u8;
+        let mut nodes = 0i64;
         loop {
             let mut line = String::new();
             if guard
@@ -568,6 +621,11 @@ fn spawn_stockfish_task_persistent(
                     if part == "cp" && i + 1 < parts.len() {
                         if let Ok(s) = parts[i + 1].parse::<i32>() {
                             score = s;
+                        }
+                    }
+                    if part == "nodes" && i + 1 < parts.len() {
+                        if let Ok(n) = parts[i + 1].parse::<i64>() {
+                            nodes = n;
                         }
                     }
                 }
@@ -600,11 +658,39 @@ fn spawn_stockfish_task_persistent(
                 score,
                 depth: search_depth,
                 thinking_time,
+                nodes,
             });
         }
 
         Err(format!("Invalid move format from Stockfish: {}", best_move))
     })
+}
+
+fn stockfish_strength_commands(strength_elo: Option<u16>) -> Vec<String> {
+    match strength_elo {
+        Some(elo) => vec![
+            "setoption name UCI_LimitStrength value true".to_string(),
+            format!("setoption name UCI_Elo value {elo}"),
+        ],
+        None => vec!["setoption name UCI_LimitStrength value false".to_string()],
+    }
+}
+
+fn stockfish_search_command(depth: u8, movetime_ms: u64) -> String {
+    if movetime_ms > 0 {
+        format!("go movetime {movetime_ms}")
+    } else {
+        format!("go depth {depth}")
+    }
+}
+
+fn normalized_move_uci(from: (u8, u8), to: (u8, u8), promotion: Option<char>) -> String {
+    format!(
+        "{}{}{}",
+        ChessEngine::coords_to_uci(from.0, from.1),
+        ChessEngine::coords_to_uci(to.0, to.1),
+        promotion.map(|c| c.to_ascii_lowercase()).unwrap_or_default()
+    )
 }
 
 /// Helper to check conditions for spawning AI task
@@ -728,21 +814,41 @@ fn apply_ai_result(
                 "[AI] Direct Stockfish task completed with move: {}",
                 ai_move.uci
             );
-            let uci_move = format!(
-                "{}{}",
-                ChessEngine::coords_to_uci(ai_move.from.0, ai_move.from.1),
-                ChessEngine::coords_to_uci(ai_move.to.0, ai_move.to.1)
-            );
-            move_found = Some(uci_move);
+            move_found = Some(ai_move.uci);
             move_from_direct_stockfish = true;
 
             // Update AI statistics
             params.ai_stats.last_score = ai_move.score as i64;
             params.ai_stats.last_depth = ai_move.depth as i64;
+            params.ai_stats.last_nodes = ai_move.nodes;
             params.ai_stats.thinking_time = ai_move.thinking_time;
         }
         Err(e) => {
             error!("[AI] Stockfish task failed: {}", e);
+            commands.remove_resource::<StockfishProcess>();
+            let base_think = params.ai_config.difficulty.seconds_per_move();
+            let (think_time, max_depth) = compute_think_params(
+                base_think,
+                params.move_history.len(),
+                params.active_tc.as_deref(),
+            );
+            let pool_arc = params.game_pool.as_ref().map(|p| p.0.clone());
+            let preloaded = pool_arc.as_ref().and_then(|arc| arc.lock().ok()?.take());
+            let fallback = spawn_xf_engine_task(
+                params.engine.current_fen().to_string(),
+                think_time,
+                max_depth,
+                params.ai_config.mode.ai_color(),
+                preloaded,
+                pool_arc,
+            );
+            commands.insert_resource(PendingAIMove {
+                task: fallback,
+                spawned_at: Instant::now(),
+                min_reveal_delay: Duration::from_millis(0),
+            });
+            warn!("[AI] Falling back to XFChessEngine for this move");
+            return;
         }
     }
 
@@ -787,7 +893,7 @@ fn apply_ai_result(
             // Validate with the cached legal-move table — O(1) lookup, no extra generation.
             let from_uci = ChessEngine::coords_to_uci(from_coords.0, from_coords.1);
             let to_uci = ChessEngine::coords_to_uci(to_coords.0, to_coords.1);
-            let move_uci = format!("{}{}", from_uci, to_uci);
+            let move_uci = normalized_move_uci(from_coords, to_coords, promotion_char);
 
             if !params.engine.is_move_legal_by_uci(&move_uci) {
                 warn!("[AI] Stockfish suggested illegal move {}", move_uci);
@@ -820,7 +926,7 @@ fn apply_ai_result(
                     &mut params.captured_pieces,
                     &mut params.engine,
                     &mut p0,
-                    None,
+                    Some(&mut params.move_events),
                     None, // BoardStateSync not available in AI context
                     &params.current_turn,
                 );
@@ -854,4 +960,46 @@ fn find_move_entities(
     }
 
     move_data.map(|(e, p, first)| (e, p, first, capture_target))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limited_stockfish_commands_set_strength() {
+        assert_eq!(
+            stockfish_strength_commands(Some(1600)),
+            vec![
+                "setoption name UCI_LimitStrength value true",
+                "setoption name UCI_Elo value 1600",
+            ]
+        );
+    }
+
+    #[test]
+    fn unrestricted_stockfish_commands_disable_strength_limit() {
+        assert_eq!(
+            stockfish_strength_commands(None),
+            vec!["setoption name UCI_LimitStrength value false"]
+        );
+    }
+
+    #[test]
+    fn search_command_prefers_time_budget() {
+        assert_eq!(stockfish_search_command(12, 750), "go movetime 750");
+        assert_eq!(stockfish_search_command(12, 0), "go depth 12");
+    }
+
+    #[test]
+    fn promotion_suffixes_are_preserved_in_uci() {
+        let from = ChessEngine::uci_to_coords("e7").unwrap();
+        let to = ChessEngine::uci_to_coords("e8").unwrap();
+        for promotion in ['q', 'r', 'b', 'n'] {
+            assert_eq!(
+                normalized_move_uci(from, to, Some(promotion)),
+                format!("e7e8{promotion}")
+            );
+        }
+    }
 }
