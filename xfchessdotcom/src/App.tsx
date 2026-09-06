@@ -58,9 +58,8 @@ function AppContent() {
                 
                 <div className={`nav-links ${isMenuOpen ? 'active' : ''}`}>
                     <Link to="/play" className="nav-link" onClick={() => setIsMenuOpen(false)}>Play</Link>
-                    <Link to="/tournaments" className="nav-link" onClick={() => setIsMenuOpen(false)}>Tournaments</Link>
                     <Link to="/features" className="nav-link" onClick={() => setIsMenuOpen(false)}>Features</Link>
-
+                    <Link to="/tournaments" className="nav-link" onClick={() => setIsMenuOpen(false)}>Tournaments</Link>
                 </div>
             </nav>
 
