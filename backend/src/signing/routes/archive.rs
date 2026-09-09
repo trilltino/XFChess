@@ -1,6 +1,3 @@
-//! Admin-only routes for inspecting and downloading the game archive
-//! (`tasks::archiver`'s binary `games.xfg` + wallet index files).
-
 use crate::signing::AppState;
 use axum::{
     extract::State,

@@ -1,7 +1,3 @@
-//! Ephemeral Rollup Manager
-//!
-//! Manages the state of an ephemeral rollup for fast move execution
-//! during gameplay. Batches moves and submits to the MagicBlock ER.
 use bevy::prelude::*; // Events are in prelude
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -42,14 +38,6 @@ pub struct EphemeralRollupManager {
     pub game_id: u64,
     pub session_keys: Option<(Pubkey, Pubkey)>, // (white_session_key, black_session_key)
     pub is_creator: bool,
-    /// Whether this game was created via `global_create_game`/`global_join_game`
-    /// (as opposed to the original per-game `create_game`/`join_game` +
-    /// `authorize_session_key` flow). Set once at create/join time — must NOT
-    /// be re-derived from the wallet's *current* `global_session_active` flag,
-    /// since that can change (e.g. authorization completing later) independently
-    /// of which flow this specific game actually used. Delegation signing
-    /// depends on getting this right: `game.fee_payer` is a different key
-    /// depending on which flow created the game.
     pub used_global_session: bool,
 }
 
@@ -195,8 +183,6 @@ pub enum RollupEvent {
         moves: Vec<String>,
         next_fens: Vec<String>,
     },
-    /// Final batch at game end — submitted directly to VPS without BatchPropose/Accept
-    /// so the peer disconnect after checkmate cannot block on-chain recording.
     GameEndBatch {
         game_id: u64,
         moves: Vec<String>,
@@ -215,14 +201,12 @@ pub enum RollupEvent {
     NeedResync {
         game_id: u64,
     },
-    /// A single move replayed during Braid reconnection recovery.
     ResyncedMove {
         game_id: u64,
         move_uci: String,
         next_fen: String,
         move_number: u32,
     },
-    /// Full game snapshot received from a peer (spectator catch-up or reconnect).
     SnapshotReceived {
         game_id: u64,
         fen: String,

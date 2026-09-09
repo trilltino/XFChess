@@ -1,5 +1,3 @@
-//! Contains all global Anchor account structs defining the program's on-chain database layout.
-
 pub mod dispute;
 pub mod friendship;
 pub mod game;

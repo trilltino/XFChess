@@ -1,12 +1,7 @@
-//! Presentation layer - Audio systems
-//!
-//! Handles all audio playback and volume management for the application.
-
 use crate::core::GameSettings;
 use bevy::audio::Volume;
 use bevy::prelude::*;
 
-/// Plugin for the presentation layer audio systems
 pub struct AudioPresentationPlugin;
 
 impl Plugin for AudioPresentationPlugin {
@@ -15,9 +10,6 @@ impl Plugin for AudioPresentationPlugin {
     }
 }
 
-/// System that applies master volume to all audio sinks
-///
-/// Watches for changes to `GameSettings.master_volume` and updates all AudioSink components.
 pub fn apply_master_volume_system(
     settings: Res<GameSettings>,
     mut audio_sinks: Query<&mut AudioSink>,

@@ -1,9 +1,3 @@
-//! Session lifecycle endpoints on the VPS.
-//!
-//! Covers session keypair creation, activation (submitting the wallet-signed
-//! setup tx), signing arbitrary tx bytes with the session key, and session
-//! status lookup.
-
 use serde::{Deserialize, Serialize};
 
 use super::client::{client, client_fast, vps_base};
@@ -30,8 +24,6 @@ struct ActivateSessionReq<'a> {
 #[derive(Deserialize)]
 pub(super) struct SigResp {
     pub sig: String,
-    /// RPC endpoint the tx was actually submitted to — only populated by
-    /// ER-routed backend responses (record_move, undelegate_game).
     #[serde(default)]
     pub er_endpoint: String,
 }
@@ -42,9 +34,6 @@ pub struct SessionStatus {
     pub session_pubkey: String,
 }
 
-/// Ask VPS to create (or return existing) session keypair for `game_id`.
-/// Returns `(session_pubkey_base58, platform_fee_lamports)`.
-/// `platform_fee_lamports` is calculated by the backend from the live SOL/GBP rate (10p per player = 20p total).
 pub fn create_session(game_id: u64, wallet_pubkey: &str) -> Result<(String, u64), String> {
     let response = client_fast()?
         .post(format!("{}/session/create", vps_base()))
@@ -70,11 +59,6 @@ struct PlatformFeeResp {
     platform_fee_lamports: u64,
 }
 
-/// Fetch the flat per-game platform fee in lamports (live SOL/GBP rate).
-/// Used by the global-session create-game path, which — unlike
-/// `create_session` above — has no per-game backend session round-trip to
-/// piggyback the fee on. Same backend-computed figure either way
-/// (`rates::PLATFORM_FEE_GBP`), so the two paths can never silently diverge.
 pub fn fetch_platform_fee_lamports() -> Result<u64, String> {
     let response = client_fast()?
         .get(format!("{}/api/rates/platform-fee", vps_base()))
@@ -91,8 +75,6 @@ pub fn fetch_platform_fee_lamports() -> Result<u64, String> {
     Ok(resp.platform_fee_lamports)
 }
 
-/// Submit the wallet-signed setup TX (create_game / join_game + authorize_session_key).
-/// VPS submits to chain and funds the session key.
 pub fn activate_session(game_id: u64, signed_tx_bytes: &[u8]) -> Result<String, String> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(signed_tx_bytes);
@@ -122,7 +104,6 @@ pub fn activate_session(game_id: u64, signed_tx_bytes: &[u8]) -> Result<String, 
 // to it with the game's session key. See `backend/src/signing/routes/main.rs`
 // (`protected_routes`) for the full reasoning.
 
-/// Query session status from VPS.
 pub fn session_status(game_id: u64) -> Result<SessionStatus, String> {
     let resp = client_fast()?
         .get(format!("{}/session/status/{game_id}", vps_base()))
@@ -143,7 +124,6 @@ pub fn session_status(game_id: u64) -> Result<SessionStatus, String> {
         .map_err(|e| format!("vps session_status parse: {e}"))
 }
 
-/// Release a per-game session whose setup transaction never activated.
 pub fn abandon_session(game_id: u64) -> Result<(), String> {
     let response = client_fast()?
         .post(format!("{}/session/abandon/{game_id}", vps_base()))
@@ -159,8 +139,6 @@ pub fn abandon_session(game_id: u64) -> Result<(), String> {
 
 // ── Item 8: Global session verify ─────────────────────────────────────────────
 
-/// Check whether the VPS holds an active global session for `wallet_pubkey`.
-/// Returns `Ok(Some(session_pubkey))` if active, `Ok(None)` if not, `Err` on network failure.
 pub fn verify_global_session(wallet_pubkey: &str) -> Result<Option<String>, String> {
     let resp = client_fast()?
         .get(format!(
@@ -197,13 +175,6 @@ struct TrackGameReq<'a> {
     wallet_pubkey: &'a str,
 }
 
-/// Tell the backend a game was just created/joined via the global-session
-/// flow, so `settlement_worker` can discover and auto-settle it — see
-/// `routes::global_session::track_game`'s doc comment for why this exists.
-/// Best-effort: `finalize_game`/`undelegate_game` don't depend on this call
-/// having succeeded (they resolve a signer from on-chain state directly), so
-/// a failure here only means this specific game misses out on *automatic*
-/// settlement, not that it becomes unsettleable.
 pub fn track_global_session_game(game_id: u64, wallet_pubkey: &str) -> Result<(), String> {
     let resp = client_fast()?
         .post(format!("{}/api/global-session/track-game", vps_base()))

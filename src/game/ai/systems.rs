@@ -16,14 +16,6 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// Resource holding the async AI computation task and its reveal timing.
-///
-/// `spawned_at` + `min_reveal_delay` enforce a minimum, slightly randomized
-/// pause between the AI's turn starting and its move being applied to the
-/// board — see [`crate::game::ai::resource::AIDifficulty::thinking_delay_range_ms`].
-/// Without this, low-difficulty searches (which finish in well under 100ms)
-/// make the AI's move snap onto the board instantly, which reads as
-/// robotic/broken UX rather than an opponent "thinking".
 #[derive(Resource)]
 pub struct PendingAIMove {
     pub task: Task<Result<AIMove, String>>,
@@ -31,22 +23,12 @@ pub struct PendingAIMove {
     min_reveal_delay: Duration,
 }
 
-/// A resolved AI move still waiting out `min_reveal_delay` before it's
-/// applied to the board. Populated once the search task in [`PendingAIMove`]
-/// completes faster than the minimum reveal delay.
 #[derive(Resource)]
 pub struct AIMovePendingReveal {
     result: Result<AIMove, String>,
     ready_at: Instant,
 }
 
-/// Persistent, pre-warmed nimzovich engine game.
-///
-/// Avoids the 2.2 GB TT zero-write that `game_from_fen` / `new_game` triggers on
-/// every AI call.  The async task takes the game out (`Option` becomes `None`),
-/// calls `set_game_from_fen` (reuses the existing TT allocation), runs the search,
-/// then puts the game back.  A background warm-up task fills the pool on game entry
-/// so it is ready before the player's first move.
 #[derive(Resource, Clone)]
 pub struct XFChessGamePool(pub std::sync::Arc<std::sync::Mutex<Option<nimzovich_engine::Game>>>);
 
@@ -116,11 +98,9 @@ impl Drop for StockfishInner {
     }
 }
 
-/// Persistent Stockfish process, shared via Arc<Mutex<>> so async tasks can reuse it.
 #[derive(Resource, Clone)]
 pub struct StockfishProcess(std::sync::Arc<std::sync::Mutex<StockfishInner>>);
 
-/// AI move representation with Stockfish statistics
 #[derive(Debug, Clone)]
 pub struct AIMove {
     pub from: (u8, u8),
@@ -193,7 +173,6 @@ fn resolve_stockfish_path() -> Result<PathBuf, String> {
         })
 }
 
-/// Resource to track AI statistics
 #[derive(Resource, Default, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct AIStatistics {
@@ -203,7 +182,6 @@ pub struct AIStatistics {
     pub thinking_time: f32,
 }
 
-/// Plugin for AI systems
 pub struct AIPlugin;
 
 impl Plugin for AIPlugin {
@@ -227,10 +205,6 @@ impl Plugin for AIPlugin {
     }
 }
 
-/// Pre-allocate the XFChess engine game on game entry to avoid the 2.2 GB TT
-/// zero-write during the first AI move. Runs immediately after transitioning to
-/// InGame while the board and assets are loading, so it finishes before the player
-/// can make their first move.
 fn warmup_xf_engine_pool(mut commands: Commands, ai_config: Res<ChessAIResource>) {
     if ai_config.engine != crate::game::ai::resource::AIEngine::XFChessEngine {
         return;
@@ -259,7 +233,6 @@ fn warmup_xf_engine_pool(mut commands: Commands, ai_config: Res<ChessAIResource>
     info!("[AI] XFChess engine warm-up started");
 }
 
-/// System params for spawning AI task
 #[derive(SystemParam)]
 pub struct AiSpawnParams<'w, 's> {
     pub ai_config: Res<'w, ChessAIResource>,
@@ -277,10 +250,6 @@ pub struct AiSpawnParams<'w, 's> {
     pub game_pool: Option<Res<'w, XFChessGamePool>>,
 }
 
-/// Compute think_time and an optional depth cap from time control context.
-///
-/// - Caps think_time to `base_seconds / 40` so the AI can't flag in short games.
-/// - Sets `max_depth = Some(6)` for fast games with no increment (< 60 s + 0).
 fn compute_think_params(
     base_think: f32,
     half_moves_played: usize,
@@ -316,7 +285,6 @@ fn compute_think_params(
     (think_time, max_depth)
 }
 
-/// System params for polling AI task
 #[derive(SystemParam)]
 pub struct AiPollParams<'w, 's> {
     pub ai_config: Res<'w, ChessAIResource>,
@@ -504,8 +472,6 @@ fn spawn_xf_engine_task(
     })
 }
 
-/// Spawn a task that queries the persistent Stockfish process and returns the best move.
-/// No cold-start overhead — the process stays alive between moves.
 fn spawn_stockfish_task_persistent(
     fen: String,
     depth: u8,
@@ -590,8 +556,12 @@ fn spawn_stockfish_task_persistent(
         // Send position and search command.
         writeln!(guard.stdin, "position fen {}", fen).map_err(|e| e.to_string())?;
         guard.stdin.flush().map_err(|e| e.to_string())?;
-        writeln!(guard.stdin, "{}", stockfish_search_command(depth, movetime_ms))
-            .map_err(|e| e.to_string())?;
+        writeln!(
+            guard.stdin,
+            "{}",
+            stockfish_search_command(depth, movetime_ms)
+        )
+        .map_err(|e| e.to_string())?;
         guard.stdin.flush().map_err(|e| e.to_string())?;
 
         // Read until bestmove.
@@ -689,11 +659,12 @@ fn normalized_move_uci(from: (u8, u8), to: (u8, u8), promotion: Option<char>) ->
         "{}{}{}",
         ChessEngine::coords_to_uci(from.0, from.1),
         ChessEngine::coords_to_uci(to.0, to.1),
-        promotion.map(|c| c.to_ascii_lowercase()).unwrap_or_default()
+        promotion
+            .map(|c| c.to_ascii_lowercase())
+            .unwrap_or_default()
     )
 }
 
-/// Helper to check conditions for spawning AI task
 fn should_skip_ai_spawn(
     pending_task: &Option<Res<PendingAIMove>>,
     pending_reveal: &Option<Res<AIMovePendingReveal>>,
@@ -761,9 +732,6 @@ fn should_skip_ai_spawn(
     false
 }
 
-/// System that polls the AI task and executes the move once it's both
-/// resolved and past its minimum "thinking" reveal delay (see
-/// [`PendingAIMove`] / [`AIMovePendingReveal`]).
 #[allow(clippy::too_many_arguments)]
 fn poll_ai_task_system(mut commands: Commands, mut params: AiPollParams) {
     // A move already finished computing and is waiting out its reveal delay.
@@ -798,8 +766,6 @@ fn poll_ai_task_system(mut commands: Commands, mut params: AiPollParams) {
     }
 }
 
-/// Turns a resolved AI search result into board state: updates statistics
-/// and, if the search succeeded, executes the move via [`execute_move`].
 fn apply_ai_result(
     result: Result<AIMove, String>,
     commands: &mut Commands,
@@ -937,7 +903,6 @@ fn apply_ai_result(
     }
 }
 
-/// Find entity, piece data, and potential capture target for a move
 fn find_move_entities(
     pieces_query: &Query<(Entity, &mut Piece, &mut HasMoved)>,
     from: (u8, u8),

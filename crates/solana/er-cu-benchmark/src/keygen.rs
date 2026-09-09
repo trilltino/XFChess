@@ -1,5 +1,3 @@
-//! Master keypair generation and child wallet funding.
-
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
@@ -12,7 +10,6 @@ use std::path::Path;
 
 use crate::{CHILDREN_KEYPAIR_PATH, CHILD_FUNDING_AMOUNT, MASTER_KEYPAIR_PATH, MASTER_MIN_BALANCE};
 
-/// Load the master keypair from disk or generate a new one.
 pub fn load_or_generate_master_keypair() -> anyhow::Result<Keypair> {
     let path = Path::new(MASTER_KEYPAIR_PATH);
 
@@ -39,19 +36,8 @@ pub fn load_or_generate_master_keypair() -> anyhow::Result<Keypair> {
     Ok(keypair)
 }
 
-/// Path to the tournament-authority keypair. `initialize_tournament`,
-/// `initialize_tournament_shards`, and `initialize_tournament_escrow` all
-/// hard-require their `authority` signer to equal the program's baked-in
-/// `constants::vps_authority::ID` (`programs/xfchess-game/src/constants.rs`)
-/// — unlike the 1v1 game flows, tournament creation can't use an arbitrary
-/// funded wallet.
 const TOURNAMENT_AUTHORITY_KEYPAIR_PATH: &str = "keys/vps_authority.json";
 
-/// Load the tournament-authority keypair from disk. Deliberately has no
-/// "generate a new one" fallback (unlike `load_or_generate_master_keypair`):
-/// a freshly generated keypair would never match the on-chain
-/// `vps_authority::ID` constant, so a missing file has to be a hard error,
-/// not a silently-wrong one.
 pub fn load_tournament_authority_keypair() -> anyhow::Result<Keypair> {
     let path = Path::new(TOURNAMENT_AUTHORITY_KEYPAIR_PATH);
     let data = fs::read_to_string(path).map_err(|e| {
@@ -70,17 +56,8 @@ pub fn load_tournament_authority_keypair() -> anyhow::Result<Keypair> {
     Ok(keypair)
 }
 
-/// Path to the dispute-authority keypair. `recover_stuck_delegation` (and
-/// `resolve_dispute`/`claim_stale_dispute`) hard-require their signer to
-/// equal the program's baked-in `constants::dispute_authority::ID` -
-/// `recovery_drill::run_stuck_delegation_drill` cannot use an arbitrary
-/// funded wallet for this step.
 const DISPUTE_AUTHORITY_KEYPAIR_PATH: &str = "keys/dispute_authority.json";
 
-/// Load the dispute-authority keypair from disk. No "generate a new one"
-/// fallback, same reasoning as [`load_tournament_authority_keypair`]: a
-/// fresh keypair would never match the on-chain `dispute_authority::ID`
-/// constant, so a missing file must be a hard error.
 pub fn load_dispute_authority_keypair() -> anyhow::Result<Keypair> {
     let path = Path::new(DISPUTE_AUTHORITY_KEYPAIR_PATH);
     let data = fs::read_to_string(path).map_err(|e| {
@@ -96,8 +73,6 @@ pub fn load_dispute_authority_keypair() -> anyhow::Result<Keypair> {
     Ok(keypair)
 }
 
-/// Generate N child keypairs for test participants.
-/// Loads from disk if previously saved, otherwise generates fresh and persists.
 pub fn generate_child_keypairs(count: usize) -> Vec<Keypair> {
     let path = Path::new(CHILDREN_KEYPAIR_PATH);
 
@@ -140,7 +115,6 @@ pub fn generate_child_keypairs(count: usize) -> Vec<Keypair> {
     keypairs
 }
 
-/// Fund all child wallets from the master keypair.
 pub async fn fund_children(
     rpc: &RpcClient,
     master: &Keypair,
@@ -182,7 +156,6 @@ pub async fn fund_children(
     Ok(())
 }
 
-/// Reclaim surplus SOL from child wallets back to master.
 pub async fn reclaim_surplus(
     rpc: &RpcClient,
     master: &Keypair,

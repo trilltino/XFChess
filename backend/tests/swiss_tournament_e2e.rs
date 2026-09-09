@@ -1,15 +1,3 @@
-//! End-to-end Swiss tournament lifecycle test, driven through the real HTTP
-//! router (`build_app_router`) and the real `SwissService`/`TournamentStore`
-//! (Tier T1; see `tests/e2e_api.rs`'s module doc for the pattern this follows).
-//!
-//! Tournament creation is seeded directly into `TournamentStore` rather than
-//! through `POST /admin/tournament/create` — that route also submits three
-//! on-chain PDA-setup transactions (see `create_tournament` in
-//! `signing/routes/tournament.rs`), which this in-process test has no RPC to
-//! satisfy. Registration (`/tournament/{id}/join`), Swiss initialization,
-//! pairing generation, result recording, round advancement, and standings are
-//! all chain-free and are exercised for real over HTTP.
-
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -87,11 +75,6 @@ impl TestApp {
         self.send(req).await
     }
 
-    /// Same as `post_json`, plus the `X-API-Key` header `require_api_key`
-    /// checks on admin routes. No `ADMIN_API_KEY` env var is set anywhere in
-    /// this file, so the middleware's debug-build default (`"dev"`) applies —
-    /// deliberately avoided setting the process-global env var to sidestep
-    /// the cross-test race `tests/e2e_api.rs` documents for the same reason.
     async fn post_json_admin(&self, uri: &str, body: &Value) -> (StatusCode, Value) {
         let req = Request::builder()
             .uri(uri)
@@ -138,9 +121,6 @@ async fn spawn_app() -> TestApp {
     TestApp { state }
 }
 
-/// Full 8-player, 5-round Swiss tournament through the real HTTP surface:
-/// join -> initialize -> round 1 pairings -> record results -> auto-advance
-/// to round 2 -> round 2 pairings -> standings.
 #[tokio::test]
 async fn swiss_tournament_full_lifecycle_via_http() {
     let app = spawn_app().await;
@@ -306,12 +286,6 @@ async fn swiss_tournament_full_lifecycle_via_http() {
     assert_eq!(standings[0]["score"], json!(1.0));
 }
 
-/// `POST /admin/tournament/{id}/approve-prize-release` is the human-in-the-loop
-/// gate `spawn_prize_distributor` checks before paying out a prize pool above
-/// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` — see
-/// `tasks::tournament_scheduler::awaiting_prize_release_approval`. This test
-/// only exercises the HTTP surface (auth + persistence); the distributor's
-/// own gating logic has direct unit tests in that module.
 #[tokio::test]
 async fn approve_prize_release_route_sets_the_flag() {
     let app = spawn_app().await;

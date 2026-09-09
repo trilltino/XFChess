@@ -1,26 +1,3 @@
-//! XFChess Tournament Admin CLI
-//!
-//! A dynamic admin tool for creating and managing tournaments with full
-//! control over scheduling, entrant counts, KYC/CACF gating, format, and prizes.
-//!
-//! # Usage
-//! ```
-//! cargo run --bin tournament_admin
-//! ```
-//!
-//! # Required environment variables
-//! - `ADMIN_API_KEY`  — admin API key for the signing server
-//!
-//! # Optional environment variables
-//! - `SIGNING_SERVICE_URL` — server base URL (default: local HTTP server)
-//!
-//! # KYC / CACF
-//! When `kyc_required = true` is set on a tournament, the server already stores
-//! a `kyc_required` flag on `TournamentRecord`. This CLI also exposes a live
-//! KYC status check per wallet so you can audit entrants before opening play.
-//!
-//! Reference: `backend/src/signing/routes/identity.rs` — `GET /identity/status/{pubkey}`
-
 use std::env;
 use std::io::{self, Write};
 
@@ -35,9 +12,6 @@ fn server_url() -> String {
     SERVICE_URL.get_or_init(resolve_service_url).clone()
 }
 
-/// Resolve the backend URL once. An explicit `SIGNING_SERVICE_URL` wins (but is
-/// rejected if it is plain http to a non-loopback host). With no env set, prompt
-/// the operator to pick LOCAL or PRODUCTION (which needs an SSH tunnel).
 fn resolve_service_url() -> String {
     if let Ok(url) = env::var("SIGNING_SERVICE_URL") {
         if is_insecure_remote(&url) {
@@ -73,7 +47,6 @@ fn resolve_service_url() -> String {
     }
 }
 
-/// True for an `http://` URL whose host is neither 127.0.0.1 nor localhost.
 fn is_insecure_remote(url: &str) -> bool {
     if let Some(rest) = url.strip_prefix("http://") {
         let host = rest.split(['/', ':']).next().unwrap_or("");
@@ -82,7 +55,6 @@ fn is_insecure_remote(url: &str) -> bool {
     false
 }
 
-/// Blocking GET {url}/health with a short timeout; true on 2xx.
 fn health_ok(url: &str) -> bool {
     reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -180,8 +152,6 @@ fn read_u32_opt(label: &str) -> Option<u32> {
     }
 }
 
-/// Parse a human-readable UTC datetime string into a Unix timestamp.
-/// Accepted format: "YYYY-MM-DD HH:MM" or "YYYY-MM-DD HH:MM:SS"
 fn parse_datetime(s: &str) -> Option<i64> {
     let fmts = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"];
     for fmt in &fmts {
@@ -948,7 +918,6 @@ fn calculate_prizes() {
 // need any special authority, since the program validates completeness from
 // on-chain state, not from who calls it.
 
-/// Program ID pinned in root CLAUDE.md (localnet + devnet).
 const DEFAULT_PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
 fn advance_tournament_round_directly() {

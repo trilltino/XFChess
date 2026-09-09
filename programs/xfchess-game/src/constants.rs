@@ -1,5 +1,3 @@
-//! Program-wide constants, discriminators, and magic numbers.
-
 use anchor_lang::prelude::*;
 
 // PDA seeds — each is the prefix byte string used to derive a Program Derived Address
@@ -45,10 +43,6 @@ pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize"; // Derives the SP
 // Before mainnet: rotate the devnet keys whose secrets were exposed in git
 // history (see backend/.env handling); optionally move to hardware-backed signers.
 
-/// The KYC/identity verification authority (VPS backend signer).
-/// Called by `verify_profile` to mark a player as KYC-verified on-chain.
-/// Public key: 2mh7zXgZHaeDnroJQQdHnLNiierWXdn43VnATbGdATZK
-/// Private key stored in backend/.env as KYC_AUTHORITY_KEY and keys/kyc_authority.json
 pub mod kyc_authority {
     use super::*;
     pub const ID: Pubkey = Pubkey::new_from_array([
@@ -58,10 +52,6 @@ pub mod kyc_authority {
     ]);
 }
 
-/// The platform dispute-resolution authority — the only signer allowed to
-/// call `resolve_dispute`.
-/// Public key: HAHgvXf6uYxTqEuUnkkzTS1EQD8sYd342zgxM2wdqpa2
-/// Private key stored in backend/.env as DISPUTE_AUTHORITY_KEY and keys/dispute_authority.json
 pub mod dispute_authority {
     use super::*;
     pub const ID: Pubkey = Pubkey::new_from_array([
@@ -71,11 +61,6 @@ pub mod dispute_authority {
     ]);
 }
 
-/// The external-elo linking authority — the only signer allowed to call
-/// `link_external_elo` to mark a Lichess account as verified on-chain.
-/// Public key: 42fiB5KcC1jEVXxmgPoWqpA3zuKEsZGu77YHmCwNEcrh
-/// Private key stored in keys/link_authority.json (gitignored) and, for the
-/// backend signer, backend/.env as LINK_AUTHORITY_KEY. Rotate before mainnet.
 pub mod link_authority {
     use super::*;
     pub const ID: Pubkey = Pubkey::new_from_array([
@@ -85,14 +70,6 @@ pub mod link_authority {
     ]);
 }
 
-/// The VPS/backend operational authority — the only signer allowed to call
-/// privileged instructions such as `update_elo` and tournament creation.
-/// Deliberately a dedicated key, separate from the
-/// program's upgrade authority, so a compromised backend can't touch the
-/// deployed program itself.
-/// Matches keys/vps_authority.json (HZTwvN9AUK1n9jmQydrh5vkpdCBZm13W7qD9jtPZJSQc).
-/// Must be funded with devnet SOL before it can sign/pay for tournament
-/// creation (it's the fee payer for the Tournament/Escrow/Shards PDAs).
 pub mod vps_authority {
     use super::*;
     pub const ID: Pubkey = Pubkey::new_from_array([
@@ -102,14 +79,6 @@ pub mod vps_authority {
     ]);
 }
 
-/// The treasury-withdrawal authority — the only signer allowed to call
-/// `withdraw_treasury` and drain accumulated platform fees. Deliberately kept
-/// separate from `vps_authority` so platform revenue sits behind a dedicated
-/// signer without also gating result-signing.
-/// Public key: 9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd
-/// A single dedicated devnet/testnet wallet (no multisig). Private key stored in
-/// keys/treasury_authority.json (gitignored) / backend .env TREASURY_AUTHORITY_KEY.
-/// Rotate before mainnet.
 pub mod treasury_authority {
     use super::*;
     pub const ID: Pubkey = Pubkey::new_from_array([
@@ -119,45 +88,20 @@ pub mod treasury_authority {
     ]);
 }
 
-/// Hard cap on a single wager so no one can lock more than 10 SOL in one game.
 pub const MAX_WAGER_AMOUNT: u64 = 10 * 1_000_000_000; // 10 SOL in lamports
 
-/// Hard cap on the client-supplied `platform_fee` a single game can carry.
-/// docs/PRE_MAINNET_E2E_PLAN.md §2.2: `platform_fee` is a live, backend-computed
-/// value (real SOL/GBP rate, see `backend/src/signing/routes/rates.rs`) with no
-/// prior on-chain bound on its magnitude — a buggy or malicious caller could
-/// otherwise set `game.country_fee` to an amount that consumes most or all of
-/// the wager pot at settlement (`lifecycle::settlement.rs`'s `.min(remaining)`
-/// prevents an underflow panic, but not the pot being drained of value before
-/// the winner is paid). Set well above any real per-game fee (observed
-/// ~0.00045 SOL in `global_session_settlement_tests.rs`) but as a hard ceiling
-/// relative to `MAX_WAGER_AMOUNT`, not an unbounded passthrough.
 pub const MAX_PLATFORM_FEE_LAMPORTS: u64 = MAX_WAGER_AMOUNT / 10; // 1 SOL
 
-/// Minimum wager amount (0.001 SOL).
 pub const MIN_WAGER_LAMPORTS: u64 = 1_000_000;
 
-/// Lamports advanced by each player to cover on-chain compute costs.
 pub const CREATE_GAME_COST: u64 = 5_000; // lamports
 pub const JOIN_GAME_COST: u64 = 5_000;
 pub const DELEGATE_COST: u64 = 5_000;
-/// Base-layer tx-fee advance for the `undelegate_game` instruction. Accrued
-/// in `lifecycle::transitions::mark_undelegated` — previously defined but
-/// never added to `fees_advanced`.
 pub const UNDELEGATE_COST: u64 = 5_000;
 pub const RECORD_RESULT_COST: u64 = 5_000;
 
-/// Flat model of the MagicBlock ER-validator-side "session fee" implicitly
-/// deducted from the session key's balance around commit/undelegate — an ER
-/// infrastructure cost, not a Solana base-layer tx fee, so it's invisible to
-/// any on-chain instruction. Mirrors the identical constant the benchmark's
-/// cost model assumes (`ER_SESSION_FEE_LAMPORTS`,
-/// crates/solana/er-cu-benchmark/src/cost_reporter.rs) — keep both in sync.
-/// Accrued once per game in `lifecycle::transitions::mark_undelegated`.
 pub const ER_SESSION_FEE_LAMPORTS: u64 = 300_000;
 
-/// How often (ms) the Ephemeral Rollup commits delegated game state back to the
-/// base layer. A fixed cadence — must not be derived from per-game arguments.
 pub const ER_COMMIT_FREQUENCY_MS: u32 = 30_000; // 30s
 pub const CLAIM_PRIZE_COST: u64 = 5_000;
 
@@ -169,27 +113,16 @@ pub const CLAIM_PRIZE_COST: u64 = 5_000;
 // them as instruction parameters — the program stores and enforces them but
 // never hardcodes a currency-specific value.
 
-/// Flat infrastructure fee charged when the dispute authority resolves a contested game.
-/// This is a fixed cost for the resolution service — not a percentage rake on the pot.
 pub const DISPUTE_RESOLUTION_COST_LAMPORTS: u64 = 10_000;
 
-/// Bond the challenger must post when opening a dispute (0.01 SOL). Refunded if
-/// the dispute is upheld (challenger ruled the winner) or auto-resolved after the
-/// TTL; forfeited to the platform treasury if the dispute is dismissed. Deters
-/// a losing player from disputing an active game just to freeze the pot.
 pub const DISPUTE_BOND_LAMPORTS: u64 = 10_000_000;
 
-/// ELO update fee per player
 pub const ELO_FEE_LAMPORTS: u64 = 5_000; // 0.000005 SOL per ELO update
 
-/// Treasury vault seed
 pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
-/// Global persistent session delegation seed
 pub const GLOBAL_SESSION_SEED: &[u8] = b"global_session";
 
-/// Time-to-live for an unresolved dispute (7 days in seconds).
-/// After this window any party may call claim_stale_dispute for an automatic 50/50 split.
 pub const DISPUTE_TTL_SECS: i64 = 604_800;
 
 #[cfg(test)]
@@ -205,11 +138,6 @@ mod tests {
         assert_ne!(treasury_authority::ID, Pubkey::default());
     }
 
-    /// docs/PRE_MAINNET_E2E_PLAN.md §2.1: the five authorities gate distinct
-    /// privileges (KYC, disputes, external-ELO linking, backend ops, treasury
-    /// withdrawal). A future edit that accidentally collapses two of these
-    /// onto the same key would silently merge two trust boundaries — this
-    /// test exists so that edit fails CI instead of shipping quietly.
     #[test]
     fn production_authorities_are_pairwise_distinct() {
         let authorities = [

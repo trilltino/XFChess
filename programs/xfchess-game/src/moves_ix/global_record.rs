@@ -1,31 +1,15 @@
-//! Instruction for recording a move via the *global* (per-wallet) session key,
-//! mirroring `record.rs` for games created with `global_create_game`/
-//! `global_join_game`. Those never get a per-game `SessionDelegation` account
-//! (that's what makes their create/join popup-free), so the original
-//! `record_move` — which hard-requires that account — fails on-chain for
-//! them. Same move-application logic (`apply::apply_recorded_move`), just
-//! checked against `GlobalSessionDelegation` instead.
-
 use crate::constants::GAME_SEED;
 use crate::errors::GameErrorCode;
 use crate::moves_ix::apply;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-/// Accounts for recording a move via a wallet's global session key.
-/// `player` is the session signer, not the wallet — the actual moving
-/// wallet is `session_delegation.player`, which must be one of `game.white`/
-/// `game.black` (a global session isn't scoped to one game the way a
-/// per-game `SessionDelegation` is, so that check has to happen here
-/// instead of being implicit in the PDA's seeds).
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct GlobalRecordMove<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
-    /// Global session key — must match the session_delegation below.
     pub player: Signer<'info>,
-    /// Global session delegation for the wallet actually making this move.
     #[account(
         seeds = [GlobalSessionDelegation::SEED, session_delegation.player.as_ref()],
         bump = session_delegation.bump,
@@ -37,8 +21,6 @@ pub struct GlobalRecordMove<'info> {
     pub session_delegation: Account<'info, GlobalSessionDelegation>,
 }
 
-/// Same shape as `record::handler` — checks session expiry, delegates to the
-/// shared `apply::apply_recorded_move`, emits the same `MoveEvent`.
 pub fn handler(
     ctx: Context<GlobalRecordMove>,
     _game_id: u64,

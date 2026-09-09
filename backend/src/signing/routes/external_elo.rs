@@ -1,11 +1,3 @@
-//! External ELO linking routes for Lichess integration.
-//!
-//! Endpoints:
-//! - POST /api/external-elo/link/start — start bio-nonce verification flow
-//! - POST /api/external-elo/link/confirm — poll Lichess, verify, submit on-chain
-//! - GET  /api/external-elo/status/{pubkey} — check current link status
-//! - POST /api/external-elo/sync — force re-sync of Lichess ratings
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -78,7 +70,6 @@ pub struct SyncResp {
     pub new_elo: f64,
 }
 
-/// Pending link stored in memory (MVP; could move to SQLite for persistence)
 #[derive(Clone)]
 struct PendingLink {
     pubkey: String,
@@ -93,7 +84,6 @@ use std::sync::{Arc, Mutex};
 static PENDING_LINKS: Lazy<Arc<Mutex<std::collections::HashMap<String, PendingLink>>>> =
     Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));
 
-/// Creates the external-elo routes router.
 pub fn external_elo_routes() -> Router<AppState> {
     Router::new()
         .route("/external-elo/link/start", post(link_start))
@@ -104,8 +94,6 @@ pub fn external_elo_routes() -> Router<AppState> {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-/// POST /api/external-elo/link/start
-/// Generates a nonce and stores a pending link. Player must put nonce in Lichess bio.
 async fn link_start(
     State(_state): State<AppState>,
     Json(req): Json<LinkStartReq>,
@@ -173,8 +161,6 @@ async fn link_start(
     }))
 }
 
-/// POST /api/external-elo/link/confirm
-/// Polls Lichess API, verifies bio contains nonce, then submits on-chain tx.
 async fn link_confirm(
     State(state): State<AppState>,
     Json(req): Json<LinkConfirmReq>,
@@ -355,7 +341,6 @@ async fn link_confirm(
     }))
 }
 
-/// GET /api/external-elo/status/{pubkey}
 async fn link_status(
     State(state): State<AppState>,
     Path(pubkey): Path<String>,
@@ -399,8 +384,6 @@ async fn link_status(
     }))
 }
 
-/// POST /api/external-elo/sync
-/// Forces a re-sync of Lichess ratings for an already-linked account.
 async fn link_sync(
     State(state): State<AppState>,
     Json(req): Json<SyncReq>,

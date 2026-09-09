@@ -1,27 +1,17 @@
-/// Anti-cheat configuration. Loaded once at startup; all fields are tunable
-/// without recompiling by editing config.toml or environment overrides.
 #[derive(Debug, Clone)]
 pub struct AcConfig {
     // ── Stockfish ──────────────────────────────────────────────────────────────
-    /// Path to the Stockfish binary. Must be on the server.
     pub stockfish_path: String,
-    /// Analysis depth. 18 gives strong accuracy at ~100 ms/move on most positions.
     pub analysis_depth: u8,
-    /// Max time allowed per position (ms). Safety cap.
     pub movetime_ms: u64,
-    /// Number of concurrent Stockfish workers.
     pub worker_count: usize,
 
     // ── Complexity filter ──────────────────────────────────────────────────────
-    /// Delta below which a position is Forced (only one reasonable move).
     pub forced_delta_cp: i32,
-    /// Delta at and above which a position is Complex.
     pub complex_delta_cp: i32,
 
     // ── Timing signal ──────────────────────────────────────────────────────────
-    /// Moves faster than this (ms) on Complex positions are suspicious.
     pub timing_fast_threshold_ms: u32,
-    /// If player has less than this many seconds on clock, disable timing signal.
     pub timing_disable_below_sec: u32,
 
     // ── Scoring thresholds ─────────────────────────────────────────────────────
@@ -32,13 +22,9 @@ pub struct AcConfig {
     pub weight_timing: f64,
     pub weight_cpl_vs_elo: f64,
     pub weight_t1_rate: f64,
-    /// Blur escalator weight — applied *on top of* the normalized weights so
-    /// games without client telemetry score exactly as before. Blur alone can
-    /// never reach the flag threshold.
     pub weight_blur: f64,
 
     // ── Minimum samples ───────────────────────────────────────────────────────
-    /// Skip analysis if fewer Complex plies than this.
     pub min_complex_plies: u32,
 
     // ── Reports ───────────────────────────────────────────────────────────────
@@ -46,7 +32,6 @@ pub struct AcConfig {
 
     // ── Job queue ──────────────────────────────────────────────────────────────
     pub queue_capacity: usize,
-    /// Retry attempts before giving up on a game.
     pub max_attempts: u32,
 }
 

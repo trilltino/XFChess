@@ -1,5 +1,3 @@
-//! HTTP/3 response handling.
-
 #[cfg(feature = "json")]
 pub mod ndjson;
 pub mod sse;
@@ -21,7 +19,6 @@ use crate::body::Body;
 use crate::error::Error;
 use crate::response::sse::{SseEvent, SseStream};
 
-/// HTTP/3 response with header access and buffered or streaming body readers.
 #[must_use]
 pub struct Response {
     pub(crate) inner: http::response::Parts,
@@ -44,21 +41,6 @@ impl Deref for Response {
 }
 
 impl Response {
-    /// Reads the full response body into a contiguous [`Bytes`] buffer.
-    ///
-    /// # Example
-    /// ```rust
-    /// # use iroh_h3_client::request::ClientRequest;
-    ///
-    /// # async fn example(request: ClientRequest) -> Result<(), Box<dyn std::error::Error>> {
-    ///
-    /// let mut response = request.send().await?;
-    /// let body = response.bytes().await?;
-    /// println!("Response body: {:?}", body);
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
     #[instrument(skip(self))]
     pub async fn bytes(self) -> Result<Bytes, Error> {
         let mut buf = Vec::new();
@@ -72,21 +54,6 @@ impl Response {
         Ok(Bytes::from(buf))
     }
 
-    /// Reads the full response body as UTF-8 text.
-    ///
-    /// # Example
-    /// ```rust
-    /// # use iroh_h3_client::request::ClientRequest;
-    ///
-    /// # async fn example(request: ClientRequest) -> Result<(), Box<dyn std::error::Error>> {
-    ///
-    /// let mut response = request.send().await?;
-    /// let text = response.text().await?;
-    /// println!("Response: {}", text);
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
     #[instrument(skip(self))]
     pub async fn text(self) -> Result<String, Error> {
         let bytes = self.bytes().await?;
@@ -97,24 +64,6 @@ impl Response {
         Ok(string)
     }
 
-    /// Deserializes the response body as JSON.
-    ///
-    /// # Example
-    /// ```rust
-    /// #[derive(serde::Deserialize)]
-    /// struct ApiResponse { message: String }
-    ///
-    /// # use iroh_h3_client::request::ClientRequest;
-    ///
-    /// # async fn example(request: ClientRequest) -> Result<(), Box<dyn std::error::Error>> {
-    ///
-    /// let mut response = request.send().await?;
-    /// let data: ApiResponse = response.json().await?;
-    /// println!("Message: {}", data.message);
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
     #[cfg(feature = "json")]
     #[instrument(skip(self))]
     pub async fn json<T: DeserializeOwned>(self) -> Result<T, Error> {
@@ -125,35 +74,16 @@ impl Response {
         Ok(value)
     }
 
-    /// Streams response body chunks without buffering the full body.
-    ///
-    /// # Example
-    /// ```rust
-    /// use futures::StreamExt;
-    /// # use iroh_h3_client::request::ClientRequest;
-    ///
-    /// # async fn example(request: ClientRequest) -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut response = request.send().await?;
-    /// let mut stream = response.bytes_stream();
-    ///
-    /// while let Some(chunk) = stream.next().await.transpose()? {
-    ///     println!("Received chunk: {:?}", chunk);
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
     #[instrument(skip(self))]
     pub fn bytes_stream(self) -> impl Stream<Item = Result<Bytes, Error>> {
         self.body.into_stream().into_data_stream()
     }
 
-    /// Returns a stream of Server-Sent Events
     #[instrument(skip(self))]
     pub fn sse_stream(self) -> impl Stream<Item = Result<SseEvent, Error>> {
         SseStream::new(self)
     }
 
-    /// Returns a stream of NDJSON
     #[cfg(feature = "json")]
     #[instrument(skip(self))]
     pub fn ndjson_stream<T: DeserializeOwned>(self) -> impl Stream<Item = Result<T, Error>> {
@@ -163,9 +93,6 @@ impl Response {
     }
 }
 
-/// HTTP/3 body implementing `http_body::Body`.
-///
-/// Wraps the `RequestStream` returned by iroh-h3.
 pub(crate) struct IrohH3ResponseBody {
     pub(crate) stream: h3::client::RequestStream<iroh_h3::BidiStream<Bytes>, Bytes>,
     pub(crate) _sender: h3::client::SendRequest<OpenStreams, Bytes>,

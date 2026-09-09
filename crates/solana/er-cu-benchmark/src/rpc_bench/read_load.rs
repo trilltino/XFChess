@@ -1,9 +1,3 @@
-//! Read-RPC load test: fire light JSON-RPC reads at ramping concurrency and
-//! report latency percentiles + the HTTP 429 (throttle) rate per endpoint.
-//!
-//! This is the head-to-head that proves the "kills the 429s" claim: run it against
-//! the Triton endpoint and against public devnet and compare the `429` columns.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -13,13 +7,11 @@ use tokio::task::JoinSet;
 
 use super::{redact_url, LatencyStats};
 
-/// A named RPC endpoint to benchmark.
 pub struct Target {
     pub name: String,
     pub url: String,
 }
 
-/// Lightweight, side-effect-free read methods rotated across requests.
 const METHODS: &[&str] = &[
     "getSlot",
     "getLatestBlockhash",
@@ -33,7 +25,6 @@ fn method_body(i: usize) -> Value {
     json!({ "jsonrpc": "2.0", "id": 1, "method": method })
 }
 
-/// Run the full ramp for every target and print a comparison table each.
 pub async fn run(targets: &[Target], levels: &[usize], requests_per_level: usize) {
     println!("\n╔══════════════════════════════════════════════════════════╗");
     println!("║  READ-RPC LOAD TEST  (latency + 429 rate under concurrency)  ║");
@@ -82,7 +73,6 @@ pub async fn run(targets: &[Target], levels: &[usize], requests_per_level: usize
     println!("\n   Read 429>0 on public devnet but 429≈0 on Triton = the throttling win is real.");
 }
 
-/// Render horizontal bar charts so the Triton-vs-baseline gap is visible at a glance.
 fn render_charts(targets: &[Target], levels: &[usize], grid: &[Vec<(LatencyStats, f64)>]) {
     const WIDTH: usize = 40;
     let label_w = targets
@@ -135,7 +125,6 @@ fn render_charts(targets: &[Target], levels: &[usize], grid: &[Vec<(LatencyStats
     println!("   └────────────────────────────────────────────────────────────────────");
 }
 
-/// A filled horizontal bar scaled to `max` over `width` columns.
 fn bar(value: f64, max: f64, width: usize) -> String {
     if max <= 0.0 {
         return String::new();
@@ -153,8 +142,6 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-/// Benchmark one (endpoint, concurrency) point with `total` requests split evenly
-/// across `concurrency` workers sharing a connection pool.
 async fn bench_level(url: &str, concurrency: usize, total: usize) -> LatencyStats {
     let client = Arc::new(
         Client::builder()

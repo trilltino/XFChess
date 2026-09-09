@@ -1,37 +1,16 @@
-//! Braid-HTTP version patch construction.
-//!
-//! A [`BraidPatch`] bundles a serialised [`ChessMessage`] with the Braid
-//! version/parents needed for the `Version` and `Parents` HTTP headers.
-
 use crate::error::BraidChessError;
 use crate::message::{ChessMessage, MovePayload};
 use hex;
 use sha2::{Digest, Sha256};
 
-/// A Braid-HTTP version patch ready to be PUT to a chess resource.
-///
-/// Chess moves are strictly linear — no player ever produces two candidate
-/// next-moves from the same position — so `parents` here is always a single
-/// entry. This is deliberately *not* a CRDT/OT merge structure: the upstream
-/// Braid merge engine was removed from this codebase (see `crates/CLAUDE.md`)
-/// in favor of a simple, disputable, content-addressed hash chain. A future
-/// reader should not expect multi-parent merge semantics to appear here.
 #[derive(Debug, Clone)]
 pub struct BraidPatch {
-    /// Version hash for this patch (64 hex chars — full SHA-256 of FEN +
-    /// move number). Wide on purpose: once this backs a durable, disputable
-    /// move log (not just an ephemeral P2P equivocation check), a collision
-    /// needs to be cryptographically implausible, not merely "vanishingly
-    /// unlikely for a single game's move count."
     pub version: String,
-    /// The single preceding version this patch follows (see struct doc).
     pub parents: Vec<String>,
-    /// JSON body of the [`ChessMessage`].
     pub body: String,
 }
 
 impl BraidPatch {
-    /// Build a patch from a [`MovePayload`] and the previous version hash.
     pub fn from_move(payload: &MovePayload, parent_version: &str) -> Result<Self, BraidChessError> {
         let version = version_hash(&payload.fen_after, payload.move_number);
         let body = serde_json::to_string(&ChessMessage::Move(payload.clone()))?;
@@ -42,7 +21,6 @@ impl BraidPatch {
         })
     }
 
-    /// Build a patch for a non-move message (resign, draw offer, etc.).
     pub fn from_message(
         msg: &ChessMessage,
         parent_version: &str,
@@ -57,28 +35,16 @@ impl BraidPatch {
         })
     }
 
-    /// Return the `Version` header value (e.g. `["{version}"]`).
     pub fn version_header(&self) -> String {
         format!("[\"{}\"]", self.version)
     }
 
-    /// Return the `Parents` header value (e.g. `["{p1}", "{p2}"]`).
     pub fn parents_header(&self) -> String {
         let parts: Vec<String> = self.parents.iter().map(|p| format!("\"{}\"", p)).collect();
         format!("[{}]", parts.join(", "))
     }
 }
 
-/// Derive a full-width (64-char hex) SHA-256 version hash from a FEN string
-/// and move number.
-///
-/// The hash is deterministic: same FEN + move number always produces the
-/// same version. Full-width rather than truncated: this value is both the
-/// P2P causal-chain equivocation check (`CausalChainState::head_version` in
-/// the game client) *and*, once wired up, the durable version key for the
-/// backend's persisted move log — a collision there would silently merge
-/// two distinct game states in a wagered game's dispute-evidence trail, so
-/// the full 256-bit digest is used rather than a truncated prefix.
 pub fn version_hash(fen: &str, move_number: u32) -> String {
     let input = format!("{}:{}", fen, move_number);
     let digest = Sha256::digest(input.as_bytes());

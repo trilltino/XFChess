@@ -8,15 +8,9 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::{error, info};
 
-/// Path to the binary archive file. Lives under data/ — in production the
-/// hardened systemd unit only permits writes to /opt/xfchess/data, and data/
-/// is what the nightly backup covers.
 const ARCHIVE_PATH: &str = "data/archive/games.xfg";
-/// Path to the wallet index file
 const WALLET_INDEX_PATH: &str = "data/archive/wallets.idx";
 
-/// Compact binary record for a single game. `white_idx`/`black_idx` index
-/// into the wallet index file rather than storing full pubkeys inline.
 pub struct BinaryGameRecord {
     pub game_id: u64,
     pub white_idx: u16,
@@ -172,8 +166,6 @@ impl Archiver {
     }
 }
 
-/// Packs a UCI move (e.g. "e2e4") into 16 bits
-/// Format: 6 bits FROM, 6 bits TO, 4 bits FLAGS
 fn pack_move(uci: &str) -> u16 {
     if uci.len() < 4 {
         return 0;

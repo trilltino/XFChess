@@ -1,4 +1,3 @@
-//! Inspector UI for debugging and development.
 
 use crate::game::resources::*;
 use bevy::prelude::*;
@@ -6,16 +5,6 @@ use bevy_egui::{egui, EguiContext, PrimaryEguiContext};
 use bevy_inspector_egui::bevy_inspector::hierarchy::SelectedEntities;
 use std::ops::DerefMut;
 
-/// System that renders the comprehensive inspector UI
-///
-/// Provides three panels:
-/// - Left: Entity hierarchy browser
-/// - Right: Selected entity component details
-/// - Bottom: Game resources and state
-///
-/// Uses World parameter for direct resource access, following the bevy-inspector-egui
-/// pattern. This avoids context initialization issues and works correctly with
-/// EguiPrimaryContextPass scheduling.
 pub fn inspector_ui(world: &mut World, mut selected_entities: Local<SelectedEntities>) {
     // Query for the primary egui context (idiomatic bevy-inspector-egui pattern)
     let Ok(mut ctx) = world

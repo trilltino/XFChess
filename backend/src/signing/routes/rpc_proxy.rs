@@ -1,17 +1,3 @@
-//! Read/submit-only Solana RPC proxy for the distributed game client.
-//!
-//! The packaged client can't embed the paid Triton RPC URL directly — it
-//! carries a secret x-token in the path (see `signing::solana::rpc::redact_url`)
-//! — without leaking that token to every player who downloads the game. So the
-//! client instead points `SOLANA_RPC_URL` at this route, and the backend
-//! forwards to the real endpoint server-side, where the token stays.
-//!
-//! This is a public, unauthenticated route baked into every binary, so it is
-//! restricted to a small allow-list of JSON-RPC methods the client actually
-//! needs (see `ALLOWED_METHODS`) plus a per-IP rate limit — otherwise anyone
-//! who extracts the URL from the binary could run arbitrary (and possibly
-//! expensive) RPC calls against our paid provider account.
-
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -28,10 +14,6 @@ use tokio::sync::Mutex;
 
 use crate::signing::AppState;
 
-/// JSON-RPC methods the client is allowed to call through this proxy.
-/// Deliberately excludes anything that could run up costs on our paid RPC
-/// account (`getProgramAccounts`, `getBlock`/`getBlocks`, …) or that has no
-/// business being called by a player (`requestAirdrop`).
 const ALLOWED_METHODS: &[&str] = &[
     "getLatestBlockhash",
     "isBlockhashValid",
@@ -46,15 +28,8 @@ const ALLOWED_METHODS: &[&str] = &[
 ];
 
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
-/// Generous enough for a client polling account/balance state every 1-3s
-/// across a couple of concurrent games; tight enough to bound abuse of the
-/// upstream paid RPC from a single source.
 const RATE_LIMIT_MAX_PER_WINDOW: usize = 180;
 
-/// Hard ceiling on tracked source addresses. Even with a trustworthy key the
-/// map should not be able to grow without limit; past this point new sources are
-/// rejected rather than admitted, which fails closed under flood conditions
-/// instead of consuming memory.
 const RATE_LIMIT_MAX_TRACKED_SOURCES: usize = 50_000;
 
 fn rate_tracker() -> &'static Mutex<HashMap<String, Vec<Instant>>> {
@@ -62,10 +37,6 @@ fn rate_tracker() -> &'static Mutex<HashMap<String, Vec<Instant>>> {
     TRACKER.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Comma-separated peer addresses permitted to set `x-real-ip` /
-/// `x-forwarded-for` on our behalf, from `TRUSTED_PROXY_IPS`. In the normal
-/// deployment this is the local nginx (`127.0.0.1`), which is also the default
-/// when the variable is unset — matching how the service is actually fronted.
 fn trusted_proxies() -> &'static Vec<String> {
     static TRUSTED: OnceLock<Vec<String>> = OnceLock::new();
     TRUSTED.get_or_init(|| {
@@ -89,13 +60,6 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
-/// The connection's peer address, or `None` when the server was not started
-/// with connect-info (in-process `oneshot` tests, chiefly).
-///
-/// Written as a bespoke infallible extractor rather than
-/// `Option<ConnectInfo<SocketAddr>>` because axum 0.8 requires
-/// `OptionalFromRequestParts` for that shape, and because a missing peer address
-/// must degrade to "no better key available" rather than rejecting the request.
 struct PeerAddr(Option<SocketAddr>);
 
 impl<S> axum::extract::FromRequestParts<S> for PeerAddr
@@ -117,18 +81,6 @@ where
     }
 }
 
-/// Resolves the rate-limit key for a request.
-///
-/// The socket's peer address is the ground truth, because a client cannot forge
-/// it. `x-real-ip` is honoured only when the peer is a configured trusted proxy
-/// — otherwise the header is just a caller-supplied string.
-///
-/// This previously read `x-real-ip` unconditionally and fell back to the literal
-/// `"unknown"`, which broke in both directions at once: anything reaching the
-/// port directly could rotate the header per request to escape the limit
-/// entirely (while minting a fresh, never-evicted map key each time), and every
-/// request that legitimately arrived without the header shared one `"unknown"`
-/// bucket, so 180 of them denied the proxy to all the rest.
 fn client_ip(headers: &HeaderMap, peer: Option<SocketAddr>) -> String {
     let peer_ip = peer
         .map(|addr| addr.ip().to_string())
@@ -151,11 +103,6 @@ fn client_ip(headers: &HeaderMap, peer: Option<SocketAddr>) -> String {
     peer_ip
 }
 
-/// Returns true if `ip` has exceeded its request budget for the window.
-///
-/// Also evicts sources whose history has fully aged out. Only the timestamps
-/// inside a bucket used to be pruned, never the buckets themselves, so the map
-/// retained one `Vec` per address seen for the life of the process.
 async fn rate_limited(ip: &str) -> bool {
     let mut tracker = rate_tracker().lock().await;
     let now = Instant::now();
@@ -192,8 +139,6 @@ fn is_allowed_method(v: &Value) -> bool {
         .unwrap_or(false)
 }
 
-/// A JSON-RPC request body is either a single object or a batch array —
-/// every method named in it must be on the allow-list.
 fn method_allowed(body: &Value) -> bool {
     match body.as_array() {
         Some(items) => !items.is_empty() && items.iter().all(is_allowed_method),
@@ -201,8 +146,6 @@ fn method_allowed(body: &Value) -> bool {
     }
 }
 
-/// Shared forwarding logic for both clusters — validates, rate-limits, then
-/// relays the raw JSON-RPC body to `upstream_url` and mirrors its response.
 async fn forward(
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
@@ -241,10 +184,6 @@ async fn forward(
     }
 }
 
-/// POST /api/rpc — forwards an allow-listed JSON-RPC call to the real Solana
-/// devnet RPC endpoint (game accounts, moves, wagers). Exists so the
-/// distributed client gets fast `confirmed` reads/sends without embedding the
-/// paid provider's secret token in every binary — see module docs.
 async fn proxy_rpc(
     State(state): State<AppState>,
     PeerAddr(peer): PeerAddr,
@@ -254,11 +193,6 @@ async fn proxy_rpc(
     forward(&headers, peer, &body, &state.solana_rpc_url).await
 }
 
-/// POST /api/rpc/mainnet — same as `/api/rpc` but forwards to a dedicated
-/// mainnet RPC endpoint (`SOLANA_MAINNET_RPC_URL`), for reads unrelated to
-/// in-game devnet state — e.g. the wallet HUD's real SOL balance. Falls back
-/// to the free public mainnet RPC if no dedicated endpoint is configured
-/// (same public endpoint the client used to hit directly and unproxied).
 async fn proxy_rpc_mainnet(
     State(state): State<AppState>,
     PeerAddr(peer): PeerAddr,

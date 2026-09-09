@@ -17,10 +17,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Solana RPC configuration with relayer fee payer. Only ever constructed by
-/// `setup_solana_system` below, which is itself never registered as a system
-/// — this resource is never actually inserted into the app. Distinct from
-/// (and unrelated to) the differently-unused `solana::rpc::SolanaRpc`.
 #[derive(Clone, Debug, bevy::prelude::Resource)]
 pub struct SolanaRpc {
     pub rpc_url: String,
@@ -191,12 +187,6 @@ pub fn query_wallet_pubkey_from_tauri() -> Option<String> {
     None
 }
 
-/// Refreshes the wallet's SOL balance on a timer. The actual RPC call runs on
-/// tokio's blocking-thread pool via `spawn_blocking` — `get_balance` is a
-/// synchronous network call, and running it straight in a Bevy system (as
-/// this used to) blocks that frame's update for the full round-trip, which
-/// reads to the player as the whole game hitching every time the balance
-/// polls.
 pub fn update_wallet_balance(
     mut solana_state: ResMut<SolanaIntegrationState>,
     mut timer: ResMut<BalanceRefreshTimer>,
@@ -259,7 +249,6 @@ pub fn update_wallet_balance(
     });
 }
 
-/// Background-fetch SOL/USD rate from CoinGecko and cache it in [`SolanaIntegrationState`].
 pub fn update_wallet_usd_rate(
     mut solana_state: ResMut<SolanaIntegrationState>,
     tokio_runtime: Res<crate::multiplayer::TokioRuntime>,
@@ -306,10 +295,6 @@ pub fn update_wallet_usd_rate(
     });
 }
 
-/// Fetches the live SOL/USD rate from the signing backend's cached
-/// `/api/rates/all` — the same cache the admin panel, tournament creation,
-/// and the in-game wager UI all read, so every USD figure in the app comes
-/// from one source instead of each surface hitting its own third-party feed.
 async fn fetch_sol_usd_rate() -> Result<f64, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
@@ -343,23 +328,6 @@ async fn fetch_sol_usd_rate() -> Result<f64, String> {
     Ok(price)
 }
 
-/// Sync the gossip-signing key into the P2P network state so that all
-/// outgoing gossip messages are cryptographically signed.
-///
-/// Generates the keypair itself (into `solana_state.session_keypair`, kept
-/// for display/logging elsewhere) rather than only copying an
-/// already-generated one — `initialize_solana_integration` used to be the
-/// sole generator, but that only runs on the branch where its *own* Tauri
-/// poll resolves the wallet pubkey, which loses the race against
-/// `main_menu.rs`'s faster WalletBridge HTTP poll almost every time (the
-/// latter's "only set pubkey once" guard then makes
-/// `initialize_solana_integration` return before ever reaching the
-/// keygen). In practice this meant no gossip-signing key was ever
-/// generated, `session_signing_key` stayed `None` for the whole run, and
-/// every P2P message went out unsigned — silently dropped by any peer that
-/// hasn't opted into `allow-unsigned-p2p`. Generating it here instead,
-/// gated only on "wallet connected, no key yet," makes it independent of
-/// which of the two wallet-connect code paths actually wins.
 pub fn sync_session_key_to_network(
     mut solana_state: ResMut<SolanaIntegrationState>,
     mut network_state: ResMut<OnlineNetworkState>,
@@ -599,12 +567,6 @@ pub fn poll_session_pubkey_update(
     }
 }
 
-/// Spawns the on-chain participants fetch (`docs/plans/networking-hardening-plan.md`'s
-/// Phase C) once per game start — the client-side counterpart to Phase B's
-/// backend `GameParticipantsCache`. Skips if a fetch for this exact game is
-/// already pending or has already completed (`verified_wallets` already has
-/// an entry) — `GameStartedEvent` can fire more than once for tournament
-/// games and a retry loop shouldn't re-spawn on every one.
 pub fn spawn_verified_participants_fetch(
     mut game_start_events: MessageReader<GameStartedEvent>,
     mut solana_state: ResMut<SolanaIntegrationState>,
@@ -635,16 +597,6 @@ pub fn spawn_verified_participants_fetch(
     }
 }
 
-/// Polls the fetch spawned by [`spawn_verified_participants_fetch`] and, on
-/// a successful on-chain result, seeds `CausalChainState::verified_wallets`
-/// — see that field's doc comment for how it's then used to validate
-/// `SessionInfo` claims. `Ok(None)` (casual game, no on-chain `Game`
-/// account) and any error are both silently dropped: the roster simply
-/// keeps its original trust-first bootstrap for that game, which is the
-/// correct behavior for casual play and a safe fallback on a transient
-/// fetch failure for wagered play (Phase B still independently protects the
-/// authoritative Braid log server-side regardless of what this client-local
-/// roster admits).
 pub fn poll_verified_participants_fetch(
     mut solana_state: ResMut<SolanaIntegrationState>,
     mut causal: ResMut<crate::multiplayer::types::CausalChainState>,
@@ -685,16 +637,6 @@ pub fn poll_verified_participants_fetch(
     }
 }
 
-/// Resolves the storage path for the local hot wallet.
-///
-/// Namespaced by `XFCHESS_WALLET_PORT` (same env var `tauri_signer` uses for
-/// the wallet-bridge port) whenever it's set to something other than the
-/// default 7454 — otherwise two instances on one machine (e.g. `just dev2`'s
-/// P1/P2) both read/write the exact same `hot_wallet.json` and end up being
-/// the *same* on-chain wallet, so logging out and back in on one window
-/// resurfaces whichever identity the other window last saved. Mirrors
-/// `network::identity::key_path`'s `XFCHESS_NODE_KEY_PATH` override for the
-/// same class of bug on the P2P node key.
 fn get_hot_wallet_path() -> Option<PathBuf> {
     #[cfg(target_os = "android")]
     {
@@ -713,10 +655,6 @@ fn get_hot_wallet_path() -> Option<PathBuf> {
     }
 }
 
-/// Appends an `_<port>` suffix to `hot_wallet.json` when `wallet_port` is set
-/// to something other than the default `7454`. Takes the port as a plain
-/// argument rather than reading the env var itself so the namespacing logic
-/// can be unit-tested without mutating process-global state.
 fn hot_wallet_filename(config_dir: &std::path::Path, wallet_port: Option<&str>) -> PathBuf {
     match wallet_port.map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) if p != "7454" => config_dir.join(format!("hot_wallet_{p}.json")),
@@ -724,7 +662,6 @@ fn hot_wallet_filename(config_dir: &std::path::Path, wallet_port: Option<&str>) 
     }
 }
 
-/// Loads an existing hot wallet or generates a new one
 fn load_or_create_hot_wallet() -> Option<Keypair> {
     let path = get_hot_wallet_path()?;
 
@@ -770,9 +707,6 @@ fn load_or_create_hot_wallet() -> Option<Keypair> {
     Some(new_kp)
 }
 
-/// Fetches user verification status from VPS and caches it in SolanaWallet.
-/// Triggers every 30 seconds; result arrives asynchronously via a channel
-/// and is applied on a subsequent frame.
 pub fn fetch_user_status_async(
     mut solana_wallet: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
     time: Res<Time>,
@@ -825,7 +759,6 @@ pub fn fetch_user_status_async(
     });
 }
 
-/// Syncs own and opponent profiles from VPS when a competitive match starts
 pub fn sync_player_profiles(
     mut competitive: ResMut<crate::multiplayer::solana::addon::CompetitiveMatchState>,
     mut profile: ResMut<crate::multiplayer::solana::addon::SolanaProfile>,
@@ -922,9 +855,6 @@ pub fn sync_player_profiles(
     }
 }
 
-/// Not registered as a system anywhere — `SolanaIntegrationPlugin::build`
-/// does not call this, so `SolanaRpc` is never actually inserted as a
-/// resource in the running app.
 pub fn setup_solana_system(mut commands: Commands) {
     // Placeholder for fetching relayer_pubkey from backend or environment
     let relayer_pubkey = "PlaceholderRelayerPubkey";
@@ -934,13 +864,11 @@ pub fn setup_solana_system(mut commands: Commands) {
     });
 }
 
-/// Not registered as a system anywhere; body is an unimplemented placeholder.
 pub fn handle_game_transactions(_game_state: ResMut<GameState>, _solana_rpc: Res<SolanaRpc>) {
     // Use solana_rpc.fee_payer for transactions
     // Placeholder for transaction logic
 }
 
-/// Not registered as a system anywhere; body is an unimplemented placeholder.
 pub fn handle_tournament_transactions(
     _tournament_state: ResMut<TournamentClientState>,
     _solana_rpc: Res<SolanaRpc>,
@@ -951,21 +879,16 @@ pub fn handle_tournament_transactions(
 
 // -- Item 8: Global session VPS handshake -------------------------------------
 
-/// Resource present when the VPS has confirmed an active global session for the local wallet.
 #[derive(bevy::prelude::Resource, Debug, Clone)]
 pub struct GlobalSessionActive {
     pub session_pubkey: String,
 }
 
-/// Holds the background receiver for the global session verification result.
 #[derive(bevy::prelude::Resource)]
 pub struct GlobalSessionCheckPending {
     pub rx: crossbeam_channel::Receiver<Option<String>>,
 }
 
-/// System that runs once on `OnEnter(MainMenu)` to verify the VPS holds an
-/// active global session for this wallet. Spawns a background thread and stores
-/// a receiver so `poll_global_session_result` can pick up the answer next frame.
 pub fn verify_global_session_on_menu_enter(
     solana_state: Option<bevy::prelude::Res<SolanaIntegrationState>>,
     mut commands: bevy::prelude::Commands,
@@ -1006,7 +929,6 @@ pub fn verify_global_session_on_menu_enter(
     });
 }
 
-/// Polls the global session check receiver and inserts/removes `GlobalSessionActive`.
 pub fn poll_global_session_result(
     mut commands: bevy::prelude::Commands,
     pending: Option<bevy::prelude::ResMut<GlobalSessionCheckPending>>,
@@ -1027,23 +949,6 @@ pub fn poll_global_session_result(
     }
 }
 
-/// Once a wallet is connected and has an on-chain profile, automatically
-/// authorize a global session — one Phantom popup, ever — if none is active
-/// yet. After this succeeds, `lobby.rs`'s create/join (and, once wired,
-/// delegation) can sign locally with the persisted session keypair instead
-/// of round-tripping through the Tauri wallet bridge every game.
-///
-/// Mirrors `profile_check.rs`'s background-task + backoff-timer shape: a
-/// `Local` receiver drains a background thread's result, and a cooldown
-/// timer stops a failed attempt from retrying every frame.
-///
-/// Capped at `MAX_ATTEMPTS`: this is purely an optimization (it lets later
-/// games sign locally instead of round-tripping through the wallet popup),
-/// so a wallet that can't complete it — insufficient balance, a stuck
-/// blockhash, whatever — must not be re-prompted with a fresh Solflare
-/// popup forever. Giving up just means every game falls back to the
-/// per-game Tauri wallet-bridge signing that already existed before this
-/// optimization.
 pub fn authorize_global_session_if_needed(
     mut solana_state: ResMut<SolanaIntegrationState>,
     time: Res<Time>,
@@ -1203,11 +1108,6 @@ pub fn authorize_global_session_if_needed(
     });
 }
 
-/// One-time (per wallet) setup: generate a session keypair locally, build the
-/// `authorize_global_session` instruction, sign + submit it via the existing
-/// Tauri wallet bridge (the one popup this ever costs), then persist the
-/// keypair encrypted to disk so `try_load_global_session` finds it on every
-/// future launch.
 fn establish_global_session(
     wallet_pubkey: Pubkey,
     program_id: Pubkey,
@@ -1365,33 +1265,17 @@ fn establish_global_session(
         .map_err(|e| format!("keypair conversion: {e}"))
 }
 
-/// Result of asking the backend to verify+register an already-authorized
-/// global session key. Distinguishes a *confirmed* on-chain mismatch (the
-/// backend read the real `GlobalSessionDelegation` PDA and the key genuinely
-/// doesn't match — the local file is stale/wrong-wallet/wrong-instance, and
-/// must not keep being trusted) from a merely transient failure (backend
-/// unreachable, momentary error), which says nothing about whether the key
-/// is actually still valid on-chain and must not cause a false "not active".
 pub(crate) enum GlobalSessionRegisterOutcome {
     Confirmed,
     ConfirmedMismatch,
     Transient,
 }
 
-/// Holds the background `register_global_session_with_backend` receiver so
-/// `poll_global_session_register_result` can apply its outcome next frame.
 #[derive(bevy::prelude::Resource)]
 pub(crate) struct GlobalSessionRegisterPending {
     rx: crossbeam_channel::Receiver<GlobalSessionRegisterOutcome>,
 }
 
-/// Drains the background registration result and applies it. The critical
-/// case is `ConfirmedMismatch`: previously this result was only logged, so a
-/// locally-decryptable but on-chain-mismatched session key (lost/stale file,
-/// wrong `dev2` instance, different machine) stayed "active" in
-/// `SolanaIntegrationState` until the first real transaction using it failed
-/// on-chain against the wrong session PDA — by then the player had already
-/// clicked Create/Join expecting the zero-popup path.
 pub fn poll_global_session_register_result(
     mut solana_state: ResMut<SolanaIntegrationState>,
     pending: Option<Res<GlobalSessionRegisterPending>>,
@@ -1417,15 +1301,6 @@ pub fn poll_global_session_register_result(
     }
 }
 
-/// Best-effort: hand the backend a copy of an already-authorized global
-/// session key, so it can act on this wallet's behalf for
-/// finalize/undelegate/settlement (Track 1 of
-/// docs/plans/global-session-flow-fix-plan.md) — create/join/delegate don't
-/// need this, the client signs those itself. Idempotent (the backend just
-/// re-verifies against on-chain state and overwrites its in-memory entry),
-/// so it's safe to call on every wallet connect, not just the first-ever
-/// authorization — that repetition matters because the backend's registry
-/// is in-memory only and forgets everything on restart.
 fn register_global_session_with_backend(
     wallet_pubkey: Pubkey,
     keypair_bytes: [u8; 64],
@@ -1476,11 +1351,6 @@ fn register_global_session_with_backend(
 mod tests {
     use super::*;
 
-    /// Guards the `dev2` P1/P2 instance-isolation fix: two windows on one
-    /// machine must not silently share `hot_wallet.json` (that was the
-    /// "logout logs me in as the other instance" bug — this file has no
-    /// wallet-pubkey mismatch check the way the session-key managers do, so
-    /// a shared path here means both windows are silently the *same* wallet).
     #[test]
     fn hot_wallet_filename_diverges_for_a_non_default_instance_port() {
         let dir = PathBuf::from("/config");

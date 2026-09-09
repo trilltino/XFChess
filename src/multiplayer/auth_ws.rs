@@ -7,7 +7,6 @@ use std::env;
 use tracing::{error, info};
 use serde_json;
 
-/// Resource for managing WebSocket connection to backend for authentication sync
 #[derive(Resource)]
 pub struct AuthWebSocket {
     pub tx: Option<mpsc::Sender<String>>,
@@ -28,7 +27,6 @@ impl Default for AuthWebSocket {
     }
 }
 
-/// Plugin for WebSocket authentication sync
 pub struct AuthWebSocketPlugin;
 
 impl Plugin for AuthWebSocketPlugin {
@@ -39,7 +37,6 @@ impl Plugin for AuthWebSocketPlugin {
     }
 }
 
-/// Start WebSocket connection to backend for authentication sync
 fn start_auth_websocket(mut auth_ws: ResMut<AuthWebSocket>) {
     let ws_url = format!(
         "{}/ws/auth",
@@ -96,7 +93,6 @@ fn start_auth_websocket(mut auth_ws: ResMut<AuthWebSocket>) {
     }).detach();
 }
 
-/// Handle incoming authentication messages from WebSocket
 fn handle_auth_messages(mut auth_ws: ResMut<AuthWebSocket>) {
     if let Some(ref mut rx) = auth_ws.rx {
         while let Ok(msg) = rx.try_recv() {

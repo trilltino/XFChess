@@ -3,7 +3,6 @@ use crate::multiplayer::solana::wager_rate::SolUsdRate;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-/// UI system that displays wager info in-game
 pub fn wager_ui_system(
     wager_state: Res<WagerState>,
     sol_usd_rate: Res<SolUsdRate>,

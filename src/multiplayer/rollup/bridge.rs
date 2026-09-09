@@ -1,13 +1,3 @@
-//! Bridges Bevy game events to the MagicBlock Ephemeral Rollup lifecycle.
-//!
-//! On [`GameStartedEvent`], the creator (only) delegates the game PDA to the
-//! ER off the main thread ([`spawn_delegation_task`]/[`retry_pending_delegation`]),
-//! polled to completion by [`poll_delegation_tasks`]. On [`GameEndedEvent`], the
-//! reverse happens: the VPS is asked to undelegate ([`vps_client::vps_undelegate_game`]),
-//! this system waits for the game PDA to return to devnet, then fires the
-//! finalize/settlement flow. Free (non-wagered) games skip delegation entirely
-//! and update ELO directly. See `crates/CLAUDE.md` for how this fits with the
-//! Braid/P2P relay layer.
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -26,30 +16,21 @@ use crate::multiplayer::{
 use crate::solana::instructions::PROGRAM_ID as SOLANA_PROGRAM_ID;
 use crate::ui::menus::game_over_popup::GameOverPayoutInfo;
 
-/// Result sent back from the async finalization task to the Bevy world.
 #[derive(Debug, Default)]
 struct FinalizationResult {
     sig: String,
     winner_lamports: u64,
     country_fee: u64,
-    /// Real backend-advanced operating cost reimbursed to treasury_vault
-    /// from the pot (0 for free games — see `vps::game::FinalizeResult`).
     operating_cost_lamports: u64,
-    /// Flat ELO-linking fee split between both players (0 for free games).
     elo_fee: u64,
 }
 
-/// Maximum seconds to wait for the Game PDA to return to devnet after undelegation.
 const MAX_UNDELEGATE_WAIT_SECS: u64 = 60;
 
-/// Maximum seconds the joiner waits to observe the creator's delegation
-/// landing on-chain before giving up (see `wait_for_delegation`).
 const MAX_JOINER_DELEGATION_WAIT_SECS: u64 = 60;
 
-/// Stores the last few on-chain move transaction signatures so the UI can display them.
 #[derive(Resource, Default, Clone)]
 pub struct RecentTransactions {
-    /// Ring buffer of (move_uci, tx_signature) tuples, newest last.
     pub entries: Vec<(String, String)>,
 }
 
@@ -69,72 +50,24 @@ pub struct RollupNetworkBridge {
     awaiting_commit_confirmation: bool,
     last_sent_batch_hash: Option<String>,
     pending_batches: std::collections::HashMap<String, (Vec<String>, Vec<String>)>,
-    /// Hashes of batches we proposed ourselves — used to suppress gossip self-echoes.
     sent_batch_hashes: std::collections::HashSet<String>,
-    /// PDA of the game currently being (re)delegated, or awaiting retry after
-    /// a failure (precondition-not-ready, signing, or broadcast). Set right
-    /// before every delegation attempt is spawned; cleared only on confirmed
-    /// success (see `poll_delegation_tasks`).
     pending_delegation_pda: Option<Pubkey>,
-    /// game_id matching pending_delegation_pda.
     pending_game_id: Option<u64>,
-    /// Channel receiving delegation result from async task.
     delegation_rx: Option<oneshot::Receiver<Result<Pubkey, String>>>,
-    /// Seconds remaining before `retry_pending_delegation` will attempt
-    /// again after a genuine signing/broadcast failure. Without this, a
-    /// real RPC error (as opposed to the "wallet not ready yet" case, which
-    /// naturally paces itself on wallet-connect) would retry every single
-    /// frame — a retry storm against the RPC endpoint.
     delegation_retry_cooldown: f32,
-    /// Monotonically increasing nonce for record_move replay protection.
-    /// Starts at 1 because the program requires nonce == move_log.nonce + 1 (on-chain starts at 0).
     move_nonce: u64,
-    /// Finalization deferred because opponent pubkey was not yet available at game end.
-    /// Retried each frame up to MAX_FINALIZATION_WAIT_FRAMES.
     pending_finalization: Option<PendingFinalization>,
-    /// Channel receiving the finalization result (sig + payout amounts) from the async task.
     finalization_rx: Option<oneshot::Receiver<FinalizationResult>>,
-    /// Channel receiving the resynced move nonce from the async RPC fetch.
     nonce_rx: Option<oneshot::Receiver<u64>>,
-    /// Channel receiving the assembled PGN game after game-end export.
     pgn_rx: Option<oneshot::Receiver<Option<nimzovich_engine::ParsedPgnGame>>>,
-    /// Channel receiving the joiner-side delegation-observed result (see
-    /// `wait_for_delegation`). Deliberately separate from `delegation_rx`:
-    /// that channel feeds `retry_pending_delegation`, which resubmits a
-    /// `delegate_game` transaction on failure — the joiner must never do
-    /// that (it isn't `game.fee_payer`; the on-chain check would just
-    /// reject it), so its wait loop needs its own channel that nothing else
-    /// retries against.
     joiner_delegation_wait_rx: Option<oneshot::Receiver<Result<Pubkey, String>>>,
-    /// game_id currently being waited on by `joiner_delegation_wait_rx`, so a
-    /// repeated `GameStartedEvent` for the same game doesn't spawn a second
-    /// waiter task.
     joiner_delegation_wait_game_id: Option<u64>,
-    /// True while the final game-end move batch (from `RollupEvent::GameEndBatch`,
-    /// see `handle_rollup_to_network_events`) is still being submitted.
-    /// `handle_game_end_undelegation` must not undelegate while this is true —
-    /// undelegating while the game-ending move (e.g. the checkmate move) is
-    /// still in flight races the ER's own commit, which the ER rejects with
-    /// `InvalidWritableAccount` ("illegally used as writable"), permanently
-    /// stranding that game's result (and any wager) since the move never
-    /// lands and the game can never reach `Finished`. Reproduced live
-    /// 2026-08-10 on a real-wager game. Set when the batch task is spawned,
-    /// cleared by `poll_game_end_flush` once it completes.
     game_end_moves_flushing: bool,
-    /// Signals completion of the in-flight game-end move batch (see
-    /// `game_end_moves_flushing`). `Ok(())` regardless of whether individual
-    /// moves succeeded — this only tracks "attempted", since the game state
-    /// itself (not this flag) is the source of truth for whether the game
-    /// actually finished.
     game_end_flush_rx: Option<oneshot::Receiver<()>>,
 }
 
-/// Maximum frames to wait for opponent pubkey before giving up on deferred finalization.
-/// At 60 fps this is ~10 seconds.
 const MAX_FINALIZATION_WAIT_FRAMES: u32 = 600;
 
-/// Captures the data needed to finalize a game when `opponent_pubkey` was not yet
-/// available in `SolanaIntegrationState` at the moment `GameEndedEvent` fired.
 #[derive(Debug)]
 struct PendingFinalization {
     game_id: u64,
@@ -153,11 +86,6 @@ impl RollupNetworkBridge {
         }
     }
 
-    /// True while an on-chain finalization (undelegate + `finalize_game`,
-    /// which pays out any wager) is queued or in flight — either still
-    /// waiting on `retry_pending_finalization`'s preconditions, or already
-    /// spawned and awaiting its result, or the game-end move batch that must
-    /// land before undelegation can even be attempted.
     pub fn has_pending_finalization(&self) -> bool {
         self.pending_finalization.is_some()
             || self.finalization_rx.is_some()
@@ -165,14 +93,6 @@ impl RollupNetworkBridge {
             || self.game_end_flush_rx.is_some()
     }
 
-    /// Resets everything except an in-flight finalization. Used when leaving
-    /// `InGame` (see `reset_multiplayer_session_state`): a full `Default`
-    /// reset there was silently discarding `pending_finalization`/
-    /// `finalization_rx` whenever the player dismissed the game-over prompt
-    /// before `retry_pending_finalization` had gotten around to firing —
-    /// permanently stranding the wager payout with no error or log, since
-    /// the async task that would have logged `[UNDELEGATE]`/`[FINALIZED]`
-    /// was simply never spawned. Reproduced live 2026-08-16.
     pub fn reset_preserving_finalization(&mut self) {
         let mut fresh = Self::default();
         fresh.pending_finalization = self.pending_finalization.take();
@@ -264,9 +184,6 @@ fn send_network_msg(state: &OnlineNetworkState, msg: NetworkMessage) {
     }
 }
 
-/// Resolves both players' wallet pubkeys — mirrors the identical inline
-/// logic previously duplicated at the finalization call sites.
-/// `is_creator ↔ white; joiner ↔ black`.
 fn resolve_white_black(
     is_creator: bool,
     solana_state: Option<&SolanaIntegrationState>,
@@ -281,10 +198,6 @@ fn resolve_white_black(
     })
 }
 
-/// Which wallet made the move at 1-based ply `nonce` — White moves on odd
-/// plies, Black on even (matches the on-chain `apply_recorded_move`'s
-/// `game.turn % 2 == 1 -> white` check exactly, since `nonce` and
-/// `game.turn` track the same ply count).
 fn mover_wallet_for_ply(nonce: u64, white: Pubkey, black: Pubkey) -> Pubkey {
     if nonce % 2 == 1 {
         white
@@ -771,7 +684,6 @@ fn validate_batch_proposal(
     !moves.is_empty() && moves.len() == next_fens.len()
 }
 
-/// Submit moves via the VPS signing service (zero wallet popups).
 fn submit_moves_via_vps(
     game_id: u64,
     moves: &[String],
@@ -814,10 +726,6 @@ fn submit_moves_via_vps(
     }
 }
 
-/// Handles game start events to delegate the game PDA to the Ephemeral Rollup
-///
-/// This system listens for GameStartedEvent and spawns an async task to perform
-/// the delegation off the main thread, preventing Bevy from freezing.
 fn handle_game_start_delegation(
     mut game_started_events: MessageReader<GameStartedEvent>,
     mut bridge: ResMut<RollupNetworkBridge>,
@@ -993,12 +901,6 @@ fn handle_game_start_delegation(
     }
 }
 
-/// Async delegation task that runs on IoTaskPool (off main thread).
-///
-/// When `global_session_keypair_bytes` is `Some`, signs and submits directly
-/// with that session key — zero wallet popup. Otherwise asks the VPS to
-/// delegate on our behalf, since it holds the per-game session key that
-/// `game.fee_payer` requires — no wallet popup either way.
 async fn spawn_delegation_task(
     game_pda: Pubkey,
     game_id: u64,
@@ -1067,13 +969,6 @@ async fn spawn_delegation_task(
     }
 }
 
-/// Joiner-side counterpart to `spawn_delegation_task`. The joiner never
-/// submits a `delegate_game` transaction itself (see the non-creator branch
-/// of `handle_game_start_delegation`), so it has no local signal that
-/// delegation actually completed. Poll the game PDA's owner until it
-/// becomes the MagicBlock Delegation Program — the same on-chain signal
-/// `spawn_finalization_task` already polls for in reverse (owner returning
-/// to the xfchess program after undelegation).
 async fn wait_for_delegation(
     game_pda: Pubkey,
     game_id: u64,
@@ -1109,11 +1004,6 @@ async fn wait_for_delegation(
     }
 }
 
-/// Polls the joiner's delegation-observation task and applies the result
-/// locally once it lands. This is the only place a joiner's own
-/// `MagicBlockResolver` ever transitions to `Delegated` — without it,
-/// `can_move_color`'s ER-not-delegated gate (`game/systems/input.rs`) blocks
-/// the joiner from moving for the entire game.
 fn poll_joiner_delegation_wait(
     mut bridge: ResMut<RollupNetworkBridge>,
     mut magicblock_resolver: ResMut<MagicBlockResolver>,
@@ -1146,11 +1036,6 @@ fn poll_joiner_delegation_wait(
     }
 }
 
-/// Clears `game_end_moves_flushing` once the game-end move batch (spawned in
-/// `handle_rollup_to_network_events`'s `GameEndBatch` arm) finishes attempting
-/// every move — the signal `handle_game_end_undelegation`/
-/// `retry_pending_finalization` wait on before undelegating, see
-/// `game_end_moves_flushing`'s doc comment for why.
 fn poll_game_end_flush(mut bridge: ResMut<RollupNetworkBridge>) {
     if let Some(ref mut rx) = bridge.game_end_flush_rx {
         match rx.try_recv() {
@@ -1165,7 +1050,6 @@ fn poll_game_end_flush(mut bridge: ResMut<RollupNetworkBridge>) {
     }
 }
 
-/// Polls the delegation async task and emits events on completion.
 fn poll_delegation_tasks(
     mut bridge: ResMut<RollupNetworkBridge>,
     mut magicblock_resolver: ResMut<MagicBlockResolver>,
@@ -1219,7 +1103,6 @@ fn poll_delegation_tasks(
     }
 }
 
-/// Retries a previously-deferred ER delegation once the wallet info is available.
 fn retry_pending_delegation(
     mut bridge: ResMut<RollupNetworkBridge>,
     time: Res<Time>,
@@ -1298,9 +1181,6 @@ fn retry_pending_delegation(
     let _ = magicblock_events; // suppress unused warning
 }
 
-/// Drops [`CausalChainState`] entries for a finished game — otherwise
-/// `last_seq`/`head_version`/`roster` grow forever across a client session
-/// that plays or spectates many games (e.g. a tournament run).
 fn handle_game_end_causal_cleanup(
     mut game_ended_events: MessageReader<GameEndedEvent>,
     mut causal: ResMut<crate::multiplayer::types::CausalChainState>,
@@ -1313,13 +1193,6 @@ fn handle_game_end_causal_cleanup(
     }
 }
 
-/// Handles game end events to undelegate the game PDA from the Ephemeral Rollup
-/// and finalize the game result on devnet — all signed by the VPS session key.
-///
-/// Flow (spawned async so Bevy never blocks):
-///   1. POST /game/undelegate → ER commits state to devnet
-///   2. sleep 3 s (let commit land)
-///   3. POST /game/finalize  → devnet: status=Finished, wager payout, ELO update
 fn handle_game_end_undelegation(
     mut game_ended_events: MessageReader<GameEndedEvent>,
     magicblock_resolver: Res<MagicBlockResolver>,
@@ -1470,9 +1343,6 @@ fn handle_game_end_undelegation(
     }
 }
 
-/// Spawns the async undelegate + finalize flow off the Bevy main thread.
-/// Item 2: Polls the Game PDA owner on devnet instead of a fixed sleep.
-/// Item 1: Sends the finalization result back to Bevy via `result_tx`.
 fn spawn_finalization_task(
     game_id: u64,
     winner: Option<String>,
@@ -1588,9 +1458,6 @@ fn spawn_finalization_task(
         .detach();
 }
 
-/// Retries a deferred game finalization each frame until `opponent_pubkey` becomes
-/// available in `SolanaIntegrationState` (set by `handle_session_info_from_network`)
-/// or `MAX_FINALIZATION_WAIT_FRAMES` elapses.
 fn retry_pending_finalization(
     mut bridge: ResMut<RollupNetworkBridge>,
     solana_state: Option<Res<SolanaIntegrationState>>,
@@ -1672,7 +1539,6 @@ fn retry_pending_finalization(
     );
 }
 
-/// Item 1: Reads the finalization result channel and updates GameOverPayoutInfo.
 fn apply_finalization_result(
     mut bridge: ResMut<RollupNetworkBridge>,
     mut payout_info: Option<ResMut<GameOverPayoutInfo>>,
@@ -1708,7 +1574,6 @@ fn apply_finalization_result(
     }
 }
 
-/// Item 5: Applies the resynced on-chain nonce once the async fetch completes.
 fn apply_nonce_resync(mut bridge: ResMut<RollupNetworkBridge>) {
     let rx = match bridge.nonce_rx.as_mut() {
         Some(rx) => rx,
@@ -1727,9 +1592,6 @@ fn apply_nonce_resync(mut bridge: ResMut<RollupNetworkBridge>) {
     }
 }
 
-/// Fetch the Braid move log from the VPS at game end, convert to PGN, and
-/// put the result on a oneshot channel so `apply_pgn_export_result` can insert
-/// `ParsedPgnGameResource` from the Bevy main thread.
 fn handle_game_end_pgn_export(
     mut game_ended_events: MessageReader<GameEndedEvent>,
     rollup_manager: Res<EphemeralRollupManager>,
@@ -1818,8 +1680,6 @@ fn handle_game_end_pgn_export(
     }
 }
 
-/// Poll the PGN export channel and, when ready, insert `ParsedPgnGameResource`
-/// so the replay UI can be opened immediately.
 fn apply_pgn_export_result(
     mut bridge: ResMut<RollupNetworkBridge>,
     mut commands: Commands,
@@ -1864,7 +1724,6 @@ fn apply_pgn_export_result(
     }
 }
 
-/// Handles Magic Block events for logging and error handling
 fn handle_magic_block_events(
     mut magicblock_events: MessageReader<MagicBlockEvent>,
     mut popup_queue: ResMut<crate::ui::menus::popup::GamePopupQueue>,
@@ -1914,24 +1773,6 @@ fn handle_magic_block_events(
 
 #[cfg(test)]
 mod game_end_ordering_tests {
-    //! Headless regression test for the bug fixed 2026-08-11: a real-wager
-    //! game's checkmate move raced `handle_game_end_undelegation`'s
-    //! undelegate call, because nothing guaranteed the game-end move batch
-    //! (`finalize_game_on_end` -> `RollupEvent::GameEndBatch` ->
-    //! `handle_rollup_to_network_events` setting `game_end_moves_flushing`)
-    //! had actually started — let alone finished — before finalize fired.
-    //! Two prior attempts at this fix both failed live because they assumed
-    //! Bevy orders systems by declaration or by an artificial one-frame
-    //! defer; neither is a real guarantee. The actual fix is the explicit
-    //! `.after()` chain in `RollupNetworkBridgePlugin::build`. This test
-    //! exercises the real plugin (no mocked scheduling) and asserts the
-    //! exact invariant that broke live: `finalization_rx` (set only right
-    //! before the undelegate/finalize network task is spawned) must never
-    //! become `Some` while `game_end_moves_flushing` is `true`. No window,
-    //! GPU, wallet, or live backend involved — `bevy::tasks::IoTaskPool`
-    //! tasks run on a background thread and are never awaited here; only
-    //! the synchronous portion of each system (which is what orders the
-    //! flag write against the finalize check) is under test.
     use super::*;
     use crate::game::events::GameEndedEvent;
     use crate::multiplayer::rollup::magicblock::DelegationStatus;

@@ -1,11 +1,3 @@
-//! Wallet balance endpoint — fetches SOL + SPL stablecoin balances via Helius RPC.
-//!
-//! GET /api/wallet/balance/:pubkey
-//!
-//! Returns live SOL balance converted to USD and local fiat using the cached
-//! exchange-rate feed (RateCache), plus balances for supported stablecoins
-//! (USDC, EURC, BRLA).
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -82,7 +74,6 @@ struct TokenAmount {
     ui_amount: Option<f64>,
 }
 
-/// Fetch SOL balance (lamports) for a pubkey via Helius RPC.
 async fn fetch_sol_lamports(client: &reqwest::Client, pubkey: &str) -> Result<u64, String> {
     let body = serde_json::json!({
         "jsonrpc": "2.0",
@@ -118,7 +109,6 @@ async fn fetch_sol_lamports(client: &reqwest::Client, pubkey: &str) -> Result<u6
     Ok(rpc.result.value)
 }
 
-/// Fetch SPL token balances for a given owner via Helius RPC (parsed encoding).
 async fn fetch_token_balances(
     client: &reqwest::Client,
     pubkey: &str,
@@ -152,34 +142,22 @@ async fn fetch_token_balances(
 
 #[derive(Serialize)]
 pub struct StablecoinBalances {
-    /// USDC balance (USD)
     pub usdc: f64,
-    /// EURC balance (EUR)
     pub eurc: f64,
-    /// BRLA balance (BRL)
     pub brla: f64,
 }
 
 #[derive(Serialize)]
 pub struct WalletBalanceResponse {
     pub pubkey: String,
-    /// Raw SOL (not lamports)
     pub sol_balance: f64,
-    /// SOL value in USD at current rate
     pub usd_value: f64,
-    /// SOL value in the player's local currency
     pub local_value: f64,
-    /// Three-letter currency code for local_value
     pub local_currency: String,
-    /// Currency symbol for display (£, €, R$, C$, $)
     pub local_symbol: String,
-    /// SPL stablecoin balances
     pub stablecoins: StablecoinBalances,
 }
 
-/// Maps an ISO country code to its local currency code (matching RateCache's
-/// lowercase key format) and display symbol. Falls back to USD for
-/// unrecognised or unset countries.
 fn country_currency(country: &str) -> (&'static str, &'static str) {
     match country {
         "GB" => ("gbp", "£"),
@@ -192,9 +170,6 @@ fn country_currency(country: &str) -> (&'static str, &'static str) {
 
 // ── Route handler ───────────────────────────────────────────────────────────
 
-/// GET /api/wallet/balance/:pubkey?country=GB
-///
-/// `country` is optional — falls back to USD if omitted or unrecognised.
 async fn get_wallet_balance(
     Path(pubkey): Path<String>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -273,7 +248,6 @@ async fn get_wallet_balance(
     }))
 }
 
-/// Builds the wallet router.
 pub fn wallet_routes() -> Router<crate::signing::AppState> {
     Router::new().route("/balance/{pubkey}", get(get_wallet_balance))
 }

@@ -1,20 +1,12 @@
-//! Move hints visualization system
-//!
-//! Highlights valid move squares when a piece is selected and show_hints is enabled.
-//! Regular moves: green dot. Captures: orange annular ring (Lichess style).
-
 use crate::core::GameSettings;
 use crate::game::components::Piece;
 use crate::game::resources::Selection;
 use crate::rendering::utils::SquareMaterials;
 use bevy::prelude::*;
 
-/// Marker component for squares showing move hints
 #[derive(Component)]
 pub struct MoveHint;
 
-/// System that shows/hides move hints based on selection and settings.
-/// Uses green dots for regular moves and orange rings for capture targets.
 pub fn update_move_hints_system(
     mut commands: Commands,
     settings: Res<GameSettings>,

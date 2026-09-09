@@ -1,15 +1,9 @@
-//! Integration tests for chess engine resource extracted from doc tests
-//! Original location: src/game/resources/engine/engine.rs
-
 use xfchess::engine::board_state::ChessEngine;
 use xfchess::rendering::pieces::PieceColor;
 // Note: Direct dependency on chess_engine might be required for is_legal_move
 // If this fails to compile, we might need to add chess_engine as dev-dependency
 // or test via public API only.
 
-/// Test move validation (Conceptual)
-/// Original: validate_move example
-/// This test verifies that the engine resource is accessible and we can use its helper methods.
 #[test]
 fn example_validate_move_helpers() {
     let from = (4, 1); // e2
@@ -29,8 +23,6 @@ fn example_validate_move_helpers() {
         .starts_with("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"));
 }
 
-/// Test getting legal moves for a square
-/// Original: get_legal_moves_for_square method example
 #[test]
 fn example_get_legal_moves_for_square() {
     let mut engine = ChessEngine::default();

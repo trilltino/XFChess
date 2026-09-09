@@ -1,10 +1,5 @@
-//! Debug utilities for Solana transactions
-//!
-//! Provides detailed transaction inspection and error analysis.
-
 use serde::{Deserialize, Serialize};
 
-/// Debug information for a transaction
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TransactionDebugInfo {
     pub signature: String,
@@ -19,7 +14,6 @@ pub struct TransactionDebugInfo {
     pub program_ids: Vec<String>,
 }
 
-/// Account balance change
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountChange {
     pub pubkey: String,
@@ -28,7 +22,6 @@ pub struct AccountChange {
     pub change: i64,
 }
 
-/// Parse program error codes into human-readable messages
 pub fn parse_program_error(code: u32) -> &'static str {
     match code {
         0x0 => "Success",
@@ -47,12 +40,6 @@ pub fn parse_program_error(code: u32) -> &'static str {
     }
 }
 
-/// Fetches the real on-chain outcome of `signature` via `getTransaction` and
-/// reports what actually happened — `success` reflects the transaction's
-/// on-chain error status (`meta.err`), not a hardcoded default. Used by
-/// `routes::debug::debug_transaction_endpoint`, the tool an operator reaches
-/// for while triaging a live incident, so it must never claim success for a
-/// transaction that actually failed (or vice versa).
 pub async fn debug_transaction(
     rpc: &solana_client::rpc_client::RpcClient,
     signature: &solana_sdk::signature::Signature,
@@ -144,7 +131,6 @@ pub async fn debug_transaction(
 }
 
 #[cfg(test)]
-/// Try to extract error code from error string.
 fn extract_error_code(error_str: &str) -> Option<u32> {
     // Look for patterns like "custom program error: 0x1" or "Custom(1)".
     if let Some(start) = error_str.find("0x") {
@@ -164,7 +150,6 @@ fn extract_error_code(error_str: &str) -> Option<u32> {
     None
 }
 
-/// Format debug info for human-readable output
 pub fn format_debug_info(info: &TransactionDebugInfo) -> String {
     let mut output = String::new();
 

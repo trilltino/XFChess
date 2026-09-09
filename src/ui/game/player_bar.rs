@@ -1,31 +1,11 @@
-//! Center player bars: rendered directly above and below the board, in both
-//! 2D and 3D view modes, replacing the old sidebar-embedded clock/name/
-//! capture-tray rows.
-//!
-//! Data is assembled once per frame in `game_status_ui` (which has full
-//! access to `GameUIParams`) and cached in [`PlayerBarsCache`] so the 2D
-//! board system (`game_2d::render_2d_board` — a separate Bevy system with
-//! its own, unrelated set of params) can read it without every
-//! `GameUIParams` field needing to be wired into its own signature.
-
 use crate::rendering::pieces::{PieceColor, PieceType};
 use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-/// Fixed height reserved for each player bar — shared by the 2D board's
-/// layout math (`game_2d::render_2d_board`) and the 3D floating `Area`s
-/// (`render_center_player_bars_3d`) so the two never drift apart.
 pub const PLAYER_BAR_HEIGHT: f32 = 64.0;
 const CAPTURE_ROW_HEIGHT: f32 = 22.0;
 
-/// Last-frame measured heights of the two 2D player bars. The 2D board
-/// layout (`game_2d::render_2d_board`) reserves this much space above and
-/// below the board — instead of trusting a fixed constant — so the whole
-/// stack (top bar, board, bottom bar) always fits inside the available 2D
-/// space and the bottom bar is never clipped at the window edge, even when
-/// a captured-piece tray makes a bar grow taller than
-/// [`PLAYER_BAR_HEIGHT`].
 #[derive(Resource)]
 pub struct PlayerBarLayoutCache {
     pub top_h: f32,
@@ -43,12 +23,10 @@ impl Default for PlayerBarLayoutCache {
     }
 }
 
-/// Everything one player bar needs to render — resolved once per frame.
 #[derive(Clone)]
 pub struct PlayerBarData {
     pub name: String,
     pub elo: String,
-    /// "No moves yet" / last move played / the local player's color.
     pub status_line: String,
     pub clock_secs: Option<f32>,
     pub clock_active: bool,
@@ -78,10 +56,6 @@ impl PlayerBarData {
     }
 }
 
-/// Per-frame cache of the top (opponent) / bottom (local) player bar
-/// contents — written once by `game_status_ui`, read by both the 3D overlay
-/// (same system) and the 2D board system (a separate system later in the
-/// same `EguiPrimaryContextPass` chain).
 #[derive(Resource)]
 pub struct PlayerBarsCache {
     pub top: PlayerBarData,
@@ -97,9 +71,6 @@ impl Default for PlayerBarsCache {
     }
 }
 
-/// Builds the top/bottom player bar data for this frame. Mirrors the
-/// identity/clock/capture resolution that used to live directly inside
-/// `render_game_right_panel`.
 pub fn build_player_bar_data(
     params: &crate::ui::system_params::game_ui::GameUIParams,
 ) -> (PlayerBarData, PlayerBarData) {
@@ -249,9 +220,6 @@ pub fn build_player_bar_data(
     (top, bottom)
 }
 
-/// Renders one player bar (avatar, name, status/last-move line, captures,
-/// clock) — used for both the opponent (top) and local player (bottom),
-/// above/below the board, in both 2D and 3D.
 pub fn render_player_bar(ui: &mut egui::Ui, data: &PlayerBarData) {
     StyledPanel::sidebar_card()
         .inner_margin(egui::Margin::symmetric(14, 8))
@@ -272,24 +240,27 @@ pub fn render_player_bar(ui: &mut egui::Ui, data: &PlayerBarData) {
                     // Reserve the capture row even before the first capture;
                     // otherwise the bar grows after a capture and the 2D
                     // board recalculates to a smaller square size.
-                    ui.allocate_ui(egui::Vec2::new(ui.available_width(), CAPTURE_ROW_HEIGHT), |ui| {
-                        if !data.captures.is_empty() {
-                            ui.horizontal(|ui| {
-                                crate::ui::game::game_ui::render_captured_pieces_tray(
-                                    ui,
-                                    &data.captures,
-                                    data.is_dark_captures,
-                                );
-                                if data.capture_delta > 0 {
-                                    ui.label(
-                                        egui::RichText::new(format!("+{}", data.capture_delta))
-                                            .size(11.0)
-                                            .color(UiColors::TEXT_TERTIARY),
+                    ui.allocate_ui(
+                        egui::Vec2::new(ui.available_width(), CAPTURE_ROW_HEIGHT),
+                        |ui| {
+                            if !data.captures.is_empty() {
+                                ui.horizontal(|ui| {
+                                    crate::ui::game::game_ui::render_captured_pieces_tray(
+                                        ui,
+                                        &data.captures,
+                                        data.is_dark_captures,
                                     );
-                                }
-                            });
-                        }
-                    });
+                                    if data.capture_delta > 0 {
+                                        ui.label(
+                                            egui::RichText::new(format!("+{}", data.capture_delta))
+                                                .size(11.0)
+                                                .color(UiColors::TEXT_TERTIARY),
+                                        );
+                                    }
+                                });
+                            }
+                        },
+                    );
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -309,12 +280,6 @@ pub fn render_player_bar(ui: &mut egui::Ui, data: &PlayerBarData) {
         });
 }
 
-/// Floating overlay version of the player bars for 3D mode, where there's no
-/// `CentralPanel` to embed them in (the board fills the whole window behind
-/// the translucent side panels — see `BoardCamera` in `game/systems/camera.rs`).
-/// Mirrors how `render_check_banner`/`render_checkmate_banner` already float
-/// over the live 3D board without blocking mesh picking: non-interactable
-/// `egui::Area`s, so 3D piece-picking under the board area is unaffected.
 pub fn render_center_player_bars_3d(
     ctx: &egui::Context,
     top: &PlayerBarData,

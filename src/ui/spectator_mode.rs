@@ -1,32 +1,18 @@
-//! Spectator mode UI for watching live games
-//!
-//! Provides a read-only view of ongoing games using egui (following project patterns)
-
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-/// Resource tracking spectator mode state
 #[derive(Resource, Default)]
 pub struct SpectatorMode {
-    /// Whether spectator mode is active
     pub active: bool,
-    /// Currently spectated game ID
     pub game_id: String,
-    /// Last received FEN position
     pub current_fen: String,
-    /// Move history
     pub moves: Vec<String>,
-    /// White player info
     pub white_player: Option<PlayerInfo>,
-    /// Black player info
     pub black_player: Option<PlayerInfo>,
-    /// Connection status
     pub connected: bool,
-    /// Error message if any
     pub error: Option<String>,
 }
 
-/// Player information for display
 #[derive(Clone, Debug)]
 pub struct PlayerInfo {
     pub username: String,
@@ -34,7 +20,6 @@ pub struct PlayerInfo {
     pub country: String,
 }
 
-/// Plugin for spectator mode UI
 pub struct SpectatorModePlugin;
 
 impl Plugin for SpectatorModePlugin {
@@ -50,11 +35,6 @@ impl Plugin for SpectatorModePlugin {
     }
 }
 
-/// Main spectator UI system
-///
-/// Runs only in [`bevy_egui::EguiPrimaryContextPass`] and only when
-/// [`SpectatorMode::active`] is true, so it never touches the egui context
-/// during normal gameplay or menu rendering.
 fn spectator_ui_system(
     mut contexts: EguiContexts,
     spectator: Res<SpectatorMode>,
@@ -158,7 +138,6 @@ fn spectator_ui_system(
         });
 }
 
-/// Render a simple ASCII chess board from FEN
 fn render_simple_board(ui: &mut egui::Ui, fen: &str) {
     // Parse FEN and render basic board
     let board_part = fen.split_whitespace().next().unwrap_or("");
@@ -185,7 +164,6 @@ fn render_simple_board(ui: &mut egui::Ui, fen: &str) {
     ui.monospace("  a   b   c   d   e   f   g   h");
 }
 
-/// Get piece symbol at a specific square from FEN
 fn get_square_from_fen(fen_board: &str, file: usize, rank: usize) -> String {
     let ranks: Vec<&str> = fen_board.split('/').collect();
     if rank >= ranks.len() {
@@ -213,7 +191,6 @@ fn get_square_from_fen(fen_board: &str, file: usize, rank: usize) -> String {
     " ".to_string()
 }
 
-/// Convert FEN piece character to Unicode chess symbol
 fn piece_symbol(c: char) -> String {
     match c {
         'P' => "".to_string(),
@@ -232,9 +209,6 @@ fn piece_symbol(c: char) -> String {
     }
 }
 
-/// System to add spectator menu option to main menu.
-///
-/// Must be scheduled in [`bevy_egui::EguiPrimaryContextPass`] by the caller.
 pub fn spectator_menu_ui(
     mut contexts: EguiContexts,
     mut spectator: ResMut<SpectatorMode>,

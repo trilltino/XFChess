@@ -16,21 +16,6 @@ use crate::multiplayer::network::reorder::IngestOutcome;
 use crate::multiplayer::types::*;
 use crate::multiplayer::TokioRuntime;
 
-/// Peers and topics the Iroh node task currently knows about.
-///
-/// Exists because an iroh-gossip topic is a *separate* swarm per `TopicId`:
-/// `Gossip::subscribe(topic, bootstrap)` only dials the peers in `bootstrap`,
-/// and being neighbours on one topic gives you nothing on another. Moves are
-/// broadcast on the per-game topic `GAME_TOPIC/<game_id>`, but the only
-/// `join_peers` call this code ever made was against the *global* `GAME_TOPIC`
-/// — so the per-game swarm had exactly one member on each side and gossip
-/// never delivered a single move between clients.
-///
-/// Both orderings have to work, since "we learned the peer" and "we joined the
-/// game topic" race with no guaranteed winner:
-/// - peer known first  → [`GossipMesh::subscribe`] passes it as bootstrap.
-/// - topic joined first → [`GossipMesh::add_peer`] back-fills it into every
-///   topic already subscribed.
 #[derive(Default)]
 struct GossipMesh {
     peers: std::collections::HashSet<EndpointId>,
@@ -38,13 +23,11 @@ struct GossipMesh {
 }
 
 impl GossipMesh {
-    /// Record a topic and return the peers to bootstrap it with.
     fn subscribe(&mut self, topic: &str) -> Vec<EndpointId> {
         self.topics.insert(topic.to_string());
         self.peers.iter().copied().collect()
     }
 
-    /// Record a peer and return every topic it must be joined into.
     fn add_peer(&mut self, peer: EndpointId) -> Vec<String> {
         self.peers.insert(peer);
         self.topics.iter().cloned().collect()
@@ -59,7 +42,6 @@ use crate::rendering::PieceType;
 
 pub const GAME_TOPIC: &str = "/xfchess-game";
 
-/// Initializes the Braid/Iroh networking layer in a background Tokio task.
 pub fn initialize_braid_network(
     mut network_state: ResMut<OnlineNetworkState>,
     tokio_runtime: Res<TokioRuntime>,
@@ -325,16 +307,6 @@ pub fn initialize_braid_network(
     });
 }
 
-/// Bind the causal identity to the verified signer.
-///
-/// The `signer_pubkey` carried inside a `Move` is set by the sender and is NOT
-/// authenticated on its own — a malicious peer could put a victim's identity
-/// there. After a signature verifies, we overwrite `signer_pubkey` with the public
-/// key that actually signed the message (`session_pubkey`). The causal
-/// fork-check in [`handle_network_events`] keys on `signer_pubkey`, so this makes
-/// that identity unforgeable: to act as identity X you must hold X's signing
-/// key. Closes the impersonation gap the TLA+ model assumed away — see
-/// docs/plans/causal-authentication.md (Gap A1).
 fn bind_identity(mut signed: SignedNetworkMessage) -> NetworkMessage {
     if let NetworkMessage::Move { signer_pubkey, .. } = &mut signed.msg {
         *signer_pubkey = signed.session_pubkey.clone();
@@ -500,7 +472,6 @@ async fn process_gossip_stream(
     }
 }
 
-/// Polling system to read NetworkEvents from the background task and write them as Bevy events.
 pub fn handle_network_events(
     mut network_state: ResMut<OnlineNetworkState>,
     mut causal: ResMut<crate::multiplayer::types::CausalChainState>,
@@ -1000,13 +971,6 @@ pub fn handle_network_events(
     }
 }
 
-/// Reaps a nonce gap that a bounded `NonceSequencer` can't catch on its own:
-/// a genuinely dropped move (not just reordered) that the mover's own client
-/// has nothing to follow up with, since it's still waiting for the opponent
-/// to see that very move — the buffer never grows past one entry, so
-/// `NonceSequencer`'s count bound never fires. Runs every frame; only games
-/// with a buffered entry older than `PendingMoveBuffer::STALE_AFTER` pay any
-/// cost.
 pub fn sweep_stale_move_buffers(
     mut pending: ResMut<crate::multiplayer::types::PendingMoveBuffer>,
     network_state: Res<OnlineNetworkState>,
@@ -1268,16 +1232,6 @@ pub fn emit_game_ended_event(
     });
 }
 
-/// Records a bot game's result to the backend, purely for history — no
-/// on-chain effect, no Elo change (on-chain Elo stays driven only by real
-/// wagered/ranked settlement). Deliberately NOT gated behind the `solana`
-/// feature: this is an Account-only concept, independent of wallets. Skips
-/// entirely for Guest play or when not logged in — see
-/// docs/plans/identity-implementation-plan.md.
-///
-/// Local pass-and-play (`GameMode::MultiplayerLocal`) is intentionally not
-/// recorded here: both sides are the same physical player, so "did the
-/// Account win or lose" isn't well-defined the way it is for a bot game.
 pub fn record_casual_game_on_end(
     game_over: Res<GameOverState>,
     game_mode: Res<crate::core::states::GameMode>,
@@ -1341,9 +1295,6 @@ pub fn record_casual_game_on_end(
     });
 }
 
-/// Convert `NetworkEvent::MessageReceived(NetworkMessage::Move)` into `NetworkMoveEvent`
-/// so that `handle_network_moves` can apply opponent moves to the local board.
-/// Runs for move messages from both direct gossip and relay-backed transport.
 pub fn dispatch_remote_moves(
     mut network_events: MessageReader<NetworkEvent>,
     mut move_events: MessageWriter<crate::game::events::NetworkMoveEvent>,
@@ -1391,9 +1342,6 @@ pub fn dispatch_remote_moves(
     }
 }
 
-/// React to [`NetworkMessage::ResyncResponse`] by overwriting the local engine with the
-/// authoritative FEN sent by the opponent.  Separate system so it doesn't need to share
-/// the `network_events` MessageReader cursor with `dispatch_remote_moves`.
 pub fn handle_resync_response(
     mut network_events: MessageReader<NetworkEvent>,
     mut engine: ResMut<crate::engine::board_state::ChessEngine>,
@@ -1414,7 +1362,6 @@ pub fn handle_resync_response(
     }
 }
 
-/// Route inbound draw, timeout, rematch, and ping/pong messages into Bevy events.
 pub fn handle_game_control_messages(
     mut network_events: MessageReader<NetworkEvent>,
     mut draw_offer: MessageWriter<crate::game::events::DrawOfferEvent>,
@@ -1490,8 +1437,6 @@ pub fn handle_game_control_messages(
     }
 }
 
-/// Forward local draw offers, draw responses, rematch messages, flag
-/// timeouts, and resignations to the network.
 pub fn send_local_draw_events(
     mut local_draw_offers: MessageReader<crate::game::events::DrawOfferEvent>,
     mut local_draw_responses: MessageReader<crate::game::events::DrawResponseEvent>,
@@ -1577,8 +1522,6 @@ pub fn send_local_draw_events(
     }
 }
 
-/// When the opponent sends [`NetworkMessage::ResyncRequest`], reply with our current engine FEN
-/// as a [`NetworkMessage::ResyncResponse`] so they can snap back to the correct board state.
 pub fn handle_resync_request(
     mut network_events: MessageReader<NetworkEvent>,
     engine: Res<crate::engine::board_state::ChessEngine>,
@@ -1602,24 +1545,6 @@ pub fn handle_resync_request(
     }
 }
 
-/// Send a [`NetworkMessage::Ping`] on a fixed interval while a game session
-/// is active. Purely a liveness/RTT probe now — it no longer declares
-/// abandonment itself (see the removed-block note below); the opponent's
-/// backend `/presence` heartbeat (`social::check_opponent_presence`) is the
-/// general-purpose signal for that, feeding `opponent_disconnect_ui`
-/// directly.
-///
-/// This used to also declare `GameOverState::*WonByAbandonment` when
-/// `since_last_pong` exceeded `timeout_secs`, gated on `!braid_state.
-/// is_connected()` (our own Braid subscription being down) to avoid
-/// false-positiving relay-only games where gossip Ping/Pong never gets
-/// through at all. That guard was backwards: `is_connected()` reflects only
-/// *our* HTTP connectivity to the backend, not the opponent's — so the
-/// branch fired only when *we* had lost our own connection, which is
-/// exactly the situation where we're least able to conclude the *opponent*
-/// abandoned. It could declare a false win off nothing but our own network
-/// hiccup, and it could never fire for the (far more common) case of the
-/// backend staying reachable while the opponent's app was simply gone.
 pub fn tick_heartbeat(
     time: Res<Time>,
     mut heartbeat: ResMut<HeartbeatState>,
@@ -1668,7 +1593,6 @@ pub fn tick_heartbeat(
     }
 }
 
-/// Reset heartbeat counters when a Pong arrives.
 pub fn handle_pong(
     mut network_events: MessageReader<NetworkEvent>,
     mut heartbeat: ResMut<HeartbeatState>,
@@ -1683,25 +1607,6 @@ pub fn handle_pong(
     }
 }
 
-/// Clear per-match networking state when leaving `InGame`, so the *next*
-/// match doesn't inherit it. Before this, three resources persisted across
-/// games in the same process:
-///
-/// - `P2PConnectionState.status` stayed `Connected`/`InGame` from the last
-///   match, so `handle_connect_to_peer`'s dedup guard silently dropped the
-///   new match's `ConnectToPeerEvent` ("Ignoring duplicate connect request —
-///   already InGame"), leaving direct Iroh P2P never established.
-/// - `RelayBridge.poll_index` kept counting up across games, so polling the
-///   new (empty) relay mailbox with a stale high `since` index meant nothing
-///   ever came back — pongs and moves were silently swallowed.
-/// - `HeartbeatState` (`timed_out` latch / stale `since_last_pong`) carried
-///   over, so a match that inherits both broken transports above has no
-///   working path to a Pong and hits the 15s abandonment timeout almost
-///   immediately.
-///
-/// Together these made every match after the first in a session (e.g. a
-/// wagered game played after a casual one) silently lose connectivity and
-/// get declared "opponent disconnected" within seconds of starting.
 pub fn reset_multiplayer_session_state(
     mut p2p_conn: ResMut<crate::multiplayer::network::p2p::P2PConnectionState>,
     mut heartbeat: ResMut<HeartbeatState>,
@@ -1789,10 +1694,6 @@ mod gossip_mesh_tests {
         SecretKey::from_bytes(&[byte; 32]).public()
     }
 
-    /// The bug this exists to prevent: moves are broadcast on
-    /// `GAME_TOPIC/<game_id>`, but the only `join_peers` call was against the
-    /// global `GAME_TOPIC`. An iroh-gossip swarm is per-`TopicId`, so the
-    /// per-game topic had one member on each side and delivered nothing.
     #[test]
     fn a_peer_learned_after_subscribing_is_joined_into_the_game_topic() {
         let mut mesh = GossipMesh::default();
@@ -1813,8 +1714,6 @@ mod gossip_mesh_tests {
         assert!(topics.contains(&GAME_TOPIC.to_string()));
     }
 
-    /// The other ordering: peer first, then the topic. The subscribe must
-    /// carry the known peer as bootstrap, since nothing will re-join it later.
     #[test]
     fn a_topic_subscribed_after_the_peer_is_known_bootstraps_with_it() {
         let mut mesh = GossipMesh::default();
@@ -1830,7 +1729,6 @@ mod gossip_mesh_tests {
         );
     }
 
-    /// Every peer must reach every topic, regardless of interleaving.
     #[test]
     fn all_known_peers_reach_all_known_topics() {
         let mut mesh = GossipMesh::default();
@@ -1851,10 +1749,6 @@ mod gossip_mesh_tests {
 mod auth_tests {
     use super::*;
 
-    /// A1 regression: an attacker who signs with their OWN key but stuffs a
-    /// victim's identity into `signer_pubkey` must not be able to act as the victim.
-    /// `bind_identity` discards the claimed `signer_pubkey` and substitutes the
-    /// verified signer, so the causal/roster checks see the attacker's real key.
     #[test]
     fn bind_identity_uses_verified_signer_not_claimed_agent_id() {
         let attacker_sk = [9u8; 32];
@@ -1893,7 +1787,6 @@ mod auth_tests {
         }
     }
 
-    /// Non-Move messages are passed through unchanged by `bind_identity`.
     #[test]
     fn bind_identity_leaves_non_move_untouched() {
         let sk = [7u8; 32];
@@ -1906,27 +1799,6 @@ mod auth_tests {
     }
 }
 
-/// docs/PRE_MAINNET_E2E_PLAN.md §1.2/§6.3: property test for cross-transport
-/// move dedup — the plan's own assessment calls this "the highest-value
-/// single test in this whole plan." Drives the REAL `handle_network_events`
-/// (gossip), `drain_braid_messages` (Braid relay), and `dispatch_remote_moves`
-/// (the shared consumer both feed) systems inside a headless Bevy `App`
-/// against a shared `CausalChainState`, so this exercises the actual
-/// production dedup mechanism (`applied_versions`), not a reimplementation.
-///
-/// Scope: a single canonical move stream (one fixed agent identity, so the
-/// per-agent seq/parent-version causal chain — gossip's own replay/fork
-/// guard — stays internally consistent) is delivered through an arbitrary
-/// mix of gossip-only, relay-only, both, and duplicated-within-a-transport
-/// patterns, each transport's arrival order independently shuffled. This
-/// exercises: (a) `NonceSequencer`'s gossip reorder gate on out-of-order
-/// gossip arrivals, (b) relay's order-independence, and (c) cross-transport
-/// dedup via `applied_versions` for moves delivered by both. Not covered
-/// (noted as follow-up, not silently assumed safe): a deliberately
-/// *malicious* forged relay message reusing a legitimate move's
-/// `version_hash` — see the module doc's "smuggle a different version_hash"
-/// concern, which needs an adversarial (not just reordering/duplication)
-/// scenario.
 #[cfg(test)]
 mod dual_transport_dedup_property_tests {
     use super::*;
@@ -1946,9 +1818,6 @@ mod dual_transport_dedup_property_tests {
     fn turn_for(i: usize) -> u16 {
         (i + 1) as u16
     }
-    /// The version_hash a move at index `i` produces — identical formula to
-    /// both `handle_network_events` (gossip) and `drain_braid_messages`
-    /// (relay), which is exactly what makes cross-transport dedup possible.
     fn head_for(i: usize) -> String {
         braid_chess::version_hash(&fen_for(i), turn_for(i) as u32)
     }
@@ -1983,7 +1852,6 @@ mod dual_transport_dedup_property_tests {
         ))
     }
 
-    /// How a single canonical move gets delivered across the two transports.
     #[derive(Debug, Clone, Copy)]
     enum Delivery {
         GossipOnly,
@@ -2005,11 +1873,6 @@ mod dual_transport_dedup_property_tests {
         ]
     }
 
-    /// Deterministic Fisher-Yates shuffle seeded from a proptest-generated
-    /// `u64`, so failures reproduce exactly (proptest doesn't ship an
-    /// off-the-shelf `Vec` shuffle combinator, and pulling in `rand` just for
-    /// this one shuffle would defeat the point of a minimal, scoped
-    /// dependency addition — see this module's parent doc comment).
     fn shuffle<T>(items: &mut Vec<T>, seed: u64) {
         let mut state = seed | 1; // xorshift64 needs a nonzero seed
         let mut next = move || {
@@ -2179,18 +2042,6 @@ mod dual_transport_dedup_property_tests {
     }
 }
 
-/// Phase C (`docs/plans/networking-hardening-plan.md`): once
-/// `CausalChainState::verified_wallets` is populated for a game, a
-/// `SessionInfo` claiming a `player_pubkey` that isn't actually white or
-/// black on-chain must not get its `signing_pubkey` seated on the roster —
-/// this is the client-side mirror of Phase B's backend
-/// `on_chain_verified_roster_beats_a_forged_first_claim` regression test.
-/// Only meaningful under `--features solana`: `verified_wallets` is only
-/// ever populated by `spawn_verified_participants_fetch`/
-/// `poll_verified_participants_fetch`, both solana-gated — without the
-/// feature the map stays empty for every game and the roster keeps its
-/// original trust-first bootstrap unconditionally (already covered by every
-/// other roster test in this file).
 #[cfg(all(test, feature = "solana"))]
 mod verified_wallets_roster_tests {
     use super::*;
@@ -2296,16 +2147,6 @@ mod verified_wallets_roster_tests {
     }
 }
 
-/// docs/PRE_MAINNET_E2E_PLAN.md §2.3: `SessionInfo.player_pubkey` is
-/// self-asserted by the claiming peer with no wallet signature over it (see
-/// `NetworkMessage::SessionInfo`'s doc comment in `network/protocol.rs`).
-/// This documents that gap directly, then pairs it with an on-chain test
-/// (`programs/xfchess-game/tests/global_session_settlement_tests.rs`'s
-/// `finalize_game_rejects_spoofed_black_authority`) proving the boundary the
-/// checklist worried about doesn't actually let a spoofed identity move
-/// escrow funds — the client can build a `finalize_game` call from a
-/// spoofed `opponent_pubkey`, but the on-chain `constraint =
-/// black_authority.key() == game.black` check rejects it regardless.
 #[cfg(all(test, feature = "solana"))]
 mod session_info_spoof_tests {
     use super::*;
@@ -2315,10 +2156,6 @@ mod session_info_spoof_tests {
     use bevy::prelude::*;
     use solana_sdk::pubkey::Pubkey;
 
-    /// Once the backend has published the authoritative wallet pair for a game,
-    /// a forged `SessionInfo.player_pubkey` must never be trusted into
-    /// `opponent_pubkey` or the per-game roster. This is the client-side
-    /// analogue of the server-side on-chain roster guard.
     #[test]
     fn handle_session_info_rejects_a_spoofed_player_pubkey_when_verified_wallets_are_known() {
         let white = Pubkey::new_unique();

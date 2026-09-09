@@ -1,13 +1,3 @@
-//! In-process HTTP end-to-end tests (Tier T1; see docs/plans/e2e-testing.md).
-//!
-//! `spawn_app()` reproduces the real server startup — `initialize_pools` →
-//! `run_migrations` → `SessionStore::init` (which also applies the 013–016
-//! schema) → `AppState::new` → `build_app_router` — against a private
-//! shared-cache in-memory SQLite, then drives the *real* router with
-//! `tower::ServiceExt::oneshot`. No network, no validator, no mocks of our own
-//! code. Flows are restricted to the chain-free seams (the Solana RPC endpoint
-//! is configured but never hit by these routes).
-
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -25,8 +15,6 @@ use backend::signing::storage::SessionStore;
 use backend::signing::{AppState, SigningConfig};
 use std::sync::Mutex;
 
-/// Per-test unique shared-cache in-memory DB name so the 16-connection pool all
-/// sees the same database and tests don't collide.
 fn unique_db_url(tag: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -37,8 +25,6 @@ fn unique_db_url(tag: &str) -> String {
     format!("sqlite:file:xfchess_e2e_{tag}_{n}_{nanos}?mode=memory&cache=shared")
 }
 
-/// Test config with valid pubkeys / 32-byte hex keys; RPC URLs point nowhere
-/// real because no tested route performs a Solana RPC call.
 fn test_config() -> SigningConfig {
     SigningConfig {
         port: 0,
@@ -68,7 +54,6 @@ struct TestApp {
 }
 
 impl TestApp {
-    /// A fresh, serveable router (oneshot consumes it, so build per request).
     fn router(&self) -> Router {
         build_app_router(self.state.clone()).with_state(self.state.clone())
     }
@@ -92,9 +77,6 @@ impl TestApp {
         self.send(req).await
     }
 
-    /// Admin-authenticated request. No `ADMIN_API_KEY`/`ADMIN_API_KEYS` is set
-    /// by these tests, so `require_api_key` falls to its debug-build default
-    /// (`X-API-Key: dev` -> actor `"dev-default"`) — see `auth_middleware::resolve_admin_actor`.
     async fn admin_request(
         &self,
         method: &str,
@@ -126,7 +108,6 @@ impl TestApp {
         (status, value)
     }
 
-    /// Raw-text variant for non-JSON endpoints (e.g. /metrics).
     async fn get_text(&self, uri: &str) -> (StatusCode, String) {
         let req = Request::builder()
             .uri(uri)
@@ -415,7 +396,6 @@ fn now_secs() -> u64 {
 }
 
 impl TestApp {
-    /// Send a request with an optional Bearer token and optional JSON body.
     async fn send_auth(
         &self,
         method: &str,
@@ -438,7 +418,6 @@ impl TestApp {
     }
 }
 
-/// The unconditional token-minting endpoint was removed; the route must be gone.
 #[tokio::test]
 async fn auth_issue_endpoint_is_removed() {
     let app = spawn_app().await;
@@ -448,7 +427,6 @@ async fn auth_issue_endpoint_is_removed() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-/// Full SIWS login produces a working JWT, and logout revokes it server-side.
 #[tokio::test]
 async fn siws_login_then_logout_revokes_token() {
     let app = spawn_app().await;
@@ -512,7 +490,6 @@ async fn siws_login_then_logout_revokes_token() {
     );
 }
 
-/// A correctly-signed login with a stale timestamp is rejected (replay window).
 #[tokio::test]
 async fn login_rejects_stale_timestamp() {
     let app = spawn_app().await;
@@ -536,12 +513,6 @@ async fn login_rejects_stale_timestamp() {
     );
 }
 
-/// `link_wallet`'s `UPDATE users_v2 SET wallet = ? WHERE email = ?` has no
-/// concept of "this account already has a wallet" — before this fix it would
-/// silently re-point an email account from one wallet to another, orphaning
-/// whatever KYC/CACF history sat under the old wallet string with nothing to
-/// reconcile it. First-time linking must still work; a second link to a
-/// DIFFERENT wallet must now be rejected.
 #[tokio::test]
 async fn link_wallet_rejects_repointing_an_already_linked_account() {
     let app = spawn_app().await;
@@ -632,10 +603,6 @@ async fn link_wallet_rejects_repointing_an_already_linked_account() {
     );
 }
 
-/// `GET /api/auth/lichess/init` used to accept `wallet_pubkey` as a bare
-/// query param — only CSRF-protected via the `state` round trip through
-/// Lichess, not actually bound to the caller's own wallet. It now requires
-/// a Bearer JWT matching `wallet_pubkey`.
 #[tokio::test]
 async fn lichess_init_requires_auth_and_rejects_wallet_mismatch() {
     let app = spawn_app().await;
@@ -706,12 +673,6 @@ async fn lichess_init_requires_auth_and_rejects_wallet_mismatch() {
     );
 }
 
-/// `POST /api/kyc/submit` used to accept `wallet_pubkey` as a bare,
-/// unauthenticated field — anyone could submit PII attributed to an
-/// arbitrary wallet with zero proof of ownership. It now requires a Bearer
-/// JWT and rejects a submission whose body `wallet_pubkey` doesn't match the
-/// authenticated wallet, closing that gap the same way `record_move` was
-/// fixed earlier for a different route.
 #[tokio::test]
 async fn kyc_submit_requires_auth_and_rejects_wallet_mismatch() {
     let app = spawn_app().await;
@@ -782,16 +743,6 @@ async fn kyc_submit_requires_auth_and_rejects_wallet_mismatch() {
     assert_eq!(status, StatusCode::OK, "own-wallet KYC submission: {body}");
 }
 
-/// The off-chain (SQLite `users.username`, set via `PATCH /api/auth/username`)
-/// and on-chain (`PlayerProfile.username_set`) registration states are
-/// completely independent — this is the exact combination that was untested
-/// and let a bug ship where a player who'd already chosen a display name
-/// off-chain still got asked to "Choose Your Handle" every time they tried to
-/// wager, because the game client's profile check (see
-/// `src/multiplayer/solana/integration/profile_check.rs`) only ever reads the
-/// on-chain side. Both `/api/auth/me` and `/api/auth/sync-profile` gracefully
-/// degrade to "no on-chain profile" when the configured RPC URL is
-/// unreachable (true in this test config), so this needs no chain mocking.
 // multi_thread flavor: `/api/auth/me`'s on-chain existence check runs the
 // blocking Solana RpcClient inside `spawn_blocking`, which internally uses
 // `tokio::task::block_in_place` — that requires a multi-threaded runtime,
@@ -856,9 +807,6 @@ async fn offchain_username_does_not_imply_onchain_profile() {
     assert_eq!(body["username_set"], false);
 }
 
-/// Serialisation guard for the one test that mutates the process-global
-/// RELAY_SHARED_SECRET env var. Without this, Cargo's parallel test runner
-/// lets other threads see the mutated value → flaky random failures.
 static RELAY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 struct RelaySharedSecretGuard {
@@ -883,11 +831,6 @@ impl Drop for RelaySharedSecretGuard {
     }
 }
 
-/// Dual-accept guard on the signing endpoints: a valid per-user JWT *or* the
-/// legacy relay secret is accepted; neither → 401 (fail-closed). JWT callers
-/// are also authorized per-wallet on session creation and move submission.
-/// All RELAY_SHARED_SECRET handling is kept in this one test to avoid racing
-/// the process-global env var.
 #[tokio::test]
 async fn dual_accept_auth_guards_signing_endpoints() {
     let _guard = RELAY_TEST_LOCK.lock().unwrap();
@@ -1032,11 +975,6 @@ async fn admin_route_requires_api_key() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
-/// `treasury_refund` must never sign or submit a transaction itself — see
-/// `bin/treasury_signer.rs`'s module doc. It should validate, audit-log, and
-/// hand back the CLI command for an operator to run on an isolated host,
-/// never a `signature` field (there's nothing to sign with — this process
-/// holds no treasury secret key at all, only the public key).
 #[tokio::test]
 async fn treasury_refund_never_signs_in_process() {
     let app = spawn_app().await;
@@ -1076,11 +1014,6 @@ async fn treasury_refund_never_signs_in_process() {
 
 // ── Tournament templates + persistent audit log (Phase 3) ─────────────────────
 
-/// Templates persist to `tournament_templates` (not localStorage/panel-only),
-/// and both a semantic `add_audit` call (save/delete) and the generic
-/// catch-all `persist_admin_request` middleware (which logs every mutating
-/// /admin/* request regardless of whether its handler calls add_audit) write
-/// through to the persistent `admin_audit_log` table.
 #[tokio::test]
 async fn tournament_template_round_trip_persists_and_is_audited() {
     let app = spawn_app().await;
@@ -1160,16 +1093,6 @@ async fn tournament_template_round_trip_persists_and_is_audited() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-/// A private tournament must reject a registration with a wrong or missing
-/// password. Until 2026-08-21 this whole path was inert in both directions:
-/// `CreateTournamentReq` had no password field so `password_hash` was never
-/// set, and `/confirm-join` accepted `{player, elo, signature}` with no
-/// password check at all — so the client's password prompt was decorative and
-/// anyone with the tournament ID could register.
-///
-/// This exercises the gate itself rather than the full signed-registration
-/// flow (which needs a real on-chain tx): a bad password must be rejected
-/// before any roster mutation, and must not be reported as a signature problem.
 #[tokio::test]
 async fn private_tournament_rejects_bad_password() {
     use backend::signing::storage::tournament::TournamentRecord;

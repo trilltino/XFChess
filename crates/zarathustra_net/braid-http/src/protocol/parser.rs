@@ -1,9 +1,6 @@
-//! Protocol parsing utilities.
-
 use crate::error::Result;
 use crate::types::Version;
 
-/// Header parser for protocol messages.
 pub struct HeaderParser;
 
 impl HeaderParser {

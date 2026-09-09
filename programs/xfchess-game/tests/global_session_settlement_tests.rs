@@ -1,15 +1,3 @@
-//! Regression coverage for a revenue-integrity bug found while auditing the
-//! signing/popup architecture: the client's `global_create_game` path used to
-//! hardcode `platform_fee_lamports = 0` (see `src/multiplayer/solana/lobby.rs`),
-//! so every wagered game created via the "one popup ever" path paid zero
-//! platform rake even though the on-chain settlement math (below) has always
-//! correctly paid `Game.country_fee` to the treasury vault once it's actually
-//! set to something nonzero at creation. This file exercises that on-chain
-//! side directly: seed a `Finished` game with a nonzero `country_fee` and
-//! confirm `finalize_game` pays exactly that amount to `treasury_vault`.
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
@@ -38,10 +26,6 @@ fn profile_account(authority: Pubkey) -> (Pubkey, solana_sdk::account::Account) 
     )
 }
 
-/// A `Finished`, undelegated, ranked (non-Free) game with a winner already
-/// decided and a nonzero `country_fee` — exactly the state `finalize_game`
-/// expects once `settlement_worker` (or, on the ER path, undelegation) has
-/// moved a completed game back to the base layer.
 #[allow(clippy::too_many_arguments)]
 fn finished_game_account(
     game_id: u64,
@@ -274,11 +258,6 @@ async fn finalize_game_refunds_cancelled_zero_move_game_to_both_players() {
     );
 }
 
-/// docs/PRE_MAINNET_E2E_PLAN.md §1.1: `EndGame`'s `fee_payer` constraint
-/// (`finalize.rs:39`, `constraint = fee_payer.key() == game.fee_payer`) is a
-/// repo-wide invariant enforced at four sites, but before this test nothing
-/// in the test suite ever supplied a *mismatched* fee_payer — only the
-/// correct one. This exercises the negative case directly.
 #[tokio::test]
 async fn finalize_game_rejects_mismatched_fee_payer() {
     let white = Pubkey::new_unique();
@@ -330,11 +309,6 @@ async fn finalize_game_rejects_mismatched_fee_payer() {
     assert_eq!(game.status, GameStatus::Finished);
 }
 
-/// docs/PRE_MAINNET_E2E_PLAN.md §1.1: regression guard on the *correct*-payer
-/// path — asserts `fee_payer`'s balance delta is exactly the escrow tx-fee
-/// reimbursement plus the closed `Game` account's full rent, so a future
-/// change to `close =`'s target (or to the escrow tx-fee split) that quietly
-/// shortchanges the relayer fails this test instead of shipping unnoticed.
 #[tokio::test]
 async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() {
     let white = Pubkey::new_unique();
@@ -399,19 +373,6 @@ async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() {
     );
 }
 
-/// docs/PRE_MAINNET_E2E_PLAN.md §2.3: the P2P gossip layer's `SessionInfo`
-/// binds `opponent_pubkey` from a self-asserted, unverified claim (see
-/// `multiplayer::systems::handle_session_info_from_network` and its paired
-/// unit test `session_info_spoof_tests::handle_session_info_accepts_a_spoofed_player_pubkey_with_no_verification`
-/// in `src/multiplayer/systems.rs`), and that spoofed value can genuinely
-/// reach `finalize_game`'s account list client-side
-/// (`src/multiplayer/rollup/bridge.rs`'s finalize-on-end path derives
-/// white/black wallet accounts from `opponent_pubkey`). This proves the
-/// other half of the boundary: even when the client is fooled into building
-/// `finalize_game` with a spoofed `black_authority`, the on-chain
-/// `constraint = black_authority.key() == game.black` check rejects it and
-/// no escrow funds move — the informal "money layer is separate from the
-/// gossip layer" claim, now an explicit regression test.
 fn finalize_game_ix_with_spoofed_black_authority(
     game_id: u64,
     white: Pubkey,

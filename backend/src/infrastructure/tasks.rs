@@ -1,5 +1,3 @@
-//! Background task spawning for the backend.
-
 use crate::signing::{AnalysisQueue, AppState, SigningConfig, TournamentTrigger};
 use crate::tasks::anticheat_worker;
 use crate::tasks::archiver;
@@ -7,7 +5,6 @@ use crate::tasks::matchmaking;
 use crate::tasks::tournament_scheduler::{spawn_prize_distributor, spawn_tournament_scheduler};
 use tracing::info;
 
-/// Spawns application background tasks and returns their trigger channels.
 pub fn spawn_background_tasks(
     state: AppState,
     config: SigningConfig,

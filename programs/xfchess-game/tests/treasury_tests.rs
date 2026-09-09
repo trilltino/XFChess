@@ -1,13 +1,3 @@
-//! Integration tests for the treasury-withdrawal and close_tournament fixes.
-//!
-//! Runs the real compiled program (`target/deploy/xfchess_game.so`) in-process
-//! via `solana-program-test`, seeding account state directly. Build the `.so`
-//! first with `cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml`.
-//!
-//! Coverage:
-//!   withdraw_treasury — happy path, rent floor, wrong signer, zero amount
-//!   close_tournament  — Active blocked, unpaid winner blocked, all-claimed OK
-
 use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
 use solana_program_test::{BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
@@ -39,7 +29,6 @@ fn tournament_escrow_pda(id: u64) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[b"t_escrow", &id.to_le_bytes()], &xfchess_game::ID)
 }
 
-/// System-owned account holding `lamports` and no data (wallet / bare PDA vault).
 fn system_account(lamports: u64) -> Account {
     Account {
         lamports,
@@ -50,7 +39,6 @@ fn system_account(lamports: u64) -> Account {
     }
 }
 
-/// Program-owned account with `lamports` and exactly `data_len` zero bytes.
 fn program_owned(lamports: u64, data_len: usize) -> Account {
     Account {
         lamports,
@@ -61,7 +49,6 @@ fn program_owned(lamports: u64, data_len: usize) -> Account {
     }
 }
 
-/// Serialize an anchor account and pad to its full on-chain allocation.
 fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> Account {
     let mut data = Vec::with_capacity(space);
     value.try_serialize(&mut data).unwrap();
@@ -144,8 +131,6 @@ fn withdraw_ix(authority: Pubkey, destination: Pubkey, amount: u64) -> Instructi
     }
 }
 
-/// Load the real treasury authority keypair from the gitignored keyfile.
-/// Returns None (test skips the signing path) when it isn't present (e.g. CI).
 fn treasury_authority_keypair() -> Option<Keypair> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -269,7 +254,6 @@ async fn withdraw_treasury_zero_amount_rejected() {
 
 // ── close_tournament ────────────────────────────────────────────────────────
 
-/// Build a Tournament with the fields the close path reads; everything else default.
 #[allow(clippy::too_many_arguments)]
 fn tournament(
     id: u64,
@@ -352,7 +336,6 @@ fn close_ix(id: u64, authority: Pubkey) -> Instruction {
     }
 }
 
-/// Seed the accounts a close_tournament call touches.
 fn close_accounts(id: u64, t: &Tournament, escrow_lamports: u64) -> Vec<(Pubkey, Account)> {
     vec![
         (

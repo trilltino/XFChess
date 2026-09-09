@@ -1,27 +1,3 @@
-//! Main menu plugin with polished UI.
-//!
-//! Displays the primary game menu with options to:
-//! - Start a new game (with mode selection)
-//! - Access settings
-//! - View statistics
-//! - Exit the application
-//!
-//! Features styled UI components from the theme system and an optional
-//! animated 3D background scene. Heavier UI is split across sibling
-//! submodules under `main_menu/`:
-//! - [`screens`] — Solana/Braid lobby, tournament browser, host-config and
-//!   waiting screens, plus the lobby-selection / spectator / join popups
-//!   driven by `MenuState` transitions.
-//! - [`navbar`] — top navigation bar and link/button helpers.
-//! - [`sections`] — PLAY / QUICK PLAY / NEWS / LEARN / TOURNAMENTS / UPDATES
-//!   cards that make up the website-style body.
-//! - [`modals`] — AI setup modal and controls popup reached from the navbar.
-//!
-//! This root file keeps the Bevy plugin, shared resources (`CompetitiveMenuState`,
-//! `PlayerIdentity`, `P2PHostState`, cached textures), camera wiring, font
-//! loading, and the top-level [`main_menu_ui`] / [`render_website_menu`]
-//! orchestrators that call into the submodules above.
-
 use crate::assets::{
     check_asset_loading, handle_asset_loading_errors, handle_untyped_asset_loading_errors,
     start_asset_loading,
@@ -56,7 +32,6 @@ use new_menu::{
 };
 use screens::*;
 
-/// Plugin for main menu state.
 pub struct MainMenuPlugin;
 
 impl Plugin for MainMenuPlugin {
@@ -209,8 +184,6 @@ impl Plugin for MainMenuPlugin {
     }
 }
 
-/// Renders the "waiting for wallet connection" overlay on top of whatever state is active.
-/// Runs in both MainMenu and InGame so the user can connect wallet at any time.
 pub fn wallet_connect_overlay_system(
     mut contexts: EguiContexts,
     mut poller: ResMut<WalletBridgePoller>,
@@ -385,7 +358,6 @@ fn wallet_connect_overlay_message(poller: &WalletBridgePoller) -> &'static str {
     }
 }
 
-/// Wrapper for [`main_menu_ui`] that surfaces query-single errors as warnings.
 fn main_menu_ui_wrapper(mut ctx: MainMenuUIContext) {
     match main_menu_ui(&mut ctx) {
         Ok(()) => {}
@@ -395,11 +367,9 @@ fn main_menu_ui_wrapper(mut ctx: MainMenuUIContext) {
     }
 }
 
-/// Marker component for the menu camera.
 #[derive(Component)]
 struct MenuCamera;
 
-/// Resource to track the player's chosen color when playing vs AI.
 #[derive(Resource)]
 pub struct PlayerColorChoice {
     pub play_as_white: bool,
@@ -415,7 +385,6 @@ impl Default for PlayerColorChoice {
     }
 }
 
-/// Filter controlling which lobby listings are shown on the home page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LobbyFilter {
     #[default]
@@ -426,37 +395,21 @@ pub enum LobbyFilter {
 
 #[derive(Resource)]
 pub struct CompetitiveMenuState {
-    /// Which game-type filter is selected in the lobby browser.
     pub lobby_filter: LobbyFilter,
-    /// Whether the AI setup modal is currently open.
     pub show_ai_setup: bool,
-    /// Selected AI difficulty level (1-8).
     pub ai_difficulty: u8,
-    /// Selected player side (Black, Random, White).
     pub ai_side: AISide,
-    /// Selected time control for AI games.
     pub ai_time_control: crate::game::time_control::TimeControl,
-    /// Whether the spectator popup is currently open.
     pub show_spectator_popup: bool,
-    /// Whether the controls popup is currently open.
     pub show_controls_popup: bool,
-    /// Whether the join lobby popup is currently open.
     pub show_join_popup: bool,
-    /// Input field for game ID to join in the join lobby popup.
     pub join_game_id: String,
-    /// Selected AI engine (Stockfish or XFChessEngine).
     pub ai_engine: crate::game::ai::resource::AIEngine,
-    /// Sort order for the P2P lobby browser.
     pub lobby_sort: crate::multiplayer::social::LobbySort,
-    /// Min time-control filter (seconds), None = no min.
     pub lobby_tc_min: Option<u32>,
-    /// Max time-control filter (seconds), None = no max.
     pub lobby_tc_max: Option<u32>,
-    /// Whether the PGN input modal is currently open.
     pub show_pgn_input: bool,
-    /// Raw PGN text typed by the user.
     pub pgn_input_text: String,
-    /// Last PGN parse error, shown inline in the modal.
     pub pgn_input_error: Option<String>,
 }
 
@@ -490,7 +443,6 @@ impl Default for CompetitiveMenuState {
     }
 }
 
-/// Player side selection for AI games.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AISide {
     Black,
@@ -504,31 +456,17 @@ impl Default for AISide {
     }
 }
 
-/// State for configuring a P2P game before hosting.
 #[derive(Resource, Debug, Clone, Reflect)]
 #[reflect(Resource)]
 pub struct P2PHostState {
-    /// Base time in minutes.
     pub base_time_minutes: u32,
-    /// Increment in seconds.
     pub increment_seconds: u16,
-    /// Stake amount in SOL (derived from wager_fiat / live rate).
     pub stake_amount: f64,
-    /// Wager amount entered by the user in fiat (GBP or USD).
     pub wager_fiat: f64,
-    /// Whether the fiat input is in USD (true) or GBP (false).
     pub wager_in_usd: bool,
-    /// The generated game ID.
     pub game_id: Option<String>,
-    /// Tracks when we last sent a heartbeat to keep the lobby alive.
     pub last_heartbeat: Option<std::time::Instant>,
-    /// Room name displayed in the lobby browser.
     pub lobby_name: String,
-    /// When true, `render_host_p2p_config_screen` skips announcing to the
-    /// VPS-backed public lobby directory entirely — the host only shares
-    /// their raw node ID out of band (Discord, text, etc). Set by the
-    /// "Direct Connection" panel; always false for the normal "Create
-    /// Lobby" flow. See docs/plans/identity-implementation-plan.md.
     pub direct_mode: bool,
 }
 
@@ -552,23 +490,15 @@ impl Default for P2PHostState {
 // Wallet bridge polling — syncs PlayerIdentity from the Tauri HTTP bridge
 // ---------------------------------------------------------------------------
 
-/// Shared state populated by the background wallet bridge poller.
 #[derive(Default, Clone)]
 pub struct WalletBridgeData {
     pub sol_balance: f64,
     pub usd_balance: Option<f64>,
-    /// USD per 1 SOL (0.0 if unknown).
     pub sol_usd_rate: f64,
-    /// GBP per 1 SOL (0.0 if unknown).
     pub sol_gbp_rate: f64,
-    /// Whether a balance fetch has completed for the currently-connected
-    /// pubkey. False while the very first fetch is in flight (or after a
-    /// manual refresh) so the HUD can show a loading state instead of a
-    /// misleadingly-precise "$0.00" before any real data has come back.
     pub balance_loaded: bool,
 }
 
-/// Subset of `/auth/me` relevant to the game client.
 #[derive(Debug, Default, Clone)]
 pub struct BridgeMeResp {
     pub username: String,
@@ -577,44 +507,26 @@ pub struct BridgeMeResp {
     pub can_wager: bool,
     pub has_onchain_profile: bool,
     pub jwt_token: String,
-    /// Lichess blitz rating (centiscale), 0 if not linked.
     pub lichess_blitz: u32,
     pub lichess_verified: bool,
 }
 
-/// Polling resource for the Tauri wallet bridge at http://localhost:7454/status.
 #[derive(Resource, Default)]
 pub struct WalletBridgePoller {
-    /// Channel for incoming (pubkey, username) from a `/status` poll.
     pub status_rx: Option<
         crossbeam_channel::Receiver<
             Result<(Option<String>, Option<String>, Option<String>), String>,
         >,
     >,
-    /// Last observed bridge status error, if any.
     pub bridge_status_error: Option<String>,
-    /// Channel for incoming (sol_balance, usd_per_sol, gbp_per_sol).
     pub balance_rx: Option<crossbeam_channel::Receiver<(f64, f64, f64)>>,
-    /// Channel for an in-flight `GET /token` + `GET /auth/me` call.
     pub me_rx: Option<crossbeam_channel::Receiver<Result<BridgeMeResp, String>>>,
-    /// Seconds since last poll trigger.
     pub timer: f32,
-    /// Seconds since last failed profile fetch — used to retry until profile is found.
     pub profile_retry_timer: f32,
-    /// Last known pubkey — used to detect new connections.
     pub known_pubkey: Option<String>,
-    /// Provider behind the connected wallet: `phantom`, `solflare` or `privy`.
-    ///
-    /// Read by `sync_bridge_pubkey_to_solana` to set
-    /// `SolanaIntegrationState::wallet_is_embedded`, which gates the no-popup
-    /// global-session flow. `None` (an older bridge that does not report it)
-    /// means "assume not embedded", leaving that flow off.
     pub wallet_provider: Option<String>,
-    /// Shared balance data exposed to the UI via `MainMenuUIContext`.
     pub data: std::sync::Arc<std::sync::Mutex<WalletBridgeData>>,
-    /// Only poll after the user explicitly clicks Connect Wallet.
     pub enabled: bool,
-    /// Show the in-game "waiting for wallet" overlay.
     pub show_connect_overlay: bool,
 }
 
@@ -898,8 +810,6 @@ fn poll_wallet_bridge(
     }
 }
 
-/// Syncs the pubkey and balance from `WalletBridgePoller` into `SolanaIntegrationState`
-/// so the Solana Wager Lobby sees the wallet as connected whenever the Tauri bridge is used.
 #[cfg(feature = "solana")]
 fn sync_bridge_pubkey_to_solana(
     poller: Res<WalletBridgePoller>,
@@ -994,7 +904,6 @@ fn sync_bridge_pubkey_to_solana(
     }
 }
 
-/// GET http://localhost:7454/status and extract pubkey + username.
 fn fetch_bridge_status() -> Result<(Option<String>, Option<String>, Option<String>), String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
@@ -1023,8 +932,6 @@ fn fetch_bridge_status() -> Result<(Option<String>, Option<String>, Option<Strin
     Ok((pubkey, username, provider))
 }
 
-/// Fetch JWT from bridge `GET /token`, then call backend `GET /auth/me`.
-/// Returns a `BridgeMeResp` populated from the unified `/auth/me` response.
 fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(4))
@@ -1076,19 +983,6 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
     })
 }
 
-/// Fetches the wallet's real (mainnet) SOL balance and live exchange rates.
-/// Returns (sol_balance, usd_per_sol, gbp_per_sol) — all 0.0 on error.
-///
-/// The balance read goes through the backend's `/api/rpc/mainnet` proxy
-/// rather than hitting a public mainnet RPC directly from the client — the
-/// free public endpoint (the old fallback here) is heavily rate-limited and
-/// was the dominant cause of the wallet HUD taking up to a minute to show a
-/// balance. The backend forwards to `SOLANA_MAINNET_RPC_URL` if configured,
-/// same public endpoint otherwise (see `routes::rpc_proxy`).
-///
-/// The balance and rates fetches are independent (a wallet's SOL balance
-/// doesn't depend on the SOL/USD quote or vice versa), so they run on
-/// separate threads concurrently instead of one blocking call after another.
 fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
@@ -1164,43 +1058,26 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
     (sol, usd_per_sol, gbp_per_sol)
 }
 
-/// Logged-in player identity passed to the game by the Tauri wallet UI or
-/// the web profile deep-link (via the `XFCHESS_USERNAME` env var).
 #[derive(Resource, Debug, Clone, Default)]
 pub struct PlayerIdentity {
     pub username: Option<String>,
-    /// Cached ELO rating from VPS backend / on-chain profile
     pub elo: Option<u32>,
-    /// ISO 3166-1 alpha-2 country from VPS KYC record
     pub country: Option<String>,
-    /// JWT issued by the backend — used for authenticated API calls
     pub jwt_token: Option<String>,
-    /// Whether this account is cleared to enter wager games
     pub can_wager: bool,
-    /// Base58 wallet pubkey string (empty when not connected)
     pub pubkey_str: Option<String>,
-    /// True once backend confirms an on-chain PlayerProfile PDA exists
     pub has_onchain_profile: bool,
-    /// Receiver for an in-flight profile fetch from VPS
     pub pending_profile_rx: Option<
         crossbeam_channel::Receiver<
             Result<crate::multiplayer::network::vps::identity::PlayerProfile, String>,
         >,
     >,
-    /// True when the player chose "Continue as Guest" — no account, no
-    /// wallet, nothing sent to the backend. `username` still holds the
-    /// locally-cached display name shown to P2P peers. See
-    /// docs/plans/identity-implementation-plan.md.
     pub is_guest: bool,
-    /// Lichess rating, synced via the existing external-ELO link flow —
-    /// stored on the same on-chain PlayerProfile as `elo` (on-chain Elo).
-    /// Shown as a second, clearly-labeled stat, never merged with `elo`.
     pub lichess_elo: Option<u32>,
     pub lichess_verified: bool,
 }
 
 impl PlayerIdentity {
-    /// Read the username from the `XFCHESS_USERNAME` env var, if set and non-empty.
     pub fn from_env() -> Self {
         let username = std::env::var("XFCHESS_USERNAME")
             .ok()
@@ -1212,22 +1089,16 @@ impl PlayerIdentity {
         }
     }
 
-    /// Display label used in the menu UI.
     pub fn display_name(&self) -> &str {
         self.username.as_deref().unwrap_or("Guest")
     }
 
-    /// Returns the ELO string for display, e.g. "1420" or "—".
     pub fn display_elo(&self) -> String {
         self.elo
             .map(|e| e.to_string())
             .unwrap_or_else(|| "—".to_string())
     }
 
-    /// Combined ELO label for the in-game HUD name row: on-chain/backend
-    /// rating and Lichess rating (if linked), shown together when both are
-    /// present. Empty for guests or logged-in players with no rating yet —
-    /// the HUD hides the ELO slot entirely rather than showing a placeholder.
     pub fn hud_elo_label(&self) -> String {
         if self.is_guest {
             return String::new();
@@ -1243,14 +1114,12 @@ impl PlayerIdentity {
     }
 }
 
-/// Cached NEWS banner texture loaded from the local screenshot file.
 #[derive(Resource, Default)]
 pub struct NewsBannerState {
     pub texture: Option<egui::TextureHandle>,
     pub loaded: bool,
 }
 
-/// Cached brand logo texture loaded from the local screenshot file.
 #[derive(Resource, Default)]
 pub struct BrandLogoState {
     pub texture: Option<egui::TextureHandle>,
@@ -1322,7 +1191,6 @@ pub(super) fn ensure_brand_logo_texture(
     Some(texture_id)
 }
 
-/// Setup the main menu camera (the persistent egui camera is reused).
 fn setup_menu_camera(
     mut commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
@@ -1353,8 +1221,6 @@ fn setup_menu_camera(
     }
 }
 
-/// Late-init fallback in case `OnEnter(MainMenu)` ran before the persistent
-/// camera was created (which can happen for the default state).
 fn ensure_menu_camera_setup(
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut camera_query: Query<&mut Transform, (With<Camera3d>, Without<MenuCamera>)>,
@@ -1381,8 +1247,6 @@ fn ensure_menu_camera_setup(
     }
 }
 
-/// Main menu UI orchestrator. Dispatches to a screen-specific renderer based
-/// on the current `MenuState`, otherwise falls back to the website-style menu.
 fn main_menu_ui(ctx: &mut MainMenuUIContext) -> Result<(), bevy::ecs::query::QuerySingleError> {
     let current_substate = if let Some(ref menu_state_res) = ctx.current_menu_state {
         *menu_state_res.get()
@@ -1466,18 +1330,9 @@ fn main_menu_ui(ctx: &mut MainMenuUIContext) -> Result<(), bevy::ecs::query::Que
     Ok(())
 }
 
-/// Setup custom fonts for the main menu.
-///
-/// Tries multiple locations in order:
-/// 1. Project `assets/fonts/` (development)
-/// 2. Executable directory (bundled app)
-/// 3. System fallback (uses default egui font)
-/// Tracks whether egui fonts have been registered (retried each frame until success).
 #[derive(Resource, Default)]
 struct FontsLoaded(bool);
 
-/// Runs every Update frame until it successfully gets the egui context, then
-/// registers Cinzel + OpenSans and sets `FontsLoaded`. Safe to call repeatedly.
 fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) {
     if loaded.0 {
         return;
@@ -1576,9 +1431,6 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
     info!("[MAIN_MENU] Fonts registered successfully");
 }
 
-/// Render the main menu: loading screen while assets load, the "Learn" focus
-/// mode (board caption only), or the 3D-board menu — the only menu layout
-/// that exists.
 fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     if !ctx_menu.loading_progress.complete {
         render_loading_screen_website(ctx, ctx_menu);
@@ -1643,7 +1495,6 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     }
 }
 
-/// Sync `PlayerIdentity` with the on-chain wallet profile when a wallet is connected.
 #[cfg(feature = "solana")]
 fn sync_player_identity_from_wallet(
     mut player_identity: ResMut<PlayerIdentity>,

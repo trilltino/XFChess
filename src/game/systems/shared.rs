@@ -10,7 +10,6 @@ use crate::rendering::pieces::PIECE_ON_BOARD_Y;
 use bevy::audio::AudioSource;
 use bevy::prelude::*;
 
-/// Data required to identify a captured piece target.
 #[derive(Clone, Copy, Debug)]
 pub struct CapturedTarget {
     pub entity: Entity,
@@ -18,42 +17,21 @@ pub struct CapturedTarget {
     pub color: PieceColor,
 }
 
-/// Describes a single chess move — the "what" without the "how".
-///
-/// Groups the value-parameters that were previously passed individually
-/// to [`execute_move`], making call sites easier to read and harder to
-/// get wrong (no positional-argument confusion).
-///
-/// # Reference
-///
-/// - <https://stackoverflow.com/questions/40703863> (parameter object pattern)
 #[derive(Clone, Debug)]
 pub struct MoveContext<'a> {
-    /// Label for log messages (e.g. `"ai"`, `"network_move"`, `"local_input"`).
     pub origin: &'a str,
-    /// Entity being moved.
     pub entity: Entity,
-    /// Snapshot of the piece component at move time.
     pub piece: Piece,
-    /// Destination square `(file, rank)`.
     pub target: (u8, u8),
-    /// Captured piece, if any.
     pub capture: Option<CapturedTarget>,
-    /// Promotion target type, if pawn reaches last rank.
     pub promotion: Option<PieceType>,
-    /// Whether this is the piece's first move (enables castling / double-pawn).
     pub was_first_move: bool,
-    /// `true` when the move originated from a remote peer.
     pub remote: bool,
-    /// Move sound handle (optional).
     pub move_sound: Option<Handle<AudioSource>>,
-    /// Capture sound handle (optional).
     pub capture_sound: Option<Handle<AudioSource>>,
-    /// Game ID for rollup submission.
     pub game_id: Option<u64>,
 }
 
-/// Helper to handle audio playback for moves
 pub fn play_move_audio(
     commands: &mut Commands,
     move_sound: Option<Handle<AudioSource>>,
@@ -70,12 +48,6 @@ pub fn play_move_audio(
     }
 }
 
-/// Apply visual and logical state for a captured piece.
-///
-/// Inserts a [`FadingCapture`] component that drives a parabolic arc + spin +
-/// scale-to-zero animation before the entity is despawned.
-///
-/// `current_pos` should be the piece's current world `Transform.translation`.
 pub fn apply_capture(
     commands: &mut Commands,
     captured_pieces: &mut CapturedPieces,
@@ -110,7 +82,6 @@ pub fn apply_capture(
     });
 }
 
-/// Updates ECS components for a moved piece (position, history, animation)
 #[allow(clippy::too_many_arguments)]
 pub fn update_piece_state(
     origin: &str,
@@ -237,10 +208,6 @@ fn apply_castling_rook_move(
     }
 }
 
-/// Core function to execute a validated move.
-///
-/// Accepts a [`MoveContext`] (the "what") plus mutable ECS handles (the "how").
-/// This keeps the call-site readable and prevents positional-argument mistakes.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_move(
     ctx: &MoveContext<'_>,
@@ -377,7 +344,6 @@ pub fn execute_move(
     true
 }
 
-/// Helper to find a piece entity at a specific board coordinate
 pub fn find_piece_on_square(
     pieces: &Query<(Entity, &Piece, &HasMoved, &Transform)>,
     position: (u8, u8),
@@ -388,14 +354,6 @@ pub fn find_piece_on_square(
         .map(|(entity, piece, _, _)| (entity, *piece))
 }
 
-/// Update ChessEngine state after a move.
-///
-/// Tracks:
-/// - halfmove_clock: reset on capture or pawn move
-/// - fullmove_counter: increment after Black's move
-/// - current_turn: flip after each move
-/// - en_passant: set if pawn moved 2 squares
-/// - castling_rights: update if king or rook moved
 fn update_engine_state_after_move(
     engine: &mut ChessEngine,
     piece_type: PieceType,
@@ -446,12 +404,10 @@ fn update_engine_state_after_move(
     update_castling_rights(engine, piece_type, piece_color, from, was_first_move);
 }
 
-/// Convert file index (0-7) to character ('a'-'h')
 fn file_to_char(file: u8) -> char {
     (b'a' + file) as char
 }
 
-/// Update castling rights when king or rook moves
 fn update_castling_rights(
     engine: &mut ChessEngine,
     piece_type: PieceType,

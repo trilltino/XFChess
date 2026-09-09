@@ -1,14 +1,9 @@
-//! SQLite pool initialization and schema migrations.
-
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use tracing::info;
 
-/// Database pools for the application.
 #[derive(Clone)]
 pub struct DatabasePools {
-    /// Pool for sessions and game data
     pub session_pool: SqlitePool,
-    /// Pool for identity vault (GDPR-compliant encrypted storage)
     pub vault_pool: SqlitePool,
 }
 
@@ -44,7 +39,6 @@ async fn make_pool(url: &str) -> Result<SqlitePool, sqlx::Error> {
     Ok(pool)
 }
 
-/// Initializes SQLite database pools with WAL mode and connection tuning.
 pub async fn initialize_pools(
     session_db_url: &str,
     vault_db_url: &str,
@@ -61,7 +55,6 @@ pub async fn initialize_pools(
     })
 }
 
-/// Runs the embedded migrations on both application databases.
 pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     // Helper to run a semicolon-separated SQL script on a pool
     async fn run_script(

@@ -1,27 +1,3 @@
-//! Swiss tournament service — pairing, scoring, and live publication.
-//!
-//! [`SwissService`] owns the per-tournament Swiss lifecycle on top of the
-//! persistent [`TournamentStore`]: initializing Swiss data, generating
-//! pairings for each round, recording match results, and recomputing
-//! standings with Buchholz/Sonneborn tiebreakers. When a round completes
-//! it auto-starts the next one.
-//!
-//! # Publishing
-//!
-//! Each fact is written **once**, into its Braid resource on the
-//! [`ResourceHub`] — pairings, standings, and the results log. The hub fans
-//! that update out to HTTP `209` subscribers and, via its gossip sink, to P2P
-//! peers. This service does not talk to a transport.
-//!
-//! It used to also emit tagged-JSON `SwissMessage`s over gossip beside each
-//! hub write. Those never actually reached anyone: the broadcasts were guarded
-//! on a `gossip` field whose only setter was never called, so it was `None` for
-//! the life of the process and every one of them returned early.
-//!
-//! On-chain and backend scoring conventions differ (integer points vs.
-//! FIDE float); helpers `to_contract_points` / `from_contract_points`
-//! convert between them.
-
 use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus, TournamentStore};
 use xfchess_braid_server::{bridge, ResourceHub};
 // Note: bytes crate not available, using Vec<u8> instead
@@ -34,30 +10,19 @@ use swiss_pairing::{
 };
 use tracing::info;
 
-/// Swiss-specific tournament data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwissData {
-    /// Current round (1-indexed)
     pub current_round: u8,
-    /// Total rounds in tournament
     pub total_rounds: u8,
-    /// All completed and current rounds
     pub rounds: Vec<SwissRound>,
-    /// Match results: (round, board, result)
     pub results: Vec<(u8, u16, MatchResult)>,
-    /// Current standings
     pub standings: Vec<StandingsEntry>,
-    /// Player IDs absent for the current round (rejoins allowed)
     pub absent_players: Vec<String>,
-    /// Player IDs permanently withdrawn (never paired again, excluded from Buchholz)
     pub withdrawn_players: Vec<String>,
-    /// Pairs that must never be matched
     pub forbidden_pairs: Vec<(String, String)>,
-    /// Manual pairings applied in the next start_round call (then cleared)
     pub manual_pairings_next_round: Vec<ManualPairing>,
 }
 
-/// Swiss tournament service
 #[derive(Clone)]
 pub struct SwissService {
     store: TournamentStore,
@@ -65,7 +30,6 @@ pub struct SwissService {
 }
 
 impl SwissService {
-    /// Create a new Swiss service
     pub fn new(store: TournamentStore) -> Self {
         Self {
             store,
@@ -73,15 +37,10 @@ impl SwissService {
         }
     }
 
-    /// Attach the Braid resource hub so live updates stream to subscribers.
-    ///
-    /// This is the only publication path: the hub reaches HTTP subscribers
-    /// directly and peers through its gossip sink.
     pub fn set_braid_hub(&mut self, hub: Arc<ResourceHub>) {
         self.braid_hub = Some(hub);
     }
 
-    /// Initialize a Swiss tournament
     pub async fn initialize_swiss(
         &self,
         tournament_id: u64,
@@ -115,7 +74,6 @@ impl SwissService {
         Ok(())
     }
 
-    /// Start the next round of a Swiss tournament
     pub async fn start_round(&self, tournament_id: u64) -> Result<SwissRound, SwissServiceError> {
         info!("Starting round for tournament {}", tournament_id);
 
@@ -179,7 +137,6 @@ impl SwissService {
         Ok(round)
     }
 
-    /// Record a match result and update standings
     pub async fn record_result(
         &self,
         tournament_id: u64,
@@ -294,7 +251,6 @@ impl SwissService {
 
         Ok(standings)
     }
-    /// Get current pairings for a round
     pub async fn get_pairings(
         &self,
         tournament_id: u64,
@@ -313,7 +269,6 @@ impl SwissService {
         Ok(swiss_data.rounds.iter().find(|r| r.round == round).cloned())
     }
 
-    /// Get current standings
     pub async fn get_standings(
         &self,
         tournament_id: u64,
@@ -331,7 +286,6 @@ impl SwissService {
         Ok(swiss_data.standings)
     }
 
-    /// Get current round number
     pub async fn get_current_round(&self, tournament_id: u64) -> Result<u8, SwissServiceError> {
         let tournament = self
             .store
@@ -346,7 +300,6 @@ impl SwissService {
         Ok(swiss_data.current_round)
     }
 
-    /// Get the total configured rounds for the Swiss tournament.
     pub async fn get_total_rounds(&self, tournament_id: u64) -> Result<u8, SwissServiceError> {
         let tournament = self
             .store
@@ -361,7 +314,6 @@ impl SwissService {
         Ok(swiss_data.total_rounds)
     }
 
-    /// Build SwissPlayer list from tournament data
     async fn build_swiss_players(
         &self,
         tournament: &TournamentRecord,
@@ -375,7 +327,6 @@ impl SwissService {
             .await
     }
 
-    /// Build SwissPlayer list with scores from results
     async fn build_swiss_players_with_results(
         &self,
         tournament: &TournamentRecord,
@@ -462,8 +413,6 @@ impl SwissService {
 
     // ── Gap 1: Absent flag + forfeit ──────────────────────────────────────────
 
-    /// Mark a player absent for the current round and forfeit their pairing if
-    /// one already exists.
     pub async fn mark_absent(
         &self,
         tournament_id: u64,
@@ -518,12 +467,6 @@ impl SwissService {
 
     // ── Gap 2: Withdrawal timing distinction ──────────────────────────────────
 
-    /// Permanently withdraw a player.
-    ///
-    /// If the player is already paired in the current round they become absent
-    /// (mid-round withdrawal) and gap 1 handles the forfeit. If they are not
-    /// yet paired they are fully removed from the pool and excluded from
-    /// future Buchholz calculations.
     pub async fn withdraw_player(
         &self,
         tournament_id: u64,
@@ -576,9 +519,6 @@ impl SwissService {
 
     // ── Gap 3: Late rejoin ────────────────────────────────────────────────────
 
-    /// Allow an absent (but not withdrawn) player to rejoin. The player is
-    /// eligible for the next start_round call. Cannot be used by withdrawn
-    /// players.
     pub async fn rejoin_player(
         &self,
         tournament_id: u64,
@@ -618,7 +558,6 @@ impl SwissService {
 
     // ── Gap 6: Forbidden pairings ─────────────────────────────────────────────
 
-    /// Add a forbidden pair — these two players will never be matched.
     pub async fn add_forbidden_pair(
         &self,
         tournament_id: u64,
@@ -638,7 +577,6 @@ impl SwissService {
         Ok(())
     }
 
-    /// Remove a previously added forbidden pair.
     pub async fn remove_forbidden_pair(
         &self,
         tournament_id: u64,
@@ -657,7 +595,6 @@ impl SwissService {
         Ok(())
     }
 
-    /// Queue a manual pairing to be applied in the next start_round call.
     pub async fn add_manual_pairing(
         &self,
         tournament_id: u64,
@@ -677,7 +614,6 @@ impl SwissService {
         Ok(())
     }
 
-    /// Remove a queued manual pairing.
     pub async fn remove_manual_pairing(
         &self,
         tournament_id: u64,
@@ -697,8 +633,6 @@ impl SwissService {
 
     // ── Gap 7: Manual result override ─────────────────────────────────────────
 
-    /// Override an existing result for a given (round, board). Recomputes all
-    /// standings from scratch after the change.
     pub async fn override_result(
         &self,
         tournament_id: u64,
@@ -760,17 +694,14 @@ impl SwissService {
 // On-chain uses integer points (2/1/0), pairing engine uses FIDE float (1.0/0.5/0.0).
 // See `SCORING.md` for the full mapping.
 
-/// Convert a backend float score to on-chain integer points.
 pub fn to_contract_points(score: f64) -> u8 {
     (score * 2.0).round() as u8
 }
 
-/// Convert an on-chain integer score to backend float.
 pub fn from_contract_points(points: u8) -> f64 {
     points as f64 / 2.0
 }
 
-/// Errors that can occur in Swiss service
 #[derive(Debug, thiserror::Error)]
 pub enum SwissServiceError {
     #[error("Tournament not found")]

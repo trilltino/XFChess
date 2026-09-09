@@ -10,10 +10,6 @@ pub struct MoveEvent {
     pub timestamp: i64,
 }
 
-/// Audit trail for `governance_ix::recover_stuck_delegation`. Before this
-/// event existed there was no on-chain record at all of who was attested as
-/// white/black or how the escrow was split — see
-/// docs/PRE_MAINNET_E2E_PLAN.md §1.5.
 #[event]
 pub struct StuckDelegationRecovered {
     pub game_id: u64,

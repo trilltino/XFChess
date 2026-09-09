@@ -1,11 +1,7 @@
-//! Reusable lifecycle precondition checks.
-
 use crate::errors::GameErrorCode;
 use crate::state::{Game, GamePhase};
 use anchor_lang::prelude::*;
 
-/// Fails unless the game has already been undelegated back to the base
-/// layer — base-layer-only operations (cancel, settlement) require this.
 pub fn require_undelegated(game: &Game) -> Result<()> {
     require!(
         !game.is_delegated,
@@ -14,13 +10,11 @@ pub fn require_undelegated(game: &Game) -> Result<()> {
     Ok(())
 }
 
-/// Fails unless the game is currently delegated to the Ephemeral Rollup.
 pub fn require_delegated(game: &Game) -> Result<()> {
     require!(game.is_delegated, GameErrorCode::GameNotDelegated);
     Ok(())
 }
 
-/// Fails unless the game's derived phase matches `expected`.
 pub fn require_phase(game: &Game, expected: GamePhase) -> Result<()> {
     require!(
         game.phase()? == expected,

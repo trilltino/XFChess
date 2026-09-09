@@ -1,8 +1,5 @@
-//! Compute-unit measurement, parsing, aggregation, and reporting.
-
 use std::collections::HashMap;
 
-/// A single CU measurement entry.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CuEntry {
     pub instruction: String,
@@ -10,8 +7,6 @@ pub struct CuEntry {
     pub cu_requested: u64,
     pub success: bool,
     pub signature: Option<String>,
-    /// Optional balance snapshot for cost attribution. These are wallet
-    /// balances before and after the transaction, not modelled fees.
     #[serde(default)]
     pub fee_payer: Option<String>,
     #[serde(default)]
@@ -20,7 +15,6 @@ pub struct CuEntry {
     pub post_balance_lamports: Option<u64>,
 }
 
-/// Aggregated CU stats for a group of entries.
 #[derive(Debug, Clone, Default)]
 pub struct CuStats {
     pub total_cu: u64,
@@ -32,7 +26,6 @@ pub struct CuStats {
     pub failure_count: u64,
 }
 
-/// Logger that collects CU measurements across a test run.
 #[derive(Debug, Clone, Default)]
 pub struct CuLogger {
     entries: Vec<CuEntry>,
@@ -44,7 +37,6 @@ impl CuLogger {
         Self::default()
     }
 
-    /// Log a single CU measurement.
     pub fn log(
         &mut self,
         group: &str,
@@ -67,7 +59,6 @@ impl CuLogger {
         );
     }
 
-    /// Log a CU measurement with an optional fee-payer balance delta.
     pub fn log_with_balance(
         &mut self,
         group: &str,
@@ -97,7 +88,6 @@ impl CuLogger {
             .push(entry);
     }
 
-    /// Aggregate stats for a specific group.
     pub fn group_stats(&self, group: &str) -> Option<CuStats> {
         let entries = self.groups.get(group)?;
         if entries.is_empty() {
@@ -116,7 +106,6 @@ impl CuLogger {
         })
     }
 
-    /// Total CU across all entries.
     pub fn total_cu(&self) -> u64 {
         self.entries.iter().map(|e| e.cu_consumed).sum()
     }
@@ -129,7 +118,6 @@ impl CuLogger {
         self.entries.iter().filter(|e| !e.success).count()
     }
 
-    /// Print a formatted summary table.
     pub fn print_summary(&self) {
         println!("\n╔══════════════════════════════════════════════════════════╗");
         println!("║           CU CONSUMPTION SUMMARY                       ║");
@@ -165,7 +153,6 @@ impl CuLogger {
         println!();
     }
 
-    /// Export raw entries as JSON.
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(&self.entries).unwrap_or_default()
     }

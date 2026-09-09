@@ -1,9 +1,3 @@
-//! 2D game board rendering using egui
-//!
-//! Provides a lightweight 2D chess board interface using egui's immediate mode GUI.
-//! This allows players to play chess with a traditional 2D view while maintaining
-//! full compatibility with the existing game state and networking systems.
-
 use crate::core::states::GameMode;
 use crate::game::components::FadingCapture;
 use crate::game::resources::{CurrentTurn, Players};
@@ -20,7 +14,6 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use std::collections::HashMap;
 
-/// Bundles extra 2D board resources to stay within the 16-param system limit.
 #[derive(SystemParam)]
 pub struct Board2DExtras<'w> {
     pub eval_bar: Res<'w, EvalBarState>,
@@ -44,9 +37,6 @@ pub struct Board2DExtras<'w> {
 
 // The local is_black_view function is removed in favor of the shared helper in camera.rs
 
-/// Convert board (file, rank) to screen offset within the board widget.
-/// White view: a-file on left, rank 1 at bottom.
-/// Black view: h-file on left, rank 8 at bottom.
 fn board_to_screen(file: u8, rank: u8, black_view: bool, square_size: f32) -> egui::Vec2 {
     let (sx, sy) = if black_view {
         (7 - file, rank)
@@ -56,7 +46,6 @@ fn board_to_screen(file: u8, rank: u8, black_view: bool, square_size: f32) -> eg
     egui::Vec2::new(sx as f32 * square_size, sy as f32 * square_size)
 }
 
-/// Drag-to-move state for the 2D board.
 #[derive(Resource, Default)]
 pub struct DragState2D {
     pub dragging: bool,
@@ -65,7 +54,6 @@ pub struct DragState2D {
     pub piece: Option<(PieceType, PieceColor)>,
 }
 
-/// Premove state: player can queue a move during opponent's turn.
 #[derive(Resource, Default)]
 pub struct PremoveState {
     pub from: Option<(u8, u8)>,
@@ -82,7 +70,6 @@ impl PremoveState {
     }
 }
 
-/// 2D piece slide animation state.
 #[derive(Resource, Default)]
 pub struct PieceAnim2D {
     pub active: bool,
@@ -92,12 +79,9 @@ pub struct PieceAnim2D {
     pub piece: Option<(PieceType, PieceColor)>,
     pub from_sq: (u8, u8),
     pub to_sq: (u8, u8),
-    /// Set to true once from_px/to_px have been computed for this animation.
     pub pixels_ready: bool,
 }
 
-/// Last board rectangle used to anchor 2D-only overlays to the board rather
-/// than to the full application viewport.
 #[derive(Resource, Default)]
 pub struct Board2DLayout {
     pub rect: Option<egui::Rect>,
@@ -117,7 +101,6 @@ impl PieceAnim2D {
     }
 }
 
-/// Triggers a 2D piece animation on `MoveMadeEvent`.
 pub fn trigger_piece_anim_2d(
     mut events: bevy::prelude::MessageReader<crate::game::events::MoveMadeEvent>,
     mut anim: ResMut<PieceAnim2D>,
@@ -138,7 +121,6 @@ pub fn trigger_piece_anim_2d(
     }
 }
 
-/// Drives the amber flash on the mated king square for 2 s after checkmate.
 #[derive(Resource, Default)]
 pub struct CheckmateFlashState {
     pub active: bool,
@@ -156,7 +138,6 @@ impl CheckmateFlashState {
     }
 }
 
-/// System: starts the checkmate flash when the game ends by checkmate.
 pub fn trigger_checkmate_flash(
     game_over: Res<crate::game::resources::history::game_over::GameOverState>,
     mut flash: ResMut<CheckmateFlashState>,
@@ -186,7 +167,6 @@ pub fn trigger_checkmate_flash(
     }
 }
 
-/// System: ticks the checkmate flash timer.
 pub fn tick_checkmate_flash(mut flash: ResMut<CheckmateFlashState>, time: Res<Time>) {
     if !flash.active {
         return;
@@ -197,10 +177,8 @@ pub fn tick_checkmate_flash(mut flash: ResMut<CheckmateFlashState>, time: Res<Ti
     }
 }
 
-/// Fades the 2D board to 40% opacity on resignation.
 #[derive(Resource)]
 pub struct BoardFadeState {
-    /// Current opacity multiplier (1.0 = normal, 0.4 = resigned-out).
     pub alpha_mult: f32,
     pub target: f32,
 }
@@ -214,7 +192,6 @@ impl Default for BoardFadeState {
     }
 }
 
-/// System: triggers board fade on resign; ticks lerp each frame.
 pub fn board_fade_system(
     game_over: Res<crate::game::resources::history::game_over::GameOverState>,
     mut fade: ResMut<BoardFadeState>,
@@ -226,12 +203,9 @@ pub fn board_fade_system(
     fade.alpha_mult += (fade.target - fade.alpha_mult) * (time.delta_secs() * 3.0).min(1.0);
 }
 
-/// Keyboard navigation cursor for the 2D board.
 #[derive(Resource)]
 pub struct BoardFocus {
-    /// Whether keyboard nav is active (toggled by Tab).
     pub active: bool,
-    /// Current cursor square (file, rank).
     pub cursor: (u8, u8),
 }
 
@@ -244,44 +218,31 @@ impl Default for BoardFocus {
     }
 }
 
-/// Right-click arrow annotations drawn over the board.
 #[derive(Resource, Default)]
 pub struct BoardArrows {
-    /// Stored arrows: (from_file, from_rank, to_file, to_rank, color_kind)
-    /// color_kind: 0=green, 1=orange (Shift), 2=blue (Alt)
     pub arrows: Vec<(u8, u8, u8, u8, u8)>,
     pub drag_from: Option<(u8, u8)>,
 }
 
-/// Per-ply centipawn scores for annotation chips in move history.
-/// scores[i] = eval (white perspective) after ply i.
 #[derive(Resource, Default)]
 pub struct EvalHistory {
     pub scores: Vec<i16>,
-    /// Cached game state after the last evaluated move — avoids replaying from move 1.
     cached_game: Option<nimzovich_engine::Game>,
 }
 
-/// Centipawn evaluation bar state (updated each move, drives the visual bar).
 #[derive(Resource, Default)]
 pub struct EvalBarState {
-    /// Centipawn score from White's perspective. Positive = White better.
     pub score: i16,
-    /// Whether the bar is visible (toggled from sidebar / settings).
     pub visible: bool,
 }
 
 impl EvalBarState {
-    /// White fill fraction 0.0 (Black winning heavily) – 1.0 (White winning heavily).
-    /// Clamped at ±500 cp → 100%.
     pub fn white_fraction(&self) -> f32 {
         let clamped = self.score.clamp(-500, 500) as f32;
         (clamped + 500.0) / 1000.0
     }
 }
 
-/// System that recomputes the eval score whenever MoveHistory changes.
-/// Also builds per-ply eval history for move annotation chips.
 pub fn update_eval_bar(
     history: Res<crate::game::resources::MoveHistory>,
     mut eval: ResMut<EvalBarState>,
@@ -339,7 +300,6 @@ pub fn update_eval_bar(
     eval.score = eval_history.scores.last().copied().unwrap_or(0);
 }
 
-/// Color theme for the 2D board.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct Board2DTheme {
     pub dark_sq: egui::Color32,
@@ -392,7 +352,6 @@ impl Board2DTheme {
         }
     }
 
-    /// A contrasting label color for corner labels inside this square.
     pub fn label_color(&self, file: u8, rank: u8) -> egui::Color32 {
         if (file + rank) % 2 == 0 {
             self.light_sq
@@ -402,7 +361,6 @@ impl Board2DTheme {
     }
 }
 
-/// Highlight overlay colors.
 fn highlight_color(highlight_type: HighlightType) -> egui::Color32 {
     match highlight_type {
         HighlightType::Selected => egui::Color32::from_rgba_unmultiplied(255, 255, 0, 100),
@@ -411,7 +369,6 @@ fn highlight_color(highlight_type: HighlightType) -> egui::Color32 {
     }
 }
 
-/// Types of square highlights.
 #[derive(Debug, Clone, Copy)]
 enum HighlightType {
     Selected,
@@ -419,7 +376,6 @@ enum HighlightType {
     Capture,
 }
 
-/// Unicode chess piece symbols.
 fn piece_symbol(piece_type: PieceType, color: PieceColor) -> &'static str {
     match (piece_type, color) {
         (PieceType::King, PieceColor::White) => "♔",
@@ -437,8 +393,6 @@ fn piece_symbol(piece_type: PieceType, color: PieceColor) -> &'static str {
     }
 }
 
-/// Main 2D board rendering system.
-/// Sync Board2DTheme from GameSettings on startup / settings change.
 pub fn sync_board_theme_from_settings(
     settings: Res<crate::core::GameSettings>,
     mut theme: ResMut<Board2DTheme>,
@@ -449,7 +403,6 @@ pub fn sync_board_theme_from_settings(
     *theme = theme_from_index(settings.board_theme);
 }
 
-/// Convert a theme index (0–4) to a Board2DTheme.
 pub fn theme_from_index(idx: u8) -> Board2DTheme {
     match idx {
         1 => Board2DTheme::green(),
@@ -1440,7 +1393,6 @@ pub fn render_2d_board(
     }
 }
 
-/// Sync `GameSettings::show_eval_bar` → `EvalBarState::visible` each frame settings change.
 pub fn sync_eval_bar_visibility(
     settings: Res<crate::core::resources::GameSettings>,
     mut eval: ResMut<EvalBarState>,

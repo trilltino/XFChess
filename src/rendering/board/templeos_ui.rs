@@ -1,17 +1,10 @@
-//! TempleOS UI elements
-//!
-//! Displays the Terry A. Davis quote and attribution at the bottom of the screen
-//! when in TempleOS view mode.
-
 use crate::core::{DespawnOnExit, GameState};
 use crate::game::view_mode::ViewMode;
 use bevy::prelude::*;
 
-/// Marker component for TempleOS UI text
 #[derive(Component)]
 pub struct TempleOSQuote;
 
-/// System to create TempleOS quote UI at the bottom of the screen
 pub fn create_templeos_quote_ui(mut commands: Commands, view_mode: Res<ViewMode>) {
     // Only create UI in TempleOS mode
     if *view_mode != ViewMode::TempleOS {

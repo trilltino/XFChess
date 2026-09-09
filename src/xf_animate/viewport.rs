@@ -1,8 +1,3 @@
-//! LEARN-box viewport bridge.
-//!
-//! Holds the resource written by the egui `render_learn_section` every frame
-//! and syncs the mini-showcase camera's viewport to that rect.
-
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{ClearColorConfig, Viewport};
 use bevy::prelude::*;
@@ -10,21 +5,16 @@ use bevy_egui::egui;
 
 use crate::core::{DespawnOnExit, GameState};
 
-/// Render layer used exclusively by the mini-showcase scene and its camera.
 pub const MINI_LAYER: usize = 8;
 
-/// Physical-pixel rectangle allocated by egui for the LEARN-box viewport.
-/// `None` means the viewport is hidden (e.g. loading screen, off-screen menu).
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct LearnViewportRect {
     pub rect_px: Option<URect>,
 }
 
-/// Marker for the secondary 3D camera rendering the mini showcase.
 #[derive(Component)]
 pub struct MiniShowcaseCamera;
 
-/// Convert an egui rect (in egui points) to a physical pixel `URect`.
 pub fn egui_rect_to_pixels(rect: egui::Rect, pixels_per_point: f32) -> URect {
     let ppp = pixels_per_point.max(0.0001);
     let min_x = (rect.min.x * ppp).max(0.0) as u32;
@@ -37,8 +27,6 @@ pub fn egui_rect_to_pixels(rect: egui::Rect, pixels_per_point: f32) -> URect {
     }
 }
 
-/// Spawn the secondary camera that renders only the mini showcase layer.
-/// Positioned for a slight top-down angle over the 8x8 board centred at origin.
 pub fn spawn_mini_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
@@ -60,9 +48,6 @@ pub fn spawn_mini_camera(mut commands: Commands) {
     ));
 }
 
-/// Pull the rect written by the egui LEARN section and apply it to the camera.
-/// The rect is clamped to the primary window's physical size so wgpu never
-/// receives an out-of-bounds scissor rectangle.
 pub fn sync_learn_viewport(
     viewport_rect: Res<LearnViewportRect>,
     windows: Query<&bevy::window::Window, With<bevy::window::PrimaryWindow>>,

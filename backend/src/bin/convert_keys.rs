@@ -1,7 +1,3 @@
-//! One-off CLI: reads `keys/vps-authority.json` and `keys/kyc-authority.json`
-//! (standard Solana JSON keypair byte arrays) and prints each as a base58
-//! string, for pasting into an env var.
-
 use std::fs::File;
 use std::io::Read;
 

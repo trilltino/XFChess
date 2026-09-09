@@ -1,14 +1,3 @@
-//! docs/PRE_MAINNET_E2E_PLAN.md §1.7: `apply_braid_resync_to_spectator`
-//! forwards every `RollupEvent::ResyncedMove` it reads straight to
-//! `NetworkMoveEvent` with no dedup of its own (real replay safety is
-//! `handle_network_moves`' incidental "source square already empty"
-//! legality rejection downstream — out of scope for a spectator-layer test,
-//! since it needs a full board/piece-query fixture). What *is* this layer's
-//! job, and was previously broken: advancing `SpectatorSession::applied_move_count`
-//! so the VPS poll (`tick_spectator_poll`) doesn't also re-fetch and
-//! re-queue moves already applied via gossip resync. Before this fix the
-//! counter was read (`let _ = session.applied_move_count;`) but never
-//! written, so it stayed flat forever on the gossip-resync path.
 #![cfg(feature = "solana")]
 
 use bevy::prelude::*;

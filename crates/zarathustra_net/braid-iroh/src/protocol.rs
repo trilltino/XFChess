@@ -1,10 +1,3 @@
-//! Braid protocol handler for iroh connections.
-//!
-//! Wraps an Axum router in `IrohAxum` so that Braid-HTTP routes (GET, PUT
-//! with Version/Parents headers) are served over HTTP/3 on iroh QUIC
-//! connections. This is the bridge between the P2P transport and the
-//! existing braid_http_rs server middleware.
-
 use axum::{
     extract::{Query, State},
     response::IntoResponse,
@@ -20,21 +13,12 @@ use std::sync::Arc;
 
 use crate::subscription::SubscriptionManager;
 
-/// Shared state accessible from Axum route handlers.
 #[derive(Clone)]
 pub struct BraidAppState {
-    /// Subscription manager for gossip-backed pub/sub.
     pub subscriptions: Arc<SubscriptionManager>,
-    /// In-memory resource store: URL → List of Updates (History).
     pub resources: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<Update>>>>,
 }
 
-/// Build the Axum router with Braid-HTTP routes, then wrap it in
-/// `IrohAxum` so it can be mounted on an iroh endpoint.
-///
-/// Routes:
-/// - `GET /:resource`  → returns the latest snapshot
-/// - `PUT /:resource`  → accepts a new update, broadcasts via gossip
 pub fn build_protocol_handler(state: BraidAppState) -> IrohAxum {
     let router = Router::new()
         .route("/{resource}", get(handle_get))
@@ -46,8 +30,6 @@ pub fn build_protocol_handler(state: BraidAppState) -> IrohAxum {
 
 use http::HeaderMap;
 
-/// GET handler — returns the current state of a resource.
-/// If the resource doesn't exist yet, returns 404.
 async fn handle_get(
     State(state): State<BraidAppState>,
     axum::extract::Path(resource): axum::extract::Path<String>,
@@ -142,7 +124,6 @@ async fn handle_get(
     StatusCode::NOT_FOUND.into_response()
 }
 
-/// PUT handler — stores a new update and broadcasts it via gossip.
 async fn handle_put(
     State(state): State<BraidAppState>,
     axum::extract::Path(resource): axum::extract::Path<String>,

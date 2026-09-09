@@ -1,15 +1,8 @@
-//! Board theme application system
-//!
-//! Updates board square materials when the board theme changes in GameSettings.
 
 use crate::core::GameSettings;
 use crate::rendering::utils::SquareMaterials;
 use bevy::prelude::*;
 
-/// System that updates board square materials when theme changes
-///
-/// Watches for changes to `GameSettings.board_theme` and updates all board squares
-/// to use the new theme colors. This runs in Update schedule to respond to settings changes.
 pub fn update_board_theme_system(
     settings: Res<GameSettings>,
     mut materials: ResMut<Assets<StandardMaterial>>,

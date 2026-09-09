@@ -1,24 +1,10 @@
-//! Coordinate label system for chess board
-//!
-//! Spawns floating coordinate labels (numbers 1-8 and letters A-H) around the chess board
-//! for the TempleOS view mode. Labels are positioned at the edges of the board and
-//! float above it for visibility.
-
 use crate::core::{DespawnOnExit, GameState};
 use crate::game::view_mode::ViewMode;
 use bevy::prelude::*;
 
-/// Marker component for coordinate labels
 #[derive(Component)]
 pub struct CoordinateLabel;
 
-/// System to create coordinate labels for TempleOS view
-///
-/// Spawns:
-/// - Numbers 1-8 along the left and right edges (vertical axis)
-/// - Letters A-H along the front and back edges (horizontal axis)
-///
-/// Uses Text2d positioned in 3D space with black color to match reference image.
 pub fn create_coordinate_labels(
     mut commands: Commands,
     view_mode: Res<ViewMode>,

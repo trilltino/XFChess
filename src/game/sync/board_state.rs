@@ -1,37 +1,23 @@
-//! Board State Synchronization using Braid Simpleton CRDT
-//!
-//! This module provides robust P2P board state synchronization by treating
-//! the chess board state as a text-based CRDT that can be merged automatically.
-
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{PieceColor, PieceType};
 use crate::game::resources::CapturedPieces;
 use bevy::prelude::*;
 use std::hash::{Hash, Hasher};
 
-/// Resource for synchronizing board state between peers
 #[derive(Resource)]
 pub struct BoardStateSync {
-    /// Last serialized state we know about
     pub last_known_state: String,
-    /// Pending moves that haven't been acknowledged
     pub pending_moves: Vec<BoardMove>,
-    /// Sync status for UI display
     pub sync_status: SyncStatus,
 }
 
-/// Status of board synchronization
 #[derive(Debug, Clone, PartialEq)]
 pub enum SyncStatus {
-    /// Waiting for initial sync
     Initializing,
-    /// In sync with peer
     Synchronized,
-    /// Local changes pending sync
     PendingLocal,
 }
 
-/// A chess move in serializable format
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BoardMove {
     pub from: (u8, u8),
@@ -54,7 +40,6 @@ impl Default for BoardStateSync {
 }
 
 impl BoardStateSync {
-    /// Serialize the current board state to a string
     pub fn serialize_state(
         &self,
         engine: &ChessEngine,
@@ -104,14 +89,12 @@ impl BoardStateSync {
         format!("{}|{}", state, hash)
     }
 
-    /// Update the last known state after local move
     pub fn on_local_move(&mut self, move_record: BoardMove, serialized_state: String) {
         self.pending_moves.push(move_record);
         self.last_known_state = serialized_state;
         self.sync_status = SyncStatus::PendingLocal;
     }
 
-    /// Mark sync as complete
     pub fn on_sync_complete(&mut self, state_str: String) {
         self.last_known_state = state_str;
         self.pending_moves.clear();
@@ -119,7 +102,6 @@ impl BoardStateSync {
     }
 }
 
-/// Calculate a simple hash for state verification
 fn calculate_state_hash(state: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     let mut hasher = DefaultHasher::new();
@@ -127,7 +109,6 @@ fn calculate_state_hash(state: &str) -> String {
     format!("{:x}", hasher.finish())
 }
 
-/// Convert PieceType to character for serialization
 fn piece_type_to_char(piece: PieceType) -> char {
     match piece {
         PieceType::King => 'K',
@@ -139,7 +120,6 @@ fn piece_type_to_char(piece: PieceType) -> char {
     }
 }
 
-/// Extension trait for ChessEngine to get FEN string
 pub trait ChessEngineExt {
     fn to_fen_string(&self) -> String;
     fn get_move_counter(&self) -> u32;
@@ -163,7 +143,6 @@ impl ChessEngineExt for ChessEngine {
     }
 }
 
-/// System to broadcast local state changes
 pub fn broadcast_state_system(
     mut board_sync: ResMut<BoardStateSync>,
     engine: Res<ChessEngine>,
@@ -180,11 +159,8 @@ pub fn broadcast_state_system(
     }
 }
 
-/// System to receive and apply remote state.
-/// TODO: wire a braid-iroh reader; apply updates via `BoardStateSync::apply_remote_state`.
 pub fn receive_state_system(_board_sync: ResMut<BoardStateSync>, _engine: ResMut<ChessEngine>) {}
 
-/// Initialize BoardStateSync on startup
 pub fn init_board_state_sync(mut commands: Commands) {
     commands.insert_resource(BoardStateSync::default());
     info!("[BOARD_SYNC] Initialized board state sync");

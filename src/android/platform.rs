@@ -1,22 +1,17 @@
-//! Shared Android JNI plumbing for the activity handle, TLS, and native library path.
-
 use bevy::android::android_activity::AndroidApp;
 use jni::JavaVM;
 use std::path::PathBuf;
 
-/// Returns Bevy's process-wide Android activity handle.
 fn android_app() -> &'static AndroidApp {
     bevy::android::ANDROID_APP
         .get()
         .expect("ANDROID_APP not set — must be called from within Bevy's android_main")
 }
 
-/// Wraps the process-lifetime VM pointer held by `AndroidApp`.
 fn java_vm() -> JavaVM {
     unsafe { JavaVM::from_raw(android_app().vm_as_ptr() as *mut jni::sys::JavaVM) }
 }
 
-/// Initializes the Android certificate verifier before HTTP clients are created.
 pub fn init_tls_verifier() -> Result<(), String> {
     let vm = java_vm();
     let activity_raw = android_app().activity_as_ptr() as jni::sys::jobject;
@@ -29,7 +24,6 @@ pub fn init_tls_verifier() -> Result<(), String> {
     .map_err(|e| format!("rustls_platform_verifier::android::init_with_env failed: {e}"))
 }
 
-/// Returns Android's install-time native library directory.
 pub fn native_library_dir() -> Result<PathBuf, String> {
     let vm = java_vm();
     let activity_raw = android_app().activity_as_ptr() as jni::sys::jobject;

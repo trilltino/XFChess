@@ -1,17 +1,3 @@
-//! `global_create_game`: the session-signed create path pays rent for the new
-//! `Game` PDA and the wager escrow out of the `GlobalSessionDelegation` vault
-//! — a PDA, not a wallet. This is instruction-level (`ProgramTest`) coverage
-//! because the bug it guards against ("Cross-program invocation with
-//! unauthorized signer or writable account: ... signer privilege escalated")
-//! only shows up under the real BPF loader's CPI privilege checks: Anchor's
-//! `init, payer = X` constraint CPIs into `system_program::create_account`
-//! without ever supplying seeds for the payer side, so it silently compiles
-//! fine but fails on-chain the moment `X` is a PDA instead of a wallet
-//! `Signer`. A unit test constructing the handler's `Game` value directly
-//! would never exercise that CPI at all.
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use anchor_lang::{AccountDeserialize, InstructionData, Space, ToAccountMetas};
@@ -32,8 +18,6 @@ fn escrow_pda(game_id: u64) -> Pubkey {
     Pubkey::find_program_address(&[b"escrow", &game_id.to_le_bytes()], &xfchess_game::ID).0
 }
 
-/// Seed a `GlobalSessionDelegation` with plenty of budget/games left and a
-/// far-future expiry, standing in for a real prior `authorize_global_session`.
 fn global_session_account(
     player: Pubkey,
     session_key: Pubkey,
@@ -153,11 +137,6 @@ async fn global_create_game_funds_rent_and_wager_from_session_vault() {
     assert_eq!(session.games_remaining, 199);
 }
 
-/// docs/PRE_MAINNET_E2E_PLAN.md §2.2: `platform_fee` used to have no on-chain
-/// bound at all — a buggy or malicious caller could set `game.country_fee`
-/// high enough to consume most/all of the wager pot at settlement. This
-/// proves `common::init_game_fields`'s new `MAX_PLATFORM_FEE_LAMPORTS` check
-/// actually rejects an absurd value instead of silently accepting it.
 #[tokio::test]
 async fn global_create_game_rejects_unreasonable_platform_fee() {
     let player = Pubkey::new_unique();
@@ -198,15 +177,6 @@ async fn global_create_game_rejects_unreasonable_platform_fee() {
     );
 }
 
-/// The session vault's real lamport balance is a separate constraint from the
-/// soft caps the player authorized, and the two drift apart constantly: every
-/// completed game spends balance while `spending_limit`/`max_wager` stay put.
-///
-/// Before the `GlobalSessionVaultUnderfunded` guard, that shortfall surfaced
-/// from deep inside `debit_program_pda` as a bare insufficient-funds failure
-/// (the "6060" reports), which reads as a program bug rather than "top up your
-/// session" — and was one of the three reasons the no-popup session path was
-/// disabled client-side. This proves the caps passing is *not* sufficient.
 #[tokio::test]
 async fn global_create_game_rejects_an_underfunded_session_vault() {
     let player = Pubkey::new_unique();
@@ -254,10 +224,6 @@ async fn global_create_game_rejects_an_underfunded_session_vault() {
     );
 }
 
-/// The guard must not overshoot: a vault that genuinely can cover rent + wager
-/// and stay rent-exempt still has to work. Without this, a too-strict bound
-/// would break every legitimate session and be indistinguishable, from the
-/// client's side, from the bug it replaced.
 #[tokio::test]
 async fn global_create_game_accepts_a_vault_funded_exactly_enough() {
     let player = Pubkey::new_unique();
@@ -365,8 +331,6 @@ fn player_profile_account(authority: Pubkey) -> (Pubkey, solana_sdk::account::Ac
     )
 }
 
-/// A `Game` waiting for an opponent, with a wager already escrowed by the
-/// creator — the state `global_join_game` expects to find on-chain.
 fn waiting_game_account(
     game_id: u64,
     white: Pubkey,
@@ -430,9 +394,6 @@ fn global_join_game_ix(
     }
 }
 
-/// Join-side half of the same guard. The joiner's vault is a different account
-/// from the creator's, so a session that could afford to *create* games says
-/// nothing about whether this one can afford to *join* one.
 #[tokio::test]
 async fn global_join_game_rejects_an_underfunded_session_vault() {
     let white = Pubkey::new_unique();

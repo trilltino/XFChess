@@ -1,21 +1,3 @@
-//! Blocking HTTP client for the XFChess signing-server VPS.
-//!
-//! This module is a thin facade that re-exports the feature-grouped
-//! submodules under `vps/`. All public helpers below are preserved for
-//! backward compatibility with existing call sites such as
-//! `crate::multiplayer::vps_client::*`.
-//!
-//! Every public function is synchronous `reqwest` and is intended to run
-//! inside a Bevy `IoTaskPool` task or `tokio::task::spawn_blocking`.
-//!
-//! Submodules:
-//! - [`client`] — shared HTTP client + base URL resolution
-//! - [`session`] — session create/activate/status/sign + TEE auth
-//! - [`game`] — move recording, undelegate, finalize
-//! - [`identity`] — player profile, KYC, status, eligibility gates
-//! - [`tournament`] — tournament listing and joining
-//! - [`p2p`] — P2P relay (announce / list / join / message / poll / leave)
-
 #[path = "vps/client.rs"]
 mod client;
 #[path = "vps/game.rs"]

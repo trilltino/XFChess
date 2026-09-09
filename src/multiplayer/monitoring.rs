@@ -1,21 +1,3 @@
-//! Periodic, consolidated "is this game healthy right now" snapshot.
-//!
-//! Everything added to `systems.rs`/`relay_bridge.rs`/`visual.rs` this session
-//! is *reactive* — it only logs when a specific event happens (a message
-//! sent, a roster check run, a turn flipped). That's necessary but not
-//! sufficient: diagnosing "the game just went quiet" from reactive logs
-//! alone means proving a negative — scrolling to confirm something *didn't*
-//! log, across several different modules, each with its own prefix. This
-//! module instead logs one consolidated line on a fixed cadence for the
-//! whole lifetime of an active online game, so the full picture (turn,
-//! connection, signing key, roster, delegation) is always current within a
-//! few seconds, without having to have caught the right reactive event.
-//!
-//! Split into two systems (core + rollup) rather than one with `#[cfg]`-gated
-//! parameters, since Bevy system params can't conditionally exist per feature
-//! flag inside a single function signature. Both log under the same
-//! `[HEALTH]` prefix family so they're easy to grep together.
-
 use bevy::prelude::*;
 
 use crate::game::resources::history::game_over::GameOverState;
@@ -23,10 +5,6 @@ use crate::game::resources::CurrentTurn;
 use crate::multiplayer::network::online_game_session::OnlineGameSession;
 use crate::multiplayer::types::{CausalChainState, OnlineNetworkState};
 
-/// How often the snapshot logs while a game is active. Chess has at most a
-/// handful of network events per second even in bullet time controls, so
-/// this is cheap to leave on permanently at `info!` — it will never be the
-/// dominant source of log volume the way per-frame systems would be.
 const SNAPSHOT_INTERVAL_SECS: f32 = 5.0;
 
 pub struct GameHealthMonitorPlugin;
@@ -37,7 +15,6 @@ impl Plugin for GameHealthMonitorPlugin {
     }
 }
 
-/// Network/turn health — always available (no `solana` feature needed).
 fn log_game_health_snapshot_core(
     session: Option<Res<OnlineGameSession>>,
     network_state: Option<Res<OnlineNetworkState>>,
@@ -102,10 +79,6 @@ fn log_game_health_snapshot_core(
     );
 }
 
-/// Ephemeral Rollup / delegation health — `solana`-feature-only, since the
-/// resources it reads don't exist without it. Runs on its own cadence/timer
-/// rather than trying to share `log_game_health_snapshot_core`'s (see the
-/// module doc comment for why this couldn't just be one function).
 #[cfg(feature = "solana")]
 pub struct RollupHealthMonitorPlugin;
 

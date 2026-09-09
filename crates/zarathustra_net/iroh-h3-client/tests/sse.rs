@@ -14,7 +14,6 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 const ALPN: &[u8] = b"iroh+h3";
 
-/// Server-Sent Events
 #[cfg_attr(not(target_family = "wasm"), tokio::test)]
 #[wasm_bindgen_test]
 async fn sse_stream() {
@@ -24,7 +23,6 @@ async fn sse_stream() {
     endpoint_1.online().await;
     endpoint_2.online().await;
 
-    /// simple handler returns a static body and sets a custom header
     async fn hello() -> impl IntoResponse {
         let event = Event::default().data("some data");
         let event_result = Ok::<_, Infallible>(event);

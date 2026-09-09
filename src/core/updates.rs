@@ -1,28 +1,13 @@
-//! In-game update checker.
-//!
-//! Compares this build's stamped version (`XFCHESS_VERSION`, baked in by
-//! `build.rs` from the release tag) against the newest published GitHub
-//! release. When a newer one exists the main menu surfaces a download panel
-//! listing every supported OS, and each button opens that platform's release
-//! asset directly.
-//!
-//! The client never installs anything itself — it hands the download to the
-//! user's browser, the same path `xfchess.com`'s download page takes (see
-//! `xfchessdotcom/src/pages/Play.tsx`, whose asset patterns this mirrors).
-
 use bevy::prelude::*;
 use bevy::tasks::IoTaskPool;
 use crossbeam_channel::{unbounded, Receiver, TryRecvError};
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// The version this build shipped as — the release tag on CI builds, the
-/// `Cargo.toml` version locally. See `stamp_version` in `build.rs`.
 pub const CURRENT_VERSION: &str = env!("XFCHESS_VERSION");
 
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/trilltino/XFChess/releases/latest";
 
-/// Fallback target whenever a per-platform asset can't be resolved.
 pub const RELEASES_URL: &str = "https://github.com/trilltino/XFChess/releases";
 pub const INSTALL_GUIDE_URL: &str =
     "https://github.com/trilltino/XFChess/blob/main/docs/INSTALL.md";
@@ -31,7 +16,6 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 // ─────────────────────────────── Platforms ───────────────────────────────
 
-/// A platform XFChess publishes a release asset for.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Platform {
     Windows,
@@ -41,7 +25,6 @@ pub enum Platform {
 }
 
 impl Platform {
-    /// Display order in the download panel.
     pub const ALL: [Platform; 4] = [
         Platform::Windows,
         Platform::MacOs,
@@ -58,7 +41,6 @@ impl Platform {
         }
     }
 
-    /// What the download actually is, shown under the label.
     pub fn kind(self) -> &'static str {
         match self {
             Platform::Windows => "Installer (.exe)",
@@ -68,12 +50,6 @@ impl Platform {
         }
     }
 
-    /// Icon rasterised from the marks the website uses (see
-    /// `xfchessdotcom/src/components/PlatformIcons.tsx`), except Chrome OS —
-    /// the website has no Chrome OS card, so its mark comes straight from
-    /// simple-icons' `googlechrome.svg` (CC0), the same source the Apple and
-    /// Linux marks are drawn from. All four are white-on-transparent so they
-    /// read as one set on the dark download card.
     pub fn icon_path(self) -> &'static str {
         match self {
             Platform::Windows => "assets/branding/platforms/windows.png",
@@ -87,10 +63,6 @@ impl Platform {
         }
     }
 
-    /// Whether `name` is this platform's release asset.
-    ///
-    /// Mirrors `ASSET_PATTERNS` in `xfchessdotcom/src/pages/Play.tsx` and the
-    /// filenames produced by `.github/workflows/release.yml`.
     fn matches_asset(self, name: &str) -> bool {
         let n = name.to_ascii_lowercase();
         match self {
@@ -101,7 +73,6 @@ impl Platform {
         }
     }
 
-    /// The platform this build is running on, if XFChess publishes for it.
     pub fn current() -> Option<Self> {
         if cfg!(target_os = "windows") {
             Some(Platform::Windows)
@@ -119,12 +90,6 @@ impl Platform {
     }
 }
 
-/// Detect a Chrome OS (Crostini) container.
-///
-/// Crostini VMs expose the host's milestone at `/dev/.cros_milestone`, and
-/// every Crostini GUI app runs through sommelier, which advertises itself in
-/// the environment. Either marker is enough, and a wrong answer is cosmetic:
-/// both platforms are served the identical tarball under different names.
 #[cfg(target_os = "linux")]
 fn running_on_chrome_os() -> bool {
     std::path::Path::new("/dev/.cros_milestone").exists()
@@ -146,7 +111,6 @@ pub struct ReleaseAsset {
 }
 
 impl ReleaseAsset {
-    /// Human-readable size. Empty when GitHub reported none.
     pub fn size_label(&self) -> String {
         if self.size == 0 {
             return String::new();
@@ -162,11 +126,9 @@ impl ReleaseAsset {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReleaseInfo {
-    /// Tag with any leading `v` stripped, e.g. "0.0.1".
     pub version: String,
     pub tag: String,
     pub page_url: String,
-    /// ISO-8601 publish timestamp, as GitHub reported it.
     pub published_at: Option<String>,
     pub assets: Vec<ReleaseAsset>,
 }
@@ -176,21 +138,17 @@ impl ReleaseInfo {
         self.assets.iter().find(|a| platform.matches_asset(&a.name))
     }
 
-    /// Direct asset link when one exists, otherwise the release page — so a
-    /// button is never dead, even mid-release while assets are still uploading.
     pub fn download_url_for(&self, platform: Platform) -> &str {
         self.asset_for(platform)
             .map(|a| a.url.as_str())
             .unwrap_or(&self.page_url)
     }
 
-    /// Just the `YYYY-MM-DD` part of the publish timestamp.
     pub fn published_date(&self) -> Option<&str> {
         self.published_at.as_deref().and_then(|s| s.get(..10))
     }
 }
 
-/// GitHub's release payload — only the fields this checker reads.
 #[derive(serde::Deserialize)]
 struct WireRelease {
     tag_name: String,
@@ -212,11 +170,6 @@ struct WireAsset {
 
 // ────────────────────────── Version comparison ───────────────────────────
 
-/// A dotted numeric version, tolerant of a leading `v` and of any
-/// `-prerelease` / `+build` suffix.
-///
-/// Field order matters: derived `Ord` compares `parts` first, then `release`,
-/// so `1.0.0-rc.1` (false) sorts below `1.0.0` (true), as semver requires.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Version {
     parts: [u64; 3],
@@ -239,10 +192,6 @@ fn parse_version(raw: &str) -> Option<Version> {
     })
 }
 
-/// Is `latest` a newer version than `current`?
-///
-/// Anything unparseable answers "no": never nag the user over a version
-/// string we don't understand.
 pub fn is_newer(latest: &str, current: &str) -> bool {
     match (parse_version(latest), parse_version(current)) {
         (Some(latest), Some(current)) => latest > current,
@@ -254,23 +203,18 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum UpdateStatus {
-    /// No check has run yet.
     #[default]
     Idle,
     Checking,
     UpToDate,
     Available(ReleaseInfo),
-    /// Check failed; holds a short reason for the UI.
     Failed(String),
 }
 
 #[derive(Resource)]
 pub struct UpdateCheck {
     pub status: UpdateStatus,
-    /// Whether the download panel is on screen.
     pub panel_open: bool,
-    /// Version the user pressed "Skip this version" on — remembered across
-    /// launches so a declined update never re-opens the panel by itself.
     skipped: Option<String>,
     rx: Option<Receiver<Result<ReleaseInfo, String>>>,
 }
@@ -298,7 +242,6 @@ impl UpdateCheck {
         matches!(self.status, UpdateStatus::Checking)
     }
 
-    /// Start a check, unless one is already in flight.
     pub fn start(&mut self) {
         if self.is_checking() {
             return;
@@ -317,7 +260,6 @@ impl UpdateCheck {
             .detach();
     }
 
-    /// Remember the offered version as declined, and close the panel.
     pub fn skip_available_version(&mut self) {
         if let Some(release) = self.available() {
             let version = release.version.clone();
@@ -381,9 +323,6 @@ fn fetch_latest_release() -> Result<ReleaseInfo, String> {
     })
 }
 
-/// Open `url` in the user's browser. GitHub serves release assets with
-/// `Content-Disposition: attachment`, so an asset link downloads the file
-/// rather than navigating anywhere.
 pub fn open_in_browser(url: &str) {
     match webbrowser::open(url) {
         Ok(()) => info!("[UPDATE] Opened {url}"),
@@ -393,7 +332,6 @@ pub fn open_in_browser(url: &str) {
 
 // ─────────────────────── Skipped-version persistence ─────────────────────
 
-/// Sits next to `settings.json` (see `core::settings_persistence`).
 const SKIP_FILENAME: &str = "update_check.json";
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -453,7 +391,6 @@ fn start_update_check(mut check: ResMut<UpdateCheck>) {
     check.start();
 }
 
-/// Pick up the worker's answer and decide whether to raise the panel.
 fn poll_update_check(mut check: ResMut<UpdateCheck>) {
     let Some(rx) = check.rx.as_ref() else {
         return;

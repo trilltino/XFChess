@@ -1,6 +1,3 @@
-//! Mini chess pieces rendered on [`MINI_LAYER`] using the same GLTF meshes as
-//! the in-game board.
-
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
@@ -9,10 +6,8 @@ use super::viewport::MINI_LAYER;
 use crate::core::{DespawnOnExit, GameState};
 use crate::rendering::pieces::{PieceColor, PieceType};
 
-/// Visual scale applied to the piece child mesh (board squares are 1.0 units).
 pub const PIECE_MESH_SCALE: f32 = 0.95;
 
-/// Component tracking a mini piece's logical board position.
 #[derive(Component, Debug)]
 pub struct MiniPiece {
     pub file: u8,
@@ -21,7 +16,6 @@ pub struct MiniPiece {
     pub kind: PieceType,
 }
 
-/// Cached asset handles + materials for restarting the loop without re-loading.
 #[derive(Resource)]
 pub struct MiniAssets {
     pub meshes: MiniMeshes,
@@ -80,8 +74,6 @@ impl MiniMeshes {
     }
 }
 
-/// One-shot: load meshes, create materials, spawn the starting position, and
-/// cache the assets resource for restart cycles.
 pub fn spawn_mini_pieces(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -104,7 +96,6 @@ pub fn spawn_mini_pieces(
     commands.insert_resource(assets);
 }
 
-/// Spawn all 32 pieces in their starting positions.
 pub fn spawn_starting_position(commands: &mut Commands, assets: &MiniAssets) {
     const BACK_ROW: [PieceType; 8] = [
         PieceType::Rook,

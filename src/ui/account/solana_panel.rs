@@ -1,7 +1,3 @@
-//! Solana-specific UI components for competitive mode
-//!
-//! Includes wallet connection status, ELO stats, and wagering UI.
-
 use crate::multiplayer::solana::addon::{
     CompetitiveMatchState, SolanaGameSync, SolanaProfile, SolanaWallet,
 };
@@ -11,7 +7,6 @@ use crate::ui::styles::UiColors;
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-/// Profile status chip colours
 fn profile_status_color(status: ProfileStatus) -> egui::Color32 {
     match status {
         ProfileStatus::HasProfileWithUsername => egui::Color32::from_rgb(34, 197, 94),
@@ -30,7 +25,6 @@ fn profile_status_label(status: ProfileStatus) -> &'static str {
     }
 }
 
-/// Renders the Solana sidebar with wallet info and game stats
 pub fn render_solana_panel(
     ui: &mut egui::Ui,
     wallet: &mut SolanaWallet,

@@ -1,9 +1,3 @@
-//! KYC submission and user verification status endpoints.
-//!
-//! PII is stored in the vault SQLite database (separate from the session DB).
-//! Tax IDs are stored only as SHA-256 blind hashes — raw values are never
-//! persisted. Soft-delete and audit logging support GDPR right-to-erasure.
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -17,7 +11,6 @@ use tracing::warn;
 use crate::signing::storage::vault::{KycInput, VaultStore};
 use crate::signing::AppState;
 
-/// Country-specific tax ID validation patterns.
 fn get_tax_id_pattern(country: &str) -> Option<Regex> {
     match country {
         "GB" => Some(Regex::new(r"^[A-Za-z]{2}\d{6}[A-Za-z]$").unwrap()), // UK NI: AB123456C
@@ -28,7 +21,6 @@ fn get_tax_id_pattern(country: &str) -> Option<Regex> {
     }
 }
 
-/// KYC submission payload from the frontend.
 #[derive(Deserialize, Serialize, Clone)]
 pub struct KycRequest {
     pub wallet_pubkey: String,
@@ -44,41 +36,18 @@ pub struct OkResponse {
     pub ok: bool,
 }
 
-/// User verification status response.
 #[derive(Serialize)]
 pub struct UserStatus {
     pub has_profile: bool,
-    /// True if an email address is stored against this wallet account.
     pub has_email: bool,
     pub has_kyc: bool,
-    /// Current KYC status string: "none" | "pending" | "approved".
     pub kyc_status: String,
-    /// True if CACF compliance is satisfied for the user's country.
     pub cacf_compliant: bool,
     pub can_wager: bool,
-    /// Lichess username from `external_elo_links` (DB), independent of the
-    /// on-chain `PlayerProfile.lichess_username` field the client otherwise
-    /// reads. The on-chain write is best-effort (see `lichess_oauth.rs`'s
-    /// `complete_link`) and can fail after the OAuth exchange itself already
-    /// succeeded, leaving the DB linked but the chain field empty — this lets
-    /// the profile UI show "linked" from that case instead of showing the
-    /// player a dead "Link" button forever with no explanation.
     pub lichess_username: Option<String>,
-    /// True when `external_elo_links.on_chain_tx == 'offchain-pending'` —
-    /// the OAuth link succeeded but the on-chain confirmation didn't.
     pub lichess_onchain_pending: bool,
 }
 
-/// Validates and stores a KYC submission (tax ID hashed, never stored raw).
-///
-/// Requires a valid Bearer JWT — previously this accepted `wallet_pubkey` as
-/// a bare, unauthenticated field in the request body, so anyone could submit
-/// PII attributed to an arbitrary wallet with zero proof of ownership (see
-/// the identity audit: KYC/CACF eligibility was "keyed on a bare wallet
-/// string supplied by the calling route, not re-verified against a fresh
-/// signature," unlike `login`/`register`/`delete`). The JWT's wallet is now
-/// the sole source of truth for whose KYC record this is; `req.wallet_pubkey`
-/// is only checked for consistency with it, never trusted on its own.
 pub async fn submit_kyc(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

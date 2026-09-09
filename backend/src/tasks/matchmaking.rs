@@ -1,45 +1,24 @@
-//! Matchmaking service for the XFChess backend.
-//!
-//! ELO window expands over time: ±150 base + 50 per 30 s of waiting.
-//! Players who have waited the longest get priority when two tickets could
-//! pair with the same opponent.
-
 use crate::signing::routes::matchmaking::{MatchResult, SharedMatchmakingState};
 use std::collections::HashSet;
 use tracing::error;
 use tracing::info;
 
-/// How often the matching loop fires (seconds).
 pub const MATCHMAKING_INTERVAL_SECONDS: u64 = 5;
 
-/// Minimum players required to form a match.
 pub const MATCHMAKING_MIN_PLAYERS: usize = 2;
 
-/// Base ELO window at t=0.
 const ELO_BASE: u32 = 150;
-/// ELO added per 30 s of waiting.
 const ELO_PER_STEP: u32 = 50;
-/// Cap: after 5 minutes the window stops expanding (hard max ≈ 650 centiscale).
 const ELO_MAX: u32 = 650;
 
-/// Drop a queued ticket if nobody paired with it and the client never called
-/// `/leave` (e.g. tab closed, connection dropped) after this long.
 const STALE_QUEUE_SECS: u64 = 300;
-/// Drop a match result if the player never came back to `/status` and
-/// collect it (e.g. crashed right after being paired) after this long.
 const STALE_MATCH_SECS: u64 = 300;
 
-/// Return the allowed ELO difference for a ticket that joined `wait_secs` ago.
 fn elo_window(wait_secs: u64) -> u32 {
     let steps = wait_secs / 30;
     (ELO_BASE + steps as u32 * ELO_PER_STEP).min(ELO_MAX)
 }
 
-/// Runs the matchmaking service.
-///
-/// Each iteration pairs the longest-waiting players that fall within each
-/// other's current ELO window. Both players' windows must include the other
-/// (the narrower window wins to keep games fair).
 pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
     // Reload queue/pending matches from SQLite so a backend restart resumes
     // instead of losing them (migration 022) — must happen before the first

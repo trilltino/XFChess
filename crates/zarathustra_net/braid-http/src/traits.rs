@@ -5,31 +5,23 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-/// Abstraction for asynchronous runtime operations.
 pub trait BraidRuntime: Send + Sync + 'static {
     fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>);
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
     fn now_ms(&self) -> u64;
 }
 
-/// An open subscription's update stream, plus what the server said about it.
 pub struct SubscriptionStreamHandle {
-    /// Decoded updates. Heartbeats are absorbed by the parser and never appear here.
     pub updates: async_channel::Receiver<Result<Update>>,
-    /// The server's declared heartbeat interval, from the `Heartbeats` response
-    /// header. `None` means the server made no promise, so silence cannot be
-    /// distinguished from death and no liveness deadline is applied.
     pub heartbeat: Option<crate::client::HeartbeatConfig>,
 }
 
-/// Abstraction for network operations.
 #[async_trait]
 pub trait BraidNetwork: Send + Sync + 'static {
     async fn fetch(&self, url: &str, req: BraidRequest) -> Result<BraidResponse>;
     async fn subscribe(&self, url: &str, req: BraidRequest) -> Result<SubscriptionStreamHandle>;
 }
 
-/// Abstraction for persistent storage.
 #[async_trait]
 pub trait BraidStorage: Send + Sync + 'static {
     async fn put(&self, key: &str, data: bytes::Bytes, meta: String) -> Result<()>;

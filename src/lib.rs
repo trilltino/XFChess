@@ -1,4 +1,3 @@
-/// XFChess library module for decentralized chess on Solana
 #[cfg(target_os = "android")]
 pub mod android;
 pub mod assets;
@@ -25,13 +24,6 @@ use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Bevy's default logging is stdout-only. Release builds run with no
-/// console attached (see main.rs's windows_subsystem = "windows"), so every
-/// P2P/rollup/turn-advance log a player's own client produced was invisible
-/// to them, same gap this already had to be closed for the wallet bridge
-/// (tauri/src/utils/logging.rs) — a "stuck, can't move" report had nothing
-/// to go on beyond a screenshot. `Box::leak`ing the guard is the standard
-/// tracing-appender pattern for a writer that must live as long as the app.
 fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
     // Still useful on Android for offline bug reports even though `adb
     // logcat` (wired in below) is the primary live-debugging channel there —
@@ -80,29 +72,23 @@ fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
 
 pub use core::persistent_camera::PersistentEguiCamera;
 
-/// Player color option
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum PlayerColor {
     White,
     Black,
 }
 
-/// Game configuration from CLI arguments and environment variables.
-/// This struct serves as both the CLI parser and the Bevy resource.
 #[derive(Parser, Resource, Debug, Clone)]
 #[command(name = "xfchess")]
 #[command(about = "XFChess - Decentralized Chess with Ephemeral Rollups")]
 #[command(version = "0.1.0")]
 pub struct GameConfig {
-    /// Optional game ID for joining an existing game
     #[arg(long)]
     pub game_id: Option<u64>,
 
-    /// Player color (White or Black)
     #[arg(long, value_enum)]
     pub player_color: Option<PlayerColor>,
 
-    /// Solana RPC endpoint URL
     #[arg(
         long,
         default_value = "https://api.devnet.solana.com",
@@ -110,65 +96,50 @@ pub struct GameConfig {
     )]
     pub rpc_url: String,
 
-    /// Session key (base58 encoded) for signing rollups
     #[arg(long, env = "XFCHESS_SESSION_KEY")]
     pub session_key: Option<String>,
 
-    /// Session public key
     #[arg(long, env = "XFCHESS_SESSION_PUBKEY")]
     pub session_pubkey: Option<String>,
 
-    /// P2P network port
     #[arg(long, default_value = "5001", env = "XFCHESS_P2P_PORT")]
     pub p2p_port: u16,
 
-    /// Bootstrap node ID (for Player 2 to connect to Player 1)
     #[arg(long, env = "XFCHESS_BOOTSTRAP_NODE")]
     pub bootstrap_node: Option<String>,
 
-    /// Game PDA address
     #[arg(long, env = "XFCHESS_GAME_PDA")]
     pub game_pda: Option<String>,
 
-    /// Wager amount in SOL
     #[arg(long, env = "XFCHESS_WAGER_AMOUNT")]
     pub wager_amount: Option<f64>,
 
-    /// Enable transaction debugger / debug mode
     #[arg(long)]
     pub debug: bool,
 
-    /// Log file path
     #[arg(long, default_value = "rollup_debug.log")]
     pub log_file: String,
 
-    /// AI difficulty (1-5)
     #[arg(long, env = "XFCHESS_AI_DIFFICULTY")]
     pub ai_difficulty: Option<u8>,
 
-    /// AI side (White or Black)
     #[arg(long, env = "XFCHESS_AI_SIDE")]
     pub ai_side: Option<PlayerColor>,
 
-    /// Session config JSON file path
     #[arg(long)]
     pub session_config: Option<PathBuf>,
 
-    /// Subcommand for CLI-only tools
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    /// Tournament administrator controls
     Tournament {
         #[command(subcommand)]
         action: TournamentCommand,
     },
-    /// Run the transaction debugger (integrated view)
     Debug {
-        /// Game ID to monitor
         #[arg(long)]
         game_id: u64,
     },
@@ -176,16 +147,13 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum TournamentCommand {
-    /// Create a new tournament on-chain
     Create {
         #[arg(long, default_value = "XFChess Cup")]
         name: String,
         #[arg(long, default_value = "0.05")]
         entry_fee: f64,
     },
-    /// List active tournaments
     List,
-    /// Start tournament bracket
     Start {
         #[arg(long)]
         id: u64,
@@ -215,7 +183,6 @@ impl Default for GameConfig {
 }
 
 impl GameConfig {
-    /// Load session config from JSON file if specified
     pub fn load_session_config(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref path) = self.session_config {
             info!("Loading session config from: {}", path.display());
@@ -249,7 +216,6 @@ struct SessionConfigFile {
     pub wager_amount: f64,
 }
 
-/// Builds the Bevy application with all plugins and configuration
 pub fn build_app(game_config: GameConfig) -> App {
     let mut app = App::new();
 
@@ -419,9 +385,6 @@ pub fn build_app(game_config: GameConfig) -> App {
     app
 }
 
-/// Sets the OS window (title-bar + taskbar) icon. The PNG is embedded in the
-/// binary via `include_bytes!`, so it works regardless of working directory or
-/// how the game is packaged. Runs once at startup against the primary window.
 fn set_window_icon(
     windows: Option<NonSend<bevy::winit::WinitWindows>>,
     primary: Query<Entity, With<bevy::window::PrimaryWindow>>,

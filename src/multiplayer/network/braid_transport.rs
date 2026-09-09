@@ -1,45 +1,3 @@
-//! Braid-backed move/resign/chat transport.
-//!
-//! Replaces the old VPS relay mailbox (`relay_bridge.rs`, removed) with the
-//! durable, push-based `GET`/`PUT /game/:id/moves` and `/game/:id/chat`
-//! backend added in this migration
-//! (`backend/src/signing/routes/game_log.rs`). Gossip stays the fast,
-//! optimistic path; this is the reliable fallback/catch-up path — same role
-//! the relay played, but pushed instead of polled, and durable across a
-//! backend restart instead of dropped.
-//!
-//! # Why this doesn't use `braid_chess::ChessPublisher`
-//!
-//! `ChessPublisher` (the shared crate's existing PUT-side client) sends the
-//! bare `ChessMessage` as the body with `Version`/`Parents` conveyed via
-//! HTTP request headers, and has no authentication mechanism at all. Our
-//! backend's auth (`GameLogState`/`auth_ok` in `game_log.rs`) is real and
-//! load-bearing for the wagered-game path — extending `ChessPublisher` to
-//! carry auth headers it was never designed for is more shared-crate
-//! surgery than a dedicated, already-tested small client here. [`publish`]
-//! below sends the same `GameEventReq` JSON body shape the backend expects
-//! and already has regression tests for.
-//!
-//! # Why Braid moves don't go through [`super::reorder::NonceSequencer`]
-//!
-//! `NonceSequencer` reconciles arrivals by a P2P `nonce` field. Braid's
-//! `ChessMessage::Move` (`MovePayload`) has no such field — it's a
-//! different wire type, shared with chat/clock/engine. But it doesn't need
-//! one: the backend's `AppendLog`-free broadcast channel
-//! (`GameLogState::put_event`) already delivers to a live subscriber in
-//! true append order, exactly once. So a Braid-delivered move is applied
-//! directly, without buffering — the one thing that *does* need handling is
-//! a move delivered by both gossip and Braid, which
-//! `CausalChainState::applied_versions` catches (see its doc comment).
-//!
-//! # Reconnect
-//!
-//! Unlike `ChessSubscriber`'s bare usage elsewhere (chat/tournament
-//! streams, which have no reconnect logic — a dropped connection just stops
-//! delivering forever), [`spawn_reconnecting_subscription`] retries with
-//! bounded exponential backoff. Because the backend replays full history to
-//! every new subscriber, a reconnect is automatically a correct catch-up.
-
 use bevy::prelude::*;
 use braid_chess::message::ChatPayload;
 use braid_chess::{ChessMessage, ChessSubscriber, MovePayload};
@@ -55,45 +13,15 @@ use crate::multiplayer::TokioRuntime;
 const MIN_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
-/// Genesis parent for a stream's first event — must match `GENESIS_PARENT`
-/// in the backend's `game_log.rs`.
 const GENESIS_PARENT: &str = "0";
 
-/// How many times a publish re-chains onto a server-reported head before
-/// giving up. Each retry costs a round trip, and a move that loses this many
-/// races in a row is better left to gossip (or to the opponent's next
-/// subscribe-time history replay) than retried indefinitely.
 const MAX_PARENT_RETRIES: usize = 3;
 
 // ── Stream head tracking ──────────────────────────────────────────────────
 
-/// The causal head of each Braid stream for the active game, as far as this
-/// client knows.
-///
-/// # Why this can't live on `OnlineGameSession`
-///
-/// The backend validates `content_parent` against the head of the *whole
-/// shared stream* — both players write to `/game/:id/moves`. A head tracked
-/// from only our own publishes is therefore wrong the moment the opponent
-/// writes anything, and the backend answers every later publish with `409
-/// CONFLICT`. That was the original bug: `OnlineGameSession::last_version`
-/// advanced on local moves only, so in a casual game the second player's very
-/// first move was rejected and never persisted, and in a wagered game the two
-/// `SessionInfo` posts (both claiming genesis as parent) wedged the stream
-/// before move one — every later publish then failed forever. Because
-/// [`publish`] is fire-and-forget, nothing surfaced: moves simply never
-/// replicated through the durable path.
-///
-/// So the head is tracked here, advanced from *delivered* messages (i.e. the
-/// server's accepted order, opponent's writes included), and shared with the
-/// publish threads.
 pub struct BraidStreamHeads {
     moves: String,
     chat: String,
-    /// Versions this client published. The backend echoes every accepted
-    /// event back to *all* subscribers including the publisher, so without
-    /// this we re-ingest our own moves as though they came from the opponent
-    /// (see [`drain_braid_messages`]).
     self_published: std::collections::HashSet<String>,
 }
 
@@ -125,15 +53,8 @@ impl BraidStreamHeads {
     }
 }
 
-/// Shared handle: publish runs on its own thread, draining runs on the Bevy
-/// main thread.
 pub type SharedStreamHeads = std::sync::Arc<std::sync::Mutex<BraidStreamHeads>>;
 
-/// Recompute the `content_version` a message was published under. Must mirror
-/// the `version_hash` inputs used by the `publish_*` helpers below exactly —
-/// this is how a *delivered* message is matched back to the head and
-/// self-published bookkeeping, since `ChessMessage` carries no version field
-/// on the wire.
 fn version_of(message: &ChessMessage) -> Option<String> {
     Some(match message {
         ChessMessage::Move(p) => braid_chess::version_hash(&p.fen_after, p.move_number),
@@ -150,8 +71,6 @@ fn version_of(message: &ChessMessage) -> Option<String> {
     })
 }
 
-/// Which Braid stream a message belongs to. Mirrors the backend's
-/// `belongs_to_stream`.
 fn stream_of(message: &ChessMessage) -> &'static str {
     if matches!(message, ChessMessage::Chat(_)) {
         "chat"
@@ -162,12 +81,8 @@ fn stream_of(message: &ChessMessage) -> &'static str {
 
 // ── Publish (PUT) ─────────────────────────────────────────────────────────
 
-/// Mirrors the backend's `game_log::GameEventReq`. Field names must stay in
-/// sync with that type's serde names, not its Rust names.
 #[derive(Serialize)]
 struct GameEventReq<'a> {
-    /// Wallet pubkey for a wagered game, Iroh node id for a casual one — see
-    /// the backend type's doc comment.
     #[serde(rename = "player_pubkey")]
     sender_identity: &'a str,
     session_token: &'a str,
@@ -176,20 +91,11 @@ struct GameEventReq<'a> {
     content_parent: &'a str,
 }
 
-/// Body of the backend's `409 CONFLICT`.
 #[derive(serde::Deserialize)]
 struct ParentMismatchResp {
     expected_parent: String,
 }
 
-/// Fire-and-forget PUT: errors are logged, not fatal — gossip may still
-/// deliver the same event.
-///
-/// The parent is read from [`BraidStreamHeads`] at send time rather than
-/// passed in, because the correct parent is the *shared* stream head and only
-/// this transport tracks it. On `409 CONFLICT` the backend replies with the
-/// head it actually expected; we adopt it and retry, which is what makes two
-/// players writing to one stream work at all.
 fn publish(
     base_url: String,
     game_id: String,
@@ -366,11 +272,6 @@ pub fn publish_chat(
     );
 }
 
-/// SessionInfo is sent once per player, near game start. It is *not*
-/// automatically genesis-parented: both players post one into the same shared
-/// moves stream, so whichever lands second must chain off the first —
-/// hardcoding genesis here is what used to wedge every wagered game's moves
-/// stream before move one.
 #[allow(clippy::too_many_arguments)]
 pub fn publish_session_info(
     base_url: String,
@@ -403,32 +304,15 @@ pub fn publish_session_info(
 
 // ── Subscribe (with reconnect) ─────────────────────────────────────────────
 
-/// Bridges the Braid moves+chat subscriptions for the active game into the
-/// same Bevy message bus gossip feeds, with reconnect-on-drop.
 #[derive(Resource, Default)]
 pub struct BraidTransportState {
-    /// Causal head of each stream for the active game, shared with the
-    /// publish threads — see [`BraidStreamHeads`].
     heads: SharedStreamHeads,
     game_id: String,
     rx: Option<crossbeam_channel::Receiver<ChessMessage>>,
-    /// True while the moves+chat subscriptions are both live. Shared with
-    /// the spawned reconnect task via `Arc` since it runs on Tokio, not the
-    /// Bevy main thread.
-    ///
-    /// Read by `tick_heartbeat` (`systems.rs`) so a "relay-only" game (Iroh
-    /// gossip down, Braid up) doesn't get falsely declared disconnected —
-    /// this is the exact same real, previously-reproduced failure mode the
-    /// old relay's Ping/Pong fallback existed to prevent (see that removal
-    /// site's comment), just answered by a real connectivity signal instead
-    /// of re-adding a heartbeat message type to this transport.
     pub connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl BraidTransportState {
-    /// Test-only constructor: wires a caller-controlled `rx` directly,
-    /// bypassing the real HTTP subscription machinery, so tests can drive
-    /// `drain_braid_messages` with a synthetic message stream.
     #[cfg(test)]
     pub(crate) fn new_for_test(
         game_id: String,
@@ -442,7 +326,6 @@ impl BraidTransportState {
         }
     }
 
-    /// Handle to the shared stream heads, for passing to `publish_*`.
     pub fn heads(&self) -> SharedStreamHeads {
         self.heads.clone()
     }
@@ -462,13 +345,6 @@ impl BraidTransportState {
     }
 }
 
-/// Start (or restart, if `game_id` changed) the reconnecting Braid
-/// subscriptions for the active game. Idempotent for the same `game_id`.
-///
-/// `rt` must be the shared [`TokioRuntime`] handle — see
-/// `social.rs::LobbyChatSession::activate`'s doc comment for why: the
-/// underlying `reqwest`-based `BraidClient` needs a live Tokio reactor,
-/// which Bevy's own task pools don't provide.
 pub fn ensure_subscribed(
     state: &mut BraidTransportState,
     base_url: String,
@@ -569,9 +445,6 @@ fn spawn_reconnecting_subscription(
     });
 }
 
-/// Drain Braid-delivered moves/resigns/chat into the same event types
-/// gossip produces, deduping cross-transport against
-/// `CausalChainState::applied_versions`.
 pub fn drain_braid_messages(
     state: Res<BraidTransportState>,
     session: Res<OnlineGameSession>,
@@ -743,12 +616,6 @@ pub fn drain_braid_messages(
     }
 }
 
-/// Starts (or restarts, on `game_id` change) the reconnecting Braid
-/// subscription whenever `OnlineGameSession` becomes configured for a new
-/// game. Reactive rather than called from `start_session` directly — that
-/// function is a plain helper with four call sites across lobby/tournament
-/// flows; watching the resource here avoids threading `TokioRuntime`/
-/// `BraidTransportState` through all of them.
 fn sync_braid_subscription(
     mut state: ResMut<BraidTransportState>,
     session: Res<OnlineGameSession>,
@@ -765,7 +632,6 @@ fn sync_braid_subscription(
     );
 }
 
-/// Registers the Braid transport resource and its systems.
 pub struct BraidTransportPlugin;
 
 impl Plugin for BraidTransportPlugin {
@@ -786,10 +652,6 @@ mod tests {
         ChessMessage::Move(MovePayload::from_uci("e2e4", fen_after, move_number, "p"))
     }
 
-    /// The core invariant the 409 bug violated: the moves-stream head must
-    /// advance on *any* delivered move, not only on ones we published. Both
-    /// players write to `/game/:id/moves`, so after the opponent moves, our
-    /// next publish has to name *their* version as its parent.
     #[test]
     fn head_advances_on_opponent_moves_not_just_our_own() {
         let mut heads = BraidStreamHeads::default();
@@ -805,9 +667,6 @@ mod tests {
         assert_eq!(heads.head("moves"), v_opponent);
     }
 
-    /// Chat and moves are validated against separate heads by the backend
-    /// (`put_event`'s per-stream `head_sql`), so a chat message must not
-    /// disturb the moves head or vice versa.
     #[test]
     fn move_and_chat_heads_are_independent() {
         let mut heads = BraidStreamHeads::default();
@@ -833,9 +692,6 @@ mod tests {
         assert_ne!(heads.head("chat"), moves_head);
     }
 
-    /// `version_of` is what matches a *delivered* message back to what we
-    /// published — it must reproduce each `publish_*` helper's `version_hash`
-    /// inputs exactly, or self-echo detection and head tracking both break.
     #[test]
     fn version_of_matches_the_publish_side_hashes() {
         let mv = move_msg("fen-after", 3);
@@ -874,9 +730,6 @@ mod tests {
         );
     }
 
-    /// The backend broadcasts accepted events to every subscriber including
-    /// the publisher. Our own move coming back must be recognised and dropped,
-    /// not replayed onto the board as if the opponent had sent it.
     #[test]
     fn own_publishes_are_recognised_as_echoes_exactly_once() {
         let mut heads = BraidStreamHeads::default();
@@ -893,7 +746,6 @@ mod tests {
         assert!(!heads.self_published.remove(&v));
     }
 
-    /// A SessionInfo posted by the opponent must not be mistaken for our own.
     #[test]
     fn opponent_session_info_is_not_treated_as_an_echo() {
         let mut heads = BraidStreamHeads::default();

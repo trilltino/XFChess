@@ -1,42 +1,18 @@
-//! T0 pre-engine screen — pure timing heuristics, no Stockfish.
-//!
-//! Runs inline at enqueue time on every finished game so that free, casual
-//! games can skip full engine analysis entirely. Stakes-bearing games (wager
-//! or tournament) always get full analysis regardless of this screen; for
-//! everything else, only games this screen marks suspicious enter the
-//! Stockfish queue.
-//!
-//! Signals are timing-only (the same family Lichess leans on before engine
-//! evidence): abnormally flat move times (humans vary, engine relayers
-//! metronome) and the total absence of snap moves over a long game.
-
 use crate::types::GameRecord;
 
-/// Minimum usable move-time samples per side; below this the screen abstains.
 const MIN_SAMPLES: usize = 12;
-/// Opening plies skipped per side (book moves have meaningless timing).
 const BOOK_PLIES_PER_SIDE: usize = 4;
-/// Mean move time must be at least this for flatness to mean anything —
-/// uniformly fast bullet-style moves are normal.
 const FLAT_MIN_MEAN_MS: f64 = 3_000.0;
-/// A move under this is a "snap" move; engine users rarely produce any.
 const SNAP_MOVE_MS: u32 = 1_500;
-/// Per-side score at or above this marks the game suspicious.
 const SUSPICIOUS_SCORE: f64 = 0.5;
 
-/// Outcome of the T0 screen for one game.
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenResult {
-    /// Heuristic suspicion score per side, 0.0–1.0.
     pub white_score: f64,
     pub black_score: f64,
-    /// True when either side scores >= [`SUSPICIOUS_SCORE`].
     pub suspicious: bool,
 }
 
-/// Pure timing screen over the recorded move latencies. Never produces a
-/// verdict on its own — it only decides whether a free game is worth engine
-/// time.
 pub fn t0_screen(game: &GameRecord) -> ScreenResult {
     let white_score = side_score(game, 0);
     let black_score = side_score(game, 1);
@@ -47,7 +23,6 @@ pub fn t0_screen(game: &GameRecord) -> ScreenResult {
     }
 }
 
-/// Scores one side's move times. `parity` 0 = white (even move indices).
 fn side_score(game: &GameRecord, parity: usize) -> f64 {
     use crate::features::timing::{effective_latency, source_for};
 
@@ -117,9 +92,6 @@ mod tests {
     use super::*;
     use crate::types::{GameContext, GameRecord, GameResult, MoveRecord, PlayerRef, TimeControl};
 
-    /// Builds a game where white's latencies follow `white_ms` cyclically and
-    /// black's follow `black_ms`. Timestamps accumulate from the latencies so
-    /// the server wall clock is plausible (resolves to `TimingSource::Server`).
     fn game(plies: usize, white_ms: &[u32], black_ms: &[u32]) -> GameRecord {
         let mut clock: u64 = 1_700_000_000_000;
         let moves = (0..plies)

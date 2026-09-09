@@ -1,13 +1,3 @@
-//! Debug and health check routes for XFChess backend
-//!
-//! Provides:
-//! - /health - Basic health check
-//! - /health/detailed - Full system health with all components
-//! - /api/debug/tx/{signature} - Transaction debugging
-//!
-//! `/metrics` lives in `infrastructure::router` (it needs `AppState` for the
-//! presence/transaction/RPC counters, not just the worker-metrics registry).
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -24,17 +14,14 @@ use crate::signing::{
     AppState,
 };
 
-/// Basic health response
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
-    /// Git commit the binary was built from (deploy → commit traceability).
     pub git_sha: String,
     pub timestamp: String,
 }
 
-/// Detailed health check response
 #[derive(Serialize)]
 pub struct DetailedHealthResponse {
     pub status: String,
@@ -43,7 +30,6 @@ pub struct DetailedHealthResponse {
     pub checks: Vec<HealthCheck>,
 }
 
-/// Individual health check
 #[derive(Serialize)]
 pub struct HealthCheck {
     pub name: String,
@@ -52,7 +38,6 @@ pub struct HealthCheck {
     pub response_time_ms: u64,
 }
 
-/// Transaction debug response
 #[derive(Serialize)]
 pub struct DebugTxResponse {
     pub signature: String,
@@ -60,7 +45,6 @@ pub struct DebugTxResponse {
     pub formatted: String,
 }
 
-/// Basic liveness check — is the process up? (cheap, no dependency I/O)
 pub async fn health_check() -> impl IntoResponse {
     Json(HealthResponse {
         status: "ok".to_string(),
@@ -70,9 +54,6 @@ pub async fn health_check() -> impl IntoResponse {
     })
 }
 
-/// Readiness check — can we actually serve traffic? Verifies DB connectivity and
-/// returns 503 if not, so deploy smoke-tests / load balancers don't route to a
-/// process that's up but can't reach its database.
 pub async fn readiness_check(State(state): State<AppState>) -> impl IntoResponse {
     match check_database(&state).await {
         Ok(_) => (
@@ -89,7 +70,6 @@ pub async fn readiness_check(State(state): State<AppState>) -> impl IntoResponse
     }
 }
 
-/// Detailed health check
 pub async fn detailed_health_check(State(state): State<AppState>) -> impl IntoResponse {
     let _start = std::time::Instant::now();
     let mut checks = vec![];
@@ -185,11 +165,6 @@ pub async fn detailed_health_check(State(state): State<AppState>) -> impl IntoRe
     (status_code, Json(response))
 }
 
-/// `GET /api/debug/tx/{signature}` — inspects an on-chain transaction via a
-/// real `getTransaction` RPC call. `success`/`error`/`logs`/`account_changes`
-/// reflect what actually happened on-chain, not a hardcoded default. Returns
-/// 400 on an unparseable signature, 404 if the RPC can't find the transaction
-/// (not yet confirmed, wrong cluster, or genuinely unknown).
 pub async fn debug_transaction_endpoint(
     Path(signature): Path<String>,
     State(state): State<AppState>,
@@ -232,7 +207,6 @@ pub async fn debug_transaction_endpoint(
     }
 }
 
-/// Build debug routes
 pub fn debug_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health_check))
@@ -310,11 +284,6 @@ async fn check_feepayer_pool(state: &AppState) -> (Option<String>, String) {
     }
 }
 
-/// Reports usage of whichever disk holds the current working directory (where
-/// the session/vault SQLite files and PID file live) — the mount that
-/// actually matters for this process staying up. Cross-platform via
-/// `sysinfo`, replacing the old Unix-only `df` shell-out (which silently
-/// reported "warning" on every Windows dev box regardless of real usage).
 async fn check_disk_space() -> (Option<String>, String) {
     use sysinfo::Disks;
 
@@ -375,8 +344,6 @@ fn format_bytes(bytes: u64) -> String {
     format!("{:.2} GB", bytes as f64 / GB)
 }
 
-/// Real resident-memory check via `sysinfo`, replacing the old placeholder
-/// that always reported "ok" regardless of actual memory pressure.
 async fn check_memory() -> (Option<String>, String) {
     use sysinfo::System;
 

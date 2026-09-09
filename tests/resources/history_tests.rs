@@ -1,12 +1,7 @@
-//! Integration tests for move history resource extracted from doc tests
-//! Original location: src/game/resources/history/history.rs
-
 use xfchess::game::components::MoveRecord;
 use xfchess::game::resources::MoveHistory;
 use xfchess::rendering::pieces::{PieceColor, PieceType};
 
-/// Test recording moves
-/// Original: recording moves example
 #[test]
 fn example_execute_move_system() {
     let mut history = MoveHistory::default();
@@ -27,8 +22,6 @@ fn example_execute_move_system() {
     assert_eq!(history.len(), 1);
 }
 
-/// Test reviewing history
-/// Original: reviewing history example
 #[test]
 fn example_display_last_move() {
     let mut history = MoveHistory::default();
@@ -53,8 +46,6 @@ fn example_display_last_move() {
     }
 }
 
-/// Test adding a move to history
-/// Original: add_move method example
 #[test]
 fn example_add_move_method() {
     let mut history = MoveHistory::default();
@@ -75,8 +66,6 @@ fn example_add_move_method() {
     assert!(history.last_move().unwrap().is_check);
 }
 
-/// Test checking for en passant via last move
-/// Original: last_move method example
 #[test]
 fn example_last_move_en_passant_check() {
     let mut history = MoveHistory::default();
@@ -107,8 +96,6 @@ fn example_last_move_en_passant_check() {
     }
 }
 
-/// Test calculating full moves from ply
-/// Original: len method example
 #[test]
 fn example_ply_count() {
     let mut history = MoveHistory::default();
@@ -134,8 +121,6 @@ fn example_ply_count() {
     assert_eq!(full_moves, 2); // 3 ply = Move 2 for White
 }
 
-/// Test checking if history is empty
-/// Original: is_empty method example
 #[test]
 fn example_is_empty() {
     let history = MoveHistory::default();
@@ -146,8 +131,6 @@ fn example_is_empty() {
     }
 }
 
-/// Test clearing history
-/// Original: clear method example
 #[test]
 fn example_clear_history() {
     let mut history = MoveHistory::default();
@@ -167,8 +150,6 @@ fn example_clear_history() {
     assert!(history.is_empty());
 }
 
-/// Test getting move by index
-/// Original: get_move method example
 #[test]
 fn example_get_move() {
     let mut history = MoveHistory::default();
@@ -193,8 +174,6 @@ fn example_get_move() {
     }
 }
 
-/// Test iterating over moves
-/// Original: iter method example
 #[test]
 fn example_iter_moves() {
     let mut history = MoveHistory::default();

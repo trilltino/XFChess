@@ -1,5 +1,3 @@
-//! Account management instructions (profiles, user data, fees).
-
 pub mod fee_vault_ix;
 pub mod friends_ix;
 pub mod global_session_ix;

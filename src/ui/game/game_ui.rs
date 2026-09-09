@@ -1,5 +1,3 @@
-//! In-game UI for chess game display
-
 use crate::core::GameMode;
 use crate::game::components::GamePhase;
 use crate::game::resources::system_params::GameStateParams;
@@ -12,7 +10,6 @@ use bevy_egui::egui;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::collections::{HashMap, VecDeque};
 
-/// Flash resource that pulses the +increment label when a player gains time.
 #[derive(Resource, Default)]
 pub struct IncrementFlash {
     pub elapsed: f32,
@@ -46,25 +43,15 @@ impl IncrementFlash {
     }
 }
 
-/// Entry in the avatar cache.
 pub enum AvatarEntry {
     Loading,
-    /// Raw PNG/JPEG bytes received from the background thread, awaiting egui texture creation.
     PendingBytes(Vec<u8>),
-    /// Egui texture handle, created once in the rendering system.
     Loaded(egui::TextureHandle),
     Failed,
 }
 
-/// Cap on distinct avatars held in memory at once — without this, a long
-/// session that browses lobbies/spectates/views standings accumulates one
-/// GPU texture per unique player name forever. Eviction is FIFO by first
-/// insertion (not true LRU): simple, and re-fetching an evicted-but-still-
-/// relevant avatar just costs one HTTP call, not a correctness issue.
 const MAX_AVATAR_CACHE_ENTRIES: usize = 200;
 
-/// Caches player avatars fetched from the backend.
-/// Key: player name / wallet address.
 #[derive(Resource)]
 pub struct AvatarCache {
     pub entries: HashMap<String, AvatarEntry>,
@@ -86,7 +73,6 @@ impl Default for AvatarCache {
 }
 
 impl AvatarCache {
-    /// Kick off a background fetch for `name` if not already in progress.
     pub fn fetch_if_absent(&mut self, name: &str) {
         if self.entries.contains_key(name) {
             return;
@@ -115,7 +101,6 @@ impl AvatarCache {
         });
     }
 
-    /// Drain the channel; promotes `Loading` entries to `PendingBytes` or `Failed`.
     pub fn drain_channel(&mut self) {
         while let Ok((name, bytes)) = self.rx.try_recv() {
             if bytes.is_empty() {
@@ -126,7 +111,6 @@ impl AvatarCache {
         }
     }
 
-    /// Decode any `PendingBytes` entries into egui textures using the current egui context.
     pub fn flush_pending(&mut self, ctx: &egui::Context) {
         for entry in self.entries.values_mut() {
             if let AvatarEntry::PendingBytes(bytes) = entry {
@@ -163,16 +147,12 @@ pub fn reset_in_game_hud_visibility(mut hud_visibility: ResMut<InGameHudVisibili
     hud_visibility.visible = true;
 }
 
-/// Tracks which player has flagged (run out of time) for the hourglass animation.
 #[derive(Resource, Default)]
 pub struct TimeoutHourglassState {
-    /// Name of the flagged player ("white" or "black"), or None if no flag yet.
     pub flagged_player: Option<String>,
-    /// Elapsed seconds since the flag (drives pulsing animation).
     pub elapsed: f32,
 }
 
-/// Listens for FlagTimeoutEvent and records the flagged player for the hourglass animation.
 pub fn timeout_hourglass_system(
     mut hourglass: ResMut<TimeoutHourglassState>,
     mut flag_reader: bevy::prelude::MessageReader<crate::game::events::FlagTimeoutEvent>,
@@ -202,7 +182,6 @@ pub fn in_game_hud_visible(hud_visibility: Res<InGameHudVisibility>) -> bool {
     hud_visibility.visible
 }
 
-/// Main in-game UI: right sidebar with player info, clocks, move list, and controls.
 pub fn game_status_ui(mut params: GameUIParams) {
     if !params.hud_visibility.visible {
         return;
@@ -458,11 +437,6 @@ mod tests {
         );
     }
 
-    /// The exact live repro: `CompetitiveMatch.opponent_username`'s async VPS
-    /// fetch hasn't resolved yet (empty string) at the moment this renders,
-    /// but the P2P handshake already delivered the real name synchronously —
-    /// must prefer the P2P name, not fall through to the empty VPS value
-    /// (which would render as the literal placeholder "Player").
     #[test]
     fn prefers_p2p_handshake_name_when_vps_fetch_hasnt_resolved_yet() {
         assert_eq!(resolve_opponent_display_name(Some("Tinog"), ""), "Tinog");
@@ -489,10 +463,6 @@ mod tests {
     }
 }
 
-/// Resolve display name + ELO string for both colors from whichever source
-/// applies to the current game (spectator feed, Solana competitive match, or
-/// plain local `Players`). Shared by the right sidebar and the left game-info
-/// panel so both show identical player identity data.
 fn resolve_online_player_name(
     player_identity: Option<&crate::states::main_menu::PlayerIdentity>,
     fallback_name: Option<&str>,
@@ -505,14 +475,6 @@ fn resolve_online_player_name(
         .unwrap_or_default()
 }
 
-/// The opponent's-side mirror of `resolve_online_player_name`'s local-side
-/// fix: `vps_username` (`CompetitiveMatch.opponent_username`) is an async
-/// VPS fetch that can still be empty at render time, while `p2p_display_name`
-/// (`P2PConnectionState.opponent_display_name`) is populated synchronously
-/// by the JOIN_ACK/GAME_START handshake before `InGame` is even entered —
-/// see `p2p_vps.rs`'s `JoinerDetected`/`JoinerGameStart` handlers. Preferring
-/// it when available avoids the same "shows the literal placeholder name"
-/// race that used to only be fixed for the local player.
 fn resolve_opponent_display_name(p2p_display_name: Option<&str>, vps_username: &str) -> String {
     p2p_display_name
         .filter(|n| !n.is_empty())
@@ -653,10 +615,6 @@ pub(crate) fn resolve_player_names(
     (white_name, white_elo, black_name, black_elo)
 }
 
-/// "MOVES" header, scrollable move list, then Resign / Offer Draw controls.
-/// Rendered in the top-left panel, below the match-info card. Player
-/// identity/clock/captures live in the center player bars above/below the
-/// board — see `crate::ui::game::player_bar`.
 pub(crate) fn render_moves_and_controls(
     ui: &mut egui::Ui,
     params: &mut crate::ui::system_params::game_ui::GameUIParams,
@@ -937,10 +895,6 @@ fn render_move_list_paired(
         });
 }
 
-/// Notation for the move at `index` — prefers the properly-disambiguated SAN
-/// recorded via `MoveHistory::add_move_with_san`, falling back to the
-/// simplified hand-rolled notation only for entries that predate/skip it
-/// (e.g. moves constructed directly in tests).
 fn move_notation(
     history: &crate::game::resources::history::MoveHistory,
     index: usize,
@@ -954,9 +908,6 @@ fn move_notation(
 
 // ── end Lichess panel helpers ─────────────────────────────────────────────────
 
-/// Render player information section
-/// Derive a stable background color from a player name for the identicon badge.
-/// Uses FNV-1a hash to map the name to one of 8 pleasant hues.
 pub fn identicon_color(name: &str) -> egui::Color32 {
     let mut hash: u32 = 2166136261;
     for b in name.bytes() {
@@ -977,9 +928,6 @@ pub fn identicon_color(name: &str) -> egui::Color32 {
     colors[(hash as usize) % colors.len()]
 }
 
-/// Render captured piece symbols as a compact tray row.
-/// `pieces` = pieces captured BY this side (the opponent's piece type).
-/// `is_dark` true = render as dark pieces (captured by white), false = light pieces (captured by black).
 pub(crate) fn render_captured_pieces_tray(
     ui: &mut egui::Ui,
     pieces: &[crate::rendering::pieces::PieceType],
@@ -1042,7 +990,6 @@ pub(crate) fn render_captured_pieces_tray(
     });
 }
 
-/// Format a move record as algebraic notation
 fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
     use crate::rendering::pieces::PieceType;
 
@@ -1101,7 +1048,6 @@ fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
     notation
 }
 
-/// Plain "Check" text at top-centre — no box, in the game's serif font.
 fn render_check_banner(ctx: &egui::Context) {
     egui::Area::new("check_indicator".into())
         .order(egui::Order::Foreground)
@@ -1117,7 +1063,6 @@ fn render_check_banner(ctx: &egui::Context) {
         });
 }
 
-/// Render a minimal checkmate pill — small, unobtrusive, top-center.
 fn render_checkmate_banner(
     ctx: &egui::Context,
     game_state: &GameStateParams,
@@ -1156,15 +1101,14 @@ fn render_checkmate_banner(
         banner = banner.anchor(egui::Align2::CENTER_TOP, [0.0, 16.0]);
     }
     banner.show(ctx, |ui| {
-            ui.label(
-                egui::RichText::new(label)
-                    .size(13.0)
-                    .color(egui::Color32::from_rgb(210, 210, 210)),
-            );
-        });
+        ui.label(
+            egui::RichText::new(label)
+                .size(13.0)
+                .color(egui::Color32::from_rgb(210, 210, 210)),
+        );
+    });
 }
 
-/// Format time in seconds to MM:SS format
 fn format_time(seconds: f32) -> String {
     let total_seconds = seconds.max(0.0) as u32;
     let minutes = total_seconds / 60;
@@ -1172,8 +1116,6 @@ fn format_time(seconds: f32) -> String {
     format!("{:02}:{:02}", minutes, secs)
 }
 
-/// Overlay system: shows an Accept/Decline banner when the opponent has offered a draw.
-/// Fires [`DrawResponseEvent`] (remote=false) on click so the network layer forwards it.
 pub fn draw_offer_ui(
     mut contexts: bevy_egui::EguiContexts,
     pending: Res<crate::game::systems::network_move::PendingDrawOffer>,
@@ -1258,7 +1200,6 @@ pub fn draw_offer_ui(
         });
 }
 
-/// Overlay system: shows an Accept/Decline banner when the opponent has offered a rematch.
 pub fn rematch_offer_ui(
     mut contexts: bevy_egui::EguiContexts,
     mut pending: ResMut<crate::game::systems::network_move::PendingRematchOffer>,
@@ -1347,19 +1288,11 @@ pub fn rematch_offer_ui(
 
 // ── Opponent disconnect popup ──────────────────────────────────────────────────
 
-/// How long the disconnect banner counts down before auto-flagging the
-/// opponent. Was 60s when opponent-gone detection itself could take up to
-/// ~19s (4s presence heartbeat + 15s TTL) — now that detection is push-based
-/// (see `braid_transport`/`social.rs` presence changes) and reliably sub-5s,
-/// this can be much shorter while still giving a real reconnect a fair shot.
 const DISCONNECT_GRACE_PERIOD_SECS: u64 = 20;
 
-/// Resource tracking opponent disconnect state.
 #[derive(Resource, Default)]
 pub struct OpponentDisconnectState {
-    /// When the opponent last dropped their connection.
     pub disconnected_at: Option<std::time::Instant>,
-    /// Whether we have already fired `FlagTimeoutEvent` for this disconnect.
     pub timed_out: bool,
 }
 
@@ -1374,7 +1307,6 @@ impl OpponentDisconnectState {
     }
 }
 
-/// Renders a small ping chip (colored dot + Nms label) when in an online game.
 pub fn ping_chip_ui(
     mut contexts: bevy_egui::EguiContexts,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
@@ -1426,10 +1358,6 @@ pub fn ping_chip_ui(
         });
 }
 
-/// Watches P2PConnectionState (and, independently, the opponent's backend
-/// `/presence` heartbeat — see `OpponentLivenessState`) for drops during an
-/// active game and renders a "Waiting N s for reconnect" banner. Auto-fires
-/// FlagTimeoutEvent at 0.
 pub fn opponent_disconnect_ui(
     mut contexts: bevy_egui::EguiContexts,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
@@ -1563,7 +1491,6 @@ pub fn opponent_disconnect_ui(
 
 // ── Check sound cue ───────────────────────────────────────────────────────────
 
-/// Plays the check sound when the game phase transitions to Check.
 pub fn play_check_sound_system(
     mut commands: Commands,
     game_phase: Res<crate::game::resources::CurrentGamePhase>,
@@ -1585,7 +1512,6 @@ pub fn play_check_sound_system(
 
 // ── Blindfold mode toggle ─────────────────────────────────────────────────────
 
-/// Toggle blindfold mode via Ctrl+B.
 pub fn toggle_blindfold_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut settings: ResMut<crate::core::GameSettings>,
@@ -1599,8 +1525,6 @@ pub fn toggle_blindfold_system(
 
 // ── Active tournament sidebar widget ─────────────────────────────────────────
 
-/// Small floating panel shown when the player is in an active tournament.
-/// Displays last match result and waiting status.
 #[cfg(feature = "solana")]
 pub fn tournament_sidebar_widget(
     mut contexts: bevy_egui::EguiContexts,
@@ -1820,8 +1744,6 @@ pub fn tournament_sidebar_widget(
 
 // ── Increment flash tick ──────────────────────────────────────────────────────
 
-/// Triggers and ticks the `IncrementFlash` resource so the "+Xs" label pulses
-/// after each move when the time control has an increment.
 pub fn increment_flash_system(
     mut flash: ResMut<IncrementFlash>,
     mut move_events: bevy::prelude::MessageReader<crate::game::events::MoveMadeEvent>,
@@ -1842,14 +1764,8 @@ pub fn increment_flash_system(
 
 // ── Resign / Offer Draw buttons ───────────────────────────────────────────────
 
-/// Floating bottom-left panel with Resign and Offer Draw buttons.
-/// Resign fires `ResignEvent` (winner = opponent).
-/// Offer Draw fires `DrawOfferEvent` (only in online modes).
-
 // ── Disconnect recovery banner ────────────────────────────────────────────────
 
-/// Shown when an online game loses its P2P connection.  Offers a one-click
-/// attempt to re-fetch game state from the backend so the game can resume.
 pub fn disconnect_recovery_banner(
     mut contexts: bevy_egui::EguiContexts,
     game_mode: Res<crate::core::GameMode>,
@@ -1928,11 +1844,6 @@ pub fn disconnect_recovery_banner(
 
 // ── Game over prompt banner ─────────────────────────────────────────────────
 
-/// Flashing bottom-of-screen banner shown once a game has ended.
-///
-/// Keeps the final position on screen (instead of instantly cutting to the
-/// black stats screen) until the player presses Enter — handled by
-/// `game_logic::confirm_game_over_prompt` — or clicks the banner itself.
 pub fn game_over_prompt_banner(
     mut contexts: bevy_egui::EguiContexts,
     state: Res<State<crate::core::GameState>>,
@@ -1981,19 +1892,19 @@ pub fn game_over_prompt_banner(
         prompt = prompt.anchor(egui::Align2::CENTER_BOTTOM, [0.0, -96.0]);
     }
     prompt.show(ctx, |ui| {
-            let resp = ui.add(
-                egui::Button::new(
-                    egui::RichText::new("Press Enter to see game stats")
-                        .size(16.0)
-                        .strong()
-                        .color(gold_text),
-                )
-                .frame(false),
-            );
-            if resp.clicked() {
-                clicked = true;
-            }
-        });
+        let resp = ui.add(
+            egui::Button::new(
+                egui::RichText::new("Press Enter to see game stats")
+                    .size(16.0)
+                    .strong()
+                    .color(gold_text),
+            )
+            .frame(false),
+        );
+        if resp.clicked() {
+            clicked = true;
+        }
+    });
 
     if clicked {
         info!("[GAME] Game over banner clicked - transitioning to GameOver state");
@@ -2002,8 +1913,6 @@ pub fn game_over_prompt_banner(
     }
 }
 
-/// Initiates avatar fetches for both players and drains channel bytes into PendingBytes entries.
-/// Actual egui texture creation happens inside game_status_ui (needs egui context).
 pub fn avatar_fetch_system(
     players: Res<crate::game::resources::Players>,
     mut avatar_cache: ResMut<AvatarCache>,

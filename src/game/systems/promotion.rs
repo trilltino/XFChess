@@ -1,5 +1,3 @@
-//! Pawn promotion system.
-
 use crate::game::resources::{is_promotion_move, PendingPromotion, PromotionSelected};
 use crate::rendering::pieces::{Piece, PieceColor, PieceType, PIECE_MESH_SCALE};
 use bevy::prelude::*;
@@ -55,7 +53,6 @@ fn apply_selected_promotion(
     }
 }
 
-/// Detects pawns that need promotion.
 pub fn detect_pawn_promotion(
     pieces: Query<(Entity, &Piece), Changed<Piece>>,
     mut pending_promotion: ResMut<PendingPromotion>,
@@ -76,14 +73,6 @@ pub fn detect_pawn_promotion(
     }
 }
 
-/// Applies the selected promotion.
-///
-/// The promotion UI (promotion_ui_system) sends a PromotionSelected message when the
-/// player picks a piece. This system applies it. If no message arrives this frame,
-/// nothing happens — the UI stays open until the player chooses.
-///
-/// AI promotions are handled inline in MoveContext (promotion field), so they never
-/// reach detect_pawn_promotion and do not require this path.
 pub fn apply_pawn_promotion(
     mut commands: Commands,
     mut promotion_messages: MessageReader<PromotionSelected>,

@@ -1,31 +1,3 @@
-//! A subscription that survives the network.
-//!
-//! [`Subscription`] gives you one connection. [`ReliableChannel`] gives you a
-//! resource: it reconnects when the connection drops, resumes from the last
-//! version it saw instead of replaying everything, and holds writes until there
-//! is somewhere to send them.
-//!
-//! This is the Rust counterpart of the reference implementation's
-//! `reliable_update_channel`. Without it every call site grows its own reconnect
-//! loop, and they drift — one retries forever, another gives up; one resumes,
-//! another double-applies history.
-//!
-//! # Example
-//!
-//! ```no_run
-//! # async fn example() -> braid_http::Result<()> {
-//! use braid_http::{BraidClient, ReliableChannel};
-//!
-//! let client = BraidClient::new()?;
-//! let mut channel = ReliableChannel::new(client, "https://example.com/game/42/moves");
-//!
-//! while let Some(update) = channel.next().await {
-//!     println!("{:?}", update.body_str());
-//! }
-//! # Ok(())
-//! # }
-//! ```
-
 use crate::client::retry::RetryConfig;
 use crate::client::{BraidClient, Subscription};
 use crate::types::{BraidRequest, Update, Version};
@@ -34,9 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, warn};
 
-/// Live view of a channel's connection state, shared with whoever is watching.
-///
-/// Cheap to clone; every clone observes the same channel.
 #[derive(Clone, Default)]
 pub struct ChannelStatus {
     online: Arc<AtomicBool>,
@@ -44,16 +13,11 @@ pub struct ChannelStatus {
 }
 
 impl ChannelStatus {
-    /// Whether a subscription is currently established.
     #[must_use]
     pub fn is_online(&self) -> bool {
         self.online.load(Ordering::Relaxed)
     }
 
-    /// Writes accepted by the channel but not yet acknowledged by the server.
-    ///
-    /// Non-zero while offline; a UI can show "saving…" from this without knowing
-    /// anything about the transport.
     #[must_use]
     pub fn outstanding_puts(&self) -> usize {
         self.outstanding_puts.load(Ordering::Relaxed)
@@ -64,13 +28,10 @@ impl ChannelStatus {
     }
 }
 
-/// How aggressively a channel reconnects.
 #[derive(Debug, Clone)]
 pub struct ReconnectPolicy {
     pub initial_backoff: Duration,
     pub max_backoff: Duration,
-    /// `None` retries forever, which is usually right for a resource a user is
-    /// still looking at.
     pub max_attempts: Option<u32>,
 }
 
@@ -93,16 +54,10 @@ impl ReconnectPolicy {
     }
 }
 
-/// A self-healing subscription to one resource.
-///
-/// Call [`next`](Self::next) in a loop. Reconnects happen underneath; the caller
-/// sees an uninterrupted sequence of updates.
 pub struct ReliableChannel {
     client: BraidClient,
     url: String,
     subscription: Option<Subscription>,
-    /// The most recent version seen, sent as `Parents` when resuming so the
-    /// server can skip what we already have.
     resume_from: Option<Version>,
     policy: ReconnectPolicy,
     retry: RetryConfig,
@@ -111,7 +66,6 @@ pub struct ReliableChannel {
 }
 
 impl ReliableChannel {
-    /// A channel for `url` using default reconnect and retry policy.
     #[must_use]
     pub fn new(client: BraidClient, url: impl Into<String>) -> Self {
         Self {
@@ -138,33 +92,22 @@ impl ReliableChannel {
         self
     }
 
-    /// Start from a known version rather than from the beginning.
-    ///
-    /// Use this when the caller already has state from a previous session — the
-    /// server will replay only what came after.
     #[must_use]
     pub fn resuming_from(mut self, version: Version) -> Self {
         self.resume_from = Some(version);
         self
     }
 
-    /// A handle for observing connection state.
     #[must_use]
     pub fn status(&self) -> ChannelStatus {
         self.status.clone()
     }
 
-    /// The last version this channel received, if any.
     #[must_use]
     pub fn version(&self) -> Option<&Version> {
         self.resume_from.as_ref()
     }
 
-    /// The next update, reconnecting as needed.
-    ///
-    /// Returns `None` only when reconnection is abandoned — that is, when the
-    /// policy sets `max_attempts` and they are exhausted. With the default policy
-    /// this never returns `None`.
     pub async fn next(&mut self) -> Option<Update> {
         loop {
             if self.subscription.is_none() && !self.connect().await {
@@ -195,14 +138,6 @@ impl ReliableChannel {
         }
     }
 
-    /// Publish an update, retrying while the channel is offline.
-    ///
-    /// Returns once the server has accepted the write. The count of in-flight
-    /// writes is visible through [`ChannelStatus::outstanding_puts`].
-    ///
-    /// # Errors
-    ///
-    /// Returns the last transport error if the retry policy gives up.
     pub async fn put(&self, body: impl Into<bytes::Bytes>) -> crate::Result<()> {
         let body = body.into();
         self.status.outstanding_puts.fetch_add(1, Ordering::Relaxed);
@@ -220,9 +155,6 @@ impl ReliableChannel {
         result.map(|_| ())
     }
 
-    /// Open a subscription, backing off between attempts.
-    ///
-    /// Returns `false` when the policy gives up.
     async fn connect(&mut self) -> bool {
         loop {
             if let Some(max) = self.policy.max_attempts {

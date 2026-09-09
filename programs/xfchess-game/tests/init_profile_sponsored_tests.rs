@@ -1,20 +1,3 @@
-//! Sponsored `init_profile`: XFChess (not the player) fronts the on-chain
-//! rent for a player's first profile, so a brand-new wallet with zero SOL
-//! can still get an on-chain identity. See
-//! docs/plans/identity-implementation-plan.md — design decision #2: no
-//! Anchor account-struct change. The backend prepends a plain system
-//! transfer to the player for exactly the rent both PDAs need, then the
-//! existing, unmodified `init_profile` instruction runs exactly as it does
-//! for a self-funded player (its `create_account` CPIs debit `player`
-//! regardless of who the *transaction's* fee payer is).
-//!
-//! This is the first instruction-level (`ProgramTest`) coverage of
-//! `init_profile` at all — the only prior test (`profile_session_tests.rs`)
-//! exercises the handler helper functions directly, with no PDA creation or
-//! CPI involved.
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use anchor_lang::{AccountDeserialize, InstructionData, Space, ToAccountMetas};

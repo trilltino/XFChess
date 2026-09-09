@@ -1,5 +1,3 @@
-//! ER CU Benchmark - XFChess Ephemeral Rollup Compute Unit Test Suite
-
 pub mod cost_reporter;
 pub mod cu_logger;
 pub mod game_flows;
@@ -14,35 +12,12 @@ use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
-/// Program ID for XFChess on devnet.
 pub const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
-/// Base-layer devnet RPC endpoint.
 pub const BASE_RPC_URL: &str = "https://api.devnet.solana.com";
 
-/// MagicBlock ephemeral rollup devnet endpoint — the router, not a raw
-/// regional validator URL. A direct regional endpoint (e.g. `devnet-eu.
-/// magicblock.app`) isn't guaranteed to be the specific ER instance a given
-/// account was actually delegated to, which surfaces as "Transaction loads a
-/// writable account that cannot be written" the moment you try to write to
-/// it. The production backend never talks to a regional endpoint directly —
-/// see `backend/src/signing/config.rs`'s `magic_router_rpc_url` (env
-/// `MAGIC_ROUTER_RPC_URL`, this same default), used for every ER RPC call
-/// (`backend/src/signing/routes/main.rs`, `tasks/settlement_worker.rs`).
 pub const ER_RPC_URL: &str = "https://devnet-router.magicblock.app";
 
-/// Fetch a blockhash valid for a transaction touching `accounts`, routed
-/// correctly by the Magic Router.
-///
-/// Plain `getLatestBlockhash` against a router endpoint (as opposed to a
-/// single validator) doesn't work for ER-delegated accounts: the router picks
-/// which shard actually executes a transaction based on the *accounts it
-/// touches*, but a blockhash fetched with no account context can come back
-/// from an arbitrary/default shard — one that never advances the blockhash
-/// the real target shard will check against, so the send later fails with
-/// "Blockhash not found" on every retry, not just a transient one. The router
-/// exposes a dedicated method for this exact problem:
-/// <https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/getBlockhashForAccounts>
 pub fn get_blockhash_for_accounts(
     rpc: &RpcClient,
     accounts: &[Pubkey],
@@ -68,18 +43,6 @@ pub fn get_blockhash_for_accounts(
         .expect("router returned an invalid blockhash string"))
 }
 
-/// Sends `tx` and polls for confirmation with a short, tight interval instead
-/// of relying on `RpcClient::send_and_confirm_transaction`.
-///
-/// Measured empirically: that SDK method clustered every move's round-trip at
-/// ~800ms regardless of how fast the ER itself processed it. Traced to
-/// `solana-rpc-client` 3.1.12's nonblocking `send_and_confirm_transaction`,
-/// which does `sleep(Duration::from_millis(500))` between each
-/// `get_signature_status` poll — so unless the transaction happens to already
-/// be confirmed on the very first check (it almost never is), you eat a full
-/// extra 500ms tick no matter how fast confirmation actually landed. Polling
-/// every 20ms instead removes that artificial floor; the remaining latency is
-/// real network/ER time, not client-side waiting.
 pub fn fast_send_and_confirm(
     rpc: &RpcClient,
     tx: &solana_sdk::transaction::Transaction,
@@ -114,28 +77,16 @@ pub fn fast_send_and_confirm(
     }
 }
 
-/// Default compute-unit limit per transaction.
 pub const DEFAULT_CU_LIMIT: u32 = 1_400_000;
 
-/// Default compute-unit price in micro-lamports.
 pub const DEFAULT_CU_PRICE: u64 = 10_000;
 
-/// Default heap size in bytes.
 pub const DEFAULT_HEAP_SIZE: u32 = 256_000;
 
-/// Lamports per SOL.
 pub const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
-/// SOL price in GBP for cost estimation. This is a static fallback, not a
-/// live rate — this crate is a standalone offline benchmarking tool with no
-/// wired path to the backend's live rate cache (`backend/src/signing/routes/rates.rs`).
-/// Set `SOL_GBP_RATE_OVERRIDE` (a float) to plug in a fresher figure at
-/// report time without a code change; `sol_gbp_rate()` is what callers should
-/// use instead of the constant directly.
 pub const SOL_GBP_RATE: f64 = 60.0;
 
-/// Resolves the SOL/GBP rate to use for a report: `SOL_GBP_RATE_OVERRIDE` env
-/// var if set and parseable, else the static `SOL_GBP_RATE` fallback.
 pub fn sol_gbp_rate() -> f64 {
     std::env::var("SOL_GBP_RATE_OVERRIDE")
         .ok()
@@ -144,63 +95,48 @@ pub fn sol_gbp_rate() -> f64 {
         .unwrap_or(SOL_GBP_RATE)
 }
 
-/// Transaction base fee in lamports.
 pub const BASE_TX_FEE: u64 = 5_000;
 
-/// ER priority fee in lamports.
 pub const ER_PRIORITY_FEE: u64 = 10_000;
 
-/// Minimum lamports to keep in master wallet (0.05 SOL buffer).
 pub const MASTER_MIN_BALANCE: u64 = 50_000_000;
 
-/// Default funding amount per child wallet (0.05 SOL).
 pub const CHILD_FUNDING_AMOUNT: u64 = 50_000_000;
 
-/// Master keypair file path — funded devnet wallet (1.5+ SOL).
 pub const MASTER_KEYPAIR_PATH: &str = "keys/program-authority.json";
 
-/// Child keypairs file path.
 pub const CHILDREN_KEYPAIR_PATH: &str = "keys/er-cu-children.json";
 
-/// Retry count for RPC calls.
 pub const RPC_RETRY_COUNT: u32 = 5;
 
-/// Delay between retries in milliseconds.
 pub const RPC_RETRY_DELAY_MS: u64 = 2_000;
 
-/// Create a base-layer RPC client.
 pub fn base_client() -> RpcClient {
     RpcClient::new_with_commitment(BASE_RPC_URL.to_string(), CommitmentConfig::confirmed())
 }
 
-/// Create an ER-layer RPC client.
 pub fn er_client() -> RpcClient {
     RpcClient::new_with_commitment(ER_RPC_URL.to_string(), CommitmentConfig::confirmed())
 }
 
-/// Parse a pubkey from a string.
 pub fn parse_pubkey(s: &str) -> Result<Pubkey, String> {
     Pubkey::from_str(s).map_err(|e| format!("Invalid pubkey: {}", e))
 }
 
-/// Build a compute budget CU limit instruction.
 pub fn compute_budget_limit(cu_limit: u32) -> solana_sdk::instruction::Instruction {
     solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(cu_limit)
 }
 
-/// Build a compute budget CU price instruction.
 pub fn compute_budget_price(micro_lamports: u64) -> solana_sdk::instruction::Instruction {
     solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_price(
         micro_lamports,
     )
 }
 
-/// Build a compute budget heap frame instruction.
 pub fn compute_budget_heap(heap_size: u32) -> solana_sdk::instruction::Instruction {
     solana_compute_budget_interface::ComputeBudgetInstruction::request_heap_frame(heap_size)
 }
 
-/// Apply compute budget optimizations to a transaction.
 pub fn apply_compute_budget(
     ixs: &mut Vec<solana_sdk::instruction::Instruction>,
     cu_limit: u32,
@@ -212,7 +148,6 @@ pub fn apply_compute_budget(
     ixs.insert(2, compute_budget_heap(heap_size));
 }
 
-/// Retry wrapper for RPC calls with exponential backoff.
 pub async fn with_retry<F, T>(mut f: F) -> Result<T, anyhow::Error>
 where
     F: FnMut() -> Result<T, solana_client::client_error::ClientError>,
@@ -253,7 +188,6 @@ where
     Err(anyhow::anyhow!("Max retries exceeded"))
 }
 
-/// Generate a unique ID based on timestamp.
 pub fn unique_id() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -261,8 +195,6 @@ pub fn unique_id() -> u64 {
         .as_secs()
 }
 
-/// Fetch a player's ELO rating from their on-chain profile.
-/// Returns the ELO as f64 (scaled: 120000.0 = 1200 ELO).
 pub fn fetch_profile_elo(
     rpc: &RpcClient,
     program_id: Pubkey,
@@ -281,16 +213,8 @@ pub fn fetch_profile_elo(
     Ok(elo)
 }
 
-/// `Tournament.status` discriminant for `TournamentStatus::Completed` (see
-/// `state/tournament.rs`'s enum order: Registration, Active, Completed,
-/// Closed, Cancelled — Borsh encodes fieldless enums as a `u8` in declaration
-/// order).
 pub const TOURNAMENT_STATUS_COMPLETED: u8 = 2;
 
-/// Minimal sequential Borsh reader for account data. Unlike `fetch_profile_elo`
-/// above, `Tournament` has a variable-length `name: String` before the fields
-/// we need, so a fixed byte offset doesn't work — this walks the account in
-/// field-declaration order instead, skipping what it doesn't need.
 struct BorshCursor<'a> {
     data: &'a [u8],
     pos: usize,
@@ -363,11 +287,6 @@ impl<'a> BorshCursor<'a> {
     }
 }
 
-/// Fetch a tournament's `status` plus its 1st/2nd/3rd place winners. Follows
-/// `state/tournament.rs`'s exact field declaration order — `winner`,
-/// `second_place`, `third_place` sit after several fixed- and variable-length
-/// fields (including the `name: String`), so this has to parse sequentially
-/// rather than jump to a fixed offset.
 pub fn fetch_tournament_places(
     rpc: &RpcClient,
     program_id: Pubkey,

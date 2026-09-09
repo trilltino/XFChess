@@ -1,5 +1,3 @@
-//! Chess game systems - ECS logic implementation.
-
 pub mod camera;
 pub mod debug_transform;
 pub mod debug_visuals;

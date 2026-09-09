@@ -1,13 +1,7 @@
-//! Integration tests for EphemeralRollupManager batch behaviour.
-//!
-//! These are pure unit-level tests: no Bevy app or Solana RPC is required.
-
 #![cfg(feature = "solana")]
 
 use xfchess::multiplayer::rollup::manager::{EphemeralRollupManager, GameStateStatus};
 
-/// After exactly `max_batch_size` local moves, `should_flush()` must return
-/// true and `prepare_batch_for_commit()` must return all moves in order.
 #[test]
 fn test_10_moves_trigger_batch_ready() {
     let mut mgr = EphemeralRollupManager::new(1, true, "startpos".to_string());
@@ -37,7 +31,6 @@ fn test_10_moves_trigger_batch_ready() {
     assert_eq!(mgr.status, GameStateStatus::Committing);
 }
 
-/// `force_flush()` must drain a non-empty partial batch regardless of size.
 #[test]
 fn test_force_flush_on_game_end() {
     let mut mgr = EphemeralRollupManager::new(42, true, "startpos".to_string());
@@ -53,7 +46,6 @@ fn test_force_flush_on_game_end() {
     assert_eq!(moves.len(), 2);
 }
 
-/// A batch commit success must advance the committed turn counter.
 #[test]
 fn test_batch_commit_success_advances_turn() {
     let mut mgr = EphemeralRollupManager::new(7, true, "startpos".to_string());
@@ -73,7 +65,6 @@ fn test_batch_commit_success_advances_turn() {
     assert_eq!(mgr.status, GameStateStatus::Synced);
 }
 
-/// Out-of-sync state must reject new local moves.
 #[test]
 fn test_out_of_sync_rejects_moves() {
     let mut mgr = EphemeralRollupManager::new(99, true, "startpos".to_string());
@@ -86,8 +77,6 @@ fn test_out_of_sync_rejects_moves() {
     );
 }
 
-/// Remote moves go through the same add_local_move path, accumulating in the
-/// shared pending batch.
 #[test]
 fn test_remote_move_accumulates_in_batch() {
     let mut mgr = EphemeralRollupManager::new(3, true, "startpos".to_string());

@@ -1,5 +1,3 @@
-//! Instruction for delegating games to MagicBlock Ephemeral Rollups.
-
 pub use self::inner::*;
 
 mod inner {
@@ -8,9 +6,6 @@ mod inner {
     use anchor_lang::prelude::*;
     use ephemeral_rollups_sdk::cpi::DelegateAccounts;
 
-    /// Delegate the Game PDA to the MagicBlock ephemeral rollup so that
-    /// subsequent moves can be processed with sub-second latency on the ER.
-    /// The payer (white or black) authorises the delegation.
     pub fn handler_delegate_game(
         ctx: Context<DelegateGameCtx>,
         _game_id: u64,
@@ -59,10 +54,6 @@ mod inner {
         Ok(())
     }
 
-    /// Commit the current ER state for the Game PDA back to the base layer
-    /// and undelegate the account so it can be used on mainnet/devnet again.
-    /// No payer identity check — the VPS session key may trigger this so no
-    /// extra wallet popup is needed at game end.
     pub fn handler_undelegate_game(ctx: Context<UndelegateGameCtx>, _game_id: u64) -> Result<()> {
         // 1. Manually deserialize the Game account
         let mut data = ctx.accounts.game.try_borrow_mut_data()?;
@@ -89,11 +80,9 @@ mod inner {
         Ok(())
     }
 
-    /// Accounts for delegating a `Game` PDA to the Ephemeral Rollup.
     #[derive(Accounts)]
     #[instruction(_game_id: u64)]
     pub struct DelegateGameCtx<'info> {
-        /// CHECK: Manual serialization is used to modify the account and serialize it back before its owner transitions.
         #[account(
             mut,
             seeds = [b"game", _game_id.to_le_bytes().as_ref()],
@@ -104,23 +93,18 @@ mod inner {
         #[account(mut)]
         pub payer: Signer<'info>,
 
-        /// CHECK: The xfchess-game program itself (owner).
         #[account(address = crate::ID @ GameErrorCode::InvalidOwnerProgram)]
         pub owner_program: AccountInfo<'info>,
 
-        /// CHECK: Temporary buffer for game PDA delegation.
         #[account(mut)]
         pub buffer: AccountInfo<'info>,
 
-        /// CHECK: Delegation record for game PDA.
         #[account(mut)]
         pub delegation_record: AccountInfo<'info>,
 
-        /// CHECK: Delegation metadata for game PDA.
         #[account(mut)]
         pub delegation_metadata: AccountInfo<'info>,
 
-        /// CHECK: MagicBlock delegation program.
         #[account(address = ephemeral_rollups_sdk::id())]
         pub delegation_program: AccountInfo<'info>,
 
@@ -130,11 +114,9 @@ mod inner {
         pub fee_payer: Signer<'info>,
     }
 
-    /// Accounts for committing ER state back to the base layer and undelegating.
     #[derive(Accounts)]
     #[instruction(_game_id: u64)]
     pub struct UndelegateGameCtx<'info> {
-        /// CHECK: Manual serialization to avoid Anchor exit serialization conflicts with delegation CPI.
         #[account(
             mut,
             seeds = [b"game", _game_id.to_le_bytes().as_ref()],
@@ -145,11 +127,9 @@ mod inner {
         #[account(mut)]
         pub payer: Signer<'info>,
 
-        /// CHECK: MagicBlock magic context account for commit/undelegate.
         #[account(mut, address = ephemeral_rollups_sdk::consts::MAGIC_CONTEXT_ID)]
         pub magic_context: AccountInfo<'info>,
 
-        /// CHECK: MagicBlock magic program.
         #[account(address = ephemeral_rollups_sdk::consts::MAGIC_PROGRAM_ID)]
         pub magic_program: AccountInfo<'info>,
     }

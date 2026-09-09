@@ -1,11 +1,3 @@
-//! Withdraw accumulated platform fees from the system-owned treasury vault.
-//!
-//! The treasury vault (seeds `[TREASURY_VAULT_SEED]`) accrues PvP platform fees,
-//! dispute-resolution fees, and forfeited dispute bonds from game settlement.
-//! It is System-owned, so — exactly like the per-game wager escrow — lamports may
-//! only leave through a `system_program::transfer` CPI signed with the vault seeds.
-//! A direct lamport decrement would fail the runtime's ownership check.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use anchor_lang::prelude::*;
@@ -22,19 +14,13 @@ pub struct TreasuryWithdrawn {
 #[derive(Accounts)]
 #[instruction(amount: u64)]
 pub struct WithdrawTreasury<'info> {
-    /// System-owned platform treasury vault — the destination of all PvP
-    /// platform/dispute fees. Seeded PDA, so it cannot be substituted.
     #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
     pub treasury_vault: SystemAccount<'info>,
-    /// Only the dedicated treasury authority may withdraw. Kept separate from
-    /// `vps_authority` so treasury access uses its own dedicated wallet without
-    /// touching the result-signing key.
     #[account(
         mut,
         address = crate::constants::treasury_authority::ID @ GameErrorCode::UnauthorizedAccess
     )]
     pub authority: Signer<'info>,
-    /// Destination wallet for the withdrawn fees.
     #[account(mut)]
     pub destination: SystemAccount<'info>,
     pub system_program: Program<'info, System>,

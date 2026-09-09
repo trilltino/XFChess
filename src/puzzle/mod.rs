@@ -1,17 +1,3 @@
-//! Client-side puzzle mode (docs/PUZZLES.md §10) — full play loop.
-//!
-//! The client is a renderer + input collector, never the judge. Flow:
-//!   1. Menu sets [`PendingPuzzleRequest`] → `GET /puzzle/next`.
-//!   2. On load: spawn the position (FEN-driven board), transition to `InGame`,
-//!      and play the opponent's setup move so the player faces the tactic.
-//!   3. Each player move → `POST /puzzle/move`; the server verifies one move at a
-//!      time and returns the opponent's reply (revealed only after a correct
-//!      move — future solution moves never reach the client).
-//!   4. On the final correct move the server pays any bounty; we show the result.
-//!
-//! Networking is blocking (reqwest) so it runs on worker threads and reports
-//! back over crossbeam channels polled each frame, like `WalletBridgePoller`.
-
 use bevy::prelude::*;
 use crossbeam_channel::{unbounded, Receiver};
 use serde::Deserialize;
@@ -22,7 +8,6 @@ use crate::game::events::{MoveMadeEvent, NetworkMoveEvent};
 use crate::multiplayer::network::vps::{client, vps_base};
 use crate::rendering::pieces::{PieceType, PiecesSpawned};
 
-/// Which puzzle experience the player picked from the menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PuzzleMode {
     Solve,
@@ -38,7 +23,6 @@ impl PuzzleMode {
     }
 }
 
-/// Set by the menu when a puzzle button is clicked; consumed by `start_request`.
 #[derive(Resource, Clone)]
 pub struct PendingPuzzleRequest {
     pub mode: PuzzleMode,
@@ -53,7 +37,6 @@ pub struct PuzzleData {
     pub id: String,
     #[serde(default)]
     pub fen: String,
-    /// The opponent's setup move (line[0]) — leaks nothing about the solution.
     #[serde(default)]
     pub setup_move: String,
     #[serde(default)]
@@ -70,7 +53,6 @@ pub struct PuzzleData {
     pub already_attempted: bool,
 }
 
-/// Backend `POST /puzzle/move` result.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct MoveOutcome {
     #[serde(default)]
@@ -102,17 +84,12 @@ pub enum PuzzlePhase {
     #[default]
     Idle,
     Loading,
-    /// Transitioned to InGame; waiting for the board to spawn before the setup move.
     AwaitingBoard,
-    /// Player to move.
     Playing,
-    /// A move was submitted; waiting for the server's verdict/reply.
     AwaitingServer,
-    /// Puzzle finished (solved or failed).
     Done,
 }
 
-/// Live puzzle state shared with the rest of the client (UI, input).
 #[derive(Resource, Default)]
 pub struct PuzzleSession {
     pub active: Option<PuzzleData>,
@@ -123,7 +100,6 @@ pub struct PuzzleSession {
     rx: Option<Receiver<NetMsg>>,
 }
 
-/// Tells the board spawner to build a specific FEN instead of the start position.
 #[derive(Resource, Default)]
 pub struct PuzzleBoard {
     pub active: bool,
@@ -377,7 +353,6 @@ fn clear_puzzle_board(mut board: ResMut<PuzzleBoard>, mut session: ResMut<Puzzle
 
 // ── UCI <-> board coordinate helpers ─────────────────────────────────────────
 
-/// Parse a UCI move ("e2e4" / "e7e8q") into a `NetworkMoveEvent`.
 fn uci_to_event(uci: &str) -> Option<NetworkMoveEvent> {
     let b = uci.trim().as_bytes();
     if b.len() < 4 {

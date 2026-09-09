@@ -26,29 +26,6 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
 
-/// System parameter grouping main menu UI resources
-///
-/// Bundles all resources needed by the main menu UI to avoid exceeding
-/// Bevy's system parameter limit (16 parameters).
-///
-/// # Resources Included
-///
-/// - [`EguiContexts`] - UI rendering contexts
-/// - [`NextState<GameState>`] - For transitioning game states
-/// - [`NextState<MenuState>`] - For transitioning menu substates
-/// - [`ChessAIResource`] - AI configuration
-/// - [`ViewMode`] - Camera/view configuration
-/// - [`LoadingProgress`] - Asset loading status
-/// - [`GameAssets`] - Loaded game assets
-///
-/// - [`GameSettings`] - Game settings
-/// - [`CoreGameMode`] - Core game mode selection
-/// - [`CompetitiveMenuState`] - Competitive match UI state
-/// - [`OnlineNetworkState`] - Network connection state
-/// - [`P2PUIState`] - P2P UI state
-/// - [`P2PConnectionState`] - P2P connection status
-/// - [`EventWriter<HostGameEvent>`] - For hosting games
-/// - [`EventWriter<ConnectToPeerEvent>`] - For connecting to peers
 #[derive(SystemParam)]
 pub struct MainMenuUIContext<'w, 's> {
     pub commands: Commands<'w, 's>,
@@ -112,8 +89,5 @@ pub struct MainMenuUIContext<'w, 's> {
     pub update_check: ResMut<'w, crate::core::updates::UpdateCheck>,
     pub spectate_events: Option<MessageWriter<'w, SpectateViaLinkEvent>>,
     pub tokio_runtime: Res<'w, crate::multiplayer::TokioRuntime>,
-    /// Used by the exit-confirmation dialog to request a graceful shutdown
-    /// instead of `std::process::exit`, so cleanup systems (e.g. notifying
-    /// the P2P relay we're leaving a hosted lobby) get a chance to run first.
     pub app_exit: MessageWriter<'w, AppExit>,
 }

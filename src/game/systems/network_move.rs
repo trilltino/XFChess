@@ -12,7 +12,6 @@ use crate::multiplayer::types::CausalChainState;
 use crate::multiplayer::OnlineNetworkState;
 use bevy::prelude::*;
 
-/// Handle network move events by executing them on the local board
 pub fn handle_network_moves(
     mut events: MessageReader<NetworkMoveEvent>,
     mut commands: Commands,
@@ -225,21 +224,16 @@ pub fn handle_network_moves(
     }
 }
 
-/// Tracks whether there is a pending incoming draw offer waiting for the local player to respond.
 #[derive(Resource, Default)]
 pub struct PendingDrawOffer {
-    /// Set to the offering player's name when a draw offer is received over the network.
     pub from_player: Option<String>,
 }
 
-/// Tracks whether there is a pending incoming rematch offer waiting for the local player to respond.
 #[derive(Resource, Default)]
 pub struct PendingRematchOffer {
-    /// Set to the offering player's name when a rematch offer is received over the network.
     pub from_player: Option<String>,
 }
 
-/// Watch for remote [`DrawOfferEvent`]s and store them so the UI can display a banner.
 pub fn watch_draw_offers(
     mut events: MessageReader<crate::game::events::DrawOfferEvent>,
     mut pending: ResMut<PendingDrawOffer>,
@@ -252,7 +246,6 @@ pub fn watch_draw_offers(
     }
 }
 
-/// Apply an accepted draw by setting game-over state; clear state on decline.
 pub fn handle_draw_response_events(
     mut events: MessageReader<crate::game::events::DrawResponseEvent>,
     mut pending: ResMut<PendingDrawOffer>,
@@ -301,7 +294,6 @@ pub fn handle_draw_response_events(
     }
 }
 
-/// Watch for remote [`RematchOfferEvent`]s and store them so the UI can display a banner.
 pub fn watch_rematch_offers(
     mut events: MessageReader<crate::game::events::RematchOfferEvent>,
     mut pending: ResMut<PendingRematchOffer>,
@@ -338,14 +330,6 @@ pub fn handle_resign_events(
     }
 }
 
-/// Resolves `FlagTimeoutEvent` into a terminal `GameOverState`.
-///
-/// If no move has been played yet (the 30-second first-move grace period
-/// expired, or an opponent disconnected before making any move) the game is
-/// aborted with no winner. Otherwise the flagged player's clock ran out
-/// mid-game and their opponent wins on time — this mirrors what
-/// `update_game_timer` already sets locally, so a remote `FlagTimeout`
-/// arriving here just confirms the same result on the other peer.
 pub fn handle_flag_timeout_events(
     mut events: MessageReader<crate::game::events::FlagTimeoutEvent>,
     mut game_over: ResMut<GameOverState>,

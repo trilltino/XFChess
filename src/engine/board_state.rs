@@ -1,11 +1,3 @@
-//! Chess engine resource – board state management backed by nimzovich_engine.
-//!
-//! `ChessEngine` is the Bevy ECS [`Resource`] that:
-//! - Holds the authoritative board position as a FEN string
-//! - Generates legal moves for any piece using `nimzovich_engine`
-//! - Validates moves (does not leave king in check)
-//! - Can sync the ECS piece positions back to update the internal FEN
-
 use crate::game::components::HasMoved;
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
@@ -15,39 +7,22 @@ use nimzovich_engine::{
 };
 use std::collections::HashMap;
 
-/// The starting position FEN.
 const STARTING_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-/// Bevy Resource wrapping the board position.
 #[derive(Resource)]
 pub struct ChessEngine {
-    /// Current position as a FEN string. Updated after every move.
     pub fen: String,
-    /// Internal engine state.
     game: Game,
-    /// Halfmove clock for 50-move rule.
     pub halfmove_clock: u32,
-    /// Full move counter.
     pub fullmove_counter: u32,
-    /// Current side to move.
     pub current_turn: PieceColor,
-    /// Castling rights in KQkq notation.
     pub castling_rights: String,
-    /// En passant target square in UCI notation.
     pub en_passant: Option<String>,
-    /// Legal moves per source square, rebuilt once per turn after sync.
-    /// Keyed by (file, rank). Empty map means cache is stale.
     move_cache: HashMap<(u8, u8), Vec<(u8, u8)>>,
-    /// Set by execute_move after it syncs ECS→engine so update_game_phase can
-    /// skip the redundant second sync and only rebuild the move cache.
     pub synced_this_move: bool,
-    /// True once rebuild_legal_move_cache has run for the current turn.
-    /// Prevents update_game_phase from re-syncing and re-building every frame
-    /// when no move has occurred.
     pub move_cache_valid: bool,
 }
 
-/// A wrapper for a chess move to maintain some compatibility with the previous shakmaty-based API.
 pub struct MoveWrapper {
     pub from: (u8, u8),
     pub to: (u8, u8),
@@ -232,9 +207,6 @@ impl ChessEngine {
 
     // ─── Move generation ────────────────────────────────────────────────────
 
-    /// Rebuild the legal-move cache for the current position.
-    /// Call this once per turn after syncing the engine from ECS.
-    /// All downstream per-click lookups read from this cache for free.
     pub fn rebuild_legal_move_cache(&mut self) {
         self.move_cache.clear();
         let side = if self.fen.contains(" w ") { 1 } else { -1 };
@@ -249,7 +221,6 @@ impl ChessEngine {
         self.move_cache_valid = true;
     }
 
-    /// Returns cached legal destinations for a square. Returns empty if no cache entry.
     pub fn get_legal_moves_for_square(
         &self,
         square: (u8, u8),
@@ -258,8 +229,6 @@ impl ChessEngine {
         self.move_cache.get(&square).cloned().unwrap_or_default()
     }
 
-    /// Check if a move expressed as a 4-char UCI string (e.g. "e2e4") is legal.
-    /// Uses the cache when populated, otherwise falls back to a single legality test.
     pub fn is_move_legal_by_uci(&mut self, uci: &str) -> bool {
         if uci.len() < 4 {
             return false;
@@ -291,18 +260,6 @@ impl ChessEngine {
         &self.fen
     }
 
-    /// The side to move, read from the same FEN field [`is_check`] uses.
-    ///
-    /// This is the authoritative "whose turn is it" for anything derived from
-    /// [`is_check`]/[`has_legal_moves`] — notably checkmate/stalemate
-    /// attribution. Deliberately NOT the `CurrentTurn` Bevy resource: that is
-    /// advanced by a *different* system (`systems::visual`'s pending-turn
-    /// apply) than the engine position is, so the two are out of sync for one
-    /// frame on the remote-move path. That skew produced a real, reproduced
-    /// bug — the two clients in one game each declared the *opposite* player
-    /// checkmated for the same 4 moves (`1.f3 e5 2.g4 Qh4#`), because the
-    /// mover's client had already advanced `CurrentTurn` while the receiver's
-    /// had not. With a wager attached, that decides who gets paid.
     pub fn side_to_move(&self) -> PieceColor {
         if self.fen.contains(" w ") {
             PieceColor::White
@@ -320,12 +277,6 @@ impl ChessEngine {
         !self.move_cache.is_empty()
     }
 
-    /// SAN (Standard Algebraic Notation) for a move about to be applied,
-    /// computed from the engine's *current* (pre-move) position — including
-    /// correct disambiguation (e.g. `Nbd2` vs `Nfd2`) and promotion suffix.
-    ///
-    /// Must be called before the engine's internal position advances past
-    /// this move (i.e. before `sync_ecs_to_engine*`/`refresh_position`).
     pub fn move_to_san(
         &mut self,
         from: (u8, u8),
@@ -481,14 +432,8 @@ mod tests {
         assert_eq!(ChessEngine::uci_to_coords("e4"), Some((4, 3)));
     }
 
-    /// Position after Fool's Mate (`1.f3 e5 2.g4 Qh4#`) — the exact game two
-    /// live clients disagreed about, each declaring the *opposite* side
-    /// checkmated. White is mated here; Black wins.
     const FOOLS_MATE_FEN: &str = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
 
-    /// `side_to_move` must agree with the FEN's own side-to-move field, since
-    /// `is_check` reads that same field. Checkmate attribution pairs the two,
-    /// so any disagreement names the wrong loser (and pays the wrong winner).
     #[test]
     fn side_to_move_matches_fen_field() {
         let mut engine = ChessEngine::default();
@@ -511,11 +456,6 @@ mod tests {
         assert_eq!(engine.side_to_move(), PieceColor::Black);
     }
 
-    /// The regression itself: in the mated position the engine must report
-    /// check + no legal moves, and attribute both to White. Previously the
-    /// mate was detected correctly but attributed via the `CurrentTurn` Bevy
-    /// resource, which lags a frame on the remote-move path — so the client
-    /// that *received* `Qh4#` blamed Black and declared White the winner.
     #[test]
     fn fools_mate_attributes_checkmate_to_white() {
         let mut engine = ChessEngine::default();
@@ -533,8 +473,6 @@ mod tests {
         assert_eq!(loser, PieceColor::White, "white is checkmated, not black");
     }
 
-    /// Guard the other direction too, so a future change can't silently flip
-    /// the mapping: Scholar's-mate-style position with Black mated.
     #[test]
     fn black_mated_position_attributes_to_black() {
         let mut engine = ChessEngine::default();

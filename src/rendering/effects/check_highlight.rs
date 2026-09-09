@@ -1,16 +1,12 @@
-//! Pulsing red point light on the king square when in check.
-
 use crate::game::components::GamePhase;
 use crate::game::resources::CurrentGamePhase;
 use crate::game::resources::CurrentTurn;
 use crate::rendering::pieces::{Piece, PieceType};
 use bevy::prelude::*;
 
-/// Marker component for the check highlight point light entity.
 #[derive(Component)]
 pub struct CheckHighlightLight;
 
-/// System that spawns or despawns a pulsing red PointLight on the king in check.
 pub fn update_check_highlight_system(
     mut commands: Commands,
     game_phase: Res<CurrentGamePhase>,

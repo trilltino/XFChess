@@ -1,18 +1,3 @@
-//! Transactional email service.
-//!
-//! A small, provider-agnostic mailer. Today it talks to the Resend API
-//! (`RESEND_API_KEY`); swapping to Amazon SES / SendGrid later means changing
-//! only `send_email` — every template and handler stays the same.
-//!
-//! Email "kinds" are just template builders (see [`EmailKind`]). Add a new
-//! variant + a `build()` arm to introduce a new email type.
-//!
-//! Env:
-//! - `RESEND_API_KEY`  — required to actually send (missing = store-only, logged)
-//! - `MAIL_FROM`       — from address, e.g. `XFChess <hello@xfchess.com>`
-//!                       (defaults to Resend's shared test sender)
-//! - `RESEND_API_URL`  — overridable for testing
-
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -23,7 +8,6 @@ use tracing::{error, info, warn};
 
 // ── Requests ────────────────────────────────────────────────────────────────
 
-/// New-account signup (fires the confirmation email).
 #[derive(Deserialize, Serialize, Default)]
 pub struct SignUpRequest {
     pub email: String,
@@ -35,19 +19,15 @@ pub struct SignUpRequest {
     pub referral: Option<String>,
 }
 
-/// Uniform response: `ok` = we recorded it, `queued` = the email job is enqueued
-/// for durable delivery (sent asynchronously with retries; see `tasks::queue`).
 #[derive(Serialize)]
 pub struct MailResponse {
     pub ok: bool,
     pub queued: bool,
 }
 
-/// Payload for the `email.send` job kind (see [`handle_email_job`]).
 #[derive(Serialize, Deserialize)]
 pub struct MailJob {
     pub email: String,
-    /// "confirmation"
     pub template: String,
     #[serde(default)]
     pub name: Option<String>,
@@ -55,9 +35,7 @@ pub struct MailJob {
 
 // ── Templates ───────────────────────────────────────────────────────────────
 
-/// The set of emails we can send. Each variant knows how to render itself.
 pub enum EmailKind<'a> {
-    /// Account confirmation / welcome.
     Confirmation { name: &'a str },
 }
 
@@ -86,7 +64,6 @@ impl EmailKind<'_> {
     }
 }
 
-/// Minimal branded HTML wrapper shared by every email.
 fn shell(heading: &str, body_html: &str) -> String {
     format!(
         "<!doctype html><html><body style=\"margin:0;background:#0d0d0f;padding:32px 0;\
@@ -118,8 +95,6 @@ fn html_escape(s: &str) -> String {
 
 // ── Core send (the only provider-specific code) ─────────────────────────────
 
-/// Send one email. Returns `Ok(false)` (not an error) when no API key is
-/// configured, so callers can still record the signup and degrade gracefully.
 pub async fn send_email(to: &str, kind: EmailKind<'_>) -> Result<bool, String> {
     let api_key = match env::var("RESEND_API_KEY") {
         Ok(k) if !k.is_empty() => k,
@@ -203,8 +178,6 @@ fn valid_email(email: &str) -> bool {
 
 // ── Durable delivery (job queue) ────────────────────────────────────────────
 
-/// Enqueue an email for durable delivery. Deduped per (template, email, day) so a
-/// double-submit can't double-send, but a genuine re-signup weeks later still works.
 async fn enqueue_email(
     pool: &sqlx::SqlitePool,
     template: &str,
@@ -231,9 +204,6 @@ async fn enqueue_email(
     }
 }
 
-/// Job handler for `email.send` — registered on the queue worker at startup.
-/// At-least-once: rendering + Resend send are idempotent enough (worst case one
-/// duplicate email on a crash between send and mark_done).
 pub async fn handle_email_job(job: crate::tasks::queue::Job) -> Result<(), String> {
     let mail: MailJob = job.parse().map_err(|e| format!("bad payload: {e}"))?;
     let kind = match mail.template.as_str() {
@@ -249,7 +219,6 @@ pub async fn handle_email_job(job: crate::tasks::queue::Job) -> Result<(), Strin
 
 // ── HTTP handlers ───────────────────────────────────────────────────────────
 
-/// `POST /api/signup` — record subscriber + queue confirmation email.
 pub async fn send_confirmation(
     State(app): State<crate::signing::AppState>,
     Json(req): Json<SignUpRequest>,
@@ -268,7 +237,6 @@ pub async fn send_confirmation(
     Ok(Json(MailResponse { ok: true, queued }))
 }
 
-/// Router for mailer endpoints (mounted under `/api`).
 pub fn mailer_routes() -> Router<crate::signing::AppState> {
     Router::new().route("/signup", post(send_confirmation))
 }

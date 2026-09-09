@@ -1,11 +1,8 @@
-//! Animation components + systems for mini pieces.
-
 use bevy::prelude::*;
 
 use super::board::BOARD_HALF;
 use super::pieces::MiniPiece;
 
-/// Smoothed arc motion from one square to another.
 #[derive(Component)]
 pub struct MiniMoveAnimation {
     pub start: Vec3,
@@ -14,7 +11,6 @@ pub struct MiniMoveAnimation {
     pub duration: f32,
 }
 
-/// Shrink-to-nothing fade-out for captured pieces.
 #[derive(Component)]
 pub struct MiniFadeOut {
     pub timer: Timer,
@@ -61,8 +57,6 @@ pub fn animate_captures(
     }
 }
 
-/// Tiny idle hover so stationary pieces don't look frozen.
-/// Respects the `MiniMoveAnimation` marker so moving pieces aren't perturbed.
 pub fn idle_float(
     time: Res<Time>,
     mut q: Query<(&MiniPiece, &mut Transform), Without<MiniMoveAnimation>>,

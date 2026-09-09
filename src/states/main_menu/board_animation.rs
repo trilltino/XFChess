@@ -1,22 +1,12 @@
-//! Menu-background board pieces for the main menu.
-//!
-//! Holds the ambient board state ([`BoardAnimator`]) and the smooth-slide
-//! animation ([`animate_menu_pieces`]). The cinematic system
-//! (`cinematic.rs`) drives which moves play; this module only owns the piece
-//! components and the slide tween.
-
 use bevy::prelude::*;
 use std::sync::OnceLock;
 
-/// Stores the original starting square for a menu background piece.
-/// Used to reset positions when the animation loops back without despawning.
 #[derive(Component, Clone, Copy)]
 pub struct MenuBgPieceHome {
     pub file: u8,
     pub rank: u8,
 }
 
-/// Smooth-slide animation state for a moving menu background piece.
 #[derive(Component)]
 pub struct MenuBgPieceAnim {
     pub start: Vec3,
@@ -25,11 +15,6 @@ pub struct MenuBgPieceAnim {
     pub duration: f32,
 }
 
-/// Slow opacity fade for a menu piece. With `fade_in: false` (captures) the
-/// (per-piece) material alpha goes 1→0 over `duration`, then the piece hides.
-/// With `fade_in: true` (board reset) alpha goes 0→1, then the material is
-/// restored to opaque. Requires each menu piece to own its own material handle
-/// (see `spawn_menu_bg_pieces`) so fading one never affects the others.
 #[derive(Component)]
 pub struct MenuPieceFade {
     pub elapsed: f32,
@@ -37,8 +22,6 @@ pub struct MenuPieceFade {
     pub fade_in: bool,
 }
 
-/// Advances capture fades: lerps each fading piece's material alpha to 0, then
-/// hides it. Runs every frame while on the main menu.
 pub fn animate_menu_piece_fades(
     time: Res<Time>,
     mut commands: Commands,
@@ -71,8 +54,6 @@ pub fn animate_menu_piece_fades(
     }
 }
 
-/// Restores a piece's material to fully opaque (used on board reset/loop so a
-/// previously-captured piece comes back solid).
 fn restore_piece_material(
     materials: &mut Assets<StandardMaterial>,
     handle: &Handle<StandardMaterial>,
@@ -84,8 +65,6 @@ fn restore_piece_material(
     }
 }
 
-/// Advances smooth movement animations for all in-flight menu background pieces.
-/// Uses cubic smooth-step easing with a gentle arc lift, matching the in-game feel.
 pub fn animate_menu_pieces(
     mut commands: Commands,
     time: Res<Time>,
@@ -104,38 +83,22 @@ pub fn animate_menu_pieces(
     }
 }
 
-/// End-of-replay reset sequence: hang on the final position, fade every piece
-/// out, teleport them home while invisible, fade them back in, then loop.
 #[derive(Clone, Copy, PartialEq)]
 pub enum ResetPhase {
-    /// Replay in progress (or not yet finished).
     Idle,
-    /// Holding on the final position; countdown in seconds.
     Hang(f32),
-    /// Pieces fading out on the final position; countdown in seconds.
     FadeOut(f32),
-    /// Pieces snapped home and fading back in; countdown in seconds.
     FadeIn(f32),
 }
 
-/// Drives the famous-games carousel animation on the menu background board.
-/// The move sequence itself is applied by the cinematic system.
 #[derive(Resource)]
 pub struct BoardAnimator {
-    /// Index of the next ply to apply.
     pub ply_index: usize,
-    /// Countdown (seconds) until the next ply is applied.
     pub move_timer: f32,
-    /// End-of-game reset sequence state.
     pub reset: ResetPhase,
-    /// Sparse entity map: board\[rank\]\[file\] = piece entity.
     pub board: [[Option<Entity>; 8]; 8],
-    /// False until `spawn_menu_bg_pieces` populates `board`.
     pub active: bool,
-    /// Index into `famous_games::FAMOUS_GAMES` of the game currently replaying.
     pub game_index: usize,
-    /// Set by [`request_game_nav`] to force the next transition toward a
-    /// specific game instead of the natural "next in the list".
     pub game_index_override: Option<usize>,
 }
 
@@ -153,14 +116,6 @@ impl Default for BoardAnimator {
     }
 }
 
-/// Jumps the ambient board to the next/previous game in `FAMOUS_GAMES`
-/// (`delta` = ±1), reusing the existing Hang→FadeOut→FadeIn crossfade.
-///
-/// Only takes effect while the board is showing a stable position (mid-replay
-/// or paused on the final one). A click landing mid-crossfade (~3s window) is
-/// ignored outright rather than silently deferred — deferring it would only
-/// apply the jump after the *next* full game finishes (tens of seconds later),
-/// which would read as a bug, not a feature.
 pub(super) fn request_game_nav(anim: &mut BoardAnimator, delta: i32) {
     if !matches!(anim.reset, ResetPhase::Idle | ResetPhase::Hang(_)) {
         return;
@@ -183,33 +138,22 @@ pub(super) fn request_game_nav(anim: &mut BoardAnimator, delta: i32) {
 // back in — either for a loop of the same game or, here, for the next game in
 // the carousel.
 
-/// World position of a square on the `MenuBg` board (x = 7 − file, z = rank).
-/// Matches `spawn_menu_bg_pieces` and the cinematic's `square_to_world`.
 #[inline]
 fn sq_world(file: usize, rank: usize) -> Vec3 {
     Vec3::new(7.0 - file as f32, 0.05, rank as f32)
 }
 
-/// One pre-resolved ply: where the piece moves, plus capture / castling / en
-/// passant side-effects. Pure data (no `Entity`) so it can be cached globally.
 #[derive(Clone, Copy)]
 struct AmbientStep {
     from: (u8, u8),
     to: (u8, u8),
-    /// A piece sits on the destination square and must be hidden.
     capture: bool,
-    /// En-passant: square of the pawn to hide (file, rank).
     ep_capture: Option<(u8, u8)>,
-    /// Castling: rook (from_file, to_file) on the king's rank.
     castle_rook: Option<(u8, u8)>,
 }
 
 static ALL_PLANS: OnceLock<Vec<Vec<AmbientStep>>> = OnceLock::new();
 
-/// Parses every `FAMOUS_GAMES` PGN once into flat lists of resolved plies,
-/// computed lazily on first use and cached for the process lifetime (all 6
-/// games together are a few KB — negligible next to this game's textures and
-/// audio, so there's no benefit to recomputing per game-transition instead).
 fn all_plans() -> &'static [Vec<AmbientStep>] {
     ALL_PLANS
         .get_or_init(|| {
@@ -269,9 +213,6 @@ fn compute_plan(pgn: &str) -> Vec<AmbientStep> {
     steps
 }
 
-/// Drives the famous-games carousel replay on the ambient `MenuBg` board.
-/// Self-arms via `anim.active`, set once `spawn_menu_bg_pieces` populates the
-/// board map.
 pub fn animate_ambient_board(
     time: Res<Time>,
     mut commands: Commands,
@@ -413,7 +354,6 @@ mod tests {
     }
 }
 
-/// Applies one ply to `anim.board`: hides captures and inserts slide tweens.
 fn apply_ambient_step(commands: &mut Commands, anim: &mut BoardAnimator, step: AmbientStep) {
     let (sf, sr) = (step.from.0 as usize, step.from.1 as usize);
     let (df, dr) = (step.to.0 as usize, step.to.1 as usize);

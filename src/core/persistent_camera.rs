@@ -6,15 +6,6 @@ pub struct PersistentEguiCamera {
     pub entity: Option<Entity>,
 }
 
-/// Setup a persistent camera with Egui context that survives all state transitions
-///
-/// This camera is used by all UI states (MainMenu, Settings, Pause, GameOver)
-/// to avoid conflicts from multiple PrimaryEguiContext cameras.
-///
-/// `PrimaryEguiContext` is inserted explicitly so `bevy_egui`'s auto-setup
-/// (which picks the first camera with a `Camera` component) cannot accidentally
-/// attach the primary egui context to a secondary camera spawned later in the
-/// same frame (e.g. the `xf_animate` mini-showcase camera).
 pub fn setup_persistent_egui_camera(
     mut commands: Commands,
     mut persistent_camera: ResMut<PersistentEguiCamera>,

@@ -1,5 +1,3 @@
-//! WebSocket client for Solana account updates on L1 and ER.
-
 use futures::{SinkExt, Stream, StreamExt};
 use solana_sdk::pubkey::Pubkey;
 use std::pin::Pin;
@@ -10,7 +8,6 @@ use tracing::{error, info, warn};
 
 use crate::error::AppError;
 
-/// Represents the cluster to connect to for subscriptions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cluster {
     Localnet,
@@ -28,7 +25,6 @@ impl Cluster {
     }
 }
 
-/// Represents an update to an account received via WebSocket subscription
 #[derive(Debug, Clone)]
 pub struct AccountUpdate {
     pub pubkey: Pubkey,
@@ -36,17 +32,13 @@ pub struct AccountUpdate {
     pub slot: u64,
 }
 
-/// Manages WebSocket subscriptions to Solana accounts
 pub struct WebSocketSubscriber {
     cluster: Cluster,
-    /// WebSocket connections for L1 subscriptions
     l1_connections: Vec<mpsc::Sender<(Pubkey, mpsc::Sender<AccountUpdate>)>>,
-    /// WebSocket connections for ER subscriptions (if applicable)
     er_connections: Vec<mpsc::Sender<(Pubkey, mpsc::Sender<AccountUpdate>)>>,
 }
 
 impl WebSocketSubscriber {
-    /// Creates a new WebSocketSubscriber
     pub async fn new(cluster: Cluster, er_endpoint: Option<&str>) -> Result<Self, AppError> {
         // Spawn two L1 WebSocket connections to split subscription load
         let mut l1_connections = Vec::new();
@@ -75,7 +67,6 @@ impl WebSocketSubscriber {
         })
     }
 
-    /// Manages a single WebSocket connection, handling subscriptions and reconnections
     async fn manage_connection(
         url: String,
         mut rx: mpsc::Receiver<(Pubkey, mpsc::Sender<AccountUpdate>)>,
@@ -138,7 +129,6 @@ impl WebSocketSubscriber {
         }
     }
 
-    /// Watches an account for updates on the specified cluster
     pub async fn watch_account(
         &self,
         pubkey: Pubkey,

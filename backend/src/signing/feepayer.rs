@@ -1,20 +1,8 @@
-//! Fee-payer keypair pool management.
-//!
-//! This module provides a round-robin pool of funded Solana keypairs used to pay
-//! transaction fees. Multiple keypairs avoid nonce conflicts under high throughput.
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use solana_sdk::signature::Keypair;
 
-/// Loads a Solana keypair from a JSON file (standard `[u8; 64]` byte-array format).
-///
-/// # Arguments
-/// * `path` - Path to the JSON keypair file
-///
-/// # Returns
-/// The loaded Keypair, or None if loading fails
 fn load_keypair_from_file(path: &str) -> Option<Keypair> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| tracing::error!("[FeepayerPool] cannot read keypair file {path}: {e}"))
@@ -27,10 +15,6 @@ fn load_keypair_from_file(path: &str) -> Option<Keypair> {
         .ok()
 }
 
-/// Round-robin pool of funded fee-payer keypairs.
-///
-/// Multiple keypairs avoid Solana nonce conflicts under high throughput.
-/// Keypairs are rotated in round-robin fashion to distribute load.
 #[derive(Clone)]
 pub struct FeepayerPool {
     keypairs: Arc<Vec<Keypair>>,
@@ -38,16 +22,6 @@ pub struct FeepayerPool {
 }
 
 impl FeepayerPool {
-    /// Load keypairs from a list of entries, each of which is either:
-    ///   - A path to a Solana JSON keypair file (e.g. `./keys/fee-payer.json`)
-    ///   - A raw base58-encoded 64-byte private key string
-    /// Falls back to a fresh generated keypair if the list is empty (dev only).
-    ///
-    /// # Arguments
-    /// * `keys` - Slice of keypair strings (file paths or base58 keys)
-    ///
-    /// # Returns
-    /// A new FeepayerPool instance
     pub fn from_base58_list(keys: &[String]) -> Self {
         let keypairs: Vec<Keypair> = keys
             .iter()
@@ -81,19 +55,11 @@ impl FeepayerPool {
         }
     }
 
-    /// Returns the next keypair in round-robin order.
-    ///
-    /// # Returns
-    /// A reference to the next Keypair in the pool
     pub fn next(&self) -> &Keypair {
         let idx = self.counter.fetch_add(1, Ordering::Relaxed) % self.keypairs.len();
         &self.keypairs[idx]
     }
 
-    /// All keypairs in the pool. Used by the ER-unavailability forced-recovery
-    /// path, which needs to find whichever pool key originally funded a
-    /// specific game's `delegate_game` call (not tracked per-game) by trying
-    /// each one in turn — see `tasks::settlement_worker`.
     pub fn all(&self) -> &[Keypair] {
         &self.keypairs
     }

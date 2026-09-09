@@ -1,10 +1,7 @@
-//! Legacy authentication state scaffold retained for compatibility.
-
 #![allow(dead_code)]
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Registered as managed Tauri state but never consumed by any command. See module docs.
 #[derive(Debug, Clone)]
 pub struct AuthState {
   pub token: Option<String>,

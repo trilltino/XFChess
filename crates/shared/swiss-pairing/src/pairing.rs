@@ -1,21 +1,9 @@
-//! Round pairing: the FIDE Dutch system implementation. Groups players into
-//! scoregroups, pairs top half against bottom half within each group, floats
-//! unpaired players to adjacent scoregroups, then assigns colors and board
-//! numbers to the resulting pairings.
-
 use crate::{
     Pairing, PairingConfig, PairingError, PairingResult, Scoregroup, SwissPlayer, SwissRound,
 };
 use std::collections::HashSet;
 use tracing::{debug, trace, warn};
 
-/// Generate pairings for a Swiss round using the Dutch system
-///
-/// Implements FIDE Dutch system rules:
-/// 1. Divide players into scoregroups
-/// 2. Pair within scoregroups
-/// 3. Minimize floaters
-/// 4. Maximize score differences
 pub fn generate_pairings(
     round: u8,
     players: &[SwissPlayer],
@@ -181,7 +169,6 @@ pub fn generate_pairings(
     })
 }
 
-/// Group players by identical scores
 fn group_by_score(players: &[SwissPlayer]) -> Vec<Scoregroup> {
     let mut groups: Vec<Scoregroup> = Vec::new();
     let mut current_score: Option<f64> = None;
@@ -219,15 +206,12 @@ fn group_by_score(players: &[SwissPlayer]) -> Vec<Scoregroup> {
     groups
 }
 
-/// Check if a pairing is valid (no rematch, not forbidden)
 fn is_valid_pairing(p1: &str, p2: &str, p1_opponents: &[String], config: &PairingConfig) -> bool {
     let already_played = p1_opponents.contains(&p2.to_string());
     let forbidden = config.is_forbidden(p1, p2);
     !already_played && !forbidden
 }
 
-/// Pair players within a scoregroup
-/// Returns (pairings, bye_player_if_any, used_player_ids)
 fn pair_scoregroup(
     players: &[SwissPlayer],
     config: &PairingConfig,
@@ -300,19 +284,6 @@ fn pair_scoregroup(
     Ok((pairings, bye, used))
 }
 
-/// Select the best candidate for a bye.
-///
-/// FIDE rule: a player should receive at most one bye per tournament. We
-/// prefer candidates who have never had a bye; fall back to lowest bye_count
-/// if everyone in the pool has already had one (rare, only in tiny fields).
-///
-/// Tie-break order:
-/// 1. fewest previous byes,
-/// 2. lowest current score,
-/// 3. lowest rating,
-/// 4. player id (stable).
-///
-/// Reference: FIDE Handbook C.04.2 — <https://handbook.fide.com/chapter/C0402>
 fn select_bye_candidate(players: &[SwissPlayer]) -> PairingResult<SwissPlayer> {
     let mut candidates: Vec<&SwissPlayer> = players.iter().collect();
 
@@ -335,7 +306,6 @@ fn select_bye_candidate(players: &[SwissPlayer]) -> PairingResult<SwissPlayer> {
         .ok_or(PairingError::NoByeCandidate)
 }
 
-/// Apply float pairing for remaining unpaired players.
 fn apply_float_pairing(
     unpaired: &[SwissPlayer],
     config: &PairingConfig,
@@ -388,11 +358,6 @@ fn apply_float_pairing(
     Ok((pairings, forced_byes))
 }
 
-/// Assign colors following Dutch system rules. Delegates the swap decision to
-/// [`crate::color::should_swap_colors`], which only forces an allocation on a
-/// clear (≥2) balance imbalance and otherwise defers to the 3-in-a-row and
-/// double-same-color checks — this crate's single source of truth for color
-/// preference, shared with anything else in the crate that needs it.
 fn assign_colors_dutch(
     pairings: &[Pairing],
     players: &[SwissPlayer],
@@ -429,7 +394,6 @@ fn assign_colors_dutch(
     Ok(colored)
 }
 
-/// Assign board numbers (1 = highest combined rating)
 fn assign_board_numbers(pairings: Vec<Pairing>, players: &[SwissPlayer]) -> Vec<Pairing> {
     let mut with_rating: Vec<(Pairing, u32)> = pairings
         .into_iter()
@@ -456,7 +420,6 @@ fn assign_board_numbers(pairings: Vec<Pairing>, players: &[SwissPlayer]) -> Vec<
         .collect()
 }
 
-/// Find a player by ID
 fn find_player<'a>(players: &'a [SwissPlayer], id: &str) -> PairingResult<&'a SwissPlayer> {
     players
         .iter()

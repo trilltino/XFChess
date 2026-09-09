@@ -1,31 +1,3 @@
-//! Standalone treasury-withdrawal signer — deliberately NOT part of
-//! `signing-server`.
-//!
-//! Phase 2 of the Custody Ledger hardening plan calls for isolating
-//! `treasury_authority` off the general-purpose, always-on, internet-facing
-//! signing host: a compromise of that process (or of any of the many other
-//! authorities it holds) must not also be able to drain the treasury. This
-//! binary is the isolation boundary — it is the *only* place
-//! `TREASURY_AUTHORITY_KEY` is ever loaded, it never binds a network port,
-//! and it's meant to be run interactively by an operator on a separate,
-//! minimally-networked host (or the same host, but never as a spawned child
-//! of `signing-server`).
-//!
-//! `signing-server`'s `AppState` no longer holds a treasury signing key at
-//! all — only the public key (`treasury_authority_pubkey` in
-//! `SigningConfig`, not a secret, matches the hardcoded on-chain constant).
-//! `POST /admin/tournament/{id}/...` and the treasury-refund admin route
-//! log the requested withdrawal and hand the operator the exact command to
-//! run here; the networked process never touches the private key.
-//!
-//! ```text
-//! TREASURY_AUTHORITY_KEY=<base58-or-keyfile-path> \
-//! cargo run --bin treasury_signer -- <destination-pubkey> <lamports> [reason]
-//! ```
-//!
-//! Optional env overrides: `SOLANA_RPC_URL` (default devnet),
-//! `PROGRAM_ID` (default the deployed devnet/mainnet program id).
-
 use backend::signing::load_keypair_from_env_value;
 use backend::signing::solana::{make_rpc, sign_and_submit, withdraw_treasury_ix};
 use solana_sdk::pubkey::Pubkey;

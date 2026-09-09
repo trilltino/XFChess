@@ -1,6 +1,3 @@
-//! Instruction to close a tournament and auto-distribute prizes to top 10.
-//! Only callable after tournament completion.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -16,18 +13,15 @@ pub struct CloseTournament<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// CHECK: Prize escrow vault (entry fees).
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub prize_escrow_pda: UncheckedAccount<'info>,
-    /// CHECK: Platform treasury vault for fee reimbursement
     #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
     pub treasury_vault: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
-    /// Tournament host or platform admin — must sign to authorize the close.
     #[account(mut)]
     pub authority: Signer<'info>,
 }

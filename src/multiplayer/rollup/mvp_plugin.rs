@@ -1,11 +1,5 @@
-//! An early, minimal MagicBlock state tracker. Confirmed unused — neither
-//! `EphemeralMvpState` nor `EphemeralMvpPlugin` is referenced anywhere else
-//! in the codebase; the real ER delegation lifecycle lives in
-//! `rollup::magicblock` and `rollup::manager` instead.
-
 use bevy::prelude::*;
 
-/// Unused. See module docs.
 #[derive(Resource, Default)]
 pub struct EphemeralMvpState {
     pub is_initialized: bool,
@@ -18,7 +12,6 @@ impl EphemeralMvpState {
     }
 }
 
-/// Unused. See module docs.
 pub struct EphemeralMvpPlugin;
 
 impl Plugin for EphemeralMvpPlugin {

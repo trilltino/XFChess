@@ -1,26 +1,16 @@
 use crate::GameConfig;
 use bevy::prelude::*;
 
-/// Resource that holds wager information passed from Web UI
 #[derive(Resource, Debug, Clone)]
 pub struct WagerState {
-    /// Game ID from on-chain
     pub game_id: Option<u64>,
-    /// Wager amount in SOL
     pub wager_amount: Option<f64>,
-    /// Total pot (wager * 2)
     pub total_pot: Option<f64>,
-    /// Player's color
     pub player_color: Option<String>,
-    /// Game PDA address
     pub game_pda: Option<String>,
-    /// Whether wager info is loaded
     pub is_loaded: bool,
-    /// Country fee in SOL (based on player's country)
     pub country_fee: Option<f64>,
-    /// ELO fee in SOL (for ranked games)
     pub elo_fee: Option<f64>,
-    /// Match type (Free, Ranked, Wager, Tournament)
     pub match_type: Option<String>,
 }
 
@@ -41,7 +31,6 @@ impl Default for WagerState {
 }
 
 impl WagerState {
-    /// Initialize from GameConfig (CLI arguments)
     pub fn from_config(config: &GameConfig) -> Self {
         let total_pot = config.wager_amount.map(|w| w * 2.0);
 
@@ -58,7 +47,6 @@ impl WagerState {
         }
     }
 
-    /// Get formatted wager display string
     pub fn wager_display(&self) -> String {
         match self.wager_amount {
             Some(amount) => format!("{:.3} SOL", amount),
@@ -66,7 +54,6 @@ impl WagerState {
         }
     }
 
-    /// Get formatted pot display string
     pub fn pot_display(&self) -> String {
         match self.total_pot {
             Some(amount) => format!("{:.3} SOL", amount),
@@ -74,7 +61,6 @@ impl WagerState {
         }
     }
 
-    /// Check if this is a wager game
     pub fn has_wager(&self) -> bool {
         self.wager_amount.map_or(false, |w| w > 0.0)
     }

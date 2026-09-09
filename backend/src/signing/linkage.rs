@@ -1,49 +1,25 @@
-//! Multi-accounting / Sybil-linkage signals (esports integrity, Part B).
-//!
-//! Replaces the in-memory, per-tournament IP counter as the *source of truth*
-//! with a persisted, cross-tournament linkage store, and adds the signals that
-//! actually survive a VPN: shared on-chain **funder**, shared device
-//! fingerprint, and **collusion** patterns in game history. The IP count stays
-//! on as one demoted input.
-//!
-//! Posture mirrors the anti-cheat pipeline: combine signals into a linkage
-//! score, then act by stakes — soft flag for review (ranked ladders), hard
-//! block / prize-withhold for high-value prize entry (KYC-driven). Funding
-//! links are probabilistic (an exchange hot wallet funds many unrelated
-//! people), so only KYC collisions should drive a hard block; everything else
-//! feeds review.
-
 use sqlx::{Row, SqlitePool};
 
-/// Persisted linkage store (table created in migration 016 /
-/// `SessionStore::init`).
 #[derive(Clone)]
 pub struct LinkageStore {
     pool: SqlitePool,
 }
 
-/// Signals observed for one wallet at registration time.
 #[derive(Debug, Clone, Default)]
 pub struct RegistrationSignals {
-    /// On-chain SOL funding source, when resolvable.
     pub funder: Option<String>,
-    /// Coarse client/device fingerprint (already hashed by the caller).
     pub device_hash: Option<String>,
 }
 
-/// A detected link between two wallets and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkedWallet {
     pub wallet: String,
     pub reason: LinkReason,
 }
 
-/// Why two wallets were linked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkReason {
-    /// Both wallets were funded by the same on-chain source.
     SharedFunder,
-    /// Both registered with the same device fingerprint.
     SharedDevice,
 }
 
@@ -52,9 +28,6 @@ impl LinkageStore {
         Self { pool }
     }
 
-    /// Records (or refreshes) a wallet's linkage signals on registration.
-    /// Funder/device are only overwritten when newly provided, so a later
-    /// registration without device info doesn't erase an earlier fingerprint.
     pub async fn record_registration(&self, wallet: &str, sig: &RegistrationSignals) {
         let _ = sqlx::query(
             r#"INSERT INTO account_linkage (wallet, funder, device_hash, ip_count, last_seen)
@@ -71,8 +44,6 @@ impl LinkageStore {
         .await;
     }
 
-    /// Increments the per-IP registration counter (the demoted IP signal,
-    /// now persisted and cross-tournament rather than an in-memory HashMap).
     pub async fn bump_ip_count(&self, wallet: &str) {
         let _ = sqlx::query("UPDATE account_linkage SET ip_count = ip_count + 1 WHERE wallet = ?")
             .bind(wallet)
@@ -80,9 +51,6 @@ impl LinkageStore {
             .await;
     }
 
-    /// Returns other wallets that share this wallet's funder or device hash —
-    /// the cross-tournament linkage cluster. Empty when the wallet is unknown
-    /// or has no resolvable signals.
     pub async fn linked_wallets(&self, wallet: &str) -> Vec<LinkedWallet> {
         let row = sqlx::query("SELECT funder, device_hash FROM account_linkage WHERE wallet = ?")
             .bind(wallet)
@@ -138,7 +106,6 @@ impl LinkageStore {
         out
     }
 
-    /// Marks a wallet for manual review (soft).
     pub async fn flag(&self, wallet: &str) {
         let _ = sqlx::query("UPDATE account_linkage SET flagged = 1 WHERE wallet = ?")
             .bind(wallet)
@@ -146,7 +113,6 @@ impl LinkageStore {
             .await;
     }
 
-    /// True if the wallet is hard-blocked from prize entry.
     pub async fn is_hard_blocked(&self, wallet: &str) -> bool {
         sqlx::query_as::<_, (i64,)>("SELECT hard_blocked FROM account_linkage WHERE wallet = ?")
             .bind(wallet)
@@ -161,37 +127,24 @@ impl LinkageStore {
 
 // ── Collusion detection (pure) ──────────────────────────────────────────────
 
-/// One finished game's outcome, as seen by the collusion detector.
 #[derive(Debug, Clone)]
 pub struct GameOutcome {
     pub white: String,
     pub black: String,
-    /// Winner wallet, or None for a draw.
     pub winner: Option<String>,
 }
 
-/// A suspected collusion / farming relationship between two wallets.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollusionPair {
     pub a: String,
     pub b: String,
     pub games: u32,
-    /// Fraction of their games won by the dominant side (1.0 = one always
-    /// wins — the dump-to-a-main signature).
     pub directional_bias: f64,
 }
 
-/// Minimum games between a pair before the pattern means anything.
 const MIN_PAIR_GAMES: u32 = 5;
-/// Win-share at or above which a pair looks like rating/prize dumping.
 const DIRECTIONAL_THRESHOLD: f64 = 0.9;
 
-/// Flags wallet pairs whose game history looks like farming: many games
-/// concentrated between exactly two accounts with a lopsided result
-/// distribution (one account almost always wins — dumping to a main).
-///
-/// Pure over a slice of outcomes so it is trivially testable and can run over
-/// either a tournament's games or a player's full history.
 pub fn detect_collusion(outcomes: &[GameOutcome]) -> Vec<CollusionPair> {
     use std::collections::HashMap;
 

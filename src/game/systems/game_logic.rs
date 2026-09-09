@@ -1,47 +1,9 @@
-//! Game logic systems for phase updates and timing
-//!
-//! These systems handle core chess game logic including:
-//! - Game phase detection (check, checkmate, stalemate)
-//! - Game timer management with Fischer increment
-//! - Game over state transitions
-//!
-//! # System Execution Order
-//!
-//! These systems run in the `Execution` system set, after move validation
-//! and before visual updates. This ensures game state is updated before
-//! rendering changes.
-
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{FadingCapture, GamePhase, PieceMoveAnimation};
 use crate::game::resources::*;
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
 
-/// System to update game phase (check, checkmate, etc.)
-///
-/// This system runs after each move to detect:
-/// - **Check**: King is under attack
-/// - **Checkmate**: King is under attack with no legal moves
-/// - **Stalemate**: No legal moves available but not in check
-///
-/// # Execution Order
-///
-/// Runs in `GameSystems::Execution` set, after move validation and
-/// before visual updates.
-///
-/// # System Parameters
-///
-/// Uses individual resources for clarity. Consider using [`GameStateParams`]
-/// if you need access to multiple game state resources.
-///
-/// # Errors
-///
-/// Handles unknown engine states gracefully by defaulting to Playing phase.
-///
-/// # TempleOS Mode
-///
-/// In TempleOS mode, no pieces are spawned, so game phase checks are skipped
-/// to prevent false stalemate detection on an empty board.
 pub fn update_game_phase(
     mut game_phase: ResMut<CurrentGamePhase>,
     mut game_over: ResMut<GameOverState>,
@@ -126,25 +88,6 @@ pub fn update_game_phase(
     }
 }
 
-/// System to update game timer with Fischer increment support
-///
-/// Decrements the current player's time each frame and checks for timeout.
-/// Applies Fischer increment after moves (handled by move execution systems).
-///
-/// # Execution Order
-///
-/// Runs in `GameSystems::Execution` set, after game phase updates.
-///
-/// # Timer Behavior
-///
-/// - Timer only runs during `GamePhase::Playing`
-/// - Timer pauses when game is over or paused
-/// - Timeout detection sets `GameOverState` to appropriate win condition
-///
-/// # System Parameters
-///
-/// Uses individual resources. Consider using [`GameHistoryParams`] if you
-/// also need access to move history.
 pub fn update_game_timer(
     mut timer: ResMut<GameTimer>,
     mut game_over: ResMut<GameOverState>,
@@ -250,14 +193,6 @@ pub fn update_game_timer(
     }
 }
 
-/// System to flag a finished game for the "press Enter" prompt.
-///
-/// Watches for changes in [`GameOverState`]. Instead of instantly switching
-/// to the black GameOver stats screen, it activates [`PendingGameOver`] so
-/// the final position stays visible with a flashing
-/// "Press Enter to see game stats" banner. The actual `InGame → GameOver`
-/// transition happens in [`confirm_game_over_prompt`] (Enter key) or when the
-/// banner is clicked in the UI.
 pub fn check_game_over_state(
     game_over: Res<GameOverState>,
     state: Res<State<crate::core::GameState>>,
@@ -281,8 +216,6 @@ pub fn check_game_over_state(
     }
 }
 
-/// While a finished game is pending acknowledgement, pressing Enter opens the
-/// GameOver stats screen (the black screen with the result popup).
 pub fn confirm_game_over_prompt(
     keyboard: Res<ButtonInput<KeyCode>>,
     state: Res<State<crate::core::GameState>>,

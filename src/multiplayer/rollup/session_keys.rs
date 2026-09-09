@@ -9,7 +9,6 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// Errors that can occur during session key management
 #[derive(Error, Debug)]
 pub enum SessionKeyError {
     #[error("IO error: {0}")]
@@ -25,10 +24,6 @@ pub enum SessionKeyError {
     Serialization(String),
 }
 
-/// Deterministically orders white/black from a P2P handshake by comparing
-/// pubkey strings. Unrelated to Solana transaction signing (see
-/// `solana::global_session_manager::GlobalSessionKeyManager` for that) — kept
-/// separate and distinctly named so it isn't confused with it.
 #[derive(Resource)]
 pub struct HandshakeOrderingKeyManager {
     game_id: u64,
@@ -57,8 +52,6 @@ impl HandshakeOrderingKeyManager {
         manager
     }
 
-    /// Load or create a session keypair synchronously
-    /// This is the primary method for use in Bevy systems
     pub fn load_or_create_keypair(&mut self) -> Result<Keypair, SessionKeyError> {
         if let Some(keypair) = &self.session_keypair {
             return Ok(keypair.insecure_clone());
@@ -77,7 +70,6 @@ impl HandshakeOrderingKeyManager {
         Ok(keypair)
     }
 
-    /// Synchronous version for use in async contexts
     pub fn load_or_create_session_keypair_sync(
         &mut self,
     ) -> Result<Keypair, Box<dyn std::error::Error>> {
@@ -176,12 +168,10 @@ impl HandshakeOrderingKeyManager {
         }
     }
 
-    /// Get the current game ID
     pub fn game_id(&self) -> u64 {
         self.game_id
     }
 
-    /// Check if a session keypair is loaded
     pub fn has_keypair(&self) -> bool {
         self.session_keypair.is_some()
     }

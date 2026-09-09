@@ -1,27 +1,14 @@
-//! Configuration for the Braid HTTP client.
-
-/// Configuration for the Braid HTTP client.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClientConfig {
-    /// Maximum retries for failed requests.
     pub max_retries: u32,
-    /// Base retry delay in milliseconds.
     pub retry_delay_ms: u64,
-    /// Connection timeout in seconds.
     pub connection_timeout_secs: u64,
-    /// Enable request logging.
     pub enable_logging: bool,
-    /// Maximum concurrent subscriptions.
     pub max_subscriptions: usize,
-    /// Threshold for auto-multiplexing.
     pub auto_multiplex_threshold: usize,
-    /// Enable multiplexing for subscription requests.
     pub enable_multiplex: bool,
-    /// Proxy URL (optional).
     pub proxy_url: String,
-    /// Request timeout in milliseconds.
     pub request_timeout_ms: u64,
-    /// Maximum total connections in the pool.
     pub max_total_connections: u32,
 }
 

@@ -1,50 +1,27 @@
-//! Session storage for the XFChess signing service.
-//!
-//! This module provides SQLite-backed storage for game sessions,
-//! including session keypair management and user authentication.
-
 use crate::signing::identity::IdentityVault;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use sqlx::SqlitePool;
 use std::str::FromStr;
 
-/// Session entry containing keypair and wallet information.
 #[derive(Clone)]
 pub struct SessionEntry {
-    /// The 64-byte session keypair (secret + public)
     pub keypair_bytes: [u8; 64],
-    /// The wallet public key that owns this session
     pub wallet_pubkey: Pubkey,
-    /// Whether the session is currently active (game in progress)
     pub active: bool,
-    /// Whether this game used the global-session flow
-    /// (`global_create_game`/`global_join_game`) rather than the original
-    /// per-game `create_game`/`join_game` + `authorize_session_key` flow —
-    /// determines which on-chain instruction move-recording must call
-    /// (`global_record_move` vs `record_move`). See migration 026.
     pub is_global: bool,
 }
 
 impl SessionEntry {
-    /// Extracts the Keypair from stored bytes.
     pub fn keypair(&self) -> Keypair {
         Keypair::try_from(self.keypair_bytes.as_slice())
             .unwrap_or_else(|e| panic!("invalid keypair bytes: {}", e))
     }
 
-    /// Gets the session's public key.
     pub fn session_pubkey(&self) -> Pubkey {
         self.keypair().pubkey()
     }
 }
 
-/// SQLite-backed session store that persists across server restarts.
-///
-/// Session keypairs (`sessions.keypair`) are encrypted at rest with
-/// `vault`'s AES-256-GCM key before being written, and decrypted on read —
-/// the raw ed25519 secret is never stored in plaintext, so a leaked SQLite
-/// backup or a copy of the file for local debugging is no longer a direct
-/// signing-key leak for every game active at copy time.
 #[derive(Clone)]
 pub struct SessionStore {
     pool: SqlitePool,
@@ -52,19 +29,14 @@ pub struct SessionStore {
 }
 
 impl SessionStore {
-    /// Creates a new SessionStore with the provided database pool and
-    /// at-rest encryption vault (reuses the same vault as KYC PII — see
-    /// `AppState::new`).
     pub fn new(pool: SqlitePool, vault: IdentityVault) -> Self {
         Self { pool, vault }
     }
 
-    /// Returns a clone of the underlying pool for use in repositories.
     pub fn pool(&self) -> SqlitePool {
         self.pool.clone()
     }
 
-    /// Initializes the sessions table if it doesn't exist.
     pub async fn init(&self) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
@@ -225,8 +197,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Revokes all JWTs for `subject` issued at or before `valid_after` (Unix
-    /// seconds). Used by logout; safe to call repeatedly (last write wins).
     pub async fn revoke_tokens_before(
         &self,
         subject: &str,
@@ -243,9 +213,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Returns `true` if a token for `subject` issued at `iat` has been revoked.
-    /// Tokens without an `iat` (legacy, `iat == 0`) are treated as revoked once a
-    /// cut-off exists for the subject, forcing a fresh login.
     pub async fn token_is_revoked(&self, subject: &str, iat: i64) -> bool {
         let cutoff: Option<(i64,)> =
             sqlx::query_as("SELECT valid_after FROM jwt_revocations WHERE subject = ?")
@@ -262,7 +229,6 @@ impl SessionStore {
         }
     }
 
-    /// Finds a user by wallet pubkey. Returns (wallet, username, email, kyc_status, password_hash).
     pub async fn find_user_by_wallet(
         &self,
         wallet: &str,
@@ -276,7 +242,6 @@ impl SessionStore {
         .ok()
     }
 
-    /// Finds a user by email.
     pub async fn find_user_by_email(
         &self,
         email: &str,
@@ -290,7 +255,6 @@ impl SessionStore {
         .ok()
     }
 
-    /// Creates a new user with email and password.
     pub async fn register_with_email(
         &self,
         email: &str,
@@ -311,7 +275,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Links a wallet to an existing email-based account.
     pub async fn link_wallet(&self, email: &str, wallet: &str) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users_v2 SET wallet = ? WHERE email = ?")
             .bind(wallet)
@@ -321,7 +284,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Sets the email on an existing wallet-first account.
     pub async fn set_email(&self, wallet: &str, email: &str) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users_v2 SET email = ? WHERE wallet = ?")
             .bind(email)
@@ -331,7 +293,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Creates a new wallet-first user.
     pub async fn create_wallet_user(
         &self,
         wallet: &str,
@@ -353,10 +314,6 @@ impl SessionStore {
 
     // ── Social identities (Privy Google/email → wallet) ────────────────────────
 
-    /// Resolves a social credential to the wallet it is bound to, if any.
-    ///
-    /// `provider`/`subject` is the primary key — for Privy, `subject` is the
-    /// user's DID. Returns `None` for a first-time login.
     pub async fn find_wallet_by_social(&self, provider: &str, subject: &str) -> Option<String> {
         sqlx::query_as::<_, (String,)>(
             "SELECT wallet FROM social_identities WHERE provider = ? AND subject = ?",
@@ -369,12 +326,6 @@ impl SessionStore {
         .map(|(w,)| w)
     }
 
-    /// Resolves a provider-asserted email to the wallet already bound to it.
-    ///
-    /// This is the D3 ("one human, one account") lookup: before binding a social
-    /// credential to a NEW wallet, callers check whether that email is already
-    /// spoken for and refuse rather than silently creating a second account.
-    /// Case-insensitive to match `idx_social_identities_email`.
     pub async fn find_wallet_by_social_email(&self, provider: &str, email: &str) -> Option<String> {
         sqlx::query_as::<_, (String,)>(
             "SELECT wallet FROM social_identities WHERE provider = ? AND LOWER(email) = LOWER(?)",
@@ -387,13 +338,6 @@ impl SessionStore {
         .map(|(w,)| w)
     }
 
-    /// Inserts or refreshes a social credential → wallet binding.
-    ///
-    /// On conflict only `last_login_at` and `login_method` are updated. `wallet`
-    /// is deliberately NOT updated: re-pointing an existing credential at a
-    /// different wallet is an account takeover primitive, and the same refusal
-    /// exists in `link_wallet` for the email/password path. A genuine wallet
-    /// change has to go through support.
     pub async fn upsert_social_identity(
         &self,
         provider: &str,
@@ -425,8 +369,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Login methods bound to a wallet, for `GET /auth/me`. Empty for a
-    /// wallet-only (Phantom/Solflare) account.
     pub async fn social_login_methods(&self, wallet: &str) -> Vec<String> {
         sqlx::query_as::<_, (String,)>(
             "SELECT DISTINCT login_method FROM social_identities WHERE wallet = ?",
@@ -438,9 +380,6 @@ impl SessionStore {
         .unwrap_or_default()
     }
 
-    /// True when this wallet was created by a social provider as an embedded
-    /// wallet. UI-only — it drives "back up your wallet" nudges and the
-    /// un-backed-up balance cap. It must never gate `can_wager`.
     pub async fn wallet_is_embedded(&self, wallet: &str) -> bool {
         sqlx::query_as::<_, (i64,)>(
             "SELECT COUNT(*) FROM social_identities WHERE wallet = ? AND embedded = 1",
@@ -452,9 +391,6 @@ impl SessionStore {
         .unwrap_or(false)
     }
 
-    /// Counts social identities created since `since` from one IP-derived
-    /// bucket. Social signup is ~free, so this is the cheap Sybil signal;
-    /// wagering still requires KYC + CACF, which is the real gate.
     pub async fn count_social_identities_since(&self, since: i64) -> i64 {
         sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM social_identities WHERE created_at >= ?")
             .bind(since)
@@ -464,7 +400,6 @@ impl SessionStore {
             .unwrap_or(0)
     }
 
-    /// Overwrites the username for a wallet (used when syncing from on-chain profile).
     pub async fn update_username(&self, wallet: &str, username: &str) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users_v2 SET username = ? WHERE wallet = ?")
             .bind(username)
@@ -474,7 +409,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Updates kyc_status for a wallet.
     pub async fn set_kyc_status(&self, wallet: &str, status: &str) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users_v2 SET kyc_status = ? WHERE wallet = ?")
             .bind(status)
@@ -484,9 +418,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Returns `Some(unix_ts)` if this account already received a
-    /// backend-sponsored on-chain profile creation — guards against repeat
-    /// sponsorship of the same wallet.
     pub async fn profile_sponsored_at(&self, wallet: &str) -> Option<i64> {
         let row: Option<(Option<i64>,)> =
             sqlx::query_as("SELECT profile_sponsored_at FROM users_v2 WHERE wallet = ?")
@@ -497,8 +428,6 @@ impl SessionStore {
         row.and_then(|(v,)| v)
     }
 
-    /// Marks this account as having received its one backend-sponsored
-    /// profile creation.
     pub async fn mark_profile_sponsored(&self, wallet: &str, now: i64) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users_v2 SET profile_sponsored_at = ? WHERE wallet = ?")
             .bind(now)
@@ -508,9 +437,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Records a casual (off-chain) game result — bot or local-P2P play,
-    /// with no on-chain effect. `account_id` is a wallet pubkey or the
-    /// `"email:<addr>"` JWT subject.
     pub async fn record_casual_game(
         &self,
         account_id: &str,
@@ -532,7 +458,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Returns true if the given username is already taken (case-insensitive).
     pub async fn username_taken(&self, username: &str) -> bool {
         let (count,): (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM users_v2 WHERE LOWER(username) = LOWER(?) AND deleted_at IS NULL",
@@ -544,7 +469,6 @@ impl SessionStore {
         count > 0
     }
 
-    /// GDPR erasure: soft-deletes user and nulls PII fields.
     pub async fn erase_user(&self, wallet: &str) -> Result<(), sqlx::Error> {
         let now = chrono::Utc::now().timestamp();
         sqlx::query(
@@ -557,20 +481,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Creates a new session for the given game and wallet, or returns the
-    /// existing session pubkey if one already exists for this game_id.
-    ///
-    /// Using get-or-create semantics ensures that the joiner calling
-    /// create_session with the same game_id gets back the same session pubkey
-    /// that was stored in game.fee_payer during create_game, preventing
-    /// FeePayerMismatch errors in join_game.
-    ///
-    /// # Arguments
-    /// * `game_id` - The unique game identifier
-    /// * `wallet_pubkey` - The wallet public key that owns this session
-    ///
-    /// # Returns
-    /// The session's public key
     pub async fn create(&self, game_id: u64, wallet_pubkey: Pubkey) -> anyhow::Result<Pubkey> {
         // Return the existing session pubkey if one already exists for this game.
         if let Some(existing) = self.get(game_id).await {
@@ -616,10 +526,6 @@ impl SessionStore {
         Ok(pubkey)
     }
 
-    /// Counts sessions this wallet has opened but never activated. Feeds the
-    /// `/session/create` funding cap: each such row corresponds to a session
-    /// key funded out of the fee-payer pool that no setup transaction ever
-    /// consumed, so an unbounded count is an unbounded drain.
     pub async fn count_pending_for_wallet(&self, wallet: &str) -> i64 {
         sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM sessions s
@@ -636,8 +542,6 @@ impl SessionStore {
         .unwrap_or(0)
     }
 
-    /// Deletes a session only when its setup transaction never activated.
-    /// Activated rows remain available for settlement and recovery.
     pub async fn abandon_unactivated(&self, game_id: u64, wallet: &str) -> bool {
         sqlx::query(
             "DELETE FROM sessions
@@ -655,15 +559,6 @@ impl SessionStore {
         .unwrap_or(false)
     }
 
-    /// Like `create`, but stores a caller-supplied keypair instead of
-    /// generating a fresh one — used for games created via the global
-    /// session flow (`global_create_game`/`global_join_game`), where
-    /// `game.fee_payer` is the wallet's already-authorized global session
-    /// key, not a fresh per-game one. Marked `active` immediately (there's
-    /// no separate wallet-signed "setup TX" to wait for in that flow, unlike
-    /// the original `create`/`activate_session` two-step). This is what lets
-    /// `settlement_worker`'s scan loop discover these games at all — see
-    /// `routes::global_session::track_game`.
     pub async fn create_with_keypair(
         &self,
         game_id: u64,
@@ -724,13 +619,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Decrypts a `sessions.keypair` column value, transparently falling
-    /// back to treating it as legacy plaintext if decryption fails and the
-    /// blob is exactly 64 bytes (the old unencrypted format) — rows written
-    /// before at-rest encryption was added stay readable rather than needing
-    /// a blocking migration; every session created or updated after this
-    /// point is encrypted going forward, and per-game sessions are
-    /// short-lived, so old plaintext rows age out naturally.
     fn decrypt_keypair_column(&self, blob: &[u8]) -> Option<[u8; 64]> {
         let bytes = match self.vault.decrypt_bytes(blob) {
             Ok(plaintext) => plaintext,
@@ -743,7 +631,6 @@ impl SessionStore {
         bytes.try_into().ok()
     }
 
-    /// Retrieves a session entry by game ID.
     pub async fn get(&self, game_id: u64) -> Option<SessionEntry> {
         let row: (Vec<u8>, String, i64, i64) = sqlx::query_as(
             "SELECT keypair, wallet, active, is_global FROM sessions WHERE game_id = ?",
@@ -767,7 +654,6 @@ impl SessionStore {
         })
     }
 
-    /// Marks a session as active (game started).
     pub async fn activate(&self, game_id: u64) {
         sqlx::query("UPDATE sessions SET active = 1 WHERE game_id = ?")
             .bind(game_id as i64)
@@ -776,7 +662,6 @@ impl SessionStore {
             .ok();
     }
 
-    /// Marks a session as inactive (game settled or abandoned).
     pub async fn deactivate(&self, game_id: u64) {
         sqlx::query("UPDATE sessions SET active = 0 WHERE game_id = ?")
             .bind(game_id as i64)
@@ -785,7 +670,6 @@ impl SessionStore {
             .ok();
     }
 
-    /// Lists the game IDs of all currently active sessions.
     pub async fn list_active_game_ids(&self) -> Vec<u64> {
         sqlx::query_as::<_, (i64,)>("SELECT game_id FROM sessions WHERE active = 1")
             .fetch_all(&self.pool)
@@ -796,11 +680,6 @@ impl SessionStore {
             .collect()
     }
 
-    /// Whether `wallet` has already successfully activated (submitted its
-    /// setup TX for) this game_id. Keyed per-wallet, unlike `is_active`,
-    /// because a game_id's session is activated twice by two different
-    /// wallets: once by the host (create_game) and once by the joiner
-    /// (join_game) — both must be allowed to land.
     pub async fn wallet_activated(&self, game_id: u64, wallet: &Pubkey) -> bool {
         sqlx::query_as::<_, (i64,)>(
             "SELECT 1 FROM session_wallet_activations WHERE game_id = ? AND wallet = ?",
@@ -814,7 +693,6 @@ impl SessionStore {
         .is_some()
     }
 
-    /// Records that `wallet` successfully activated this game_id with `sig`.
     pub async fn record_wallet_activation(&self, game_id: u64, wallet: &Pubkey, sig: &str) {
         sqlx::query(
             "INSERT OR IGNORE INTO session_wallet_activations (game_id, wallet, sig) VALUES (?1, ?2, ?3)",
@@ -827,7 +705,6 @@ impl SessionStore {
         .ok();
     }
 
-    /// Checks if a session is currently active.
     pub async fn is_active(&self, game_id: u64) -> bool {
         let (active,): (i64,) = sqlx::query_as("SELECT active FROM sessions WHERE game_id = ?")
             .bind(game_id as i64)
@@ -837,7 +714,6 @@ impl SessionStore {
         active != 0
     }
 
-    /// Counts active sessions (currently running games).
     pub async fn count_active(&self) -> u64 {
         let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE active = 1")
             .fetch_one(&self.pool)
@@ -846,7 +722,6 @@ impl SessionStore {
         count as u64
     }
 
-    /// Counts total unique players (by wallet pubkey).
     pub async fn count_unique_players(&self) -> u64 {
         let (count,): (i64,) = sqlx::query_as("SELECT COUNT(DISTINCT wallet) FROM sessions")
             .fetch_one(&self.pool)
@@ -855,7 +730,6 @@ impl SessionStore {
         count as u64
     }
 
-    /// Counts total sessions ever created.
     pub async fn count_total_sessions(&self) -> u64 {
         let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
             .fetch_one(&self.pool)
@@ -864,8 +738,6 @@ impl SessionStore {
         count as u64
     }
 
-    /// Atomically increments the move counter for a game and returns the new value.
-    /// Used to assign sequential move numbers when persisting moves to the DB.
     pub async fn increment_move_count(&self, game_id: u64) -> i32 {
         let result: Result<(i64,), _> = sqlx::query_as(
             "UPDATE sessions SET move_count = move_count + 1 WHERE game_id = ? RETURNING move_count",
@@ -876,7 +748,6 @@ impl SessionStore {
         result.map(|(n,)| n as i32).unwrap_or(1)
     }
 
-    /// Lists all players in the system.
     pub async fn list_players(
         &self,
         limit: i32,
@@ -990,12 +861,6 @@ mod tests {
         assert_eq!(entry.session_pubkey(), expected_pubkey);
     }
 
-    /// The `ON CONFLICT(game_id) DO UPDATE SET ... wallet = excluded.wallet`
-    /// upsert used to overwrite `wallet` unconditionally on any `game_id`
-    /// collision, decoupling a session's recorded owner from whoever
-    /// actually holds it. A re-call for the SAME wallet (retry/idempotent
-    /// re-track) must still succeed; a different wallet claiming an already
-    /// active game_id must be rejected.
     #[tokio::test]
     async fn create_with_keypair_rejects_repointing_an_active_sessions_wallet() {
         let store = test_store().await;

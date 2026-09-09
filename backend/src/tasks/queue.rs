@@ -1,24 +1,3 @@
-//! Durable SQLite-backed job queue (Production Reality Plan, WS-A).
-//!
-//! For one-shot work that has **no durable backing of its own** — email sends,
-//! anti-cheat analyses, future webhooks. If the process crashes between "we decided
-//! to do X" and "X happened", the job survives in SQLite and is retried.
-//!
-//! Deliberately **not** used for settlement / prize distribution: those workers
-//! re-derive their work from on-chain state every tick (the chain is the durable
-//! queue), and mirroring that into a second store would create a split-brain.
-//!
-//! Semantics:
-//! - **Idempotent enqueue** via optional `dedupe_key` (UNIQUE; re-enqueue is a no-op).
-//! - **At-least-once execution** — handlers must themselves be idempotent.
-//! - **Bounded retries** with exponential backoff + jitter; exhausted jobs land in
-//!   the DLQ (`status='dead'`) for review (see runbooks).
-//! - **Stale-claim recovery** — jobs claimed by a process that died are reclaimed
-//!   after `STALE_CLAIM_SECS`.
-//!
-//! Single-writer discipline: one poller task per process; SQLite's WAL handles the
-//! rest at our scale.
-
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
@@ -28,11 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
-/// Poll interval for due jobs.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
-/// A `running` job older than this is considered orphaned (worker died) and reclaimed.
 const STALE_CLAIM_SECS: i64 = 300;
-/// Base backoff (doubles per attempt) capped at `BACKOFF_CAP_SECS`.
 const BACKOFF_BASE_SECS: u64 = 30;
 const BACKOFF_CAP_SECS: u64 = 3600;
 
@@ -40,7 +16,6 @@ fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-/// Exponential backoff with ±20% jitter so retry storms can't synchronize.
 fn backoff_secs(attempt: u32) -> i64 {
     let base = BACKOFF_BASE_SECS.saturating_mul(1u64 << attempt.min(6)); // 30s,1m,2m,4m,8m,16m,32m cap
     let capped = base.min(BACKOFF_CAP_SECS);
@@ -53,7 +28,6 @@ fn backoff_secs(attempt: u32) -> i64 {
     (capped - jitter / 2 + (nanos % jitter)) as i64
 }
 
-/// A claimed job handed to a handler.
 #[derive(Debug, Clone)]
 pub struct Job {
     pub id: i64,
@@ -63,18 +37,14 @@ pub struct Job {
 }
 
 impl Job {
-    /// Deserialize the JSON payload into a concrete type.
     pub fn parse<T: DeserializeOwned>(&self) -> Result<T, serde_json::Error> {
         serde_json::from_str(&self.payload)
     }
 }
 
-/// Boxed async handler: `Ok(())` = done, `Err(msg)` = retry (until max_attempts).
 pub type Handler =
     Arc<dyn Fn(Job) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync>;
 
-/// Enqueue a job. `dedupe_key = Some(..)` makes the enqueue idempotent — a second
-/// call with the same key is a silent no-op (returns Ok(None)).
 pub async fn enqueue<P: Serialize>(
     pool: &SqlitePool,
     kind: &str,
@@ -104,8 +74,6 @@ pub async fn enqueue<P: Serialize>(
     Ok(Some(res.last_insert_rowid()))
 }
 
-/// Claim the next due pending job (oldest first). Also reclaims stale `running`
-/// jobs whose worker died. Returns None when nothing is due.
 async fn claim_next(pool: &SqlitePool) -> Result<Option<Job>, sqlx::Error> {
     let ts = now();
 
@@ -152,8 +120,6 @@ async fn mark_done(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Record a failure: schedule a retry with backoff, or move to the DLQ when
-/// attempts are exhausted.
 async fn mark_failed(pool: &SqlitePool, job: &Job, err: &str) -> Result<(), sqlx::Error> {
     let ts = now();
     let attempts = job.attempts + 1;
@@ -198,7 +164,6 @@ async fn mark_failed(pool: &SqlitePool, job: &Job, err: &str) -> Result<(), sqlx
     Ok(())
 }
 
-/// Number of jobs currently in the DLQ (exposed as a metric; alert when > 0).
 pub async fn dead_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
     let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM jobs WHERE status='dead'")
         .fetch_one(pool)
@@ -206,7 +171,6 @@ pub async fn dead_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
     Ok(n)
 }
 
-/// Registry of job-kind → handler, then `spawn` the poller.
 #[derive(Default)]
 pub struct QueueWorker {
     handlers: HashMap<String, Handler>,
@@ -217,8 +181,6 @@ impl QueueWorker {
         Self::default()
     }
 
-    /// Register a handler for a job kind. Handlers must be idempotent
-    /// (at-least-once execution).
     pub fn register<F, Fut>(mut self, kind: &str, f: F) -> Self
     where
         F: Fn(Job) -> Fut + Send + Sync + 'static,
@@ -229,7 +191,6 @@ impl QueueWorker {
         self
     }
 
-    /// Spawn the polling loop. One per process.
     pub fn spawn(self, pool: SqlitePool) {
         let handlers = Arc::new(self.handlers);
         tokio::spawn(async move {

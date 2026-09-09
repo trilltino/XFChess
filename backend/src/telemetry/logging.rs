@@ -1,13 +1,7 @@
-//! Structured logging with request tracing for XFChess backend
-//!
-//! Provides correlation IDs for tracing requests across async boundaries
-//! and structured log output for easier parsing and filtering.
-
 use std::fmt;
 use std::time::Instant;
 use uuid::Uuid;
 
-/// Context for a single request
 #[derive(Clone, Debug)]
 pub struct RequestContext {
     pub request_id: Uuid,
@@ -63,11 +57,9 @@ impl fmt::Display for RequestContext {
     }
 }
 
-/// Structured logger that includes request context
 pub struct StructuredLogger;
 
 impl StructuredLogger {
-    /// Log info with context
     pub fn info(ctx: &RequestContext, message: &str) {
         tracing::info!(
             request_id = %ctx.request_id,
@@ -80,7 +72,6 @@ impl StructuredLogger {
         );
     }
 
-    /// Log error with context
     pub fn error(ctx: &RequestContext, message: &str, error: &dyn std::error::Error) {
         tracing::error!(
             request_id = %ctx.request_id,
@@ -94,7 +85,6 @@ impl StructuredLogger {
         );
     }
 
-    /// Log warning with context
     pub fn warn(ctx: &RequestContext, message: &str) {
         tracing::warn!(
             request_id = %ctx.request_id,
@@ -107,7 +97,6 @@ impl StructuredLogger {
         );
     }
 
-    /// Log transaction event
     pub fn transaction(
         ctx: &RequestContext,
         signature: &str,
@@ -141,7 +130,6 @@ impl StructuredLogger {
     }
 }
 
-/// Scrub PII from log messages
 pub fn scrub_pii(input: &str) -> String {
     let mut result = input.to_string();
 
@@ -163,7 +151,6 @@ pub fn scrub_pii(input: &str) -> String {
     result
 }
 
-/// Log formatter that adds structured fields
 pub fn format_log_entry(
     level: &str,
     target: &str,

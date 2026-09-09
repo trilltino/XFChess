@@ -1,7 +1,3 @@
-//! Solana Lobby State
-//!
-//! Resource and plugin for the in-menu wager lobby (create/join a game on-chain).
-
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -14,18 +10,15 @@ use crate::solana::instructions::{
     offer_draw_ix, GAME_SEED, PROGRAM_ID as SOLANA_PROGRAM_ID,
 };
 
-/// Which tab the lobby is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LobbyMode {
     #[default]
     Create,
     Join,
     Browse,
-    /// On-chain games created by the backend tournament orchestrator.
     Tournament,
 }
 
-/// ELO range matching preference for matchmaking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EloMatchPref {
     Strict, // ±50 ELO
@@ -52,48 +45,35 @@ impl EloMatchPref {
     }
 }
 
-/// Async task outcome communicated back to the Bevy system.
 #[derive(Debug, Clone)]
 pub enum LobbyStatus {
     Idle,
-    /// Transaction or lookup in flight.
     Pending,
-    /// Game was created or joined successfully — stores the game_id.
     Success(u64),
-    /// RPC returned a wager amount for a join lookup.
     Fetched {
         wager_sol: f64,
         game_id: u64,
     },
-    /// Creator is waiting for opponent to sign join_game on-chain.
     WaitingForOpponent {
         game_id: u64,
     },
-    /// Opponent detected on-chain — host can now start P2P.
     OpponentJoined {
         game_id: u64,
     },
-    /// We (the joiner) have confirmed our on-chain `join_game` — now waiting
-    /// for the host to click "Host Game", which relays a GAME_START signal
-    /// over the P2P relay (see `spawn_poll_game_start`).
     WaitingForHostStart {
         game_id: u64,
     },
-    /// The host's GAME_START signal arrived — safe to actually enter the match.
     EnterGame {
         game_id: u64,
     },
-    /// On-chain cancellation and relay removal are in flight.
     Cancelling {
         game_id: u64,
     },
-    /// Cancellation completed. The lobby may now be left safely.
     Cancelled {
         game_id: u64,
         refunded: bool,
         message: String,
     },
-    /// Cancellation failed. Keep the game id available so the user can retry.
     CancelFailed {
         game_id: u64,
         error: String,
@@ -107,110 +87,48 @@ impl Default for LobbyStatus {
     }
 }
 
-/// Central UI state for the Solana wager lobby.
 #[derive(Resource)]
 pub struct SolanaLobbyState {
     pub mode: LobbyMode,
-    /// Whether the "Create Game" tab is shown. True when the lobby is entered
-    /// via "Wagered PVP"; false via "Find Wagered Game" (join/browse only).
     pub allow_create: bool,
-    /// SOL amount chosen by creator. Defaults to 0 — the Create Game panel
-    /// should always open showing a $0 wager, not a leftover/sticky amount.
     pub wager_sol: f32,
-    /// Raw text typed into the custom wager amount field (USD when a live
-    /// rate is available, otherwise SOL). Kept separate from `wager_sol` so
-    /// in-progress typing (e.g. "1.") isn't clobbered by reformatting.
     pub wager_amount_input: String,
-    /// Match type: 0=Free Casual, 1=Free Rated (ELO), 2=Wagered.
     pub match_type: u8,
-    /// Raw game-id text typed by the joiner.
     pub game_id_input: String,
     pub status: LobbyStatus,
-    /// Channel receiving the result of a create/join transaction.
     pub tx_rx: Option<oneshot::Receiver<Result<u64, String>>>,
-    /// Channel receiving the result of a game-info lookup (wager in lamports).
     pub lookup_rx: Option<oneshot::Receiver<Result<(u64, u64), String>>>,
-    /// Channel receiving notification that opponent joined on-chain.
     pub opponent_poll_rx: Option<oneshot::Receiver<Result<(), String>>>,
-    /// Channel receiving notification that the host marked the game
-    /// in-progress on the relay (see `spawn_poll_game_start`).
     pub game_start_poll_rx: Option<oneshot::Receiver<Result<(), String>>>,
-    /// Channel receiving the result of on-chain cancellation plus relay cleanup.
     pub cancel_rx: Option<oneshot::Receiver<Result<CancelOutcome, String>>>,
     // Cached from SolanaIntegrationState each frame.
     pub cached_balance: f64,
     pub cached_keypair_bytes: Option<Vec<u8>>,
     pub cached_rpc_url: String,
-    /// Session keypair bytes when an `authorize_global_session` has already
-    /// gone through (see `authorize_global_session_if_needed`) — passing
-    /// this to `spawn_create_game`/`spawn_join_game` skips the wallet popup
-    /// entirely. `None` while unauthorized, falling back to the original
-    /// per-game wallet-signed flow.
     pub cached_global_session_keypair_bytes: Option<Vec<u8>>,
-    /// Whether the in-flight (or just-completed) create/join attempt used
-    /// the global session — set at the moment `spawn_create_game`/
-    /// `spawn_join_game` is called, not re-derived later from
-    /// `cached_global_session_keypair_bytes`, since that can flip between
-    /// spawning the attempt and its result landing (e.g. authorization
-    /// completing mid-flight). `poll_lobby_tasks` copies this onto
-    /// `EphemeralRollupManager::used_global_session` once the attempt
-    /// succeeds, which is what delegation actually keys off.
     pub last_attempt_used_global_session: bool,
-    /// Cached display name used when announcing wagered games to the VPS relay.
     pub cached_display_name: Option<String>,
-    /// Cached node ID used when announcing wagered games to the VPS relay.
     pub cached_node_id: Option<String>,
-    /// Cached raw Iroh secret key, refreshed alongside `cached_node_id` —
-    /// used to sign JOIN_ACK/relay messages so the backend can verify the
-    /// sender actually controls the claimed `cached_node_id`, not just
-    /// asserts it. See `p2p_relay/routes.rs::send_message`'s verification.
     pub cached_secret_key_bytes: Option<[u8; 32]>,
-    /// Cached ELO from on-chain profile; 0 = unknown.
     pub cached_elo: u16,
-    /// Cached VPS/backend region tag (e.g. "eu-central").
     pub cached_region: Option<String>,
-    /// Optional room password (None = public).
     pub room_password: Option<String>,
-    /// Time control: base seconds (default 300 = 5 min).
     pub time_control_base: u32,
-    /// Time control: increment seconds per move (default 0).
     pub time_control_inc: u32,
-    /// ELO matching preference.
     pub elo_pref: EloMatchPref,
-    /// Receiver for the on-chain active-game check (rejoin flow).
     pub rejoin_rx: Option<oneshot::Receiver<Option<u64>>>,
-    /// Game ID found during rejoin check (displayed until dismissed).
     pub rejoin_game_id: Option<u64>,
-    /// Cached wagered game listings for the Browse tab.
     pub browse_games: Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>,
-    /// Last time the browse list was fetched.
     pub browse_last_fetch: Option<std::time::Instant>,
-    /// Receiver for background browse-list fetch.
     pub browse_rx: Option<
         crossbeam_channel::Receiver<Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>>,
     >,
-    /// Cached backend-tournament games for the Tournament tab (only matches
-    /// with an on-chain Solana game_id).
     pub tournament_games: Vec<crate::multiplayer::network::vps::TournamentGameListing>,
-    /// Last time the tournament-games list was fetched.
     pub tournament_last_fetch: Option<std::time::Instant>,
-    /// Receiver for background tournament-games fetch.
     pub tournament_rx: Option<
         crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentGameListing>>,
     >,
-    /// Set when the post-create P2P announce (which makes the game show up
-    /// in a peer's Browse Games list) fails. The game itself is still fully
-    /// playable via a direct Game ID share — this is surfaced so a host isn't
-    /// left wondering why nobody can find their game with zero on-screen sign
-    /// anything went wrong (previously only a server-console `warn!`).
     pub announce_warning: Option<String>,
-    /// Last time this host sent a P2P-relay heartbeat while waiting for an
-    /// opponent. Without this, the Browse Games listing created by the
-    /// post-create announce silently falls out of the backend's stale-lobby
-    /// sweep after `LOBBY_TTL_SECS` (90s) even though the on-chain game (and
-    /// this "Waiting for opponent" screen) is still fully live — a host
-    /// waiting longer than that becomes invisible to browsers with no
-    /// on-screen indication anything changed.
     pub last_lobby_heartbeat: Option<std::time::Instant>,
 }
 
@@ -258,13 +176,11 @@ impl Default for SolanaLobbyState {
 }
 
 impl SolanaLobbyState {
-    /// Wager in lamports (from the `wager_sol` field).
     pub fn wager_lamports(&self) -> u64 {
         (self.wager_sol as f64 * 1_000_000_000.0) as u64
     }
 }
 
-/// Plugin — registers the resource and polling system.
 pub struct SolanaLobbyPlugin;
 
 impl Plugin for SolanaLobbyPlugin {
@@ -290,12 +206,6 @@ impl Plugin for SolanaLobbyPlugin {
 // Async helpers (called from UI via IoTaskPool / Tokio)
 // ---------------------------------------------------------------------------
 
-/// Spawn a `create_game` transaction on `IoTaskPool`.
-/// `global_session_keypair_bytes`: when `Some` (an already-authorized global
-/// session — see `integration::systems::authorize_global_session_if_needed`),
-/// the game is created and signed entirely with that session key, no Tauri
-/// wallet popup at all. When `None`, falls back to the original per-game
-/// wallet-signed flow.
 pub fn spawn_create_game(
     rpc_url: String,
     wallet_pubkey: Pubkey,
@@ -331,11 +241,6 @@ pub fn spawn_create_game(
         .detach();
 }
 
-/// Fire-and-forget: record a draw offer on the game's on-chain account. The
-/// off-chain P2P `DrawOfferEvent` already gives the opponent instant UI
-/// feedback (see `crate::ui::game::game_ui`) — this just makes the on-chain
-/// `Game` account agree once the opponent accepts, so settlement (which reads
-/// on-chain state only) actually pays out.
 pub fn spawn_offer_draw(rpc_url: String, wallet_pubkey: Pubkey, game_id: u64) {
     let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
     bevy::tasks::IoTaskPool::get()
@@ -362,11 +267,6 @@ async fn async_offer_draw(
     Ok(())
 }
 
-/// Fire-and-forget: accept the opponent's pending on-chain draw offer, ending
-/// the game as a draw. Settlement (pot split, ELO, stats) happens afterward
-/// through the backend's existing generic settlement sweep, which finalizes
-/// any game whose on-chain status is `Finished` — same path as checkmate,
-/// resignation, or timeout, so no separate handling is needed here.
 pub fn spawn_accept_draw(rpc_url: String, wallet_pubkey: Pubkey, game_id: u64) {
     let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
     bevy::tasks::IoTaskPool::get()
@@ -393,18 +293,6 @@ async fn async_accept_draw(
     Ok(())
 }
 
-/// Fire-and-forget: claim victory on-chain for an on-chain (wagered/
-/// competitive) game whose opponent has gone silent. Permissionless — this
-/// bridges the client's own fast local abandonment detection
-/// (`crate::ui::game::game_ui`'s disconnect grace banner, which already ends
-/// the *local* game via `FlagTimeoutEvent`) into an actual on-chain
-/// resolution, since nothing else calls this instruction: not the client, and
-/// the ER crank (`crank_time_check`) only runs for games that were delegated
-/// to begin with. If the inactivity window
-/// (`lifecycle::clock::inactivity_window_seconds` on-chain) hasn't genuinely
-/// elapsed yet, this fails harmlessly with `TimeoutNotExpired` — callers
-/// should only invoke this once their own local abandonment flow has already
-/// fired, which happens well after that window in practice.
 pub fn spawn_claim_timeout(rpc_url: String, wallet_pubkey: Pubkey, game_id: u64) {
     let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
     bevy::tasks::IoTaskPool::get()
@@ -431,7 +319,6 @@ async fn async_claim_timeout(
     Ok(())
 }
 
-/// Spawn a game-info lookup on `IoTaskPool` (returns wager_lamports + game_id).
 pub fn spawn_lookup_game(
     rpc_url: String,
     game_id: u64,
@@ -447,9 +334,6 @@ pub fn spawn_lookup_game(
         .detach();
 }
 
-/// Spawn a background task that polls the P2P relay every 2 s for this
-/// game's durable status to flip to `InProgress` (set by the host's "Host
-/// Game" button via `p2p_accept_join`). Times out after 10 minutes.
 pub fn spawn_poll_game_start(game_id: u64, tx: oneshot::Sender<Result<(), String>>) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
@@ -459,9 +343,6 @@ pub fn spawn_poll_game_start(game_id: u64, tx: oneshot::Sender<Result<(), String
         .detach();
 }
 
-/// Spawn a background task that polls the on-chain game account every 3 s until
-/// the `black` pubkey is set (opponent joined), then resolves the oneshot.
-/// Times out after 5 minutes.
 pub fn spawn_poll_opponent_joined(
     rpc_url: String,
     game_id: u64,
@@ -477,10 +358,6 @@ pub fn spawn_poll_opponent_joined(
         .detach();
 }
 
-/// Spawn a `join_game` transaction on `IoTaskPool`.
-/// See `spawn_create_game`'s doc comment — same `global_session_keypair_bytes`
-/// contract (`Some` = zero-popup join via the global session, `None` = the
-/// original per-game wallet-signed flow).
 pub fn spawn_join_game(
     rpc_url: String,
     wallet_pubkey: Pubkey,
@@ -512,8 +389,6 @@ pub fn spawn_join_game(
 // Private async implementations
 // ---------------------------------------------------------------------------
 
-/// Polls every 3 s for up to 5 min until the game account's `black` field is
-/// set to a non-default pubkey (meaning opponent has called `join_game`).
 async fn async_poll_opponent_joined(
     rpc_url: String,
     program_id: solana_sdk::pubkey::Pubkey,
@@ -559,15 +434,6 @@ async fn async_poll_opponent_joined(
     }
 }
 
-/// Polls the P2P relay's game listing every 2 s for up to 10 min until this
-/// game's entry reports `status == "InProgress"`. Deliberately checks the
-/// relay's durable per-game status (flipped once, server-side, by
-/// `p2p_accept_join`) rather than a one-shot message: a message log can
-/// accumulate a stale `GAME_START` from an earlier test/attempt against the
-/// same `game_id` (nothing expires individual messages — see
-/// `backend/src/signing/p2p_relay/state.rs`), which would make a *new* join
-/// falsely believe the host had already started. A status flip has no such
-/// history to misread.
 async fn async_poll_game_start(game_id: u64) -> Result<(), String> {
     use std::time::{Duration, Instant};
     const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -702,11 +568,6 @@ async fn async_create_game(
     Ok(game_id)
 }
 
-/// Zero-popup create: signs + submits `global_create_game` directly with an
-/// already-authorized global session keypair. No Tauri round-trip, no VPS
-/// round-trip for the transaction itself — the session key pays its own tx
-/// fee (funded once, during authorization) and wager funds are drawn from
-/// the on-chain `GlobalSessionDelegation` vault, not the wallet.
 async fn async_create_game_via_global_session(
     rpc_url: String,
     wallet_pubkey: Pubkey,
@@ -797,20 +658,12 @@ async fn async_create_game_via_global_session(
     Ok(game_id)
 }
 
-/// Outcome of an attempted on-chain cancel.
 #[derive(Debug)]
 pub enum CancelOutcome {
-    /// `cancel_game` landed — the escrowed wager was refunded.
     Refunded(solana_sdk::signature::Signature),
-    /// Nothing on-chain to cancel (missing account, free game, already
-    /// terminal) — no wallet popup was spent.
     NothingToRefund(String),
 }
 
-/// True for errors that mean the user refused to sign — retrying would just
-/// fire another popup they already declined. Everything else (RPC hiccups,
-/// blockhash expiry, bridge timeouts) is worth retrying: a failed cancel
-/// leaves real money stranded in escrow, so err on the side of retrying.
 fn is_user_rejection(e: &str) -> bool {
     let l = e.to_lowercase();
     l.contains("reject")
@@ -820,21 +673,6 @@ fn is_user_rejection(e: &str) -> bool {
         || l.contains("user closed")
 }
 
-/// Cancels a wagered lobby on-chain, refunding the escrowed wager back to
-/// `white`/`black`. This is a real transaction — before this existed,
-/// "cancelling" a hosted lobby only left the P2P relay listing (see
-/// `p2p_leave_game`) and permanently stranded any wager in `escrow_pda`,
-/// since nothing ever called the on-chain `cancel_game` instruction.
-///
-/// Fetches the `Game` account first (rather than trusting client-side state)
-/// so `black` is correct even if a joiner's on-chain `join_game` beat this
-/// cancel — passing a stale/default `black` when someone actually joined
-/// would make the on-chain `black_authority` constraint fail closed (safe)
-/// rather than silently skip their refund.
-///
-/// Also verifies from chain state that a cancel is possible *before* popping
-/// the wallet: a missing/terminal/free game resolves without ever asking for
-/// a signature, instead of a popup followed by a guaranteed on-chain failure.
 pub fn cancel_game_on_chain(
     rpc_url: String,
     program_id: Pubkey,
@@ -932,10 +770,6 @@ pub fn cancel_game_on_chain(
     }
 }
 
-/// Cancel a Solana lobby and remove its VPS relay listing as one user-visible
-/// operation. The UI stays in `LobbyStatus::Cancelling` until this finishes so
-/// backing out cannot make a live room disappear locally while it remains
-/// discoverable to other players or leaves escrow unresolved.
 pub fn spawn_cancel_lobby(
     rpc_url: String,
     program_id: Pubkey,
@@ -951,9 +785,7 @@ pub fn spawn_cancel_lobby(
                 let wallet = wallet_pubkey.ok_or_else(|| {
                     "Wallet unavailable; the wager could not be cancelled".to_string()
                 });
-                wallet.and_then(|wallet| {
-                    cancel_game_on_chain(rpc_url, program_id, wallet, game_id)
-                })
+                wallet.and_then(|wallet| cancel_game_on_chain(rpc_url, program_id, wallet, game_id))
             } else {
                 Ok(CancelOutcome::NothingToRefund(
                     "free game; no escrow to refund".to_string(),
@@ -961,11 +793,8 @@ pub fn spawn_cancel_lobby(
             };
 
             let relay_error = node_id.and_then(|node_id| {
-                crate::multiplayer::vps_client::p2p_leave_game_fast(
-                    game_id.to_string(),
-                    &node_id,
-                )
-                .err()
+                crate::multiplayer::vps_client::p2p_leave_game_fast(game_id.to_string(), &node_id)
+                    .err()
             });
             if let Some(error) = relay_error {
                 warn!(
@@ -1121,9 +950,6 @@ async fn async_join_game(
     Ok(game_id)
 }
 
-/// Zero-popup join: signs + submits `global_join_game` directly with an
-/// already-authorized global session keypair — same trade-offs as
-/// `async_create_game_via_global_session`.
 async fn async_join_game_via_global_session(
     rpc_url: String,
     wallet_pubkey: Pubkey,
@@ -1240,7 +1066,6 @@ async fn async_join_game_via_global_session(
 // Bevy polling system
 // ---------------------------------------------------------------------------
 
-/// Polls in-flight oneshot channels each frame; updates LobbyStatus on completion.
 fn poll_lobby_tasks(
     mut lobby: ResMut<SolanaLobbyState>,
     mut sync: ResMut<crate::multiplayer::solana::addon::SolanaGameSync>,
@@ -1495,8 +1320,6 @@ fn poll_lobby_tasks(
     }
 }
 
-/// Copies balance and keypair bytes from `SolanaIntegrationState` into
-/// `SolanaLobbyState` so the UI can read them without an extra SystemParam.
 fn sync_from_solana_state(
     solana: Res<crate::multiplayer::solana::integration::SolanaIntegrationState>,
     mut lobby: ResMut<SolanaLobbyState>,
@@ -1539,8 +1362,6 @@ fn sync_from_solana_state(
     }
 }
 
-/// Spawn a task that looks for an active on-chain game belonging to `wallet`.
-/// Resolves to Some(game_id) if one is found, None otherwise.
 pub fn spawn_check_active_game(wallet_pubkey: Pubkey, tx: oneshot::Sender<Option<u64>>) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
@@ -1556,7 +1377,6 @@ pub fn spawn_check_active_game(wallet_pubkey: Pubkey, tx: oneshot::Sender<Option
         .detach();
 }
 
-/// Poll the rejoin check receiver.
 fn poll_rejoin_check(mut lobby: ResMut<SolanaLobbyState>) {
     if let Some(ref mut rx) = lobby.rejoin_rx {
         match rx.try_recv() {
@@ -1572,9 +1392,6 @@ fn poll_rejoin_check(mut lobby: ResMut<SolanaLobbyState>) {
     }
 }
 
-/// Poll background tournament-games fetch and auto-refresh every 10 seconds
-/// while the Tournament tab is active. Lists only backend-tournament matches
-/// that have an on-chain Solana game_id.
 pub fn poll_tournament_games(mut lobby: ResMut<SolanaLobbyState>) {
     // Drain result if pending.
     if let Some(ref rx) = lobby.tournament_rx {
@@ -1608,7 +1425,6 @@ pub fn poll_tournament_games(mut lobby: ResMut<SolanaLobbyState>) {
     );
 }
 
-/// Poll background browse-list fetch and auto-refresh every 10 seconds.
 pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
     // Drain result if pending.
     if let Some(ref rx) = lobby.browse_rx {

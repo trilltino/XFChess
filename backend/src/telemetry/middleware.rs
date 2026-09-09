@@ -1,7 +1,3 @@
-//! Axum middleware for request telemetry
-//!
-//! Injects request tracing context and records metrics for all HTTP requests.
-
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -13,13 +9,10 @@ use std::time::Instant;
 use super::logging::RequestContext;
 use crate::signing::AppState;
 
-/// HTTP status code threshold for server errors.
 pub const HTTP_STATUS_SERVER_ERROR: u16 = 500;
 
-/// HTTP status code threshold for client errors.
 pub const HTTP_STATUS_CLIENT_ERROR: u16 = 400;
 
-/// Middleware that adds telemetry to all requests
 pub async fn telemetry_middleware(
     State(app_state): State<AppState>,
     request: Request<Body>,

@@ -1,9 +1,3 @@
-//! Chess piece 3D rendering — Data-driven GLTF model spawning.
-//!
-//! The authoritative type definitions for [`Piece`], [`PieceColor`], and
-//! [`PieceType`] live in [`crate::game::components::piece_types`].
-//! This module re-exports them for backward compatibility.
-
 use crate::game::components::HasMoved;
 use crate::game::systems::input::{
     on_piece_click, on_piece_drag, on_piece_drag_end, on_piece_drag_start,
@@ -21,33 +15,17 @@ use std::f32;
 // continue to work without changes.
 pub use crate::game::components::piece_types::{Piece, PieceColor, PieceType};
 
-/// Visual Y offset for piece meshes to align with the board surface.
-///
-/// The chess kit GLB models have their origin at the BASE of the piece (not geometric center).
-/// This means offset Y=0 places the piece base at the parent's Y position.
-///
-/// The parent entity is positioned at PIECE_ON_BOARD_Y (board surface).
-/// With offset Y=0, the piece base sits exactly on the board surface.
 const PIECE_Y_OFFSET: f32 = 0.0;
 
-/// Scale factor for piece meshes — fits the chess kit models to board squares
-/// Reference uses 1.0 scale for wooden_chess_board.glb
 pub const PIECE_MESH_SCALE: f32 = 1.0;
 
-/// Y position for piece parent entities on the board.
-///
-/// The board squares are `Cuboid::new(1.0, 0.1, 1.0)` centered at y=0,
-/// so the top face is at y=0.05. Placing pieces at y=0.05 puts their base
-/// flush with the board surface, preventing clipping into the board geometry.
 pub const PIECE_ON_BOARD_Y: f32 = 0.05;
 
-/// Resource to track if pieces have been spawned for current game
 #[derive(Resource, Default)]
 pub struct PiecesSpawned {
     pub spawned: bool,
 }
 
-/// Ivory/cream piece with low roughness — specular highlights define the silhouette.
 pub fn white_piece_material() -> StandardMaterial {
     StandardMaterial {
         base_color: Color::srgb(0.92, 0.89, 0.82), // warm ivory, not pure white
@@ -58,7 +36,6 @@ pub fn white_piece_material() -> StandardMaterial {
     }
 }
 
-/// Dark charcoal piece — not pure black so light still picks out the edges.
 pub fn black_piece_material() -> StandardMaterial {
     StandardMaterial {
         base_color: Color::srgb(0.10, 0.08, 0.07), // very dark warm brown-black
@@ -69,20 +46,12 @@ pub fn black_piece_material() -> StandardMaterial {
     }
 }
 
-/// Component marking a 3D visual element of a piece
 #[derive(Component)]
 pub struct Piece3DVisual;
 
-/// Component marking a 2D visual element of a piece
 #[derive(Component)]
 pub struct Piece2DVisual;
 
-/// Data-driven piece setup - idiomatic Bevy approach
-///
-/// Uses const arrays to define starting positions, then iterates to spawn pieces.
-/// This pattern is cleaner, more maintainable, and easier to test than manual spawning.
-///
-/// Reference: `reference/bevy/examples/ecs/` for data-driven entity spawning patterns
 pub fn create_pieces(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -216,9 +185,6 @@ pub fn create_pieces(
     info!("[PIECES] All 32 pieces spawned successfully");
 }
 
-/// Spawn pieces for an arbitrary position from the board field of a FEN string.
-/// FEN ranks run 8→1 (top to bottom); board rank 0 is white's first rank, so
-/// FEN row index `i` maps to board rank `7 - i`.
 #[allow(clippy::too_many_arguments)]
 fn spawn_pieces_from_fen(
     commands: &mut Commands,
@@ -279,11 +245,6 @@ fn spawn_pieces_from_fen(
     }
 }
 
-/// Container for piece mesh handles - using wooden_chess_board.glb like the reference
-///
-/// Mesh indices derived from reference ENGINE_TO_MODEL mapping:
-///   Bishop=Mesh0/18, King=Mesh2/20, Knight=Mesh3/21,
-///   Pawn=Mesh5/23, Queen=Mesh13/31, Rook=Mesh14/32
 #[derive(Resource)]
 pub struct PieceMeshes {
     pub white_king: Handle<Mesh>,
@@ -397,7 +358,6 @@ fn load_sprite_handles_for_set(asset_server: &AssetServer, piece_set: u8) -> Pie
     }
 }
 
-/// Re-loads piece sprites whenever `GameSettings.piece_set` changes.
 pub fn reload_piece_sprites(
     settings: Res<crate::core::GameSettings>,
     asset_server: Res<AssetServer>,
@@ -440,35 +400,6 @@ fn load_piece_meshes(mut commands: Commands, asset_server: Res<AssetServer>) {
     info!("[PIECES] Mesh and Sprite handles created - waiting for assets to load");
 }
 
-/// Per-piece-type offsets to center meshes on squares.
-///
-/// These offsets compensate for the GLB mesh origins being at different positions
-/// within the model file. Each piece type in the chess_kit has its mesh center
-/// at a different location, requiring specific offsets to center the piece on its square.
-///
-/// # Coordinate System for Offsets
-///
-/// Offsets are in the piece's local coordinate space (after Y-rotation is applied):
-/// - X: Left/right adjustment to center on square (0.5 = center of 1.0 wide square)
-/// - Y: Vertical offset (0.0 = piece base at parent Y position)
-/// - Z: Forward/back adjustment to center on square (0.5 = center of 1.0 deep square)
-///
-/// # Why Different Z Offsets?
-///
-/// The chess_kit GLB file has each piece type at a different Z position:
-/// - King at Z ≈ -1.9, Queen at Z ≈ -0.95, Bishop at Z ≈ 0.0,
-/// - Knight at Z ≈ 0.9, Rook at Z ≈ 1.8, Pawn at Z ≈ 2.6
-///
-/// These offsets bring each piece to the center of its square (local X=0.5, Z=0.5).
-/// Y=0.0 keeps the piece at the parent's Y position (PIECE_ON_BOARD_Y = 0.05).
-/// The parent entity is positioned at the square corner, so we add 0.5 to center it.
-
-/// Unified piece spawning function - dispatches to specific spawner based on type
-///
-/// # Arguments
-/// * `position` - Tuple of (file, rank) where:
-///   - file: 0-7 (corresponds to files a-h)
-///   - rank: 0-7 (corresponds to ranks 1-8)
 pub fn spawn_piece_at(
     commands: &mut Commands,
     meshes: &PieceMeshes,
@@ -587,7 +518,6 @@ fn piece_mesh_transform(offset: Vec3) -> Transform {
     t
 }
 
-/// Get rotation for piece based on color - black pieces face opposite direction
 fn piece_rotation(color: PieceColor) -> Quat {
     match color {
         PieceColor::White => Quat::IDENTITY,
@@ -595,9 +525,6 @@ fn piece_rotation(color: PieceColor) -> Quat {
     }
 }
 
-/// Get rotation for knights - they need special handling because the GLB model
-/// is oriented facing +X (along the board) instead of +Z (across the board).
-/// This function adds a 90° rotation to make knights face the opponent.
 fn knight_rotation(color: PieceColor) -> Quat {
     match color {
         // White: Faces opponent (+Z). Asset faces +X, so rotate +90 degrees.
@@ -607,11 +534,6 @@ fn knight_rotation(color: PieceColor) -> Quat {
     }
 }
 
-/// Helper function to generate piece name for inspector
-///
-/// # Arguments
-/// * `file` - File index 0-7 (a-h)
-/// * `rank` - Rank index 0-7 (1-8)
 fn piece_name(piece_type: PieceType, color: PieceColor, file: u8, rank: u8) -> String {
     let color_str = match color {
         PieceColor::White => "White",
@@ -889,30 +811,12 @@ pub fn spawn_pawn(
         });
 }
 
-/// Calculate capture zone position for a captured piece
-///
-/// Arranges captured pieces on the sides of the board:
-/// - White captured pieces (black pieces taken): Left side (x = -2.0 to -1.0)
-/// - Black captured pieces (white pieces taken): Right side (x = 8.0 to 9.0)
-///
-/// Pieces are arranged by type in rows:
-/// - Row 0: Pawns
-/// - Row 1: Knights
-/// - Row 2: Bishops
-/// - Row 3: Rooks
-/// - Row 4: Queens
-///
-
-/// Pre-allocated assets for the 2D picking proxy slab (only needed in 2D top-down mode;
-/// 3D mode picks directly on the actual GLB mesh geometry).
 #[derive(Resource)]
 pub struct PiecePickingAssets {
     pub mesh_2d: Handle<Mesh>,
     pub matl: Handle<StandardMaterial>,
 }
 
-/// Marker for the 2D picking proxy (flat slab, active only in 2D mode).
-/// In 3D mode the actual Piece3DVisual mesh is used for picking instead.
 #[derive(Component)]
 pub struct PiecePickingProxy2D;
 
@@ -933,9 +837,6 @@ fn init_piece_picking_assets(
     commands.insert_resource(PiecePickingAssets { mesh_2d, matl });
 }
 
-/// Observer: fires whenever a Piece component is added to an entity.
-/// In 2D mode, attaches a flat proxy slab for picking (sprites aren't mesh-pickable).
-/// In 3D mode, picking goes through the Piece3DVisual mesh directly.
 fn on_piece_added(
     trigger: On<bevy::ecs::lifecycle::Add, Piece>,
     mut commands: Commands,

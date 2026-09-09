@@ -1,12 +1,8 @@
-//! Terminal result transitions that mutate only the Game account.
-
 use crate::errors::GameErrorCode;
 use crate::lifecycle::clock;
 use crate::state::{Game, GameResult, GameStatus};
 use anchor_lang::prelude::*;
 
-/// Ends an active game as a loss for `resigner`. Sets the result and status
-/// only — does not touch `is_delegated` or move any funds (see settlement.rs).
 pub fn finish_by_resign(game: &mut Game, resigner: Pubkey, now: i64) -> Result<()> {
     require!(
         game.status == GameStatus::Active,
@@ -29,10 +25,6 @@ pub fn finish_by_resign(game: &mut Game, resigner: Pubkey, now: i64) -> Result<(
     Ok(())
 }
 
-/// Records `offerer`'s draw offer on an active game. Idempotent — re-offering
-/// (including the other player "offering" after already receiving one, which
-/// the client should instead treat as an implicit accept) just overwrites the
-/// stored offerer.
 pub fn record_draw_offer(game: &mut Game, offerer: Pubkey) -> Result<()> {
     require!(
         game.status == GameStatus::Active,
@@ -47,8 +39,6 @@ pub fn record_draw_offer(game: &mut Game, offerer: Pubkey) -> Result<()> {
     Ok(())
 }
 
-/// Ends an active game as a mutually agreed draw. `accepter` must be the
-/// player who did *not* place the pending offer.
 pub fn finish_by_draw_agreement(game: &mut Game, accepter: Pubkey, now: i64) -> Result<()> {
     require!(
         game.status == GameStatus::Active,
@@ -70,9 +60,6 @@ pub fn finish_by_draw_agreement(game: &mut Game, accepter: Pubkey, now: i64) -> 
     Ok(())
 }
 
-/// Ends an active game as a loss for whoever's clock ran out, for the
-/// permissionless `ClaimTimeout` instruction. Fails if the inactivity window
-/// hasn't actually elapsed yet.
 pub fn finish_by_timeout(game: &mut Game, now: i64) -> Result<()> {
     require!(
         game.status == GameStatus::Active,
@@ -89,10 +76,6 @@ pub fn finish_by_timeout(game: &mut Game, now: i64) -> Result<()> {
     Ok(())
 }
 
-/// The idempotent, crank-friendly variant of timeout resolution: returns
-/// `Ok(false)` (rather than erroring) if the game isn't active or the clock
-/// hasn't expired, so callers like `crank_ix::crank_time_check` can invoke it
-/// unconditionally on every tick. Returns `Ok(true)` if it resolved the game.
 pub fn finish_by_timeout_if_expired(game: &mut Game, now: i64) -> Result<bool> {
     if game.status != GameStatus::Active || game.base_time_seconds == 0 {
         return Ok(false);
@@ -283,11 +266,6 @@ mod tests {
         );
     }
 
-    /// docs/PRE_MAINNET_E2E_PLAN.md §1.3: `finish_by_timeout` (manual
-    /// `ClaimTimeout`) and `finish_by_timeout_if_expired` (the crank's
-    /// idempotent twin) are two independent implementations of the same
-    /// payout decision. This locks them together so a future edit to one
-    /// can't silently diverge from the other.
     #[test]
     fn crank_twin_matches_manual_claim_timeout_outcome() {
         for (turn, move_count) in [(1u16, 0u16), (1, 1), (2, 1)] {

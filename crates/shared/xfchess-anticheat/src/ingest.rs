@@ -1,10 +1,6 @@
 use crate::error::{AcError, AcResult};
 use crate::types::{GameContext, GameRecord, GameResult, MoveRecord, PlayerRef, TimeControl};
 
-/// Raw DB row shape — matches the `moves` + `games` tables from migration 006,
-/// with `blurred` and `think_ms` joined from `move_telemetry` (migrations
-/// 013/014). `think_ms` is the audited client think time (None when absent or
-/// rejected by the backend's budget checks).
 pub struct MoveRow {
     pub move_number: i64,
     pub move_uci: String,
@@ -30,7 +26,6 @@ pub struct GameMeta {
     pub time_inc_sec: u32,
 }
 
-/// Pure function: DB rows → `GameRecord`.
 pub fn build_game_record(rows: &[MoveRow], meta: &GameMeta) -> AcResult<GameRecord> {
     if rows.is_empty() {
         return Err(AcError::InsufficientMoves(meta.game_id.clone(), 0));

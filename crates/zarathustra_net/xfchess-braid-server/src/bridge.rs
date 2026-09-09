@@ -1,21 +1,11 @@
-//! Bridge: converts XFChess backend mutations into Braid resource updates.
-//!
-//! The backend calls these free functions after mutating `TournamentStore` /
-//! `SwissService`. Each function builds the appropriate JSON Patch and calls
-//! into the [`ResourceHub`].
-//!
-//! No async required — `ResourceHub::patch` and `replace` are synchronous.
-
 use crate::ResourceHub;
 use serde_json::{json, Value};
 
-/// Push a full tournament meta update (after create / status change).
 pub fn push_tournament_meta(hub: &ResourceHub, tournament_id: u64, meta: Value) {
     hub.ensure_tournament(tournament_id);
     hub.replace(&format!("tournament/{}/meta", tournament_id), meta);
 }
 
-/// Push a schedule-status update.
 pub fn push_schedule_status(hub: &ResourceHub, tournament_id: u64, status: Value) {
     hub.ensure_tournament(tournament_id);
     hub.replace(
@@ -24,12 +14,6 @@ pub fn push_schedule_status(hub: &ResourceHub, tournament_id: u64, status: Value
     );
 }
 
-/// Push the bracket-fired transition: the tournament has started.
-///
-/// This is the resource form of what used to be a `BracketFired` gossip
-/// message. A client that subscribes *after* the start still sees
-/// `status: "started"` in the snapshot, which the fire-and-forget broadcast
-/// could never deliver.
 pub fn push_bracket_fired(
     hub: &ResourceHub,
     tournament_id: u64,
@@ -47,7 +31,6 @@ pub fn push_bracket_fired(
     );
 }
 
-/// Append one finished board's result to the tournament's results log.
 pub fn push_result(hub: &ResourceHub, tournament_id: u64, round: u8, board: u16, result: Value) {
     hub.ensure_tournament(tournament_id);
     hub.append(
@@ -60,7 +43,6 @@ pub fn push_result(hub: &ResourceHub, tournament_id: u64, round: u8, board: u16,
     );
 }
 
-/// Push the full roster after a player registers.
 pub fn push_roster(hub: &ResourceHub, tournament_id: u64, players: &[String]) {
     hub.ensure_tournament(tournament_id);
     let roster: Vec<Value> = players.iter().map(|p| json!(p)).collect();
@@ -70,7 +52,6 @@ pub fn push_roster(hub: &ResourceHub, tournament_id: u64, players: &[String]) {
     );
 }
 
-/// Push full standings after a result is recorded.
 pub fn push_standings(hub: &ResourceHub, tournament_id: u64, standings: Value) {
     hub.ensure_tournament(tournament_id);
     hub.replace(
@@ -79,7 +60,6 @@ pub fn push_standings(hub: &ResourceHub, tournament_id: u64, standings: Value) {
     );
 }
 
-/// Push pairings for a round after it starts.
 pub fn push_pairings(hub: &ResourceHub, tournament_id: u64, round: u8, pairings: Value) {
     hub.ensure_tournament(tournament_id);
     hub.ensure_pairings(tournament_id, round);

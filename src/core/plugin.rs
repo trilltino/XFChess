@@ -1,30 +1,3 @@
-//! Core plugin for XFChess
-//!
-//! Provides fundamental application setup including:
-//! - Panic hook configuration for detailed crash reporting
-//! - Window configuration
-//! - Core resource initialization
-//! - State management setup
-//!
-//! # Plugin Dependencies
-//!
-//! This plugin has no dependencies and should be added **first** before any other
-//! XFChess plugins. It sets up foundational state management and resources that
-//! other plugins depend on.
-//!
-//! # Plugin Order
-//!
-//! Recommended plugin order:
-//! 1. [`CorePlugin`] - Foundation (state, resources)
-//! 2. [`bevy::DefaultPlugins`] - Core Bevy functionality
-//! 3. [`bevy_egui::EguiPlugin`] - UI framework
-//! 4. [`crate::game::GamePlugin`] - Game logic
-//! 5. State plugins (MainMenuPlugin, SettingsPlugin, etc.)
-//! 6. Rendering plugins (PiecePlugin, BoardPlugin, etc.)
-//!
-//! This plugin should be added early in the plugin chain as it sets up
-//! foundational systems and resources used throughout the application.
-
 use bevy::prelude::*;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -46,33 +19,14 @@ use super::state_lifecycle::{
     cleanup_main_menu, cleanup_paused,
 };
 
-/// Global state tracker for panic reporting
-/// This allows the panic hook to report the current state even outside ECS context
 static PANIC_STATE_TRACKER: OnceLock<Mutex<PanicStateInfo>> = OnceLock::new();
 
-/// State information stored for panic reporting
 #[derive(Debug, Clone, Default)]
 struct PanicStateInfo {
     game_state: Option<GameState>,
     menu_state: Option<MenuState>,
 }
 
-/// Core plugin for XFChess application
-///
-/// Sets up fundamental application infrastructure including:
-/// - Panic hook for detailed crash reporting
-/// - Window configuration
-/// - Core state management
-/// - Settings persistence
-///
-/// # Usage
-///
-/// ```rust,ignore
-/// App::new()
-///     .add_plugins(CorePlugin)
-///     .add_plugins(DefaultPlugins)
-///     // ... other plugins
-/// ```
 pub struct CorePlugin;
 
 impl Plugin for CorePlugin {
@@ -172,16 +126,6 @@ impl Plugin for CorePlugin {
     }
 }
 
-/// Set up a custom panic hook that provides detailed crash information
-///
-/// This panic hook provides comprehensive information about panics including:
-/// - Panic message
-/// - Location (file, line, column)
-/// - Current game state (GameState and MenuState)
-/// - Full backtrace
-///
-/// The output is formatted for easy reading in PowerShell (ASCII-only, no box drawing).
-/// Panic information is also written to a log file for later analysis.
 fn setup_panic_hook() {
     // Initialize the state tracker
     PANIC_STATE_TRACKER.get_or_init(|| Mutex::new(PanicStateInfo::default()));
@@ -261,8 +205,6 @@ fn setup_panic_hook() {
     }));
 }
 
-/// System to update the panic state tracker with current state
-/// This allows the panic hook to report the current state even outside ECS context
 fn update_panic_state_tracker(
     game_state: Option<Res<State<GameState>>>,
     menu_state: Option<Res<State<MenuState>>>,

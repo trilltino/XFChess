@@ -1,8 +1,3 @@
-//! `no_std` re-export layer over `nimzovich_engine`'s on-chain subset, compiled
-//! into the Solana program (behind its `move-validation` feature) to validate
-//! move legality on-chain within compute limits. See the crate README for the
-//! full surface and the `no_std` constraint.
-
 #![no_std]
 
 extern crate alloc;
@@ -16,11 +11,9 @@ pub use nimzovich_engine::{
     Color, Game, Move, BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID,
 };
 
-/// Re-export commonly used types and functions for move validation
 pub mod validation {
     use super::*;
 
-    /// Parses a FEN and move string to validate if the move is legal
     pub fn is_move_legal(fen_str: &str, move_uci: &str) -> bool {
         // Use the on-chain optimized validation
         let cb = CompactBoard::from_fen(fen_str);

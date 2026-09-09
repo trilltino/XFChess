@@ -1,9 +1,3 @@
-//! Integration tests for XFChess core state management
-//!
-//! Tests the state management system in a realistic Bevy application context,
-//! verifying that state transitions work correctly and systems execute only
-//! in their designated states.
-
 use bevy::app::{App, Update};
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::{AppExtStates, MinimalPlugins, ResMut, Resource};
@@ -14,30 +8,22 @@ use bevy::state::{
 };
 use xfchess::core::{debug_current_gamestate, GameState};
 
-/// Helper struct to track system executions during tests
 #[derive(Resource, Default, Debug)]
 struct SystemExecutionTracker {
     main_menu_executions: u32,
     multiplayer_executions: u32,
 }
 
-/// Test system that runs only in MainMenu state
 fn track_main_menu_execution(mut tracker: ResMut<SystemExecutionTracker>) {
     tracker.main_menu_executions += 1;
 }
 
-/// Test system that runs only in InGame state
 fn track_multiplayer_execution(mut tracker: ResMut<SystemExecutionTracker>) {
     tracker.multiplayer_executions += 1;
 }
 
 #[test]
 fn test_initial_state_is_main_menu() {
-    //! Verifies that a new app starts in the MainMenu state
-    //!
-    //! This ensures users see the main menu when the game first starts,
-    //! not the active gameplay screen.
-
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
@@ -53,11 +39,6 @@ fn test_initial_state_is_main_menu() {
 
 #[test]
 fn test_state_transition_to_multiplayer() {
-    //! Tests transitioning from MainMenu to InGame state
-    //!
-    //! Simulates a user clicking "Start Game" in the menu, which should
-    //! transition the app to the active gameplay state.
-
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
@@ -78,11 +59,6 @@ fn test_state_transition_to_multiplayer() {
 
 #[test]
 fn test_state_transition_back_to_main_menu() {
-    //! Tests round-trip state transition: MainMenu -> InGame -> MainMenu
-    //!
-    //! Simulates starting a game and then returning to the main menu
-    //! (e.g., pressing ESC or finishing a game).
-
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
@@ -112,11 +88,6 @@ fn test_state_transition_back_to_main_menu() {
 
 #[test]
 fn test_systems_run_conditionally_based_on_state() {
-    //! Verifies that systems with `in_state()` run conditions execute only in correct states
-    //!
-    //! This ensures menu systems don't run during gameplay and vice versa,
-    //! preventing bugs like menu UI appearing during a game.
-
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
@@ -165,10 +136,6 @@ fn test_systems_run_conditionally_based_on_state() {
 
 #[test]
 fn test_multiple_state_transitions() {
-    //! Stress test: Multiple rapid state transitions should work correctly
-    //!
-    //! Simulates edge cases like rapid menu navigation or game restarts.
-
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
@@ -194,11 +161,6 @@ fn test_multiple_state_transitions() {
 
 #[test]
 fn test_debug_current_gamestate_system() {
-    //! Verifies the debug_current_gamestate system doesn't panic
-    //!
-    //! While this system just prints debug info, we ensure it can
-    //! safely access the state resource.
-
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
@@ -216,10 +178,6 @@ fn test_debug_current_gamestate_system() {
 
 #[test]
 fn test_state_persistence_across_updates() {
-    //! Verifies state remains stable across multiple update cycles
-    //!
-    //! Ensures states don't spontaneously change without explicit transitions.
-
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
@@ -241,10 +199,6 @@ fn test_state_persistence_across_updates() {
 
 #[test]
 fn test_state_is_clonable() {
-    //! Tests that GameState can be cloned (required for Bevy internals)
-    //!
-    //! Bevy's state system relies on Clone for efficient state management.
-
     let state1 = GameState::MainMenu;
     let state2 = state1.clone();
     assert_eq!(state1, state2);
@@ -256,10 +210,6 @@ fn test_state_is_clonable() {
 
 #[test]
 fn test_state_is_copyable() {
-    //! Tests that GameState implements Copy (more efficient than Clone)
-    //!
-    //! Copy allows Bevy to pass states by value without heap allocations.
-
     let state1 = GameState::MainMenu;
     let state2 = state1; // Copy, not move
     assert_eq!(state1, state2);
@@ -269,10 +219,6 @@ fn test_state_is_copyable() {
 
 #[test]
 fn test_state_debug_format() {
-    //! Verifies GameState has useful Debug output
-    //!
-    //! Good debug formatting helps with logging and troubleshooting.
-
     let debug_str = format!("{:?}", GameState::MainMenu);
     assert!(debug_str.contains("MainMenu"));
 

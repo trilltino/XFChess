@@ -1,15 +1,8 @@
-//! Integration tests for type utilities extracted from doc tests
-//!
-//! These tests demonstrate usage patterns for File, Rank, Square, and Centipawns types.
-//! Original location: src/game/types.rs
-
 use xfchess::game::types::{Centipawns, File, Rank, Square};
 use xfchess::rendering::pieces::PieceType;
 
 // File tests
 
-/// Example: Creating a file from a character
-/// Original: File::from_char() doc example
 #[test]
 fn example_file_from_char() {
     if let Some(file) = File::from_char('e') {
@@ -22,8 +15,6 @@ fn example_file_from_char() {
     assert!(File::from_char('z').is_none());
 }
 
-/// Example: Converting file to character
-/// Original: File::to_char() doc example
 #[test]
 fn example_file_to_char() {
     let file = File(4);
@@ -36,8 +27,6 @@ fn example_file_to_char() {
 
 // Rank tests
 
-/// Example: Creating a rank from a number
-/// Original: Rank::from_number() doc example
 #[test]
 fn example_rank_from_number() {
     let rank = Rank::from_number(4).unwrap(); // Rank 3 (0-indexed)
@@ -50,8 +39,6 @@ fn example_rank_from_number() {
     assert!(Rank::from_number(9).is_none());
 }
 
-/// Example: Converting rank to number
-/// Original: Rank::to_number() doc example
 #[test]
 fn example_rank_to_number() {
     let rank = Rank(3);
@@ -64,8 +51,6 @@ fn example_rank_to_number() {
 
 // Square tests
 
-/// Example: Creating a square from indices
-/// Original: Square::new() doc example
 #[test]
 fn example_square_new() {
     let square = Square::new(4, 3); // e4
@@ -73,8 +58,6 @@ fn example_square_new() {
     assert_eq!(square.rank.index(), 3);
 }
 
-/// Example: Creating a square from algebraic notation
-/// Original: Square::from_algebraic() doc example
 #[test]
 fn example_square_from_algebraic() {
     let square = Square::from_algebraic("e4").unwrap();
@@ -91,8 +74,6 @@ fn example_square_from_algebraic() {
     assert_eq!(h8.rank.index(), 7);
 }
 
-/// Example: Converting square to algebraic notation
-/// Original: Square::to_algebraic() doc example
 #[test]
 fn example_square_to_algebraic() {
     let square = Square::new(4, 3);
@@ -104,7 +85,6 @@ fn example_square_to_algebraic() {
 
 // Centipawns tests
 
-/// Example: Getting piece values in centipawns
 #[test]
 fn example_centipawns_for_piece() {
     assert_eq!(Centipawns::for_piece(PieceType::Pawn).value(), 100);
@@ -115,7 +95,6 @@ fn example_centipawns_for_piece() {
     assert_eq!(Centipawns::for_piece(PieceType::King).value(), 0);
 }
 
-/// Example: Arithmetic with centipawns
 #[test]
 fn example_centipawns_arithmetic() {
     let knight_value = Centipawns::for_piece(PieceType::Knight);
@@ -129,7 +108,6 @@ fn example_centipawns_arithmetic() {
     assert_eq!(total_value, 500); // 300 + 100 + 100
 }
 
-/// Example: Converting centipawns to pawns
 #[test]
 fn example_centipawns_to_pawns() {
     let queen_value = Centipawns::for_piece(PieceType::Queen);

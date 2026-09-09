@@ -1,15 +1,3 @@
-//! End-to-end tournament driver for devnet.
-//!
-//! Runs a complete single-elimination tournament against the deployed
-//! `xfchess-game` program: initialize → escrow → shards → prize funding →
-//! player profiles → registration → start → bracket matches → results →
-//! winner advancement, using ephemeral player keypairs funded from the
-//! admin wallet. Match results are recorded by the tournament authority
-//! (higher seed wins), mirroring how the backend records results — the
-//! goal is to exercise the tournament instruction surface, not chess.
-//!
-//! Used by the `tournament_data_gen` and `tournament_real_test` bins.
-
 use anyhow::{bail, Context, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -27,14 +15,12 @@ use super::instructions::{
     register_player_ix, start_tournament_ix, PROGRAM_ID,
 };
 
-/// One confirmed on-chain step of the run.
 #[derive(Debug, Clone)]
 pub struct StepLog {
     pub step: String,
     pub signature: String,
 }
 
-/// Outcome of a full tournament run.
 #[derive(Debug)]
 pub struct TournamentRunSummary {
     pub tournament_id: u64,
@@ -44,18 +30,10 @@ pub struct TournamentRunSummary {
     pub steps: Vec<StepLog>,
 }
 
-/// Lamports funded to each ephemeral player: profile + username rent,
-/// entry fee, and transaction fees.
 const PLAYER_FUNDING_LAMPORTS: u64 = 20_000_000; // 0.02 SOL
-/// Entry fee per player (operator revenue, refundable until start).
 const ENTRY_FEE_LAMPORTS: u64 = 1_000_000; // 0.001 SOL
-/// Guaranteed SOL prize locked in escrow before registration opens.
 const PRIZE_LAMPORTS: u64 = 5_000_000; // 0.005 SOL
 
-/// Runs a complete `player_count`-player tournament on `rpc_url`.
-///
-/// `admin` must be the program's `vps_authority` (tournament authority);
-/// it also acts as `host_treasury`. Supports 2..=64 players (power of 2).
 pub fn run_tournament(
     rpc_url: &str,
     admin: &Keypair,
@@ -277,7 +255,6 @@ pub fn run_tournament(
     })
 }
 
-/// Signs with `payer` (fee payer) plus `extra` signers and confirms.
 fn send(
     rpc: &RpcClient,
     ixs: &[Instruction],
@@ -302,7 +279,6 @@ fn push_step(steps: &mut Vec<StepLog>, step: &str, sig: &str) {
     });
 }
 
-/// Loads a JSON keypair file (solana-keygen format).
 pub fn load_keypair(path: &str) -> Result<Keypair> {
     let data = std::fs::read(path).with_context(|| format!("reading keypair {path}"))?;
     let bytes: Vec<u8> = serde_json::from_slice(&data)?;

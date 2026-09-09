@@ -1,12 +1,8 @@
-//! Error types for Braid HTTP operations.
-
 use std::io;
 use thiserror::Error;
 
-/// Result type for Braid HTTP operations.
 pub type Result<T> = std::result::Result<T, BraidError>;
 
-/// Errors that can occur during Braid HTTP operations.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum BraidError {
@@ -69,7 +65,6 @@ pub enum BraidError {
 }
 
 impl BraidError {
-    /// Check if this error is retryable.
     #[inline]
     #[must_use]
     pub fn is_retryable(&self) -> bool {
@@ -88,7 +83,6 @@ impl BraidError {
         }
     }
 
-    /// Check if this is an access denied error.
     #[inline]
     #[must_use]
     pub fn is_access_denied(&self) -> bool {

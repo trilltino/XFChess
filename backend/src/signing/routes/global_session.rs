@@ -1,19 +1,3 @@
-//! Global persistent session key endpoints.
-//!
-//! These routes let the game client/VPS:
-//!
-//! - `DELETE /global-session/:wallet` — Revoke: broadcast
-//!   `revoke_global_session` and remove the keypair from memory.
-//!
-//! - `POST /global-session/register` — The game client's authorization path
-//!   (`authorize_global_session_if_needed`) generates the session keypair and
-//!   signs+submits `authorize_global_session` on-chain itself, then hands the
-//!   backend a copy of that already-authorized key so it can still act on the
-//!   player's behalf for `finalize_game`/`undelegate_game`/settlement — the
-//!   same custody model the original per-game flow already uses, just keyed
-//!   by wallet instead of by game. Verified against on-chain state before
-//!   being trusted.
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -35,24 +19,10 @@ use crate::signing::AppState;
 
 // ── Route registration ────────────────────────────────────────────────────────
 
-/// Truly public: reveals only whether the VPS currently holds a session for a
-/// wallet, which the client needs before deciding whether to show the
-/// "Authorize session" banner. Read-only and self-limiting.
 pub fn global_session_public_routes() -> Router<AppState> {
     Router::new().route("/{wallet}/verify", axum::routing::get(verify))
 }
 
-/// Wallet-scoped mutations. Every route here acts on one specific wallet's
-/// session key, so every one requires a per-user JWT proving control of that
-/// wallet — enforced inside each handler via [`RequireWallet`].
-///
-/// This function was previously named "protected" while being mounted with no
-/// middleware at all, and its handlers checked nothing. That made `track-game`
-/// an unauthenticated way to copy any wallet's global session key into the
-/// per-game session store under an attacker-chosen `game_id`, and `revoke` an
-/// unauthenticated way to evict any player mid-game. The caller layers
-/// `require_relay_or_jwt` over this router in `signing::build_router`; the
-/// per-handler checks are what make the identity mandatory rather than optional.
 pub fn global_session_protected_routes() -> Router<AppState> {
     Router::new()
         .route("/register", post(register))
@@ -65,18 +35,9 @@ pub fn global_session_protected_routes() -> Router<AppState> {
 #[derive(Deserialize)]
 pub struct RegisterReq {
     pub wallet_pubkey: String,
-    /// Base58-encoded raw session keypair bytes (64 bytes, ed25519 secret +
-    /// public) — the client already generated this and used it to sign
-    /// `authorize_global_session` on-chain itself.
     pub session_secret_key_b58: String,
 }
 
-/// POST /global-session/register — accept a session key the client
-/// authorized entirely on its own (see module docs). Not blindly trusted:
-/// the derived pubkey must match the `GlobalSessionDelegation.session_key`
-/// already recorded on-chain for this wallet — a field only that wallet's
-/// own signature could have set — before it's stored. A mismatched or
-/// bogus key is rejected outright.
 async fn register(
     State(state): State<AppState>,
     caller: RequireWallet,
@@ -146,16 +107,6 @@ pub struct TrackGameReq {
     pub wallet_pubkey: String,
 }
 
-/// POST /global-session/track-game — tell the backend a game was created via
-/// the global-session flow, so `settlement_worker`'s scan loop (which only
-/// knows to look at `SessionStore` rows) can discover and auto-settle it.
-/// `finalize_game`/`undelegate_game`/`session_status` don't need this call
-/// at all — they resolve a signer straight from on-chain `fee_payer` (see
-/// `routes::main::resolve_game_signer`) — this exists purely so the
-/// *proactive* scan has something to iterate. Requires the wallet to already
-/// have a `register`ed session; silently a no-op otherwise (nothing to track
-/// yet, the client will just have to call `/game/finalize` itself in that
-/// case rather than being auto-settled).
 async fn track_game(
     State(state): State<AppState>,
     caller: RequireWallet,
@@ -194,10 +145,6 @@ async fn track_game(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// GET /global-session/:wallet/verify
-/// Returns whether the VPS holds an active global session for this wallet,
-/// along with the session pubkey if it does. The client calls this at MainMenu
-/// entry to decide whether to show the "Authorize session" banner.
 async fn verify(
     State(state): State<AppState>,
     Path(wallet_str): Path<String>,
@@ -217,18 +164,6 @@ async fn verify(
     }
 }
 
-/// DELETE /api/global-session/:wallet — drops the VPS's copy of this wallet's
-/// global session key and returns the `session_pda` the client needs to build
-/// the on-chain `revoke_global_session` transaction.
-///
-/// Note this is *only* the in-memory half: the on-chain delegation stays
-/// authorized until the wallet signs and submits that transaction itself. The
-/// doc comment here used to claim the backend broadcast it, which it never did.
-///
-/// Requires the caller to own the wallet. Unauthenticated, this was a
-/// one-request denial of service against any player by public address — drop
-/// their session key mid-game and their moves stop being signable until they
-/// re-register, which in a wagered game means losing on the clock.
 async fn revoke(
     State(state): State<AppState>,
     caller: RequireWallet,

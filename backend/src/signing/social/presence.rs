@@ -1,21 +1,11 @@
-//! In-memory presence store.  Tracks which node IDs are online / in-game.
-//! Entries expire after 5 minutes of silence (same TTL as P2P lobbies).
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tracing::info;
 
-/// How fresh a heartbeat must be to count as "online" in `get_all_online()`.
-/// Must stay comfortably above the client's heartbeat cadence
-/// (`tick_presence_sync` in `src/multiplayer/social.rs`, currently ~2s) to
-/// absorb normal jitter/latency, while staying short enough that a genuinely
-/// disconnected opponent (whose heartbeats simply stop) drops out of the
-/// online list quickly instead of lingering for up to 15s.
 pub const ONLINE_FRESHNESS_SECS: i64 = 6;
 
-/// A node's current presence state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PresenceStatus {
@@ -24,20 +14,16 @@ pub enum PresenceStatus {
     Offline,
 }
 
-/// One node's current presence snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Presence {
     pub node_id: String,
     pub pubkey: Option<String>,
     pub display_name: String,
     pub status: PresenceStatus,
-    /// game_id when status == InGame
     pub game_id: Option<String>,
     pub updated_at: DateTime<Utc>,
 }
 
-/// In-memory, process-local map of node ID → latest presence. Not persisted;
-/// resets on backend restart.
 #[derive(Clone, Default)]
 pub struct PresenceStore {
     inner: Arc<RwLock<HashMap<String, Presence>>>,
@@ -48,9 +34,6 @@ impl PresenceStore {
         Self::default()
     }
 
-    /// Records/replaces a node's presence. Only logs when the status
-    /// actually changes (e.g. Online -> InGame) — repeat heartbeats that
-    /// don't change anything stay silent so logs reflect real events.
     pub fn upsert(&self, p: Presence) {
         if let Ok(mut map) = self.inner.write() {
             let changed = map
@@ -64,11 +47,6 @@ impl PresenceStore {
         }
     }
 
-    /// Everyone not `Offline` and updated within the last
-    /// `ONLINE_FRESHNESS_SECS`. This is the sole detection mechanism for
-    /// "opponent went offline" (see `set_offline`'s doc comment) — kept short
-    /// so client-side disconnect detection (`OpponentLivenessState` in the
-    /// game client) resolves in a few seconds instead of ~15-19s.
     pub fn get_all_online(&self) -> Vec<Presence> {
         self.inner
             .read()
@@ -82,12 +60,10 @@ impl PresenceStore {
             .unwrap_or_default()
     }
 
-    /// Current presence for one node, regardless of staleness.
     pub fn get(&self, node_id: &str) -> Option<Presence> {
         self.inner.read().ok()?.get(node_id).cloned()
     }
 
-    /// Mark a node as offline (called on disconnect / heartbeat timeout).
     pub fn set_offline(&self, node_id: &str) {
         if let Ok(mut map) = self.inner.write() {
             if let Some(p) = map.get_mut(node_id) {
@@ -97,7 +73,6 @@ impl PresenceStore {
         }
     }
 
-    /// Sweep stale entries (>10 min old) — call from a background task.
     pub fn sweep_stale(&self) {
         if let Ok(mut map) = self.inner.write() {
             let cutoff = Utc::now() - chrono::Duration::minutes(10);
@@ -105,8 +80,6 @@ impl PresenceStore {
         }
     }
 
-    /// Count of players actually in a game right now (bot, local, P2P, or
-    /// Solana) — excludes players just sitting at the main menu.
     pub fn count_in_game(&self) -> usize {
         self.get_all_online()
             .iter()
@@ -114,10 +87,6 @@ impl PresenceStore {
             .count()
     }
 
-    /// Count of distinct real multiplayer games currently in progress,
-    /// deduped by `game_id`. Bot games and local hotseat never set
-    /// `game_id`, so they're naturally excluded — only sessions with a real
-    /// opponent (casual P2P or Solana wager/rated) count here.
     pub fn count_games_in_progress(&self) -> usize {
         let ids: std::collections::HashSet<String> = self
             .get_all_online()

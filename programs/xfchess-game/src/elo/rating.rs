@@ -1,16 +1,7 @@
-//! Rating unit conversions and per-time-control bucketing.
-//!
-//! On-chain `PlayerProfile.elo_rating` and linked external ratings are stored
-//! in centiscale: 1200 Elo is stored as 120000.
-
 use crate::errors::GameErrorCode;
 use crate::state::PlayerProfile;
 use anchor_lang::prelude::*;
 
-/// Which of `PlayerProfile`'s four rating fields a game's outcome updates.
-/// Mirrors `TimeCategory` in the game client's `src/game/time_control.rs`,
-/// collapsing `UltraBullet` into `Bullet` and `Unlimited` into `Classical` —
-/// the on-chain profile only tracks four buckets, not six.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RatingBucket {
     Bullet,
@@ -19,9 +10,6 @@ pub enum RatingBucket {
     Classical,
 }
 
-/// Buckets a game's base time control into a rating category. Thresholds
-/// match the client's `TimeControl::category()` exactly (seconds of base
-/// time per player; increment isn't a factor, same as the client).
 pub fn bucket_for_time_control(base_time_seconds: u64) -> RatingBucket {
     match base_time_seconds {
         0 => RatingBucket::Classical, // Unlimited/no-clock games
@@ -32,11 +20,6 @@ pub fn bucket_for_time_control(base_time_seconds: u64) -> RatingBucket {
     }
 }
 
-/// Mutable access to the rating field a bucket maps to, lazily seeding it to
-/// `INITIAL_ELO_CENTISCALE` on first touch (mirrors the pre-existing
-/// lazy-init for `elo_rating` in `account_ix::profile_init`) — a player's
-/// first-ever Bullet game shouldn't start from 0.0 just because they already
-/// have a Blitz rating.
 pub fn rating_field_mut(profile: &mut PlayerProfile, bucket: RatingBucket) -> &mut f64 {
     let field = match bucket {
         RatingBucket::Bullet => &mut profile.elo_bullet,
@@ -56,8 +39,6 @@ pub const INITIAL_ELO_CENTISCALE: u32 = INITIAL_ELO * RATING_SCALE;
 pub const MIN_EXTERNAL_ELO: u32 = 100;
 pub const MAX_EXTERNAL_ELO: u32 = 4000;
 
-/// Converts a display-scale external rating (e.g. a Lichess rating) to
-/// centiscale for on-chain storage, after validating it's in range.
 pub fn external_to_centiscale(rating: u32) -> Result<u32> {
     validate_external_rating(rating)?;
     rating
@@ -65,12 +46,10 @@ pub fn external_to_centiscale(rating: u32) -> Result<u32> {
         .ok_or_else(|| GameErrorCode::ArithmeticOverflow.into())
 }
 
-/// Converts a centiscale rating back to display scale (rounded), e.g. for UI rendering.
 pub fn centiscale_to_display(rating: f64) -> u32 {
     (rating / RATING_SCALE as f64).round() as u32
 }
 
-/// Rejects external ratings outside `MIN_EXTERNAL_ELO..=MAX_EXTERNAL_ELO`.
 pub fn validate_external_rating(rating: u32) -> Result<()> {
     require!(
         (MIN_EXTERNAL_ELO..=MAX_EXTERNAL_ELO).contains(&rating),

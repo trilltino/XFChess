@@ -1,57 +1,33 @@
-//! Action chaining for Solana Blinks onboarding flow.
-//!
-//! This module implements the "pro move" of action chaining (Alpenglow 2026 feature)
-//! for multi-step flows like wallet creation → funding → registration → viewing match.
-
 use serde::{Deserialize, Serialize};
 
-/// A single step in an action chain.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ChainStep {
-    /// Step number (1-indexed)
     pub step: u32,
-    /// Label for this step
     pub label: String,
-    /// Action to execute (URL or action type)
     pub action: ChainAction,
-    /// Whether this step is completed
     pub completed: bool,
 }
 
-/// Action types for chain steps.
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "data")]
 pub enum ChainAction {
-    /// Deep link to wallet app for wallet creation
     WalletCreation { deep_link: String },
-    /// Link to funding page
     Funding { url: String, amount_sol: f64 },
-    /// Link to validation endpoint
     Validation { url: String },
-    /// Link to registration endpoint
     Registration { url: String },
-    /// Link to view match/bracket
     ViewMatch { url: String },
-    /// Error action
     Error { message: String },
 }
 
-/// Complete action chain definition.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ActionChain {
-    /// Chain ID
     pub chain_id: String,
-    /// Chain name
     pub name: String,
-    /// Chain description
     pub description: String,
-    /// Steps in the chain
     pub steps: Vec<ChainStep>,
-    /// Current step index (0-indexed)
     pub current_step: usize,
 }
 
-/// Creates a registration action chain for users with existing wallets and SOL.
 pub fn create_registration_chain(tournament_id: u64, wallet_pubkey: &str) -> ActionChain {
     ActionChain {
         chain_id: format!("registration-{}", tournament_id),
@@ -90,7 +66,6 @@ pub fn create_registration_chain(tournament_id: u64, wallet_pubkey: &str) -> Act
     }
 }
 
-/// Creates an onboarding chain for users without wallets or SOL.
 pub fn create_onboarding_chain(
     tournament_id: u64,
     wallet_pubkey: Option<String>,
@@ -193,7 +168,6 @@ pub fn create_onboarding_chain(
     }
 }
 
-/// Marks a step as completed in the chain.
 pub fn complete_step(chain: &mut ActionChain, step_number: u32) -> Result<(), String> {
     let step_index = (step_number - 1) as usize;
     if step_index >= chain.steps.len() {
@@ -209,7 +183,6 @@ pub fn complete_step(chain: &mut ActionChain, step_number: u32) -> Result<(), St
     Ok(())
 }
 
-/// Gets the next action to execute in the chain.
 pub fn get_next_action(chain: &ActionChain) -> Option<&ChainStep> {
     if chain.current_step >= chain.steps.len() {
         None
@@ -218,7 +191,6 @@ pub fn get_next_action(chain: &ActionChain) -> Option<&ChainStep> {
     }
 }
 
-/// Checks if the chain is complete.
 pub fn is_chain_complete(chain: &ActionChain) -> bool {
     chain.steps.iter().all(|step| step.completed)
 }

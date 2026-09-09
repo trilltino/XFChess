@@ -1,16 +1,3 @@
-//! Integration tests for `complete_swiss_tournament`.
-//!
-//! Runs the real compiled program (`target/deploy/xfchess_game.so`) in-process
-//! via `solana-program-test`. Proves the gap flagged in `advance_round.rs`'s
-//! doc comment is actually closed: once every round has been played and
-//! `advance_round` has pushed `current_round` to `total_rounds`, a completely
-//! unrelated third party can crank `complete_swiss_tournament` to sort final
-//! standings and mark the tournament `Completed` — no tournament-authority
-//! signer, no backend process, involved.
-//!
-//! Build the `.so` first with:
-//!   cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml
-
 use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
 use solana_program_test::{
     BanksClientError, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
@@ -61,9 +48,6 @@ fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> Account {
     }
 }
 
-/// A 4-player, 2-round Swiss tournament, `Active`, with `current_round`
-/// already at `total_rounds` (as if both rounds had been played and
-/// `advance_round` cranked twice) so `complete_swiss_tournament` is eligible.
 fn tournament(fee_payer: Pubkey, bump: u8, current_round: u8) -> Tournament {
     Tournament {
         tournament_id: TOURNAMENT_ID,
@@ -119,9 +103,6 @@ fn tournament(fee_payer: Pubkey, bump: u8, current_round: u8) -> Tournament {
     }
 }
 
-/// Four players with distinct scores/tiebreakers so sort order is unambiguous:
-/// p1 wins outright on score, p2 beats p3 on Buchholz despite equal score,
-/// p4 is last.
 fn shard0(p1: Pubkey, p2: Pubkey, p3: Pubkey, p4: Pubkey) -> TournamentPlayersShard {
     TournamentPlayersShard {
         tournament_id: TOURNAMENT_ID,
@@ -270,10 +251,6 @@ async fn setup(
     .await
 }
 
-/// The property this feature exists for: a Swiss tournament with all rounds
-/// played can be finalized by a completely unrelated third-party cranker, and
-/// the resulting placements match the on-chain standings' score/Buchholz/
-/// Sonneborn ordering.
 #[tokio::test]
 async fn completes_and_ranks_by_score_then_tiebreakers() {
     let p1 = Keypair::new();
@@ -312,8 +289,6 @@ async fn completes_and_ranks_by_score_then_tiebreakers() {
     assert_eq!(t.fifth_place, None);
 }
 
-/// Calling before the last round has been advanced must fail — otherwise a
-/// tournament could be paid out and closed while rounds are still in play.
 #[tokio::test]
 async fn rejects_completion_before_final_round_advances() {
     let p1 = Keypair::new();

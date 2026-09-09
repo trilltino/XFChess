@@ -1,14 +1,3 @@
-//! Integration-level coverage for `ClaimTimeout` (docs/PRE_MAINNET_E2E_PLAN.md
-//! §1.3). `lifecycle::terminal::finish_by_timeout`'s pure-function branches
-//! already have unit coverage in `terminal.rs`, but nothing previously drove
-//! the *instruction* itself through the real `Clock` sysvar — this exercises
-//! the full `ClaimTimeout` dispatch (permissionless caller, on-chain
-//! `Clock::get()`, PDA lookup) for the two branches the existing
-//! `er_delegation_tests.rs` test doesn't cover: the `TimeoutNotExpired`
-//! rejection, and the mirror parity (black timed out -> white wins).
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use anchor_lang::Space;
@@ -25,8 +14,6 @@ const GAME_ID: u64 = 90_001;
 // no longer proportional to base time.
 const BASE_TIME_SECONDS: u64 = 300;
 
-/// A timed, active game with caller-controlled `updated_at`/`turn`, so the
-/// test can place it on either side of the inactivity window.
 fn timed_active_game(
     white: Pubkey,
     black: Pubkey,

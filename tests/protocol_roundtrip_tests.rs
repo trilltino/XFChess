@@ -1,11 +1,3 @@
-//! Wire + signing round-trips for the P2P `NetworkMessage`.
-//!
-//! Complements the sign/verify unit tests in
-//! `src/multiplayer/network/protocol.rs` by proving the *serialized* envelope
-//! survives a JSON round-trip and still verifies — i.e. a signed message can be
-//! sent over the wire and validated by the receiver. `NetworkMessage` has no
-//! `PartialEq`, so structural equality is checked by re-serialization.
-
 use xfchess::multiplayer::network::protocol::{NetworkMessage, SignedNetworkMessage};
 
 fn test_key() -> [u8; 32] {
@@ -73,12 +65,6 @@ fn resign_message_signs_serializes_and_verifies() {
     assert_eq!(received.msg.game_id(), 99);
 }
 
-/// The Rust field was renamed `agent_id` → `signer_pubkey` (the old name
-/// described the iroh NodeId, which is not what it carries). The *wire* name
-/// must not change: a renamed JSON key would make an upgraded client's moves
-/// undecodable to a peer on the old build, and `#[serde(default)]` would
-/// silently fill an empty key rather than erroring — i.e. every move would
-/// fail the receiver's roster check instead of failing loudly.
 #[test]
 fn signer_pubkey_still_serializes_under_the_legacy_wire_name() {
     let json = serde_json::to_string(&move_msg()).expect("serialize");

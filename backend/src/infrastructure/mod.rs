@@ -1,5 +1,3 @@
-//! Backend infrastructure for storage, routing, authentication, tasks, and development tools.
-
 pub mod auth_middleware;
 pub mod database;
 pub mod ngrok;

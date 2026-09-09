@@ -1,8 +1,3 @@
-//! Exchange rate endpoints for fiat-crypto conversion.
-//!
-//! Provides cached SOL rates for multiple fiat currencies (USD, GBP, EUR, CAD, BRL)
-//! so the frontend can display accurate wager tiers and dashboard metrics.
-
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -14,27 +9,13 @@ use tracing::{error, info};
 
 use crate::telemetry::worker_metrics;
 
-/// A SOL/USD price outside this band is virtually certainly a bug (bad
-/// decimal/expo parsing, a corrupted upstream feed) rather than reality —
-/// reject rather than let it flow into a real fee calculation.
 const SOL_USD_SANITY_MIN: f64 = 1.0;
 const SOL_USD_SANITY_MAX: f64 = 10_000.0;
 
-/// Flat platform fee charged per wagered game: 10p per player × 2 players.
-/// The single source of truth for this figure — both `create_session` (the
-/// legacy per-game path) and `get_platform_fee` (the global-session path,
-/// which has no session-creation round-trip to piggyback the fee on) convert
-/// it via the same `RateCache::gbp_to_lamports` call so it can't drift
-/// between the two flows.
 pub const PLATFORM_FEE_GBP: f64 = 0.20;
 
-/// Relative difference between the primary and secondary sources' SOL/USD
-/// rate above which we log+count the disagreement as an anomaly worth
-/// investigating. Two independent live-quote providers normally agree
-/// within a fraction of a percent.
 const DIVERGENCE_ALERT_THRESHOLD: f64 = 0.03;
 
-/// Cached rate entry with TTL.
 #[derive(Clone, Debug)]
 struct CachedRates {
     rates: HashMap<String, f64>,
@@ -47,7 +28,6 @@ impl CachedRates {
     }
 }
 
-/// In-memory cache for SOL/Fiat rates (backend-process-local).
 #[derive(Clone)]
 pub struct RateCache {
     inner: Arc<RwLock<Option<CachedRates>>>,
@@ -64,8 +44,6 @@ impl Default for RateCache {
 }
 
 impl RateCache {
-    /// Convert a GBP amount to lamports using the live SOL/GBP rate.
-    /// Returns `None` if the rate is unavailable.
     pub async fn gbp_to_lamports(&self, gbp: f64) -> Option<u64> {
         let rates = self.get().await.ok()?;
         let gbp_per_sol = rates.get("gbp")?;
@@ -76,7 +54,6 @@ impl RateCache {
         Some((sol_amount * 1_000_000_000.0).round() as u64)
     }
 
-    /// Get the current rates. Returns stale cache on fetch failure rather than erroring.
     pub async fn get(&self) -> Result<HashMap<String, f64>, String> {
         // Fast path: fresh cache
         {
@@ -137,11 +114,6 @@ impl RateCache {
         }
     }
 
-    /// Refreshes the cache on a fixed interval regardless of request traffic,
-    /// so payment-critical call sites (tournament/session creation) never
-    /// block on a live external fetch and a fetch outage is caught proactively
-    /// via `[RATES]` error logs / the `xfchess_rates_fetch_failed_total` metric
-    /// instead of surfacing as a slow or failed player-facing request.
     pub fn spawn_background_refresh(&self) {
         let cache = self.clone();
         tokio::spawn(async move {
@@ -157,9 +129,6 @@ impl RateCache {
     }
 }
 
-/// Rejects a rate map whose SOL/USD figure falls outside a plausible band —
-/// catches a parsing bug or a broken upstream feed before it reaches a real
-/// fee calculation. Also rejects non-finite or non-positive values.
 fn validate_rates(rates: HashMap<String, f64>) -> Result<HashMap<String, f64>, String> {
     let sol_usd = *rates
         .get("usd")
@@ -181,10 +150,6 @@ fn validate_rates(rates: HashMap<String, f64>) -> Result<HashMap<String, f64>, S
     Ok(rates)
 }
 
-/// Logs (and counts) a wide disagreement between the two independent sources.
-/// Deliberately does not pick a side — auto-resolving a disagreement is its
-/// own risk vector; the safe response to "our sources disagree" is a paged
-/// human, with the trusted primary still served in the meantime.
 fn check_divergence(primary: &HashMap<String, f64>, secondary: &HashMap<String, f64>) {
     for (currency, p) in primary {
         let Some(s) = secondary.get(currency) else {
@@ -208,8 +173,6 @@ fn check_divergence(primary: &HashMap<String, f64>, secondary: &HashMap<String, 
     }
 }
 
-/// Primary source: SOL/USD from Helius (or CoinGecko fallback), converted to
-/// each fiat currency via frankfurter.app FX rates. Two-hop chain.
 async fn fetch_primary_rates() -> Result<HashMap<String, f64>, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -236,10 +199,6 @@ async fn fetch_primary_rates() -> Result<HashMap<String, f64>, String> {
     Ok(rates)
 }
 
-/// Secondary source: CoinGecko's own direct multi-currency pricing in a
-/// single call. Independent of the primary's two-hop (SOL/USD × FX) chain —
-/// genuine redundancy, not just a fallback that shares a failure mode with
-/// the primary's own CoinGecko-as-SOL/USD-fallback path.
 async fn fetch_secondary_rates_coingecko() -> Result<HashMap<String, f64>, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -283,9 +242,6 @@ async fn fetch_secondary_rates_coingecko() -> Result<HashMap<String, f64>, Strin
     Ok(rates)
 }
 
-/// Fetch SOL/USD spot price from Helius token-price API.
-/// Skips straight to the CoinGecko fallback when HELIUS_API_KEY is unset —
-/// never ship a hardcoded key in source.
 async fn fetch_sol_usd_helius(client: &reqwest::Client) -> Result<f64, String> {
     // Try Helius first when a key is configured (never hardcode a key in source);
     // otherwise go straight to the CoinGecko fallback below.
@@ -336,8 +292,6 @@ async fn fetch_sol_usd_helius(client: &reqwest::Client) -> Result<f64, String> {
         .ok_or_else(|| "CoinGecko: missing solana/usd".to_string())
 }
 
-/// Fetch USD FX rates from frankfurter.app (free, no key).
-/// Returns a map of currency code (uppercase) → amount of that currency per 1 USD.
 async fn fetch_usd_fx_rates(client: &reqwest::Client) -> Result<HashMap<String, f64>, String> {
     const URL: &str = "https://api.frankfurter.app/latest?from=USD&to=GBP,EUR,CAD,BRL";
 
@@ -372,18 +326,13 @@ async fn fetch_usd_fx_rates(client: &reqwest::Client) -> Result<HashMap<String, 
     Ok(out)
 }
 
-/// Response payload for /api/rates/all.
 #[derive(Serialize)]
 pub struct ExchangeRatesResponse {
-    /// Map of currency code to its price per 1 SOL (e.g., {"usd": 150.5, "gbp": 120.2}).
     pub rates: HashMap<String, f64>,
-    /// Map of currency code to SOL per 1 unit of fiat (reciprocal).
     pub sol_per_fiat: HashMap<String, f64>,
-    /// Timestamp when rate was fetched (Unix seconds).
     pub fetched_at: i64,
 }
 
-/// GET /api/rates/all — cached SOL exchange rates for multiple currencies.
 async fn get_all_rates(
     State(app_state): State<crate::signing::AppState>,
 ) -> axum::response::Response {
@@ -420,7 +369,6 @@ async fn get_all_rates(
     }
 }
 
-/// Legacy GET /api/rates/sol-gbp — cached SOL/GBP exchange rate (backward compatibility).
 #[derive(Serialize)]
 pub struct SolGbpResponse {
     pub sol_per_gbp: f64,
@@ -451,17 +399,11 @@ async fn get_sol_gbp_rate(
     }
 }
 
-/// Response payload for /api/rates/platform-fee.
 #[derive(Serialize)]
 pub struct PlatformFeeResponse {
     pub platform_fee_lamports: u64,
 }
 
-/// GET /api/rates/platform-fee — the flat per-game platform fee (`PLATFORM_FEE_GBP`),
-/// converted to lamports at the live SOL/GBP rate. Lets the global-session
-/// create-game path charge the same fee the legacy path already does via
-/// `create_session`, without needing to create a per-game backend session
-/// just to learn the number.
 async fn get_platform_fee(
     State(app_state): State<crate::signing::AppState>,
 ) -> Result<Json<PlatformFeeResponse>, StatusCode> {
@@ -475,8 +417,6 @@ async fn get_platform_fee(
     }))
 }
 
-/// Builds the rates router (no auth required — public rate feed).
-/// State is provided by the parent router's `.with_state(AppState)`.
 pub fn rates_routes() -> Router<crate::signing::AppState> {
     Router::new()
         .route("/all", get(get_all_rates))

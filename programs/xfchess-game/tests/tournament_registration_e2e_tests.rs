@@ -1,18 +1,3 @@
-//! Instruction-level (`ProgramTest`) verification of `register_player` — the
-//! actual on-chain call the game client's tournament "Join" button submits
-//! (`src/multiplayer/solana/tournament_session.rs::build_register_player_ix`,
-//! `src/multiplayer/solana/tournament.rs::register_tournament`).
-//!
-//! This exists because the game client used to have a stub here
-//! (`register_tournament` just returned `Ok(0)` without ever submitting a
-//! transaction) — no player has ever had an entry fee collected on-chain by
-//! joining a tournament through the shipped game. This test proves the fixed
-//! client-side account layout is exactly what the real, compiled program
-//! accepts: real entry fee deposit into escrow, real shard membership.
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md) — already satisfied if
-//! `target/deploy/xfchess_game.so` exists and is current.
-
 mod common;
 
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
@@ -66,11 +51,6 @@ fn init_profile_ix(player: &Pubkey, username: &str) -> Instruction {
     }
 }
 
-/// This mirrors `build_register_player_ix` in
-/// `src/multiplayer/solana/tournament_session.rs` field-for-field, but built
-/// via Anchor's own generated `to_account_metas` — an independent,
-/// authoritative check that the client's manually-assembled account list
-/// (order + is_writable/is_signer flags) is actually correct.
 fn register_player_ix(
     tournament_id: u64,
     player: &Pubkey,
@@ -99,10 +79,6 @@ fn register_player_ix(
     }
 }
 
-/// The devnet vps_authority keypair, matching the hardcoded on-chain constraint
-/// (constants::vps_authority::ID) every privileged tournament instruction checks.
-/// Not committed to the repo (see keys/KEYS_README.md) — returns None (test skips
-/// the signing path) when it isn't present (e.g. CI).
 fn vps_authority_keypair() -> Option<Keypair> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../keys/vps_authority.json");
     read_keypair_file(path).ok()

@@ -1,4 +1,3 @@
-//! Client-side Braid Multiplexing implementation.
 #![cfg(not(target_arch = "wasm32"))]
 
 use crate::error::{BraidError, Result};
@@ -8,7 +7,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Manages a multiplexed connection to a Braid server.
 pub struct Multiplexer {
     pub id: String,
     requests: Arc<Mutex<HashMap<String, MultiplexedRequestState>>>,

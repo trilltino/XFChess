@@ -3,7 +3,6 @@ use rand::prelude::*;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 
-/// Fuzz the message parser with arbitrary random bytes.
 fn fuzz_parser_with_random_bytes(seed: u64) {
     let mut rng = SmallRng::seed_from_u64(seed);
     let mut parser = MessageParser::new();
@@ -21,7 +20,6 @@ fn fuzz_parser_with_random_bytes(seed: u64) {
     }
 }
 
-/// Helper to generate a semi-valid Braid message with mutations.
 fn generate_semi_valid_message(rng: &mut SmallRng) -> Vec<u8> {
     let mut msg = Vec::new();
 
@@ -51,7 +49,6 @@ fn generate_semi_valid_message(rng: &mut SmallRng) -> Vec<u8> {
     msg
 }
 
-/// Fuzz the parser with semi-valid messages.
 fn fuzz_parser_with_mutated_messages(seed: u64) {
     let mut rng = SmallRng::seed_from_u64(seed);
     let mut parser = MessageParser::new();

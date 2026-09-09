@@ -1,17 +1,8 @@
-//! Graphics quality settings application
-//!
-//! Applies graphics quality presets to cameras and lights based on GameSettings.
-
 use crate::core::GameSettings;
 use bevy::pbr::ScreenSpaceAmbientOcclusion;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 
-/// System that applies graphics quality settings to cameras
-///
-/// Watches for changes to `GameSettings.graphics_quality` and updates:
-/// - Bloom component on cameras
-/// - ScreenSpaceAmbientOcclusion component on cameras
 pub fn apply_graphics_quality_camera_system(
     settings: Res<GameSettings>,
     mut camera_query: Query<
@@ -57,9 +48,6 @@ pub fn apply_graphics_quality_camera_system(
     );
 }
 
-/// System that updates graphics quality settings on existing cameras
-///
-/// Updates cameras that already have Bloom or SSAO components when quality changes.
 pub fn update_graphics_quality_camera_system(
     settings: Res<GameSettings>,
     mut bloom_query: Query<Entity, (With<Camera3d>, With<Bloom>)>,
@@ -105,7 +93,6 @@ pub fn update_graphics_quality_camera_system(
     );
 }
 
-/// System that applies shadow settings to lights based on graphics quality
 pub fn apply_graphics_quality_lights_system(
     settings: Res<GameSettings>,
     mut directional_lights: Query<&mut DirectionalLight>,

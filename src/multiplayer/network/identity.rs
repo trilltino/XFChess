@@ -1,35 +1,15 @@
-//! Stable Iroh node key persistence.
-//!
-//! Stored at `$config_dir/xfchess/node_key` as 32 raw bytes.
-//! On first run a random key is generated and saved; subsequent runs
-//! reload it so the node ID stays constant across restarts and wallet
-//! changes — the **social identity anchor**.
-
 use iroh::SecretKey;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tracing::{info, warn};
 
-/// Arbitrary fixed loopback port used purely as an OS-level exclusivity
-/// mutex — never actually served. Binding it is how a process claims
-/// "I am the one persisted node identity on this machine right now".
 const IDENTITY_MUTEX_PORT: u16 = 47771;
 
-/// Holds the bound listener for the process's lifetime when we're the
-/// primary instance. Never accepted on; its only job is to keep the port
-/// held so a second launch's bind attempt fails. The OS reclaims it
-/// automatically on exit or crash — no stale-lock cleanup needed, unlike a
-/// PID file.
 static IDENTITY_MUTEX: OnceLock<Option<TcpListener>> = OnceLock::new();
 
-/// A same-process-only identity used when another instance already holds
-/// the persisted one. Cached so repeated calls to `load_or_create()` within
-/// this process return the same key instead of a fresh random one each time.
 static FALLBACK_KEY: OnceLock<SecretKey> = OnceLock::new();
 
-/// True if this process holds the persisted node identity (i.e. no other
-/// instance was already running when we started).
 fn is_primary_instance() -> bool {
     IDENTITY_MUTEX
         .get_or_init(|| TcpListener::bind(("127.0.0.1", IDENTITY_MUTEX_PORT)).ok())
@@ -60,13 +40,6 @@ fn key_path() -> PathBuf {
     base.join("node_key")
 }
 
-/// Load the persisted node secret key, or generate + save a new one.
-///
-/// If another instance is already running on this machine and holds the
-/// persisted identity, returns a same-process-only fallback key instead —
-/// two live instances sharing one node ID isn't a config a player can even
-/// see, let alone fix, and it silently breaks P2P between them (the relay
-/// rejects the second connection as a duplicate endpoint).
 pub fn load_or_create() -> SecretKey {
     if !is_primary_instance() {
         return FALLBACK_KEY
@@ -108,7 +81,6 @@ pub fn load_or_create() -> SecretKey {
     key
 }
 
-/// Return the base58-encoded public node ID (matches the Iroh `EndpointId` format).
 pub fn node_id_b58() -> String {
     let key = load_or_create();
     let public = key.public();
@@ -133,10 +105,6 @@ fn guest_username_path() -> PathBuf {
     base.join("guest_username")
 }
 
-/// Load the locally-cached Guest display name, if one was ever saved. Guest
-/// identity has no account and no server-side record — this is purely a
-/// per-device display name shown to P2P peers. See
-/// docs/plans/identity-implementation-plan.md.
 pub fn load_guest_username() -> Option<String> {
     std::fs::read_to_string(guest_username_path())
         .ok()
@@ -144,7 +112,6 @@ pub fn load_guest_username() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Persist the Guest display name for next launch.
 pub fn save_guest_username(name: &str) {
     if let Err(e) = std::fs::write(guest_username_path(), name.trim()) {
         warn!("[identity] Failed to save guest_username: {e}");
@@ -235,7 +202,6 @@ fn write_profiles_file(file: &ProfilesFile) {
     }
 }
 
-/// Names of every local profile ever created, in creation order.
 pub fn list_profiles() -> Vec<String> {
     read_profiles_file()
         .profiles
@@ -244,13 +210,10 @@ pub fn list_profiles() -> Vec<String> {
         .collect()
 }
 
-/// The profile active as of the last launch, if any.
 pub fn load_active_profile() -> Option<String> {
     read_profiles_file().active
 }
 
-/// Create a new local profile (no-op if the name already exists) and make it
-/// the active one. Also ensures its PGN subfolder exists.
 pub fn create_profile(name: &str, save_path: Option<PathBuf>) {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -271,7 +234,6 @@ pub fn create_profile(name: &str, save_path: Option<PathBuf>) {
     ensure_profile_pgn_dir(&name);
 }
 
-/// Switch the active profile to an already-existing name (no-op if unknown).
 pub fn set_active_profile(name: &str) {
     let mut file = read_profiles_file();
     if !file.profiles.iter().any(|p| p.name == name) {
@@ -283,9 +245,6 @@ pub fn set_active_profile(name: &str) {
     ensure_profile_pgn_dir(name);
 }
 
-/// Filesystem-safe folder name for a profile — replaces path separators and
-/// other characters that would otherwise escape `profiles/` or fail on
-/// Windows.
 fn sanitize_profile_name(name: &str) -> String {
     name.chars()
         .map(|c| {
@@ -298,8 +257,6 @@ fn sanitize_profile_name(name: &str) -> String {
         .collect()
 }
 
-/// PGN save folder for a given profile, e.g.
-/// `Documents/xfchess/profiles/<name>/`. Created on demand.
 pub fn profile_pgn_dir(name: &str) -> PathBuf {
     let file = read_profiles_file();
     if let Some(profile) = file.profiles.iter().find(|p| p.name == name) {
@@ -312,7 +269,6 @@ pub fn profile_pgn_dir(name: &str) -> PathBuf {
         .join(sanitize_profile_name(name))
 }
 
-/// Delete a profile from the saved list. Does not delete their PGN folder.
 pub fn delete_profile(name: &str) {
     let mut file = read_profiles_file();
     file.profiles.retain(|p| p.name != name);

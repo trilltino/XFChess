@@ -1,5 +1,3 @@
-//! Delegation and Ephemeral Rollup integration instructions.
-
 pub mod delegate;
 pub mod force_recovery;
 pub mod session;

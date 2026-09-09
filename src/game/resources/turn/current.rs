@@ -1,43 +1,6 @@
-//! Turn tracking resource
-//!
-//! Manages the current player's turn and move counter for chess games.
-//! This resource is the single source of truth for whose turn it is.
-//!
-//! # Architecture
-//!
-//! - Uses Bevy's `Resource` pattern for global game state
-//! - Implements `Reflect` for inspector integration
-//! - Move number increments only when White completes their turn
-//!
-//! # Turn Flow
-//!
-//! ```text
-//! Move 1: White plays → switch() → Black plays → switch() → Move 2: White plays
-//! ```
-//!
-//! # Reference
-//!
-//! Standard chess turn tracking following FIDE rules where White moves first
-//! and move numbers increment after Black's move completes.
-//!
-//! For usage examples, see `tests/resources/turn_tests.rs`
-
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
 
-/// Tracks whose turn it currently is and the current move number
-///
-/// # Fields
-///
-/// - `color`: The player who should move next (White or Black)
-/// - `move_number`: Current move number in chess notation (starts at 1)
-///
-/// # Move Counting
-///
-/// Move numbers follow standard chess notation:
-/// - Move 1: White's first move and Black's response
-/// - Move 2: White's second move and Black's response
-/// - Increments only after White completes their turn
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Reflect)]
 #[reflect(Resource)]
 pub struct CurrentTurn {
@@ -55,13 +18,6 @@ impl Default for CurrentTurn {
 }
 
 impl CurrentTurn {
-    /// Switch to the other player's turn
-    ///
-    /// Increments the move number only when switching from White to Black,
-    /// following standard chess notation where a "move" consists of both
-    /// White's and Black's turns.
-    ///
-    /// For usage examples, see `tests/resources/turn_tests.rs`
     pub fn switch(&mut self) {
         self.color = match self.color {
             PieceColor::White => PieceColor::Black,
@@ -73,10 +29,6 @@ impl CurrentTurn {
     }
 }
 
-/// Resource to track the current game phase
-///
-/// Wraps the `GamePhase` component to provide global access to the current
-/// game state (Playing, Check, Checkmate, Stalemate).
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Reflect)]
 #[reflect(Resource)]
 pub struct CurrentGamePhase(pub crate::game::components::GamePhase);
@@ -93,7 +45,6 @@ mod tests {
 
     #[test]
     fn test_current_turn_default() {
-        //! Verifies that games start with White to move on move 1
         let turn = CurrentTurn::default();
         assert_eq!(turn.color, PieceColor::White);
         assert_eq!(turn.move_number, 1);
@@ -101,7 +52,6 @@ mod tests {
 
     #[test]
     fn test_turn_switch_white_to_black() {
-        //! Tests switching from White to Black stays on same move number
         let mut turn = CurrentTurn::default();
         turn.switch();
 
@@ -114,7 +64,6 @@ mod tests {
 
     #[test]
     fn test_turn_switch_black_to_white() {
-        //! Tests switching from Black to White increments the move number
         let mut turn = CurrentTurn {
             color: PieceColor::Black,
             move_number: 1,
@@ -130,7 +79,6 @@ mod tests {
 
     #[test]
     fn test_multiple_turn_switches() {
-        //! Verifies correct turn tracking over multiple moves
         let mut turn = CurrentTurn::default();
 
         // Move 1: White → Black
@@ -156,7 +104,6 @@ mod tests {
 
     #[test]
     fn test_current_turn_clone() {
-        //! Verifies CurrentTurn can be cloned correctly
         let turn1 = CurrentTurn {
             color: PieceColor::Black,
             move_number: 42,
@@ -170,7 +117,6 @@ mod tests {
 
     #[test]
     fn test_current_game_phase_default() {
-        //! Verifies game phase defaults to Playing
         let phase = CurrentGamePhase::default();
         assert_eq!(phase.0, crate::game::components::GamePhase::Playing);
     }

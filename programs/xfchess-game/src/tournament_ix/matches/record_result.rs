@@ -1,6 +1,3 @@
-//! Instruction resolving an individual tournament game to advance players.
-//! Supports dynamic single-elimination brackets of any size.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -23,8 +20,6 @@ pub struct RecordMatchResult<'info> {
         bump = tournament_match.bump
     )]
     pub tournament_match: Account<'info, TournamentMatch>,
-    /// The tournament authority is the trusted source of match results (results
-    /// are not verified against an on-chain game account by design).
     #[account(mut)]
     pub authority: Signer<'info>,
 }
@@ -82,8 +77,6 @@ pub fn handler(
     Ok(())
 }
 
-/// Instruction to advance a winner from a completed match to the next round.
-/// Used by the backend to populate the next match after recording a result.
 #[derive(Accounts)]
 #[instruction(tournament_id: u64, source_match_index: u16, target_match_index: u16)]
 pub struct AdvanceWinner<'info> {

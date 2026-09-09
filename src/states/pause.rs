@@ -1,14 +1,8 @@
-//! Pause menu plugin
-//!
-//! Displayed when pressing ESC during gameplay.
-//! Allows resuming, accessing settings, or returning to main menu.
-
 use crate::core::{GameState, PreviousState};
 use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 
-/// Plugin for pause menu state
 pub struct PausePlugin;
 
 impl Plugin for PausePlugin {
@@ -25,7 +19,6 @@ impl Plugin for PausePlugin {
     }
 }
 
-/// Wrapper for pause_ui that handles Result
 fn pause_ui_wrapper(
     contexts: EguiContexts,
     next_state: ResMut<NextState<GameState>>,
@@ -34,13 +27,9 @@ fn pause_ui_wrapper(
     let _ = pause_ui(contexts, next_state, previous_state);
 }
 
-/// Marker component for pause camera
 #[derive(Component)]
 struct PauseCamera;
 
-/// Setup camera for pause screen
-/// Uses the persistent Egui camera and updates its transform
-/// Handles case where camera might not exist yet
 fn setup_pause_camera(
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut camera_query: Query<
@@ -90,7 +79,6 @@ fn setup_pause_camera(
     info!("[PAUSE] Camera setup complete");
 }
 
-/// Handle ESC key - return to main menu from pause
 fn handle_pause_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut next_state: ResMut<NextState<GameState>>,
@@ -101,7 +89,6 @@ fn handle_pause_input(
     }
 }
 
-/// Pause menu UI
 fn pause_ui(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,

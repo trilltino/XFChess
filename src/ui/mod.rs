@@ -1,7 +1,3 @@
-//! UI component entry point
-//!
-//! Assembles all Bevy Egui plugin logic for the application.
-
 pub mod account;
 pub mod game;
 pub mod menus;

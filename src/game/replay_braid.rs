@@ -1,24 +1,8 @@
-//! Convert a Braid move log into a PGN game and load it into PgnReplayState.
-//!
-//! After any multiplayer game ends the Braid move log stored by BraidIrohNode
-//! contains the full ordered sequence of MovePayload values.  This module
-//! converts that log into a ParsedPgnGame by:
-//!   1. Parsing each UCI string via nimzovich_engine::parse_uci
-//!   2. Generating SAN via nimzovich_engine::move_to_san (before applying the move)
-//!   3. Applying the move so the engine stays in sync
-//!
-//! The resulting ParsedPgnGame can be inserted as ParsedPgnGameResource and the
-//! existing replay UI plays it back immediately (no PGN text round-trip needed).
-
 use braid_chess::MovePayload;
 use nimzovich_engine::{do_move_with_promo, move_to_san, new_game_no_tt, parse_uci, ParsedPgnGame};
 use std::collections::BTreeMap;
 use tracing::{info, warn};
 
-/// Convert an ordered slice of [`MovePayload`] values into a [`ParsedPgnGame`].
-///
-/// Builds the SAN move list and PGN tags directly without going through a PGN text string.
-/// Returns `None` if the move log is empty or any move fails to parse.
 pub fn braid_move_log_to_parsed_pgn(
     moves: &[MovePayload],
     white_name: &str,
@@ -28,10 +12,6 @@ pub fn braid_move_log_to_parsed_pgn(
     braid_move_log_to_parsed_pgn_rated(moves, white_name, black_name, None, None, result)
 }
 
-/// Same as [`braid_move_log_to_parsed_pgn`], but also stamps `WhiteElo`/
-/// `BlackElo` tags when the wallet's on-chain ELO is known (Solana PVP).
-/// Local/offline games pass `None` for both and get no rating tags, matching
-/// standard PGN practice of omitting Elo tags rather than faking a value.
 #[allow(clippy::too_many_arguments)]
 pub fn braid_move_log_to_parsed_pgn_rated(
     moves: &[MovePayload],
@@ -107,10 +87,6 @@ pub fn braid_move_log_to_parsed_pgn_rated(
     })
 }
 
-/// Build a PGN text string from a Braid move log.
-///
-/// Convenience wrapper around [`braid_move_log_to_parsed_pgn`] for cases where
-/// the raw PGN text is needed (e.g., clipboard copy, file export).
 pub fn braid_move_log_to_pgn_text(
     moves: &[MovePayload],
     white_name: &str,

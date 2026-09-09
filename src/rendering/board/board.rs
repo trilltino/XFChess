@@ -1,8 +1,3 @@
-//! Board creation and rendering
-//!
-//! Uses batch spawning pattern from Bevy examples (many_sprites.rs, bevymark.rs)
-//! to efficiently create all 64 board squares in a single operation.
-
 use crate::game::systems::camera::BOARD_LAYER;
 use crate::game::systems::input::on_square_click;
 use crate::game::view_mode::ViewMode;
@@ -15,12 +10,9 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct Board;
 
-/// Component marking a 3D visual element of a board square
 #[derive(Component)]
 pub struct BoardSquare3DVisual;
 
-/// Invisible flat hit plane — sole pick target for a board square in all view modes.
-/// Sits just above the cuboid top (Y=0.06), covers the full 1×1 cell.
 #[derive(Component)]
 pub struct BoardSquareHitPlane;
 
@@ -83,8 +75,7 @@ pub fn create_board(
         })
         .collect();
 
-    for (transform, square, board, name, exit, m3d, mat3d, m_hit, mat_hit_cell) in squares
-    {
+    for (transform, square, board, name, exit, m3d, mat3d, m_hit, mat_hit_cell) in squares {
         commands
             .spawn((
                 transform,

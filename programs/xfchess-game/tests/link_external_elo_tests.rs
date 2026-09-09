@@ -1,13 +1,3 @@
-//! Proves `LichessUsernameRecord` actually enforces one-Lichess-username-
-//! per-wallet through the real compiled program: before this fix,
-//! `link_external_elo` had no on-chain uniqueness protection at all, unlike
-//! local in-game usernames (`UsernameRecord`) — the same Lichess handle
-//! (and the external ELO it seeds) could be attached to any number of
-//! different wallets' profiles. See `LichessUsernameRecord`'s own doc
-//! comment for the full writeup.
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
@@ -71,12 +61,6 @@ fn link_external_elo_ix(
     }
 }
 
-/// Loads the real `link_authority` keypair from the gitignored keyfile —
-/// same pattern `treasury_tests.rs`/`tournament_registration_e2e_tests.rs`
-/// already use for their own authorities. The instruction hard-constrains
-/// `address = link_authority::ID` (`constants.rs`), so no other key can
-/// sign this successfully; tests skip gracefully when the file isn't
-/// present (e.g. a fresh clone/CI) rather than failing.
 fn link_authority_keypair() -> Option<Keypair> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),

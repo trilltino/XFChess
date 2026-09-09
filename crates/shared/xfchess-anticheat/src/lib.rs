@@ -1,10 +1,3 @@
-//! Server-side, post-game anti-cheat analysis. Takes a finished game
-//! (`ingest::GameRecord`), runs a Stockfish subprocess over every ply,
-//! extracts behavioral features (accuracy, timing, blur, complexity), scores
-//! them against ELO-calibrated baselines, and produces a structured
-//! `AcReport` plus cross-game per-player evidence. See the crate README for
-//! the full pipeline diagram and module map.
-
 pub mod config;
 pub mod cross_game;
 pub mod elo_baseline;
@@ -27,8 +20,6 @@ use error::AcResult;
 use features::{accuracy, blur, complexity, timing};
 use types::{AcReport, GameRecord, PlyEval, SideAnalysis, SignalValues};
 
-/// Analyse a single game with Stockfish.  This is a blocking-ish call that
-/// runs a Stockfish subprocess for the duration — call it from a worker task.
 pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport> {
     // Spawn a Stockfish process for this analysis
     let sf_path = cfg.stockfish_path.clone();
@@ -86,8 +77,6 @@ pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport
     })
 }
 
-/// Run Stockfish over every ply, returning white_evals and black_evals.
-/// White plays even plies (0, 2, 4…), black plays odd plies.
 fn evaluate_all_plies(
     sf: &mut StockfishHandle,
     game: &GameRecord,
@@ -143,11 +132,6 @@ fn evaluate_all_plies(
     Ok((white_evals, black_evals))
 }
 
-/// Evaluate the position reached *after* the played move, from the mover's
-/// perspective. Stockfish's `top1_cp` is always from the side-to-move's
-/// perspective, and after the move it's the opponent's turn — negate to flip
-/// it back to the mover's perspective. This is one operand of the CPL
-/// subtraction in [`cpl_from_evals`], not CPL itself.
 fn eval_after_played_move(
     sf: &mut StockfishHandle,
     fen_after: &str,
@@ -163,10 +147,6 @@ fn eval_after_played_move(
     }
 }
 
-/// Centipawn loss for one ply: best-move eval before the move minus the eval
-/// of the position actually reached, clamped to non-negative (Stockfish can
-/// occasionally score the played continuation marginally higher than its
-/// pre-move top line on a deeper follow-up search).
 fn cpl_from_evals(best_before_cp: i32, played_after_cp: i32) -> i32 {
     (best_before_cp - played_after_cp).max(0)
 }

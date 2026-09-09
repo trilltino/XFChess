@@ -1,11 +1,3 @@
-//! In-game online chat — state + inline rendering for the left game-info panel.
-//!
-//! Systems:
-//!  - `drain_chat_messages` - drains `OnlineChatMessage` events into `ChatState.history`
-//!
-//! Rendering happens inline inside `crate::ui::game::left_panel::render_game_left_panel`
-//! via `render_chat_section`, not as a standalone floating window.
-
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -14,7 +6,6 @@ use crate::multiplayer::traits::MessageReader;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-/// One received or sent chat line.
 #[derive(Debug, Clone)]
 pub struct ChatEntry {
     pub player: String,
@@ -22,11 +13,9 @@ pub struct ChatEntry {
     pub timestamp_ms: u64,
 }
 
-/// Bevy resource tracking all chat history + compose state for the active session.
 #[derive(Resource, Default)]
 pub struct ChatState {
     pub history: Vec<ChatEntry>,
-    /// Current text in the compose box.
     pub input: String,
 }
 
@@ -47,7 +36,6 @@ impl ChatState {
 
 // ── Systems ───────────────────────────────────────────────────────────────────
 
-/// Drain inbound `OnlineChatMessage` events into `ChatState`.
 pub fn drain_chat_messages(
     session: Option<Res<OnlineGameSession>>,
     mut chat_events: MessageReader<OnlineChatMessage>,
@@ -66,9 +54,6 @@ pub fn drain_chat_messages(
     }
 }
 
-/// Render the chat history + compose row inline inside a panel section.
-/// `max_height` bounds the scrollable history area. Fires `PublishOnlineChat`
-/// on send (and optimistically appends the message to local history).
 pub fn render_chat_section(
     ui: &mut egui::Ui,
     chat_state: &mut ChatState,

@@ -1,36 +1,9 @@
-//! Cost estimation and formatted reporting in SOL/GBP.
-//!
-//! Cost model (MagicBlock public nodes):
-//!   - Base fee per TX on ER:           0 lamports (free per-TX)
-//!   - Session fee (at undelegation):    300_000 lamports (0.0003 SOL)
-//!   - Base-layer TXs:                   5_000 base + CU-priced priority fee
-//!
-//! There used to be a "commit fee (commit_move_batch)" line here too, but
-//! `commit_move_batch` is not a real instruction in the production program —
-//! it never had a handler, and `game_flows.rs`'s own 1v1 flow labels that
-//! step "Bypassed in event-based architecture". Removed rather than kept as
-//! an always-zero line item that implied a cost path that doesn't exist.
-
 use crate::cu_logger::CuLogger;
 use crate::{sol_gbp_rate, BASE_TX_FEE, DEFAULT_CU_PRICE, LAMPORTS_PER_SOL};
 use std::collections::HashMap;
 
-/// MagicBlock ER session fee charged at undelegation (0.0003 SOL). Mirrors
-/// `ER_SESSION_FEE_LAMPORTS` in `programs/xfchess-game/src/constants.rs`,
-/// which is now actually accrued into `Game.fees_advanced` at undelegation
-/// (`lifecycle::transitions::mark_undelegated`) — keep the two in sync.
 pub const ER_SESSION_FEE_LAMPORTS: u64 = 300_000;
 
-/// Modeled (not measured — see `docs/plans/tournament-production-readiness-plan.md`
-/// F9/WS-D.1b) rent-exemption cost per account created by each instruction,
-/// from the program's own account layouts via Solana's rent-exempt formula
-/// `(128 + data_len) × 6960` lamports. Corroborated by the program's own
-/// comment on shard rent ("1 shard, ~0.034 SOL",
-/// `programs/xfchess-game/src/tournament_ix/lifecycle/initialize_shards.rs`).
-/// Instructions not listed here create no new account (or one negligible
-/// enough not to matter for a working-capital estimate) and contribute 0.
-/// Kept in sync with `backend/src/signing/routes/admin.rs::tournament_cost_estimate`,
-/// which needs the same numbers for the pre-flight affordability gate.
 fn modeled_rent_lamports(instruction: &str) -> u64 {
     match instruction {
         "initialize_shards_small" | "initialize_shards_medium" | "initialize_shards" => 34_100_000,
@@ -41,11 +14,6 @@ fn modeled_rent_lamports(instruction: &str) -> u64 {
     }
 }
 
-/// Instructions that return previously-paid rent to the payer (a close/finalize
-/// step), used to derive `net_rent_sol` = `gross_rent_sol` − refunds. These
-/// don't reliably map 1:1 to which specific rent line they refund without
-/// reading close-account instructions in detail, so refunds are tracked in
-/// aggregate rather than per-account-type.
 fn is_rent_refunding_instruction(instruction: &str) -> bool {
     matches!(
         instruction,
@@ -53,7 +21,6 @@ fn is_rent_refunding_instruction(instruction: &str) -> bool {
     )
 }
 
-/// A cost report for a test scenario.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CostReport {
     pub scenario: String,
@@ -64,28 +31,15 @@ pub struct CostReport {
     pub estimated_gbp: f64,
     pub base_tx_fees_sol: f64,
     pub priority_fees_sol: f64,
-    /// ER session fees (0.0003 SOL × number of undelegate_game calls).
     pub er_session_fees_sol: f64,
-    /// Measured fee-payer balance movement when snapshots were captured.
     pub measured_outflow_sol: f64,
     pub measured_inflow_sol: f64,
-    /// Modeled (not measured) rent-exemption cost for every account-creating
-    /// instruction seen — see `modeled_rent_lamports`. This is the dominant
-    /// cost for a tournament and was previously omitted entirely (F9.1).
     pub modeled_rent_gross_sol: f64,
-    /// `modeled_rent_gross_sol` minus rent recovered by any
-    /// rent-refunding instruction observed in the same run (F9.2). This is
-    /// still modeled, not measured — a real refund amount depends on the
-    /// specific account being closed, which this crate doesn't track per-PDA.
     pub modeled_rent_net_sol: f64,
-    /// Per fee-payer breakdown of measured lamport movement (F9's
-    /// "per-signer attribution" ask) — key is the fee payer pubkey string,
-    /// or `"unknown"` for entries logged without `log_with_balance`.
     pub per_signer_outflow_sol: HashMap<String, f64>,
     pub breakdown: Vec<InstructionCost>,
 }
 
-/// Cost breakdown per instruction type.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InstructionCost {
     pub instruction: String,
@@ -95,7 +49,6 @@ pub struct InstructionCost {
     pub estimated_sol: f64,
 }
 
-/// Generate a cost report from a CU logger.
 pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
     let total_cu = logger.total_cu();
     let tx_count = logger.entries().len() as u64;
@@ -216,7 +169,6 @@ pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
     }
 }
 
-/// Print a formatted cost report.
 pub fn print_cost_report(report: &CostReport) {
     println!("\n╔══════════════════════════════════════════════════════════╗");
     println!("║           COST ESTIMATION REPORT                       ║");
@@ -295,7 +247,6 @@ pub fn print_cost_report(report: &CostReport) {
     }
 }
 
-/// Export the cost report as JSON.
 pub fn export_json(report: &CostReport) -> String {
     serde_json::to_string_pretty(report).unwrap_or_default()
 }

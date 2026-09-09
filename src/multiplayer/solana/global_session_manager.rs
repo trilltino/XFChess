@@ -1,11 +1,3 @@
-//! Global persistent session key management for client-side use.
-//!
-//! One session keypair per wallet, persisted on disk, good for 30 days / 200
-//! games. After `authorize_global_session` succeeds the VPS can co-sign every
-//! `global_create_game` / `global_join_game` without another wallet popup.
-//!
-//! Storage: `<data-dir>/global_session_key.enc` (AES-256-GCM).
-
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -24,37 +16,14 @@ use solana_system_interface::program as system_program;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// PDA seed prefix matching [`GlobalSessionDelegation::SEED`] on-chain.
 const SEED: &[u8] = b"global_session";
 
 // ── PDA helper ────────────────────────────────────────────────────────────────
 
-/// Derive the `GlobalSessionDelegation` PDA for `player`.
 pub fn find_global_session_pda(program_id: &Pubkey, player: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SEED, player.as_ref()], program_id)
 }
 
-/// Reads the on-chain `GlobalSessionDelegation` PDA (if any) and reports
-/// whether the program would currently reject a plain `authorize_global_session`
-/// with `GlobalSessionAlreadyActive` — i.e. whether a revoke must happen
-/// first. Mirrors the exact condition the program checks
-/// (`programs/xfchess-game/src/account_ix/global_session_ix.rs`):
-/// `enabled && now < expires_at && games_remaining > 0`, which is also
-/// `GlobalSessionDelegation::is_valid` (`state/global_session.rs`).
-///
-/// This is a pre-flight optimization, not a correctness requirement: if the
-/// account can't be read (doesn't exist yet, RPC hiccup, unexpected layout),
-/// this returns `false` ("safe to authorize directly") and the caller's
-/// existing reactive fallback — attempt authorize, revoke-and-retry on a
-/// real `GlobalSessionAlreadyActive` error — still covers it. What this
-/// avoids is the *common* case costing a wasted, doomed-to-fail first wallet
-/// popup before falling back to revoke+reauthorize.
-///
-/// Account layout (Anchor `#[account]`, see `GlobalSessionDelegation`):
-/// `[0..8)` disc, `[8..40)` player, `[40..72)` session_key,
-/// `[72..80)` expires_at `i64` LE, `[80..88)` spending_limit `u64`,
-/// `[88..96)` total_spent `u64`, `[96..104)` max_wager `u64`,
-/// `[104..106)` games_remaining `u16` LE, `[106]` enabled `bool`, `[107]` bump.
 pub fn global_session_is_live_onchain(rpc_url: &str, session_pda: &Pubkey) -> bool {
     use solana_client::rpc_client::RpcClient;
     use solana_commitment_config::CommitmentConfig;
@@ -81,21 +50,6 @@ pub fn global_session_is_live_onchain(rpc_url: &str, session_pda: &Pubkey) -> bo
     enabled && now < expires_at && games_remaining > 0
 }
 
-/// Reports whether a `GlobalSessionDelegation` account exists at `session_pda`
-/// at all, regardless of whether it's still `is_valid` (see
-/// `global_session_is_live_onchain`) — i.e. whether there could be a stale,
-/// unclaimed deposit sitting in it from a prior authorize.
-///
-/// This is the fix for the fund-leak bug `establish_global_session` used to
-/// have: it only ever bundled `withdraw_global_session` ahead of a fresh
-/// authorize when the account was still *live* (`GlobalSessionAlreadyActive`
-/// path). An account that had simply **expired** (30-day default duration)
-/// or run out of `games_remaining` is not "live" by that check, so a plain
-/// re-authorize proceeded straight through the on-chain guard and deposited
-/// a brand-new amount on top of whatever was already stranded there —
-/// compounding on every natural re-auth. Callers should reclaim via
-/// `withdraw_global_session` whenever this returns `true`, independent of
-/// whether a `revoke_global_session` is also needed first.
 pub fn global_session_account_exists(rpc_url: &str, session_pda: &Pubkey) -> bool {
     use solana_client::rpc_client::RpcClient;
     use solana_commitment_config::CommitmentConfig;
@@ -108,34 +62,8 @@ pub fn global_session_account_exists(rpc_url: &str, session_pda: &Pubkey) -> boo
         .unwrap_or(false)
 }
 
-/// Generous over-estimate of the rent-exempt minimum
-/// `global_create_game`/`global_join_game` allocate for the `Game` PDA out
-/// of the session vault (`programs/xfchess-game/src/game_ix/global_create.rs`'s
-/// `Rent::get()?.minimum_balance(8 + Game::INIT_SPACE)` debit). `Game`'s
-/// actual on-chain rent is roughly 0.003 SOL for its ~350-odd bytes; this
-/// constant is deliberately padded well above that rather than hand-mirroring
-/// the exact struct layout client-side, so a drift between the two (a new
-/// field added on-chain, say) makes this check *more* conservative, never
-/// less — the on-chain `debit_program_pda` check remains the actual
-/// correctness boundary regardless of what this estimates.
 const GAME_ACCOUNT_RENT_ESTIMATE_LAMPORTS: u64 = 5_000_000; // 0.005 SOL
 
-/// Whether `session_pda`'s live on-chain balance can cover a wager of
-/// `wager_lamports` plus the `Game` account rent that `global_create_game`/
-/// `global_join_game` also draws from the same vault — the pre-submit check
-/// that closes the bug where a player could sail past the soft
-/// `spending_limit`/`max_wager` caps (self-declared at authorize time, not
-/// balance-aware) and only find out the vault was actually empty when the
-/// on-chain `debit_program_pda` guard rejected the transaction with a bare
-/// `InsufficientFunds` (6060) — after already paying the transaction fee.
-/// This check is advisory: it can only ever be *more* conservative than the
-/// real on-chain check (see `GAME_ACCOUNT_RENT_ESTIMATE_LAMPORTS`), never
-/// less, so it can produce a false "insufficient" but never a false "ok."
-///
-/// Returns `Err` with a message suitable for surfacing to the player
-/// directly (not an internal/RPC error string) when funds look short, or
-/// when the account can't be read at all (treated as "not ready to play" —
-/// safer than assuming ok and submitting a doomed transaction).
 pub fn check_global_session_can_afford_wager(
     rpc_url: &str,
     session_pda: &Pubkey,
@@ -168,7 +96,6 @@ pub fn check_global_session_can_afford_wager(
 
 // ── Disk-persisted global session keypair ─────────────────────────────────────
 
-/// Encrypted session key record stored on disk.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GlobalSessionKeyData {
     pub session_pubkey: String,
@@ -178,19 +105,12 @@ pub struct GlobalSessionKeyData {
     pub created_at: DateTime<Utc>,
 }
 
-/// Manages a single global session keypair for a wallet.
 pub struct GlobalSessionKeyManager {
     keypair: Arc<Keypair>,
     encryption_key: Vec<u8>,
     data_dir: PathBuf,
 }
 
-/// Appends an `instance_<port>` suffix when `wallet_port` is set to
-/// something other than the default `7454`, so two same-machine instances
-/// (e.g. `just dev2`'s P1/P2, which set `XFCHESS_WALLET_PORT` differently)
-/// never resolve to the same directory. Takes the port as a plain argument
-/// rather than reading the env var itself so the namespacing logic can be
-/// unit-tested without mutating process-global state.
 fn instance_scoped_dir(base: PathBuf, wallet_port: Option<&str>) -> PathBuf {
     match wallet_port.map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) if p != "7454" => base.join(format!("instance_{p}")),
@@ -199,9 +119,6 @@ fn instance_scoped_dir(base: PathBuf, wallet_port: Option<&str>) -> PathBuf {
 }
 
 impl GlobalSessionKeyManager {
-    /// Namespaced by `XFCHESS_WALLET_PORT` when set to a non-default value —
-    /// see `integration::systems::get_hot_wallet_path`'s doc comment for why
-    /// two same-machine instances must not share this directory.
     fn storage_dir() -> PathBuf {
         // This is the most important of the paths this module resolves — it's
         // where the encrypted global session key lives. Desktop's fallback
@@ -226,7 +143,6 @@ impl GlobalSessionKeyManager {
         Sha256::digest(wallet.as_ref()).to_vec()
     }
 
-    /// Create a fresh session keypair for `wallet`.
     pub fn new(wallet: &Pubkey) -> Self {
         Self {
             keypair: Arc::new(Keypair::new()),
@@ -235,7 +151,6 @@ impl GlobalSessionKeyManager {
         }
     }
 
-    /// Load an existing persisted session, or create one if absent/expired.
     pub fn load_or_create(wallet: &Pubkey) -> Self {
         Self::load(wallet).unwrap_or_else(|_| Self::new(wallet))
     }
@@ -248,7 +163,6 @@ impl GlobalSessionKeyManager {
         Arc::clone(&self.keypair)
     }
 
-    /// Persist the session keypair encrypted to `global_session_key.enc`.
     pub fn save(&self, wallet: &Pubkey, duration_days: i64) -> Result<(), String> {
         let data = GlobalSessionKeyData {
             session_pubkey: self.keypair.pubkey().to_string(),
@@ -271,8 +185,6 @@ impl GlobalSessionKeyManager {
             .map_err(|e| format!("write: {e}"))
     }
 
-    /// Load from disk; returns `Err` if the file is missing, expired, or
-    /// belongs to a different wallet.
     pub fn load(wallet: &Pubkey) -> Result<Self, String> {
         let data_dir = Self::storage_dir();
         let path = data_dir.join("global_session_key.enc");
@@ -309,7 +221,6 @@ impl GlobalSessionKeyManager {
         })
     }
 
-    /// Remove the persisted session file.
     pub fn delete() -> Result<(), String> {
         let path = Self::storage_dir().join("global_session_key.enc");
         if path.exists() {
@@ -321,12 +232,6 @@ impl GlobalSessionKeyManager {
 
 // ── Instruction builders ──────────────────────────────────────────────────────
 
-/// Anchor's instruction discriminator: `sha256("global:<name>")[..8]`.
-/// Computed at call time rather than hardcoded so it can never drift from the
-/// on-chain instruction name — a hand-transcribed constant here previously
-/// didn't match any real discriminator, so every session/global-game
-/// instruction landed on the program's fallback handler
-/// (`InstructionFallbackNotFound`) no matter what else was correct.
 fn anchor_discriminator(name: &str) -> [u8; 8] {
     use sha2::{Digest, Sha256};
     let hash = Sha256::digest(format!("global:{name}").as_bytes());
@@ -335,7 +240,6 @@ fn anchor_discriminator(name: &str) -> [u8; 8] {
     discriminator
 }
 
-/// Arguments matching [`AuthorizeGlobalSessionArgs`] on-chain.
 #[derive(Debug, Clone)]
 pub struct AuthorizeGlobalSessionArgs {
     pub session_key: Pubkey,
@@ -346,7 +250,6 @@ pub struct AuthorizeGlobalSessionArgs {
     pub deposit_lamports: u64,
 }
 
-/// Build an `authorize_global_session` instruction.
 pub fn build_authorize_global_session_ix(
     program_id: &Pubkey,
     player: &Pubkey,
@@ -378,7 +281,6 @@ pub fn build_authorize_global_session_ix(
     }
 }
 
-/// Build a `revoke_global_session` instruction.
 pub fn build_revoke_global_session_ix(
     program_id: &Pubkey,
     player: &Pubkey,
@@ -398,12 +300,6 @@ pub fn build_revoke_global_session_ix(
     }
 }
 
-/// Build a `withdraw_global_session` instruction — reclaims whatever balance
-/// sits above the vault's own rent-exempt minimum, back to `player`. Safe to
-/// call regardless of `enabled`/expiry state; it only touches lamports, not
-/// the delegation fields. Used before a revoke+reauthorize cycle so a stale
-/// session's leftover deposit isn't silently stranded when a fresh one is
-/// created (see `establish_global_session`'s doc comment).
 pub fn build_withdraw_global_session_ix(
     program_id: &Pubkey,
     player: &Pubkey,
@@ -423,7 +319,6 @@ pub fn build_withdraw_global_session_ix(
     }
 }
 
-/// Build a `global_create_game` instruction.
 pub fn build_global_create_game_ix(
     program_id: &Pubkey,
     session_pda: &Pubkey,
@@ -466,7 +361,6 @@ pub fn build_global_create_game_ix(
     }
 }
 
-/// Build a `global_join_game` instruction.
 pub fn build_global_join_game_ix(
     program_id: &Pubkey,
     session_pda: &Pubkey,
@@ -502,8 +396,6 @@ pub fn build_global_join_game_ix(
     }
 }
 
-/// Build a transaction: `init_profile` (if needed) + `authorize_global_session`
-/// — the player sees **one wallet popup ever**.
 pub fn build_first_time_auth_tx(
     program_id: &Pubkey,
     player: &Pubkey,
@@ -564,12 +456,6 @@ fn push_option_u16(buf: &mut Vec<u8>, v: Option<u16>) {
 mod tests {
     use super::*;
 
-    /// Guards against the discriminator bug this file previously had: these 4
-    /// instructions are hand-encoded (not via Anchor's generated client) so
-    /// nothing else catches a wrong discriminator except the wallet rejecting
-    /// the transaction on-chain at runtime. Compare against
-    /// `xfchess_game::instruction::*::data()`, Anchor's own encoding, which is
-    /// authoritative.
     #[test]
     fn discriminators_match_anchor_generated_encoding() {
         use anchor_lang::InstructionData;
@@ -674,9 +560,6 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    /// Guards the `dev2` P1/P2 instance-isolation fix: two windows on one
-    /// machine must not silently share this directory (that was the "logout
-    /// logs me in as the other instance" bug).
     #[test]
     fn storage_dir_diverges_for_a_non_default_instance_port() {
         let base = PathBuf::from("/base");

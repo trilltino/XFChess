@@ -1,7 +1,6 @@
 use crate::elo_baseline::cpl_vs_elo_signal;
 use crate::types::{Complexity, PlyEval};
 
-/// Average CPL across non-Forced plies.
 pub fn avg_cpl(plies: &[PlyEval]) -> f64 {
     let relevant: Vec<_> = plies
         .iter()
@@ -14,7 +13,6 @@ pub fn avg_cpl(plies: &[PlyEval]) -> f64 {
     sum as f64 / relevant.len() as f64
 }
 
-/// T1 rate on Complex positions only.
 pub fn t1_rate(plies: &[PlyEval]) -> f64 {
     let complex: Vec<_> = plies
         .iter()
@@ -27,13 +25,11 @@ pub fn t1_rate(plies: &[PlyEval]) -> f64 {
     t1_count as f64 / complex.len() as f64
 }
 
-/// CPL-vs-ELO signal: how suspicious is this player's accuracy for their rating?
 pub fn cpl_signal(elo: u32, plies: &[PlyEval]) -> f64 {
     let observed = avg_cpl(plies);
     cpl_vs_elo_signal(elo, observed)
 }
 
-/// Count of Complex positions (minimum sample gate).
 pub fn complex_ply_count(plies: &[PlyEval]) -> u32 {
     plies
         .iter()

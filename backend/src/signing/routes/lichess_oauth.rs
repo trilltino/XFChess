@@ -1,12 +1,3 @@
-//! Lichess OAuth 2.0 + PKCE integration for external ELO linking.
-//!
-//! Replaces the bio-nonce flow for production use. Bio-nonce remains as a
-//! manual fallback in external_elo.rs.
-//!
-//! Endpoints:
-//! - GET  /api/auth/lichess/init?wallet_pubkey=... — start OAuth flow
-//! - POST /api/auth/lichess/exchange — exchange code for token + link on-chain
-
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -76,25 +67,8 @@ use once_cell::sync::Lazy;
 static PKCE_STATES: Lazy<Arc<Mutex<HashMap<String, PkceState>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
-/// Must exactly match the redirect_uri sent to `/oauth` at authorize time —
-/// Lichess matches it by exact string equality at token-exchange time. This
-/// route is nested under `/api` (see `backend/src/signing/mod.rs`), so the
-/// path here must include that prefix.
-///
-/// Was previously the bare IP over plain HTTP
-/// (`http://178.104.55.19/api/auth/lichess/callback`) — a leftover from
-/// before the TLS/domain migration. `ops/nginx/nginx.conf` (the config
-/// `deploy.ps1` actually installs, not the older IP-only `nginx-http.conf`)
-/// unconditionally 301s port 80 to HTTPS on the same host, and its
-/// certificate covers `xfchess.com`, not the raw IP — so Lichess's redirect
-/// back to that old URL hit a certificate-hostname mismatch before the
-/// callback page ever loaded, breaking the entire link flow. Whoever
-/// updates this must also update the matching `redirect_uri` registered in
-/// XFChess's app settings on Lichess's own OAuth developer dashboard —
-/// Lichess rejects the auth request outright if the two don't match exactly.
 const REDIRECT_URI: &str = "https://xfchess.com/api/auth/lichess/callback";
 
-/// Creates the Lichess OAuth routes router.
 pub fn lichess_oauth_routes() -> Router<AppState> {
     Router::new()
         .route("/auth/lichess/init", get(init_oauth))
@@ -104,17 +78,6 @@ pub fn lichess_oauth_routes() -> Router<AppState> {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-/// GET /api/auth/lichess/init?wallet_pubkey=...
-/// Generates PKCE params, stores state, returns the Lichess authorize URL.
-///
-/// Requires a valid Bearer JWT whose wallet matches `wallet_pubkey`. Before
-/// this, `wallet_pubkey` was only CSRF-protected via the `state` param
-/// round-tripping through Lichess — the Lichess OAuth identity itself is
-/// genuinely verified server-side (see `exchange_code`), but nothing
-/// verified that the wallet asking to receive that link was actually the
-/// caller's own. Anyone who could trigger this flow (a genuine, unrelated
-/// action — no exploit needed) could link their real Lichess account, and
-/// the external ELO it seeds, to an arbitrary victim wallet.
 async fn init_oauth(
     State(state): State<AppState>,
     Query(req): Query<InitRequest>,
@@ -189,17 +152,6 @@ async fn init_oauth(
     }))
 }
 
-/// POST /api/auth/lichess/exchange
-/// Exchanges the authorization code for an access token, fetches profile,
-/// and submits link_external_elo on-chain. Requires the caller to supply the
-/// original `code_verifier` — since `/init` never returns it to the client
-/// (by design, PKCE verifiers are never sent over the wire twice), only a
-/// caller who generated its own matching verifier client-side can use this
-/// route. Nothing in this codebase does that today (`/init` generates the
-/// verifier server-side) — this route exists for a future client that wants
-/// to own the full PKCE handshake itself. The flow every current UI actually
-/// uses is `GET /auth/lichess/callback`, which completes the exchange
-/// server-side using the verifier `/init` already stored.
 async fn exchange_code(
     State(state): State<AppState>,
     Json(req): Json<ExchangeRequest>,
@@ -242,14 +194,6 @@ async fn exchange_code(
     .map(Json)
 }
 
-/// GET /api/auth/lichess/callback?code=...&state=...
-/// This is the `redirect_uri` Lichess actually sends the browser back to
-/// after the player authorizes. The server already holds the matching PKCE
-/// `code_verifier` (stored by `/init`, keyed by `state`), so it completes the
-/// whole exchange itself here — the popup window that started the flow never
-/// needs to see the verifier or call `/exchange` directly. Renders a small
-/// HTML page that reports success/failure to the opener window (if any) via
-/// `postMessage`, then closes itself.
 async fn oauth_callback(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -335,10 +279,6 @@ fn render_callback_page(result: Result<ExchangeResponse, String>) -> String {
     )
 }
 
-/// Shared exchange logic used by both `/exchange` (client-supplied verifier)
-/// and `/callback` (server-stored verifier): swap the code for a token, fetch
-/// the Lichess profile, best-effort submit `link_external_elo` on-chain, and
-/// persist the link locally.
 async fn complete_link(
     state: &AppState,
     code: &str,
@@ -551,7 +491,6 @@ async fn complete_link(
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Generates a PKCE code_verifier: 128 random bytes → base64url (no padding).
 fn generate_code_verifier() -> String {
     use base64::{engine::general_purpose, Engine as _};
     use rand::Rng;
@@ -560,7 +499,6 @@ fn generate_code_verifier() -> String {
     general_purpose::URL_SAFE_NO_PAD.encode(&bytes)
 }
 
-/// Computes the PKCE code_challenge: SHA256(code_verifier) → base64url (no padding).
 fn code_challenge(verifier: &str) -> String {
     use base64::{engine::general_purpose, Engine as _};
     use sha2::{Digest, Sha256};
@@ -568,7 +506,6 @@ fn code_challenge(verifier: &str) -> String {
     general_purpose::URL_SAFE_NO_PAD.encode(hash)
 }
 
-/// Generates a random state parameter for CSRF protection.
 fn generate_state() -> String {
     use rand::Rng;
     let mut bytes = vec![0u8; 32];

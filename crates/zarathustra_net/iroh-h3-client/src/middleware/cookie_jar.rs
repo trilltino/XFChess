@@ -1,22 +1,3 @@
-//! Cookie middleware for the HTTP/3 client.
-//!
-//! This module provides [`CookieJar`], a simple, thread-safe, per-peer cookie
-//! store used by the `IrohH3Client` middleware system.
-//!
-//! # Overview
-//!
-//! The [`CookieJar`] middleware:
-//!
-//! - Automatically attaches stored cookies to outgoing requests
-//!   (`Cookie:` header).
-//! - Extracts cookies from incoming responses
-//!   (`Set-Cookie:` headers).
-//! - Stores cookies _per peer_ using the peer’s [`EndpointId`].
-//! - Uses the [`cookie`] crate to perform correct RFC-compliant parsing.
-//!
-//! [`cookie`]: https://docs.rs/cookie
-//! [`EndpointId`]: iroh::EndpointId
-
 use cookie::Cookie;
 use dashmap::DashMap;
 use http::{
@@ -33,28 +14,17 @@ use crate::{
     middleware::{Middleware, Service},
 };
 
-/// A simple per-peer cookie jar.
-///
-/// Stores and retrieves cookies using the peer's [`EndpointId`] as the key.
-/// Automatically:
-/// - Adds cookies to outgoing requests
-/// - Extracts `Set-Cookie` headers from responses
 pub struct CookieJar {
     cookies: DashMap<EndpointId, DashMap<String, Cookie<'static>>>,
 }
 
 impl CookieJar {
-    /// Constructs the cookie jar
     pub fn new() -> Self {
         Self {
             cookies: DashMap::new(),
         }
     }
 
-    /// Returns all cookies for a given peer.
-    ///
-    /// Returned cookies are cloned because the underlying DashMap guard
-    /// cannot be held across API boundaries.
     pub fn get_cookies_for(&self, id: &EndpointId) -> Vec<Cookie<'static>> {
         match self.cookies.get(id) {
             Some(map) => map.iter().map(|entry| entry.value().clone()).collect(),
@@ -62,9 +32,6 @@ impl CookieJar {
         }
     }
 
-    /// Inserts or updates cookies for the given peer.
-    ///
-    /// Any cookie with the same name overwrites the existing one.
     pub fn update_cookies_for<I>(&self, id: EndpointId, cookies: I)
     where
         I: IntoIterator<Item = Cookie<'static>>,
@@ -76,7 +43,6 @@ impl CookieJar {
         }
     }
 
-    /// Build the Cookie header value for a peer, if any cookies exist.
     fn build_cookie_header(&self, peer_id: &EndpointId) -> Option<HeaderValue> {
         let cookies = self.get_cookies_for(peer_id);
 
@@ -99,7 +65,6 @@ impl CookieJar {
         }
     }
 
-    /// Attach cookies to the outgoing request (if any exist).
     fn attach_request_cookies(&self, peer_id: &EndpointId, req: &mut http::Request<Body>) {
         if let Some(header) = self.build_cookie_header(peer_id) {
             debug!(?peer_id, cookie_header = %header.to_str().unwrap_or("<invalid>"),
@@ -110,7 +75,6 @@ impl CookieJar {
         }
     }
 
-    /// Parse all Set-Cookie headers from the response.
     fn parse_response_cookies(&self, res: &http::Response<Body>) -> Vec<Cookie<'static>> {
         let mut out = Vec::new();
 
@@ -133,7 +97,6 @@ impl CookieJar {
         out
     }
 
-    /// Store parsed response cookies.
     fn store_new_cookies(&self, peer_id: EndpointId, new_cookies: Vec<Cookie<'static>>) {
         if !new_cookies.is_empty() {
             debug!(count = new_cookies.len(), ?peer_id, "storing new cookies");

@@ -1,10 +1,3 @@
-//! The signing-server entry point, shared by both bin names.
-//!
-//! `signing-server` (local dev, justfile) and `signing-server-http` (systemd,
-//! CI, deploy scripts) are the same server; each bin is a one-line wrapper
-//! around [`run`] so the source isn't declared in two build targets (cargo
-//! warns about that).
-
 use crate::infrastructure::{initialize_pools, run_migrations, spawn_background_tasks};
 use crate::signing::storage::tournament::TournamentStore;
 use crate::signing::storage::SessionStore;
@@ -227,7 +220,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Resolve when the process receives a shutdown signal: SIGTERM (systemd) or Ctrl-C.
 async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;

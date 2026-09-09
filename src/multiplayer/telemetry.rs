@@ -1,12 +1,3 @@
-//! Client-side anti-cheat telemetry (blur reporting).
-//!
-//! Tracks window focus loss between the local player's moves — the
-//! alt-tab-to-engine signature — and reports one flag per local move to the
-//! VPS (`POST /telemetry/blur`). Honest play costs nothing: the report is a
-//! tiny fire-and-forget request off the main thread, and failures are only
-//! logged. The backend folds the flags into post-game anti-cheat analysis as
-//! a soft escalator signal (see docs/plans/client-telemetry.md).
-
 use std::time::Instant;
 
 use bevy::prelude::*;
@@ -14,16 +5,10 @@ use bevy::window::WindowFocused;
 
 use crate::game::events::{GameStartedEvent, MoveMadeEvent};
 
-/// Focus + timing state accumulated between moves.
 #[derive(Resource, Default)]
 pub struct FocusTelemetry {
-    /// True once the window lost focus since the local player's last move.
     blurred_since_last_local_move: bool,
-    /// Total plies seen this game (local + remote), matching the server's
-    /// 1-based `move_number` sequence.
     ply_count: u32,
-    /// When the current turn began (the previous move was applied, or game
-    /// start). The basis for client-measured think time.
     turn_started_at: Option<Instant>,
 }
 

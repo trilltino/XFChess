@@ -1,5 +1,3 @@
-//! Rendering module - 3D chess visualization.
-
 pub mod board;
 pub mod camera;
 pub mod effects;

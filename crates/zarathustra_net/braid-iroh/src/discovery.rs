@@ -1,9 +1,3 @@
-//! Peer discovery configuration for braid_iroh.
-//!
-//! For the demo, we use `MockDiscoveryMap` (an in-memory peer registry
-//! shared across endpoints on the same machine). In production you'd
-//! swap this for iroh's DNS + Pkarr discovery.
-
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
@@ -14,24 +8,17 @@ use iroh::{Endpoint, EndpointAddr, EndpointId};
 use n0_future::boxed::BoxStream;
 use n0_future::StreamExt;
 
-/// How peers find each other on the network.
 #[derive(Clone)]
 pub enum DiscoveryConfig {
-    /// In-memory discovery — peers register themselves in a shared map.
-    /// Use this for tests and the Leptos demo (both peers on the same machine).
     Mock(MockDiscoveryMap),
-    /// Use Iroh's real discovery (DNS, Pkarr, MDNS).
     Real,
 }
 
 impl DiscoveryConfig {
-    /// Create a new mock discovery instance. Clone it and pass the same
-    /// instance to every peer that should be able to find each other.
     pub fn mock() -> Self {
         DiscoveryConfig::Mock(MockDiscoveryMap::new())
     }
 
-    /// Register a node's address so other peers using the same mock can find it.
     pub fn add_node(&self, node_addr: EndpointAddr) {
         if let DiscoveryConfig::Mock(map) = self {
             let info = EndpointInfo::from(node_addr);
@@ -41,23 +28,16 @@ impl DiscoveryConfig {
     }
 }
 
-/// A shared in-memory discovery map.
-///
-/// All endpoints that hold a clone of the same `MockDiscoveryMap` can
-/// find each other — perfect for demos and tests.
 #[derive(Debug, Default, Clone)]
 pub struct MockDiscoveryMap {
     peers: Arc<RwLock<BTreeMap<EndpointId, Arc<EndpointData>>>>,
 }
 
 impl MockDiscoveryMap {
-    /// Create a new empty discovery map.
     pub fn new() -> Self {
         Default::default()
     }
 
-    /// Add a node's address information to the mock discovery map.
-    /// Useful for manually registering peers if needed.
     pub fn add_node(&self, id: EndpointId, data: EndpointData) {
         self.peers.write().unwrap().insert(id, Arc::new(data));
     }
@@ -75,8 +55,6 @@ impl AddressLookupBuilder for MockDiscoveryMap {
     }
 }
 
-/// Per-endpoint discovery instance that publishes its own address and
-/// resolves peers from the shared map.
 #[derive(Debug, Clone)]
 struct MockDiscoveryInstance {
     id: EndpointId,

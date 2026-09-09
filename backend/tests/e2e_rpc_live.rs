@@ -1,34 +1,7 @@
-//! Tier T2 — live-network RPC smoke tests.
-//!
-//! `e2e_api.rs` (Tier T1) is deliberately chain-free: it points RPC URLs at an
-//! unreachable port so tests stay fast, hermetic, and need no secrets. This
-//! file is the opt-in counterpart — it hits whatever `SOLANA_RPC_URL` is
-//! actually configured to point at (Triton One in prod/staging; public devnet
-//! if you only export a bare URL locally) through the *real* client helpers in
-//! `backend::signing::solana::rpc`, including the primary/fallback circuit
-//! breaker.
-//!
-//! Every test is `#[ignore]` so a plain `cargo test` never needs network
-//! access or secrets. Run this tier explicitly:
-//!
-//! ```text
-//! just test-rpc-live
-//! # or directly:
-//! cargo test -p backend --test e2e_rpc_live -- --ignored --nocapture
-//! ```
-//!
-//! after exporting `SOLANA_RPC_URL` (with your Triton x-token embedded in the
-//! path, never committed) in the shell or `backend/.env`. If it isn't set,
-//! each test prints a skip message and returns rather than failing — running
-//! `--ignored` by accident in an environment without the secret configured
-//! must stay harmless, not turn into a red build.
-
 use backend::signing::solana::rpc::{fallback_rpc_url, make_rpc, read_with_failover, redact_url};
 use solana_sdk::signature::Signer;
 use std::str::FromStr;
 
-/// The on-chain program this backend talks to (see `backend/CLAUDE.md`);
-/// used as a stable, always-present account to probe read paths against.
 const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
 fn skip_unless_configured(test_name: &str) -> bool {

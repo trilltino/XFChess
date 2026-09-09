@@ -1,10 +1,3 @@
-//! Transaction-landing test: submit small SPL-Memo transactions and time both the
-//! `sendTransaction` round-trip and the time-to-confirmation, per endpoint.
-//!
-//! This validates the "better transaction landing" claim. Memo txs touch no accounts
-//! and only cost the base fee, so a funded master keypair with a fraction of a SOL
-//! covers a full run.
-
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
@@ -19,11 +12,8 @@ use solana_sdk::{
 
 use super::{redact_url, LatencyStats};
 
-/// SPL Memo program (v2). Accepts zero accounts, so a memo tx is the cheapest
-/// possible "real" transaction to land.
 const MEMO_PROGRAM_ID: &str = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
-/// Outcome of a tx-landing run against one endpoint.
 pub struct TxLandReport {
     pub name: String,
     pub submit: LatencyStats,
@@ -32,10 +22,6 @@ pub struct TxLandReport {
     pub failed: usize,
 }
 
-/// Submit `count` memo transactions through `url`, signed by `payer`, measuring
-/// submit latency and confirmation latency for each.
-///
-/// Blocking — call inside `tokio::task::spawn_blocking`.
 pub fn run(name: &str, url: &str, payer: &Keypair, count: usize) -> TxLandReport {
     let rpc = RpcClient::new_with_commitment(url.to_string(), CommitmentConfig::confirmed());
     let memo = Pubkey::from_str(MEMO_PROGRAM_ID).expect("valid memo program id");
@@ -115,7 +101,6 @@ pub fn run(name: &str, url: &str, payer: &Keypair, count: usize) -> TxLandReport
     report
 }
 
-/// Print a side-by-side summary of multiple endpoint reports.
 pub fn print_summary(reports: &[TxLandReport]) {
     println!("\n── TX LANDING SUMMARY ──");
     println!(

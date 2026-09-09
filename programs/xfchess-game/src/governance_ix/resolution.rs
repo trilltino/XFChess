@@ -1,13 +1,9 @@
-//! Shared dispute resolution validation and state transitions.
-
 use crate::errors::GameErrorCode;
 use crate::state::{DisputeRecord, DisputeStatus, Game, GameResult, GameStatus};
 use anchor_lang::prelude::*;
 
-/// Cap on `DisputeGame`'s `reason` and `ResolveDispute`'s `resolution` text.
 pub const MAX_DISPUTE_TEXT_LEN: usize = 200;
 
-/// Rejects free-text fields longer than `MAX_DISPUTE_TEXT_LEN`.
 pub fn require_text_fits(text: &str) -> Result<()> {
     require!(
         text.len() <= MAX_DISPUTE_TEXT_LEN,
@@ -16,8 +12,6 @@ pub fn require_text_fits(text: &str) -> Result<()> {
     Ok(())
 }
 
-/// Turns an authority's `winner` choice into a `GameResult`, rejecting a
-/// winner that isn't actually one of the game's two players.
 pub fn validate_resolution(game: &Game, winner: Option<Pubkey>) -> Result<GameResult> {
     match winner {
         Some(winner_key) => {
@@ -31,11 +25,6 @@ pub fn validate_resolution(game: &Game, winner: Option<Pubkey>) -> Result<GameRe
     }
 }
 
-/// Writes the platform authority's ruling onto both the dispute and the
-/// game: marks the dispute `Resolved` with its resolution text, and the game
-/// `Settled` with the given result. Used by `resolve.rs`'s authority-ruled
-/// path only — `claim_stale_dispute.rs`'s TTL auto-resolution sets its own
-/// `Dismissed` status inline instead.
 pub fn apply_resolution(
     game: &mut Game,
     dispute: &mut DisputeRecord,

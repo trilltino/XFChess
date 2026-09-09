@@ -1,27 +1,3 @@
-//! Braid-based tournament scheduler — async fill-bracket scheduling.
-//!
-//! Two cooperating tasks:
-//! * [`TournamentScheduler`] consumes events from an [`mpsc`] channel and
-//!   decides when to start a tournament.  Two start modes:
-//!
-//!   - **Async fill** (`scheduled_at = None`): bracket fires as soon as
-//!     `max_players` register.  If only `min_players` are present, a
-//!     [`FILL_GRACE_SECS`] countdown starts; any additional players extend
-//!     nothing — the countdown fires the bracket regardless.  If `max_players`
-//!     fills during the grace window the timer is cancelled and the bracket
-//!     fires immediately.
-//!
-//!   - **Scheduled** (`scheduled_at = Some(ts)`): bracket fires at `ts` if
-//!     `>= min_players` are registered.  If not enough players arrive within
-//!     [`GRACE_SECS`] after `ts`, the tournament is cancelled.
-//!
-//! * [`spawn_scheduled_start_ticker`] polls every 30 s for tournaments whose
-//!   `scheduled_at` has passed.
-//!
-//! References:
-//! * Tokio tasks  — <https://tokio.rs/tokio/tutorial/spawning>
-//! * mpsc channel — <https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html>
-
 use crate::signing::storage::tournament::{
     MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus, TournamentStore,
 };
@@ -35,23 +11,14 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 use xfchess_braid_server::{bridge, ResourceHub};
 
-/// Channel buffer size for tournament trigger events.
 pub const TOURNAMENT_TRIGGER_CHANNEL_SIZE: usize = 256;
 
-/// Minimum players needed before the scheduler will start a tournament when
-/// the operator didn't set `min_players` explicitly. Capped at `max_players`
-/// so small brackets (2/4 players) can start once full.
 fn default_min_players(tournament: &TournamentRecord) -> usize {
     tournament
         .min_players
         .unwrap_or_else(|| tournament.max_players.min(8)) as usize
 }
 
-/// Round-1 pairings for a full single-elimination bracket, in the same
-/// highest-vs-lowest seeding order the store's `generate_bracket` and the
-/// on-chain `start_tournament` use (ELO descending, stable on ties). Returns
-/// an empty vec for Swiss tournaments or non-full brackets — their round-1
-/// on-chain matches are then initialized without players.
 pub fn round1_pairings(
     tournament: &TournamentRecord,
 ) -> Vec<(
@@ -78,23 +45,24 @@ pub fn round1_pairings(
         .collect()
 }
 
-/// Messages that can trigger tournament actions via Braid pub/sub.
 #[derive(Debug, Clone)]
 pub enum TournamentTrigger {
-    /// Re-evaluate start conditions for a tournament.
-    CheckStart { tournament_id: u64 },
-    /// A player just joined — may trigger fill-start or grace timer.
+    CheckStart {
+        tournament_id: u64,
+    },
     PlayerJoined {
         tournament_id: u64,
         player_count: usize,
     },
-    /// Admin explicitly requested an immediate start.
-    AdminStart { tournament_id: u64 },
-    /// Scheduled start time has been reached (emitted by the ticker task).
-    ScheduledStart { tournament_id: u64 },
-    /// Fill grace timer expired — start if still >= min_players.
-    FillGraceExpired { tournament_id: u64 },
-    /// A settled single-elimination game is ready to advance the bracket.
+    AdminStart {
+        tournament_id: u64,
+    },
+    ScheduledStart {
+        tournament_id: u64,
+    },
+    FillGraceExpired {
+        tournament_id: u64,
+    },
     GameSettled {
         tournament_id: u64,
         game_id: u64,
@@ -103,16 +71,12 @@ pub enum TournamentTrigger {
     },
 }
 
-/// Async-fill tournament scheduler.
 pub struct TournamentScheduler {
     store: TournamentStore,
-    /// Kept so grace-timer tasks can send `FillGraceExpired` back to us.
     trigger_tx: mpsc::Sender<TournamentTrigger>,
     trigger_rx: mpsc::Receiver<TournamentTrigger>,
-    /// Per-tournament grace-timer handles — aborted on max-fill or admin start.
     fill_timers: HashMap<u64, JoinHandle<()>>,
     braid_hub: Option<Arc<ResourceHub>>,
-    /// On-chain config — present when the backend has a VPS authority key.
     on_chain: Option<OnChainConfig>,
 }
 
@@ -120,7 +84,6 @@ struct OnChainConfig {
     program_id: String,
     rpc_url: String,
     vps_authority: Arc<Keypair>,
-    /// Operator treasury — receives swept entry fees at start_tournament.
     host_treasury: solana_sdk::pubkey::Pubkey,
 }
 
@@ -281,11 +244,8 @@ impl TournamentScheduler {
         }
     }
 
-    /// After this many seconds of waiting at `min_players`, fire the bracket.
     const FILL_GRACE_SECS: u64 = 5 * 60;
 
-    /// After `scheduled_at` passes, cancel the tournament if still below
-    /// `min_players` after this many seconds.
     const GRACE_SECS: i64 = 10 * 60;
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -567,10 +527,6 @@ impl TournamentScheduler {
     }
 }
 
-/// Spawn the scheduler as a background task.
-///
-/// Pass `braid_hub` so the scheduler can publish the bracket-start transition.
-/// Pass `on_chain` so the scheduler fires on-chain txs when starting a tournament.
 pub fn spawn_tournament_scheduler(
     store: TournamentStore,
     braid_hub: Option<Arc<ResourceHub>>,
@@ -588,20 +544,10 @@ pub fn spawn_tournament_scheduler(
     trigger_tx
 }
 
-/// Tick interval for the prize-distribution scanner.
 const PRIZE_DISTRIBUTION_TICK: Duration = Duration::from_secs(60);
 
-/// After completion, hold distribution this long while anti-cheat analysis of
-/// the tournament's games is still pending. Past the window we pay anyway —
-/// analysis lag must not freeze payouts indefinitely.
 const PRIZE_HOLD_WINDOW_SECS: i64 = 15 * 60;
 
-/// Default prize-pool size (lamports) above which the crank refuses to pay
-/// out automatically and instead waits for a human admin to call
-/// `POST /admin/tournament/{id}/approve-prize-release`. Unlike the anti-cheat
-/// hold window, this gate never times out on its own — a large payout stays
-/// held indefinitely until someone explicitly approves it. Overridable via
-/// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS`.
 const DEFAULT_PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS: u64 = 5_000_000_000; // 5 SOL
 
 fn prize_auto_release_threshold_lamports() -> u64 {
@@ -611,24 +557,15 @@ fn prize_auto_release_threshold_lamports() -> u64 {
         .unwrap_or(DEFAULT_PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS)
 }
 
-/// True if `prize_pool` exceeds `threshold` and hasn't been explicitly
-/// approved yet — i.e. the crank should hold distribution pending
-/// `POST /admin/tournament/{id}/approve-prize-release`. Pulled out as a pure
-/// function (mirrors `anticheat_gate`) so the threshold logic is testable
-/// without spinning up the whole background loop.
 fn awaiting_prize_release_approval(prize_pool: u64, approved: bool, threshold: u64) -> bool {
     prize_pool > threshold && !approved
 }
 
-/// Anti-cheat gate decision for a completed tournament.
 enum PrizeGate {
-    /// Analysis still pending and we're inside the hold window.
     Hold,
-    /// Distribute, withholding the places held by these flagged wallets.
     Proceed { flagged: Vec<String> },
 }
 
-/// Checks the anti-cheat queue and verdicts for a tournament's games.
 async fn anticheat_gate(
     pool: &sqlx::SqlitePool,
     t: &crate::signing::storage::tournament::TournamentRecord,
@@ -700,18 +637,6 @@ async fn anticheat_gate(
     PrizeGate::Proceed { flagged }
 }
 
-/// Spawns a background task that pushes SOL prizes to tournament winners as
-/// soon as a tournament completes — winners never sign a claim transaction.
-///
-/// Scans for `Completed` tournaments with an unpaid prize pool and cranks the
-/// permissionless `distribute_tournament_prizes` instruction. The instruction
-/// is idempotent (claim bits guard double-pays), so retrying after a partial
-/// failure is safe.
-///
-/// Distribution is gated on anti-cheat: held up to [`PRIZE_HOLD_WINDOW_SECS`]
-/// while analysis of the tournament's games is pending, and places whose
-/// winner has a `Flag` verdict are withheld (resolution goes through the
-/// on-chain governance dispute flow).
 pub fn spawn_prize_distributor(
     store: TournamentStore,
     pool: sqlx::SqlitePool,
@@ -874,12 +799,8 @@ pub fn spawn_prize_distributor(
     });
 }
 
-/// Tick interval for the scheduled-start scanner.
 const SCHEDULED_START_TICK: Duration = Duration::from_secs(30);
 
-/// Spawns a background task that scans all tournaments every
-/// [`SCHEDULED_START_TICK`] and emits `ScheduledStart` for any tournament
-/// whose `scheduled_at` has passed while still in `Registration`.
 pub fn spawn_scheduled_start_ticker(
     store: TournamentStore,
     trigger_tx: mpsc::Sender<TournamentTrigger>,
@@ -1004,12 +925,6 @@ mod tests {
         t
     }
 
-    /// docs/PRE_MAINNET_E2E_PLAN.md §3.2: exercises the exact documented race
-    /// — a tournament's analysis is still pending (a durable `anticheat_queue`
-    /// row exists) but `PRIZE_HOLD_WINDOW_SECS` has already elapsed since
-    /// completion. The comment at this const's definition says "analysis lag
-    /// must not freeze payouts indefinitely" — this proves that's actually
-    /// what happens, not just documented intent.
     #[tokio::test]
     async fn prize_gate_pays_unanalyzed_game_after_hold_window_expires() {
         let pool = anticheat_migrated_pool().await;
@@ -1031,9 +946,6 @@ mod tests {
         );
     }
 
-    /// Counterpart to the above: within the hold window, pending analysis
-    /// must actually hold distribution (the branch the previous test's
-    /// boundary case relies on existing at all).
     #[tokio::test]
     async fn prize_gate_holds_unanalyzed_game_within_hold_window() {
         let pool = anticheat_migrated_pool().await;
@@ -1103,8 +1015,6 @@ mod tests {
         ));
     }
 
-    /// Serializes the one test that mutates the process-global
-    /// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` env var.
     static PRIZE_THRESHOLD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
@@ -1119,18 +1029,6 @@ mod tests {
         );
     }
 
-    /// A `Flag` verdict is only ever consulted through `anticheat_gate`'s own
-    /// query, scoped strictly to the querying tournament's own `game_id`s
-    /// (docs/PRE_MAINNET_E2E_PLAN.md §3.2). This is the narrowest directly
-    /// testable slice of "a Flag has no effect outside where it's explicitly
-    /// looked up": a verdict recorded for a game not referenced by any of
-    /// this tournament's matches must not surface through this tournament's
-    /// gate query. It does NOT (and, without a live-chain harness, cannot)
-    /// assert anything about on-chain state for 1v1 wagers — see the
-    /// settlement-timing finding in docs/PRE_MAINNET_E2E_PLAN.md §3.2 for the
-    /// full claim (finalize_game pays out before analysis for 1v1 games;
-    /// there is no on-chain instruction anywhere aware of anti-cheat verdicts
-    /// at all, so no clawback is even structurally possible today).
     #[tokio::test]
     async fn flagged_verdict_is_invisible_outside_its_own_tournaments_gate_query() {
         let pool = anticheat_migrated_pool().await;

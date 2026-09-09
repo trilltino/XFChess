@@ -5,18 +5,13 @@ use tracing::debug;
 
 use crate::error::{AcError, AcResult};
 
-/// Result of analysing one position.
 #[derive(Debug, Clone)]
 pub struct PosResult {
-    /// Score of the best move in centipawns (from the side to move's perspective).
     pub top1_cp: i32,
-    /// Score of the second-best move. 0 if only one legal move.
     pub top2_cp: i32,
-    /// UCI string of the best move (e.g. "e2e4").
     pub best_move: String,
 }
 
-/// A single Stockfish subprocess handle.
 pub struct StockfishHandle {
     _child: Child,
     stdin: ChildStdin,
@@ -81,8 +76,6 @@ impl StockfishHandle {
         }
     }
 
-    /// Analyse a position given as a FEN string.
-    /// Returns the top-2 moves by score and the best-move UCI.
     pub fn analyse(&mut self, fen: &str, depth: u8, movetime_ms: u64) -> AcResult<PosResult> {
         self.send("ucinewgame")?;
         self.send(&format!("position fen {fen}"))?;
@@ -142,7 +135,6 @@ impl StockfishHandle {
         })
     }
 
-    /// Configure multipv (call once after spawn, before analysis loop).
     pub fn set_multipv(&mut self, n: u8) -> AcResult<()> {
         self.send(&format!("setoption name MultiPV value {n}"))
     }

@@ -22,7 +22,6 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::EguiContexts;
 
-/// System parameter grouping UI-related resources
 #[derive(SystemParam)]
 pub struct GameUIParams<'w, 's> {
     pub contexts: EguiContexts<'w, 's>,

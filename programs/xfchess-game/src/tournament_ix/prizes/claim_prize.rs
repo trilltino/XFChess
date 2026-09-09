@@ -1,6 +1,3 @@
-//! Instruction allowing winners to claim their tournament prize shares.
-//! Supports USDC prize pools (primary) and SOL fallback.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -17,32 +14,26 @@ pub struct ClaimTournamentPrize<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// CHECK: USDC prize escrow PDA — the authority of the token account.
     #[account(
         seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub usdc_prize_escrow_authority: UncheckedAccount<'info>,
-    /// USDC prize escrow token account (only used if usdc_prize_mint is Some).
     #[account(
         mut,
         associated_token::mint = usdc_mint,
         associated_token::authority = usdc_prize_escrow_authority,
     )]
     pub usdc_prize_escrow: Option<Account<'info, TokenAccount>>,
-    /// Claimant's USDC ATA — receives USDC prize (only used if usdc_prize_mint is Some).
     #[account(mut)]
     pub claimant_usdc_ata: Option<Account<'info, TokenAccount>>,
-    /// The USDC mint account (only used if usdc_prize_mint is Some).
     pub usdc_mint: Option<Account<'info, token::Mint>>,
-    /// CHECK: SOL escrow PDA (legacy, only used for SOL-only tournaments).
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// CHECK: Claimant's wallet — must match a winning position.
     #[account(mut, constraint = claimant_wallet.key() == claimant.key() @ GameErrorCode::UnauthorizedAccess)]
     pub claimant_wallet: UncheckedAccount<'info>,
     pub claimant: Signer<'info>,

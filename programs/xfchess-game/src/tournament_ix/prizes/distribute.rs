@@ -1,11 +1,3 @@
-//! Permissionless crank that pushes SOL prize shares to every recorded winner
-//! in a single transaction, so winners receive funds without signing a claim.
-//!
-//! Destinations are constrained to the place pubkeys recorded on the
-//! `Tournament` account, so the cranker cannot redirect funds. USDC pools stay
-//! on the pull-based `claim_tournament_prize` path because recipient ATAs may
-//! not exist at distribution time.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -21,24 +13,15 @@ pub struct DistributeTournamentPrizes<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// CHECK: SOL escrow PDA — program-owned `TournamentEscrow`, so lamports
-    /// can be debited directly. Seeds make it impossible to substitute.
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// Anyone may crank; payouts only ever go to recorded winners.
     pub cranker: Signer<'info>,
 }
 
-/// Pays each unclaimed place its SOL share, marking the claim bits used by
-/// `claim_tournament_prize` so the two paths cannot double-pay.
-///
-/// `remaining_accounts` must contain the winners' (writable) wallet accounts in
-/// any order; places whose wallet is absent are skipped and remain claimable.
-/// Idempotent: re-cranking after full distribution is a no-op.
 pub fn handler<'info>(
     ctx: Context<'info, DistributeTournamentPrizes<'info>>,
     _tournament_id: u64,

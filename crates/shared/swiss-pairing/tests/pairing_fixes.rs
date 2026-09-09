@@ -1,11 +1,3 @@
-//! Regression tests for Swiss pairing correctness fixes.
-//!
-//! Each test targets a specific documented bug or rule:
-//! - Rematch transposition in the bottom half
-//! - Forced bye on odd-leftover after float
-//! - 5-round bye rotation (no player gets two byes unless unavoidable)
-//! - Float history — player not floated down twice in a row
-
 use swiss_pairing::{generate_pairings, PairingConfig, SwissPlayer};
 
 fn player(id: &str, rating: u32, score: f64) -> SwissPlayer {
@@ -71,8 +63,6 @@ fn forced_bye_on_odd_leftover_after_float() {
 
 // ─── Test 3: 5-round bye rotation ────────────────────────────────────────────
 
-/// Over 5 rounds with 5 players (one bye per round), each player should
-/// receive at most one bye.
 #[test]
 fn five_round_bye_rotation_no_double_bye() {
     let base_player = |id: &str, rating: u32| player(id, rating, 0.0);

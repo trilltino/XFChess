@@ -1,9 +1,3 @@
-//! Dispute management routes.
-//!
-//! POST /dispute/notify      — player calls after submitting on-chain tx
-//! GET  /dispute/:game_id    — returns current dispute status
-//! POST /admin/dispute/resolve — moderator resolves a dispute (admin-only)
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -22,7 +16,6 @@ use crate::db::repository::DisputeRepository;
 use crate::infrastructure::auth_middleware::constant_time_eq;
 use crate::signing::AppState;
 
-/// Address that receives a notification email for every new dispute.
 const DISPUTE_NOTIFY_EMAIL: &str = "isicheivalentine@gmail.com";
 const FROM_EMAIL: &str = "noreply@xfchess.com";
 
@@ -62,13 +55,10 @@ pub struct NotifyDisputeResp {
 #[derive(Deserialize)]
 pub struct ResolveDisputeReq {
     pub game_id: i64,
-    /// WHITE_WINS | BLACK_WINS | DRAW | DISMISS
     pub decision: String,
     pub resolution_text: String,
     pub admin_token: String,
-    /// White player wallet pubkey (needed to build the on-chain instruction)
     pub white_wallet: String,
-    /// Black player wallet pubkey
     pub black_wallet: String,
 }
 
@@ -80,8 +70,6 @@ pub struct ResolveDisputeResp {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-/// POST /dispute/notify
-/// Player calls this after submitting the on-chain dispute_game tx.
 pub async fn notify_dispute(
     State(state): State<AppState>,
     Json(req): Json<NotifyDisputeReq>,
@@ -110,7 +98,6 @@ pub async fn notify_dispute(
     }))
 }
 
-/// GET /dispute/:game_id
 pub async fn get_dispute_status(
     State(state): State<AppState>,
     Path(game_id): Path<i64>,
@@ -135,8 +122,6 @@ pub async fn get_dispute_status(
     }
 }
 
-/// POST /admin/dispute/resolve
-/// Moderator decision → builds + signs resolve_dispute on-chain → emails both players.
 pub async fn resolve_dispute(
     State(state): State<AppState>,
     Json(req): Json<ResolveDisputeReq>,
@@ -221,8 +206,6 @@ pub async fn resolve_dispute(
 pub struct RecoverStuckDelegationReq {
     pub game_id: u64,
     pub admin_token: String,
-    /// White player wallet, sourced from off-chain records (this game's own
-    /// create_game/join_game history) — the wiped Game PDA no longer holds it.
     pub white_wallet: String,
     pub black_wallet: String,
 }
@@ -233,17 +216,6 @@ pub struct RecoverStuckDelegationResp {
     pub tx_sig: String,
 }
 
-/// POST /admin/dispute/recover_stuck_delegation
-///
-/// The manual last step of the ER-unavailability recovery path (see
-/// MAGICBLOCK.md's "Failure Mode: ER Unavailability"): once
-/// `force_undelegate_after_timeout` has left a `Game` PDA wiped and
-/// program-owned again (the automated part, run by the settlement worker —
-/// see `backend/src/tasks/settlement_worker.rs`), this releases the wager
-/// escrow as a 50/50 "no fault" split, mirroring `claim_stale_dispute`. Same
-/// admin-token + dispute_authority trust model as `resolve_dispute` above,
-/// since there's no way to verify who was actually winning from a wiped
-/// account.
 pub async fn recover_stuck_delegation(
     State(state): State<AppState>,
     Json(req): Json<RecoverStuckDelegationReq>,

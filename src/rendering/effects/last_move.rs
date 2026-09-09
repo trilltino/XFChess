@@ -1,27 +1,20 @@
-//! Last move highlighting system.
-
 use crate::core::GameSettings;
 use crate::game::resources::MoveHistory;
 use crate::rendering::utils::SquareMaterials;
 use bevy::prelude::*;
 
-/// Marker component for squares showing last move highlight
 #[derive(Component)]
 pub struct LastMoveHighlight;
 
-/// Marker component for the 3D directional arrow showing the last move vector.
 #[derive(Component)]
 pub struct LastMoveArrow3D;
 
-/// Pre-allocated mesh and material for the last-move arrow.
-/// Created once at startup; reused every move to avoid per-move GPU allocations.
 #[derive(Resource)]
 pub struct ArrowAssets {
     pub mesh: Handle<Mesh>,
     pub matl: Handle<StandardMaterial>,
 }
 
-/// One-time setup system: allocate the arrow assets.
 pub fn init_arrow_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -38,7 +31,6 @@ pub fn init_arrow_assets(
     commands.insert_resource(ArrowAssets { mesh, matl });
 }
 
-/// Shows/hides last move highlights. Runs only when `MoveHistory` or settings change.
 pub fn update_last_move_highlight_system(
     mut commands: Commands,
     settings: Res<GameSettings>,

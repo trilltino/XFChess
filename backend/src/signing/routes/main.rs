@@ -1,13 +1,3 @@
-//! Main API routes for the XFChess signing service.
-//!
-//! This module provides HTTP endpoints for:
-//! - Authentication (JWT issuance)
-//! - Session management (create, activate, status)
-//! - Move recording (via Execution Rollup)
-//! - Game lifecycle (undelegate, finalize)
-//! - Transaction signing (session key delegation)
-//! - Statistics (active games, players)
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -27,31 +17,13 @@ use crate::db::repository::GameRepository;
 use crate::signing::{solana, AppState};
 use crate::telemetry::worker_metrics;
 
-/// Lamports used to fund a per-game session key: 0.01 SOL — enough for the
-/// `create_game`/`join_game` init rent (~3.2M) plus ~2000 future tx fees.
-/// Shared by the eager pre-fund in `create_session` and the fallback fund in
-/// `activate_session` so the two can never silently diverge.
 const SESSION_FUND_LAMPORTS: u64 = 10_000_000;
 
-/// How many sessions one wallet may open per [`SESSION_RATE_WINDOW`].
-///
-/// Every `/session/create` funds a fresh keypair with [`SESSION_FUND_LAMPORTS`]
-/// from the fee-payer pool, and `game_id` is chosen by the caller, so without a
-/// ceiling a single authenticated wallet can drain the pool in a loop — 0.01 SOL
-/// per HTTP request, with nothing to stop it. A real player creates or joins a
-/// handful of games in an hour; this leaves ample headroom for retries and
-/// reconnects while making the drain loop useless.
 const SESSION_RATE_MAX_PER_WALLET: usize = 12;
 const SESSION_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// Ceiling on *unactivated* sessions a wallet may hold at once. Bounds the
-/// stock of funded-but-unused keys independently of the rate above, which only
-/// bounds the flow.
 const SESSION_MAX_PENDING_PER_WALLET: i64 = 6;
 
-/// Per-wallet `/session/create` timestamps. Bounded: entries older than the
-/// window are dropped on every touch, and wallets whose history empties are
-/// evicted rather than left as permanently-growing keys.
 fn session_create_tracker() -> &'static tokio::sync::Mutex<HashMap<String, Vec<std::time::Instant>>>
 {
     static TRACKER: std::sync::OnceLock<
@@ -60,9 +32,6 @@ fn session_create_tracker() -> &'static tokio::sync::Mutex<HashMap<String, Vec<s
     TRACKER.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
 }
 
-/// Rations `/session/create` against the fee-payer pool: a sliding-window rate
-/// limit per wallet, plus a cap on how many funded-but-unactivated sessions one
-/// wallet may hold. Returns the HTTP error to surface when either is exceeded.
 pub(crate) async fn session_funding_guard(
     state: &AppState,
     wallet: &str,
@@ -114,31 +83,24 @@ pub(crate) async fn session_funding_guard(
 
 // ── Request / Response types ─────────────────────────────────────────────────
 
-/// Request to create a new game session.
 #[derive(Deserialize, Serialize)]
 pub struct CreateSessionReq {
     pub game_id: u64,
     pub wallet_pubkey: String,
 }
 
-/// Response containing the session public key.
 #[derive(Serialize)]
 pub struct CreateSessionResp {
     pub session_pubkey: String,
-    /// Platform fee per game in lamports (20p GBP total = 10p per player × 2),
-    /// calculated from the live SOL/GBP rate at session creation time.
     pub platform_fee_lamports: u64,
 }
 
-/// Request to activate a session with wallet-signed transaction.
 #[derive(Deserialize, Serialize)]
 pub struct ActivateSessionReq {
     pub game_id: u64,
-    /// Base64-encoded signed Transaction bytes (wallet-signed create/join + authorize_session_key)
     pub signed_tx_b64: String,
 }
 
-/// Request to record a chess move.
 #[derive(Deserialize, Serialize, Clone)]
 pub struct RecordMoveReq {
     pub game_id: u64,
@@ -146,70 +108,41 @@ pub struct RecordMoveReq {
     pub next_fen: String,
     #[serde(default)]
     pub nonce: u64,
-    /// Wallet of the player whose move this is (White on odd plies, Black
-    /// on even) — see `resolve_move_signer`'s doc comment for why this
-    /// can't be inferred from `SessionStore` alone.
     #[serde(default)]
     pub mover_wallet: String,
 }
 
-/// Response containing transaction signature.
 #[derive(Serialize, Default)]
 pub struct SigResp {
     pub sig: String,
-    /// RPC endpoint the transaction was actually submitted to — populated
-    /// only for ER-routed instructions (record_move, undelegate_game) so
-    /// the client can build an accurate `explorer.solana.com/tx/<sig>
-    /// ?cluster=custom&customUrl=<er_endpoint>` link instead of guessing at
-    /// a hardcoded constant that can drift from the backend's real
-    /// `MAGIC_ROUTER_RPC_URL`/`ER_RPC_URL` config. Empty for base-layer
-    /// responses (they're viewable on the normal devnet explorer).
     #[serde(default)]
     pub er_endpoint: String,
 }
 
-/// Client blur + think-time telemetry for one ply (see `report_blur_telemetry`).
 #[derive(Deserialize)]
 pub struct BlurTelemetryReq {
     pub game_id: u64,
-    /// 1-based ply number, matching the server's `moves.move_number`.
     pub move_number: u32,
-    /// "white" | "black" — must match the ply's parity.
     pub color: String,
     pub blurred: bool,
-    /// Client-measured think time for this move in ms (optional).
     #[serde(default)]
     pub think_ms: Option<u32>,
 }
 
-/// Extended finalize response including payout breakdown.
 #[derive(Serialize)]
 pub struct FinalizeResp {
     pub sig: String,
-    /// Lamports awarded to the winner (0 for draws/free games).
     pub winner_lamports: u64,
-    /// Treasury fee deducted in lamports.
     pub country_fee: u64,
-    /// Real backend-advanced operating cost for this game (create + join +
-    /// delegate + N*record_move + undelegate + the MagicBlock ER session
-    /// fee) — the on-chain `Game.fees_advanced` value read just before
-    /// finalize closes the account, which `settle_finished_game` reimburses
-    /// to `treasury_vault` out of the pot. 0 for free games (nothing is
-    /// reimbursed there — see `lifecycle::settlement`'s wager_amount gate).
     pub operating_cost_lamports: u64,
-    /// Flat ELO-linking fee split between both players' wallets at
-    /// settlement (`ELO_FEE_LAMPORTS` on-chain), 0 for free games.
     pub elo_fee: u64,
 }
 
-/// Nonce response for /game/:id/nonce.
 #[derive(Serialize)]
 pub struct NonceResp {
-    /// The last confirmed on-chain nonce (client should use nonce + 1 for next move).
     pub nonce: u64,
 }
 
-/// Request body for free-rated ELO update.
 #[derive(Deserialize, Serialize)]
 pub struct FreeRatedResultReq {
     pub game_id: u64,
@@ -218,14 +151,12 @@ pub struct FreeRatedResultReq {
     pub black_pubkey: String,
 }
 
-/// Request body for submitting a dispute.
 #[derive(Deserialize, Serialize)]
 pub struct DisputeReq {
     pub game_id: u64,
     pub disputing_player: String,
 }
 
-/// Response containing player profile details.
 #[derive(Serialize)]
 pub struct PlayerProfileResp {
     pub elo: u32,
@@ -233,8 +164,6 @@ pub struct PlayerProfileResp {
     pub username: String,
 }
 
-/// Public main API routes — reads and player-initiated writes that carry their
-/// own validation. No relay-secret required.
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/session/status/{game_id}", get(session_status))
@@ -243,21 +172,6 @@ pub fn routes() -> Router<AppState> {
         .route("/stats", get(get_stats))
 }
 
-/// Session-key signing endpoints. The VPS holds the session keypair and signs
-/// Solana transactions on the caller's behalf, so these are wrapped with
-/// [`require_relay_secret`](crate::infrastructure::require_relay_secret) by the
-/// caller in `build_router`.
-/// NOTE: `POST /session/sign` used to live here. It deserialized an arbitrary
-/// caller-supplied `Transaction`, signed it with the game's session keypair,
-/// re-anchored it on a fresh blockhash and submitted it — with no inspection of
-/// the instructions, program IDs or accounts, and no check that the caller had
-/// any relationship to `game_id`. That is an unrestricted signing oracle over a
-/// key the backend holds on a player's behalf. It has been removed rather than
-/// constrained: nothing in the game client ever called it (delegation goes
-/// through `/game/delegate`, which builds the instruction server-side), so the
-/// endpoint was pure attack surface. `POST /session/tee_auth` is gone for the
-/// same reason — it verified a signature over a constant message with no nonce,
-/// game binding or expiry (replayable forever), then discarded the result.
 pub fn protected_routes() -> Router<AppState> {
     Router::new()
         .route("/session/create", post(create_session))
@@ -284,7 +198,6 @@ pub fn protected_routes() -> Router<AppState> {
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
-/// POST /session/create - Creates a new session for a game.
 pub async fn create_session(
     State(state): State<AppState>,
     caller: crate::signing::auth::RequireWallet,
@@ -364,11 +277,6 @@ pub async fn create_session(
     }))
 }
 
-/// POST /session/activate - Activates a session with wallet-signed setup TX.
-///
-/// Error responses carry the real reason in the body (not just a bare status)
-/// so it reaches the player's `LobbyStatus::Error` UI instead of dead-ending
-/// as an opaque "HTTP 502" that only the server's own log can explain.
 pub async fn activate_session(
     State(state): State<AppState>,
     caller: crate::signing::auth::RequireWallet,
@@ -522,7 +430,6 @@ pub async fn activate_session(
     }))
 }
 
-/// POST /session/abandon/:game_id - Releases a never-activated session.
 pub async fn abandon_session(
     State(state): State<AppState>,
     caller: crate::signing::auth::RequireWallet,
@@ -542,7 +449,6 @@ pub async fn abandon_session(
     }
 }
 
-/// GET /session/status/:game_id - Gets session status.
 pub async fn session_status(
     Path(game_id): Path<u64>,
     State(state): State<AppState>,
@@ -567,8 +473,6 @@ pub async fn session_status(
 
 // ── Moves ─────────────────────────────────────────────────────────────────────
 
-/// POST /move/record - Records a move on the Execution Rollup.
-/// Validates engine-side before Solana submission; derives next_fen internally.
 pub async fn record_move(
     State(state): State<AppState>,
     caller: crate::signing::auth::RequireWallet,
@@ -805,28 +709,10 @@ pub async fn record_move(
     }))
 }
 
-/// The Braid resource carrying a game's moves to spectators.
-///
-/// Registered lazily on a game's first move — a game nobody has played is not
-/// a resource anyone can subscribe to, and `404` is the honest answer.
 pub fn spectator_moves_path(game_id: &str) -> String {
     format!("game/{game_id}/moves")
 }
 
-/// Append one move to the game's spectator feed.
-///
-/// # Why this is gated on the broadcast delay
-///
-/// A `209` subscription pushes each move the instant it is recorded. For a
-/// tournament game with a non-zero broadcast delay that is precisely the
-/// ghosting channel the delay exists to close — `get_moves_visible` filters the
-/// polled feed by timestamp, and a live stream would walk straight around it.
-///
-/// So a delayed game is never published here at all: its resource is never
-/// registered, a subscribe gets `404`, and the client falls back to the
-/// delay-gated poll it already uses. Two independent guards (this one, and the
-/// client refusing to subscribe unless the delay it fetched is 0) — losing
-/// either one alone does not leak a live board.
 #[allow(clippy::too_many_arguments)]
 async fn publish_move_to_spectators(
     state: &AppState,
@@ -876,11 +762,6 @@ async fn publish_move_to_spectators(
     );
 }
 
-/// Encode one move as the `ChessMessage::Move` a spectator's
-/// `braid_chess::ChessSubscriber` decodes.
-///
-/// History and live tail must produce byte-identical shapes — a subscriber has
-/// one decode path for both.
 fn move_to_message(
     move_uci: &str,
     _move_san: Option<&str>,
@@ -898,14 +779,6 @@ fn move_to_message(
         .unwrap_or(serde_json::Value::Null)
 }
 
-/// Asserts `wallet` is White or Black in `game_id` according to the chain.
-///
-/// This is the authorization primitive for every game-scoped route. String
-/// equality against a field the caller supplied proves nothing, and a game's
-/// host legitimately acts for *both* players (it relays the opponent's moves),
-/// so the only meaningful question is on-chain participation in this specific
-/// game. Cheap in the common case — `GameParticipantsCache` holds a 5-minute
-/// TTL and participants never change mid-game.
 async fn require_game_participant(
     state: &AppState,
     game_id: u64,
@@ -935,19 +808,8 @@ async fn require_game_participant(
     }
 }
 
-/// Upper bound on a single move's think time (ms). Anything larger is a
-/// fabricated or buggy claim; clamping keeps the budget math meaningful.
 const MAX_THINK_MS: u32 = 2 * 60 * 60 * 1000; // 2 hours
 
-/// POST /telemetry/blur - Client-side anti-cheat telemetry.
-///
-/// Each client reports, for its *own* moves only, whether the game window
-/// lost focus since its previous move (the alt-tab-to-engine signature) and
-/// how long it spent on the move (`think_ms`). Ply parity is enforced (odd
-/// plies are white's), so a client can only attach telemetry to plies of the
-/// color it claims; first write per ply wins. The think time is a *claim* —
-/// the analysis enqueue audits it against the server-observed wall clock
-/// before scoring. Consumed by the anti-cheat pipeline as soft signals.
 pub async fn report_blur_telemetry(
     State(state): State<AppState>,
     caller: crate::signing::auth::RequireWallet,
@@ -1036,7 +898,6 @@ pub async fn report_blur_telemetry(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Convert a UCI string (e.g. "e2e4" or "e7e8q") into a fixed 5-byte array.
 fn uci_to_fixed5(uci: &str) -> Result<[u8; 5], ()> {
     let bytes = uci.as_bytes();
     if bytes.len() < 4 || bytes.len() > 5 {
@@ -1047,14 +908,6 @@ fn uci_to_fixed5(uci: &str) -> Result<[u8; 5], ()> {
     Ok(out)
 }
 
-/// POST /game/delegate - Delegates a game from devnet to the Ephemeral Rollup.
-///
-/// Mirrors `undelegate_game`'s trust model in reverse: the VPS already holds
-/// the per-game session key (set as `game.fee_payer` during create/join), so
-/// it can satisfy the on-chain `fee_payer` check itself; the fee-payer pool
-/// covers the delegation bookkeeping accounts' rent. Lets the client trigger
-/// delegation with zero wallet popup — no session-key funding margin spent
-/// on this beyond what `activate_session` already provides.
 pub async fn delegate_game(
     State(state): State<AppState>,
     caller: crate::signing::auth::RequireWallet,
@@ -1153,18 +1006,6 @@ pub async fn delegate_game(
     }))
 }
 
-/// Registers the on-chain time-check crank for a freshly-delegated game, so a
-/// stalled clock gets auto-forfeited on the ER even if nothing else calls
-/// `claim_timeout`. 30s interval, effectively-until-cancelled iterations —
-/// cancelled by `cancel_time_check_crank` alongside `undelegate_game`.
-///
-/// Best-effort: delegation itself already succeeded (the part that matters
-/// for gameplay to continue), so a scheduling failure is logged and counted
-/// rather than surfaced to the caller.
-///
-/// `pub(crate)` so `tasks::settlement_worker`'s redelegate-retry path can
-/// reuse it after successfully redelegating a stuck game — the crank still
-/// needs to be (re)registered exactly like the normal delegate flow does.
 pub(crate) async fn schedule_time_check_crank(
     state: &AppState,
     base_rpc_url: &str,
@@ -1276,19 +1117,6 @@ pub(crate) async fn schedule_time_check_crank(
     }
 }
 
-/// Acquires the per-game lock serializing ER-routed writes for `game_id`.
-/// See `AppState::er_write_locks`'s doc comment for why this exists —
-/// briefly: the ER rejects two concurrent writes to the same delegated
-/// account outright, and this backend has multiple independent triggers
-/// (a client's `record_move`/`undelegate_game` request,
-/// `schedule_time_check_crank`'s own follow-up call, `settlement_worker`'s
-/// periodic redelegate pass) that can all touch the same game with no other
-/// coordination between them. Hold the returned guard for the entire
-/// ER-touching portion of the caller — dropping it early re-opens the race.
-///
-/// Only the outer map lock (held briefly, to get-or-insert the per-game
-/// entry) is shared across games; looking up game A's lock never blocks a
-/// concurrent lookup for game B.
 async fn er_game_lock(state: &AppState, game_id: u64) -> tokio::sync::OwnedMutexGuard<()> {
     let per_game = {
         let mut locks = state.er_write_locks.lock().await;
@@ -1300,15 +1128,6 @@ async fn er_game_lock(state: &AppState, game_id: u64) -> tokio::sync::OwnedMutex
     per_game.lock_owned().await
 }
 
-/// Resolves the signing keypair for `game_id`: prefers the per-game
-/// `SessionStore` entry (original `create_game`/`join_game` +
-/// `authorize_session_key` flow); if none exists, reads the Game PDA's
-/// `fee_payer` on-chain and checks it against sessions registered via
-/// `routes::global_session::register` (the newer `global_create_game`/
-/// `global_join_game` flow, which never gets a `SessionStore` row since it
-/// skips `/session/create` entirely). Returns `None` if neither source has
-/// a match — the caller should treat that as "no known signer for this game"
-/// (404), same as a plain `SessionStore` miss did before this existed.
 pub async fn resolve_game_signer(
     state: &AppState,
     game_id: u64,
@@ -1337,43 +1156,9 @@ pub async fn resolve_game_signer(
         .and_then(|kp| solana_sdk::signature::Keypair::try_from(kp.to_bytes().as_slice()).ok())
 }
 
-/// Resolves the signing keypair for one specific player's move within a
-/// game, and which on-chain instruction it must go through.
-///
-/// A single relayer (the creator's client) submits *both* players' moves
-/// for a game through this one backend, so `record_move` cannot just grab
-/// "the" session on file for `game_id` — the two players can be on
-/// completely different session flows at once (one using a long-lived
-/// global session, the other a fresh per-game one), and even within the
-/// per-game flow, `SessionStore` only ever tracks one physical keypair per
-/// `game_id` shared by both players' on-chain `SessionDelegation`s (see
-/// `SessionStore::create`'s "return the existing session pubkey" early
-/// return) — the *account* that keypair authenticates as differs by which
-/// wallet's delegation PDA is passed, which depends on whose move this is.
-/// Picking the wrong one doesn't just misattribute a move — the on-chain
-/// `apply_recorded_move` explicitly checks the claimed mover against
-/// `game.turn`'s expected player and rejects the transaction with
-/// `NotYourTurn` (confirmed live 2026-08-10: every non-creator move failed
-/// exactly this way once the ER-routing fix let record_move calls actually
-/// reach the chain for the first time).
-///
-/// Resolution order per `mover_wallet`:
-/// 1. An active *global* session for that wallet specifically (not
-///    whichever wallet's global flag happens to be set on the game's
-///    `SessionStore` row) → `global_record_move` with that wallet's own
-///    global session keypair.
-/// 2. Otherwise, the per-game shared session on file for `game_id` → plain
-///    `record_move`, deriving the `SessionDelegation` PDA from
-///    `mover_wallet` (not the row's stored wallet, which only ever reflects
-///    whoever activated their session first/most-recently).
 #[derive(Debug, PartialEq, Eq)]
 pub enum MoveSignerError {
-    /// Neither a global session for `mover_wallet` nor any per-game session
-    /// exists for `game_id`.
     NoSession,
-    /// A per-game session exists but hasn't finished activation yet (the
-    /// wallet-signed setup TX hasn't confirmed) — global sessions have no
-    /// equivalent gate, see `resolve_move_signer`'s doc comment.
     SessionInactive,
 }
 
@@ -1404,7 +1189,6 @@ pub async fn resolve_move_signer(
     Ok((entry.keypair(), false))
 }
 
-/// POST /game/undelegate - Undelegates a game from ER to devnet.
 pub async fn undelegate_game(
     State(state): State<AppState>,
     caller: crate::signing::auth::RequireWallet,
@@ -1494,9 +1278,6 @@ pub async fn undelegate_game(
     }))
 }
 
-/// Cancels the on-chain time-check crank scheduled by `schedule_time_check_crank`.
-/// Best-effort and synchronous-but-fire-and-forget from the caller's
-/// perspective: never returns an error, only logs/counts one.
 fn cancel_time_check_crank(
     er_rpc: &solana_client::rpc_client::RpcClient,
     program_id: &Pubkey,
@@ -1531,31 +1312,11 @@ fn cancel_time_check_crank(
     }
 }
 
-/// The on-chain fee-related fields read off a `Game` account just before
-/// finalize closes it — see `read_game_fee_breakdown`.
 struct GameFeeBreakdown {
-    /// Real backend-advanced cost accrued via `lifecycle::transitions`
-    /// (create/join/delegate/record_move/undelegate + the ER session fee) —
-    /// what `settle_finished_game` reimburses to `treasury_vault` from the
-    /// pot, clamped by what's left after the flat tx-fee deduction.
     fees_advanced: u64,
-    /// The flat platform fee set at creation time, in lamports.
     country_fee: u64,
 }
 
-/// Reads the on-chain `Game.fees_advanced` and `Game.country_fee` fields, the
-/// authoritative amounts `settle_finished_game` actually pays to
-/// `treasury_vault` — recomputing an estimate backend-side (e.g. via a
-/// BPS-of-pot guess) silently diverges from what the program transfers.
-///
-/// Returns `None` on any parse failure (missing account, unexpected layout) —
-/// callers must treat that as "fee unknown", not "fee zero".
-///
-/// This used to walk the byte offsets itself and got them wrong: it stepped
-/// `move_count` straight to `turn`, skipping `halfmove_clock`, so `country_fee`
-/// was read two bytes early and the platform fee reported back to players was
-/// garbage. It now goes through the shared decoder, which is pinned against the
-/// program's own offset test.
 fn read_game_fee_breakdown(
     rpc: &solana_client::rpc_client::RpcClient,
     program_id: &Pubkey,
@@ -1571,16 +1332,8 @@ fn read_game_fee_breakdown(
     })
 }
 
-/// Flat ELO-linking fee split between both players at settlement — mirrors
-/// `ELO_FEE_LAMPORTS` in `programs/xfchess-game/src/constants.rs`. Keep the
-/// two in sync; this crate doesn't depend on the program crate.
 const ELO_FEE_LAMPORTS: u64 = 5_000;
 
-/// POST /game/finalize - Finalizes a game on devnet.
-/// COUNTRY_FEE estimate — 1% of pot — used only as a fallback when the real
-/// on-chain fee can't be read: either `read_game_fee_breakdown` failed, or (for
-/// an already-finalized game, see `finalize_game`'s early-return) the `Game`
-/// account is already closed and there's nothing left to read.
 fn estimate_country_fee(wager_lamports: u64) -> u64 {
     const COUNTRY_FEE_BPS: u64 = 100; // 1%
     wager_lamports
@@ -1589,14 +1342,6 @@ fn estimate_country_fee(wager_lamports: u64) -> u64 {
         / 10_000
 }
 
-/// Winner payout after fees — reproduces `settle_finished_game`'s exact
-/// deduction order (tx-fee reimbursement, platform/operating-cost
-/// reimbursement, country fee, then the flat per-player ELO fee) rather than
-/// a BPS-of-pot guess, since the real on-chain amounts are flat constants,
-/// not percentages. `country_fee` and `operating_cost` should be the real
-/// on-chain values when available (see `estimate_country_fee` for the
-/// country_fee fallback; pass 0 for `operating_cost` when the `Game` account
-/// is already closed and `fees_advanced` can no longer be read).
 fn compute_winner_lamports(
     wager_lamports: u64,
     country_fee: u64,
@@ -1839,7 +1584,6 @@ pub async fn finalize_game(
     }))
 }
 
-/// GET /player/:pubkey - Gets player profile details (ELO, country, username).
 pub async fn get_player_profile(
     Path(pubkey): Path<String>,
     State(state): State<AppState>,
@@ -1891,7 +1635,6 @@ pub struct FinalizeGameReq {
     pub winner: Option<String>, // "white" | "black" | null (draw)
     pub white_pubkey: String,
     pub black_pubkey: String,
-    /// Per-player wager in lamports (optional; 0 for free games).
     #[serde(default)]
     pub wager_lamports: u64,
 }
@@ -1906,22 +1649,15 @@ pub struct StatsResp {
     pub uptime_seconds: u64,
 }
 
-/// Process start instant, captured the first time `/stats` is served. Real
-/// uptime needs a fixed reference point; the field previously reported
-/// `SystemTime::now()` as seconds — the Unix clock, around 1.7 billion, not an
-/// uptime at all.
 fn process_start() -> std::time::Instant {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     *START.get_or_init(std::time::Instant::now)
 }
 
-/// Called once during startup so `/stats` reports uptime from process start
-/// rather than from the first request that happened to touch it.
 pub fn init_uptime_clock() {
     let _ = process_start();
 }
 
-/// GET /stats - Global platform statistics.
 pub async fn get_stats(State(state): State<AppState>) -> Result<Json<StatsResp>, StatusCode> {
     let active_games = state.store.count_active().await;
     let unique_players = state.store.count_unique_players().await;
@@ -1937,7 +1673,6 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<StatsResp>,
     }))
 }
 
-/// Generate SAN for a move by replaying from the previous position.
 async fn generate_san(
     repo: &GameRepository,
     game_id: &str,
@@ -2011,17 +1746,6 @@ async fn generate_san(
 
 // ── Item 5: move nonce ────────────────────────────────────────────────────────
 
-/// GET /game/:game_id/nonce - Returns the last confirmed move nonce, read from
-/// the chain with the local move log as a fallback.
-///
-/// This used to derive the nonce purely from local SQLite rows while its doc
-/// comment claimed it was the on-chain value. The two diverge in practice —
-/// `record_move` submits to the ER first and persists afterwards, so a DB write
-/// that fails (or a restore from an older snapshot) leaves the local count
-/// behind the chain's, and the client then builds its next move on a nonce the
-/// program rejects with `InvalidNonce`. The `Game` account is authoritative, so
-/// read it; fall back to the local log only when the account can't be read,
-/// which is the pre-existing behaviour and no worse than before.
 pub async fn get_move_nonce(
     Path(game_id): Path<u64>,
     State(state): State<AppState>,
@@ -2044,8 +1768,6 @@ pub async fn get_move_nonce(
     Ok(Json(NonceResp { nonce }))
 }
 
-/// Reads `Game.nonce` off-chain-account bytes, or `None` if the account is
-/// missing/unreadable. Uses the shared decoder so the offsets stay in one place.
 async fn read_game_nonce(state: &AppState, game_id: u64) -> Option<u64> {
     let game_pda = Pubkey::find_program_address(
         &[solana::GAME_SEED, &game_id.to_le_bytes()],
@@ -2062,7 +1784,6 @@ async fn read_game_nonce(state: &AppState, game_id: u64) -> Option<u64> {
 
 // ── Item 4: free-rated ELO update ────────────────────────────────────────────
 
-/// POST /ratings/update - Records result of a free (no-wager) rated game and triggers ELO update.
 pub async fn update_free_rated_result(
     State(state): State<AppState>,
     caller: crate::signing::auth::RequireWallet,
@@ -2158,16 +1879,6 @@ pub async fn update_free_rated_result(
 
 // ── Item 6: dispute submission ────────────────────────────────────────────────
 
-/// POST /dispute/submit — **removed**. It logged a warning and returned
-/// `dispute-{id}-pending`, which the client rendered as a filed dispute; nothing
-/// was ever persisted and no admin could see it. Telling a player their dispute
-/// is open when no record exists is worse than refusing outright, so this now
-/// answers 501 and names the route that works — the same honest-501 treatment
-/// `admin::force_resign` already uses for its unimplemented on-chain path.
-///
-/// The real flow is `POST /dispute/notify` (`routes::dispute`), which records
-/// the case against the player's on-chain `dispute_game` transaction and is
-/// resolved by `POST /admin/dispute/resolve`.
 pub async fn submit_dispute(
     State(_state): State<AppState>,
     Json(req): Json<DisputeReq>,
@@ -2242,15 +1953,6 @@ mod tests {
         assert!(json.is_ok());
     }
 
-    /// Pins the bug found live on devnet 2026-08-10: a single relayer
-    /// backend submits *both* players' moves for a game, and the two
-    /// players can be on completely different session flows at once (one
-    /// long-lived global session, one fresh per-game session) — resolving
-    /// "the" session for a `game_id` instead of the specific mover's wallet
-    /// silently signed every move as the wrong player, which the on-chain
-    /// program only surfaced as an opaque `NotYourTurn` once the record_move
-    /// calls actually started reaching the chain. See `resolve_move_signer`'s
-    /// doc comment for the full mechanism.
     #[tokio::test]
     async fn resolve_move_signer_picks_the_correct_players_session() {
         use crate::infrastructure::{initialize_pools, run_migrations};
@@ -2343,18 +2045,6 @@ mod tests {
         );
     }
 
-    /// Reconciliation contract regression test (see
-    /// `docs/plans/state-reconciliation-contract.md`): once Solana finalized
-    /// state has been observed for a game — here, simulated by
-    /// `SessionStore::deactivate`, exactly what
-    /// `tasks::settlement_worker` calls the moment it sees the on-chain
-    /// `Game` account closed/finished — no further move can be authorized
-    /// for that game, no matter what the Ephemeral Rollup or the durable
-    /// event log still believe. `resolve_move_signer` is the single choke
-    /// point every move-recording path goes through
-    /// (`record_move`/`delegate_game`/`undelegate_game`/`finalize_game`),
-    /// so this one check is what makes "Solana finalized state wins" true
-    /// in practice, not just in a doc comment.
     #[tokio::test]
     async fn settlement_deactivation_blocks_further_moves_even_with_a_live_session_on_file() {
         use crate::infrastructure::{initialize_pools, run_migrations};
@@ -2438,14 +2128,6 @@ mod tests {
         );
     }
 
-    /// Regression test for the live-devnet 403 (2026-08-16): a game's host
-    /// relays moves for *both* players, so `caller` (the host's JWT wallet)
-    /// and `mover_wallet` (whichever player actually moved) routinely
-    /// differ. `record_move`'s auth check must allow that — verifying
-    /// on-chain participation in the game, not string equality with
-    /// `mover_wallet` — while still rejecting a wallet with no relationship
-    /// to the game at all. See the doc comment at the top of `record_move`
-    /// for the full incident writeup.
     #[tokio::test]
     async fn record_move_allows_a_genuine_participant_to_relay_the_other_players_move() {
         use crate::infrastructure::{initialize_pools, run_migrations};

@@ -1,11 +1,6 @@
-//! Integration tests for turn tracking resource extracted from doc tests
-//! Original location: src/game/resources/turn/current.rs
-
 use xfchess::game::resources::CurrentTurn;
 use xfchess::rendering::pieces::PieceColor;
 
-/// Test turn execution flow
-/// Original: turn flow example
 #[test]
 fn example_execute_move_flow() {
     let mut current_turn = CurrentTurn::default();
@@ -18,8 +13,6 @@ fn example_execute_move_flow() {
     assert_eq!(current_turn.color, PieceColor::Black);
 }
 
-/// Test switching turns
-/// Original: switch method example
 #[test]
 fn example_switch_turns() {
     let mut turn = CurrentTurn::default();

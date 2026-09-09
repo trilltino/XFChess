@@ -1,7 +1,3 @@
-//! Game history route.
-//!
-//! GET /games/history/:wallet — returns last 20 games for a player wallet.
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -27,10 +23,6 @@ pub fn history_routes() -> Router<AppState> {
         .route("/ratings/history/{wallet}", get(get_ratings_history))
 }
 
-/// GET /games/{game_id}/broadcast-delay — the game's public spectator delay in
-/// seconds (0 = live). Spectator clients query this *before* deciding whether
-/// to subscribe to the live P2P gossip feed: a non-zero delay means the only
-/// permitted public source is the delay-gated HTTP move feed.
 pub async fn get_broadcast_delay(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
@@ -73,13 +65,6 @@ pub async fn get_game_history_by_username(
     Ok(Json(serde_json::json!({ "games": games })))
 }
 
-/// GET /games/moves/{game_id} — public (delayed) spectator feed.
-///
-/// Returns only moves at least the game's `broadcast_delay_secs` old, so a
-/// live stream can't be used to ghost. For delay = 0 games (all casual/ranked
-/// today) this is the full move list, unchanged. There is deliberately no
-/// `live` bypass on this unauthenticated endpoint — that's exactly the feed an
-/// accomplice would watch. Participants/casters get live via authorized paths.
 pub async fn get_game_moves(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
@@ -99,8 +84,6 @@ pub async fn get_game_moves(
     Ok(Json(serde_json::json!({ "moves": moves })))
 }
 
-/// GET /ratings/history/{wallet} — Returns the last 50 game results for ELO chart.
-/// Each entry: {game_id, result: "win"|"loss"|"draw"|"unknown", opponent, timestamp, stake_amount}
 pub async fn get_ratings_history(
     State(state): State<AppState>,
     Path(wallet): Path<String>,
@@ -140,7 +123,6 @@ pub async fn get_ratings_history(
     Ok(Json(serde_json::json!({ "history": history })))
 }
 
-/// GET /games/{game_id}/pgn — Returns the PGN text for a game.
 pub async fn get_game_pgn(
     State(state): State<AppState>,
     Path(game_id): Path<String>,

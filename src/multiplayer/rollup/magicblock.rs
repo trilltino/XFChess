@@ -1,13 +1,3 @@
-//! Magic Block Ephemeral Rollups Resolver Integration
-//!
-//! Builds the `delegate_game` instruction (signed by the wallet) and tracks
-//! local delegation status for the UI. Actual move/undelegate RPC routing
-//! between base RPC and MagicBlock's Magic Router is owned by the backend
-//! (see `crate::multiplayer::vps_client` and MAGICBLOCK.md) — this module
-//! does not send gameplay transactions itself.
-//!
-//! Reference: https://docs.magicblock.gg/
-
 use bevy::prelude::*;
 use sha2::{Digest, Sha256};
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
@@ -20,36 +10,14 @@ use ephemeral_rollups_sdk::pda::{
     delegation_metadata_pda_from_delegated_account, delegation_record_pda_from_delegated_account,
 };
 
-/// The XFChess program ID on Solana
 pub const XFCHESS_PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
-/// Magic Block explorer-link default (used for the explorer link only —
-/// actual move/undelegate RPC routing is owned by the backend, see
-/// MAGICBLOCK.md). Must track the backend's `magic_router_rpc_url` default
-/// (`backend/src/signing/config.rs`), NOT `ER_RPC_URL` — `record_move` and
-/// `undelegate` are routed through the Magic Router
-/// (`https://devnet-router.magicblock.app`), never the bare ER validator
-/// URL, so a link built from that URL would 404 or point at the wrong node.
-/// If the backend's `MAGIC_ROUTER_RPC_URL` env override is ever changed
-/// from its default, this constant drifts — this is a known limitation of
-/// hardcoding it client-side rather than having the backend echo back the
-/// URL it actually used.
 pub const MAGIC_BLOCK_ER_ENDPOINT: &str = "https://devnet-router.magicblock.app";
 
-/// Solana Explorer with custom RPC for viewing ER transactions
 pub const MAGIC_BLOCK_EXPLORER: &str = "https://explorer.solana.com";
 
-/// MagicBlock Delegation Program ID
 pub const DELEGATION_PROGRAM_ID: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
 
-/// Builds a Solana Explorer link that inspects `signature` against a custom
-/// RPC cluster pointed at the ER validator (`?cluster=custom&customUrl=...`)
-/// — per MagicBlock's own guidance, this is how you view an ER transaction
-/// in explorer.solana.com / solscan.io: point the explorer's RPC at the ER
-/// endpoint rather than the base cluster, since the tx never lands on devnet.
-/// Free function (not a `&self` method) so callers inside a spawned async
-/// task — which can't hold a `Res<MagicBlockResolver>` — can still build the
-/// link from a cloned endpoint string.
 pub fn er_explorer_url_for(er_endpoint: &str, signature: &str) -> String {
     let endpoint = er_endpoint.trim_end_matches('/');
     format!(
@@ -58,7 +26,6 @@ pub fn er_explorer_url_for(er_endpoint: &str, signature: &str) -> String {
     )
 }
 
-/// Compute the 8-byte Anchor discriminator for `global:<fn_name>`.
 fn anchor_disc(fn_name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
     hasher.update(format!("global:{}", fn_name).as_bytes());
@@ -68,14 +35,12 @@ fn anchor_disc(fn_name: &str) -> [u8; 8] {
     disc
 }
 
-/// Errors that can occur during Magic Block resolver operations
 #[derive(Error, Debug, Clone)]
 pub enum MagicBlockError {
     #[error("Failed to delegate game PDA: {0}")]
     DelegationFailed(String),
 }
 
-/// Represents the delegation status of a game
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DelegationStatus {
     #[default]
@@ -83,14 +48,9 @@ pub enum DelegationStatus {
     Delegated,
 }
 
-/// Configuration for the Magic Block resolver
 #[derive(Resource, Clone, Debug)]
 pub struct MagicBlockConfig {
-    /// The ER validator endpoint URL (used for the explorer link only —
-    /// actual move/undelegate RPC routing is owned by the backend, see
-    /// MAGICBLOCK.md).
     pub er_endpoint: String,
-    /// The Solana program ID for XFChess
     pub program_id: Pubkey,
 }
 
@@ -103,18 +63,12 @@ impl Default for MagicBlockConfig {
     }
 }
 
-/// Magic Block resolver that handles ER interactions
 #[derive(Resource)]
 pub struct MagicBlockResolver {
-    /// Configuration for the resolver
     config: MagicBlockConfig,
-    /// Current delegation status
     pub delegation_status: DelegationStatus,
-    /// The delegated game PDA (if any)
     pub delegated_game_pda: Option<Pubkey>,
-    /// Game ID of the currently delegated game
     delegated_game_id: Option<u64>,
-    /// RPC client for Solana fallback (public for async task spawning)
     pub solana_rpc: Option<Arc<solana_client::rpc_client::RpcClient>>,
 }
 
@@ -125,7 +79,6 @@ impl Default for MagicBlockResolver {
 }
 
 impl MagicBlockResolver {
-    /// Creates a new MagicBlockResolver with the given configuration
     pub fn new(config: MagicBlockConfig) -> Self {
         Self {
             config,
@@ -136,62 +89,30 @@ impl MagicBlockResolver {
         }
     }
 
-    /// Sets the Solana RPC client for fallback
     pub fn set_solana_rpc(&mut self, rpc_client: Arc<solana_client::rpc_client::RpcClient>) {
         self.solana_rpc = Some(rpc_client);
     }
 
-    /// Checks if a game is currently delegated to the ER
     pub fn is_delegated(&self) -> bool {
         self.delegation_status == DelegationStatus::Delegated && self.delegated_game_pda.is_some()
     }
 
-    /// Gets the current game PDA if delegated
     pub fn get_delegated_game(&self) -> Option<Pubkey> {
         self.delegated_game_pda
     }
 
-    /// Sets the game ID used in delegation/undelegation instructions.
     pub fn set_game_id(&mut self, game_id: u64) {
         self.delegated_game_id = Some(game_id);
     }
 
-    /// Returns the MagicBlock ER explorer URL for a given tx signature.
     pub fn er_explorer_url(&self, signature: &str) -> String {
         er_explorer_url_for(&self.config.er_endpoint, signature)
     }
 
-    /// The configured ER validator endpoint (used to build explorer links).
     pub fn er_endpoint(&self) -> &str {
         &self.config.er_endpoint
     }
 
-    /// Creates a `delegate_game` Anchor instruction matching the on-chain
-    /// `DelegateGameCtx` account layout.
-    ///   0.  game                  (mut) — game PDA
-    ///   1.  payer          (mut, sign)  — pays for delegation bookkeeping
-    ///   2.  owner_program               — xfchess-game program itself
-    ///   3.  buffer                (mut) — game delegation buffer PDA
-    ///   4.  delegation_record     (mut) — game delegation record PDA
-    ///   5.  delegation_metadata   (mut) — game delegation metadata PDA
-    ///   6.  delegation_program          — MagicBlock delegation program
-    ///   7.  system_program
-    ///   8.  fee_payer       (mut, sign) — must equal `game.fee_payer`
-    /// `payer` funds the MagicBlock delegation bookkeeping accounts (buffer,
-    /// delegation_record, delegation_metadata) — it does not have to be the
-    /// wallet, just some funded signer; `fee_payer` must equal `game.fee_payer`
-    /// on-chain (checked by `handler_delegate_game`) — pass the session key
-    /// there to co-sign without a second real "authority" check.
-    ///
-    /// Account order below matches `DelegateGameCtx`
-    /// (`programs/xfchess-game/src/delegation_ix/delegate.rs`) exactly — Anchor
-    /// resolves `Accounts` fields positionally, so previously this built a
-    /// 12-account list (interleaving a `move_log` delegation that has no
-    /// field in `DelegateGameCtx` at all) which put a non-signer PDA where
-    /// `payer: Signer` was expected — every delegation submitted through it
-    /// would have failed on-chain with `AccountNotSigner`, regardless of who
-    /// signed. If move_log ever needs delegating too, that has to be a
-    /// second, separate instruction — not folded into this account list.
     pub fn create_delegation_instruction(
         &self,
         game_pda: Pubkey,
@@ -249,18 +170,12 @@ impl MagicBlockResolver {
     }
 }
 
-/// Events for Magic Block resolver
 #[derive(Event, Message, Debug, Clone)]
 pub enum MagicBlockEvent {
-    /// Game has been delegated to ER
     GameDelegated { game_pda: Pubkey },
-    /// Game has been undelegated from ER
     GameUndelegated { game_pda: Pubkey },
-    /// Delegation failed
     DelegationFailed { game_pda: Pubkey, error: String },
-    /// Undelegation failed
     UndelegationFailed { game_pda: Pubkey, error: String },
-    /// Transaction routed to ER
     TransactionRoutedToEr { signature: String },
 }
 

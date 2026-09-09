@@ -1,24 +1,3 @@
-//! Settings persistence system
-//!
-//! Saves and loads [`GameSettings`] to/from a JSON file. Provides automatic
-//! persistence of user preferences across application sessions.
-//!
-//! # File Location
-//!
-//! Settings are stored in `settings.json` in the project root directory.
-//! This location is chosen for simplicity and easy access during development.
-//!
-//! # Error Handling
-//!
-//! Both load and save operations handle errors gracefully:
-//! - Load failures fall back to default settings
-//! - Save failures are logged but don't interrupt gameplay
-//!
-//! # Usage
-//!
-//! Settings are automatically loaded on startup via [`load_settings_system`]
-//! and saved automatically when changed via [`save_settings_system`].
-
 use crate::core::GameSettings;
 use bevy::prelude::*;
 
@@ -32,17 +11,9 @@ use std::path::PathBuf;
 #[cfg(target_arch = "wasm32")]
 use gloo_storage::{LocalStorage, Storage};
 
-/// Settings filename
 #[cfg(not(target_arch = "wasm32"))]
 const SETTINGS_FILENAME: &str = "settings.json";
 
-/// Helper to resolve the settings file path
-///
-/// Desktop: a path to `settings.json` in the user's configuration directory,
-/// e.g. C:\Users\User\AppData\Roaming\trilltino\XFChess\settings.json — falls
-/// back to local "settings.json" if the system config dir cannot be found.
-/// Android: `internal_data_dir()`, private per-package storage that plays the
-/// same role `ProjectDirs::config_dir()` does on desktop.
 #[cfg(not(target_arch = "wasm32"))]
 fn get_settings_path() -> PathBuf {
     #[cfg(target_os = "android")]
@@ -63,11 +34,6 @@ fn get_settings_path() -> PathBuf {
     }
 }
 
-/// Load settings from file on startup
-///
-/// Attempts to load settings from the system config directory. If the file doesn't exist or
-/// is invalid, uses default settings. This system should run early in the startup
-/// schedule to ensure settings are available for other systems.
 pub fn load_settings_system(mut commands: Commands) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -130,10 +96,6 @@ pub fn load_settings_system(mut commands: Commands) {
     commands.insert_resource(GameSettings::default());
 }
 
-/// Save settings to file when they change
-///
-/// Watches for changes to [`GameSettings`] and automatically saves to `settings.json`
-/// in the user's configuration directory.
 pub fn save_settings_system(settings: ResMut<GameSettings>) {
     if !settings.is_changed() {
         return;

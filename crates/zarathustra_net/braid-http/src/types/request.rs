@@ -1,8 +1,5 @@
-//! Braid-specific request parameters.
-
 use crate::types::{Patch, Version};
 
-/// Braid-specific request parameters.
 #[derive(Clone, Debug, Default)]
 pub struct BraidRequest {
     pub version: Option<Vec<Version>>,

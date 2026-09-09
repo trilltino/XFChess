@@ -1,5 +1,3 @@
-//! Governance instructions for resolving disputes and game issues.
-
 pub mod claim_stale_dispute;
 pub mod dispute;
 pub mod recover_stuck_delegation;

@@ -1,12 +1,6 @@
 use crate::config::AcConfig;
 use crate::types::{SignalValues, Verdict};
 
-/// Compute a weighted score in [0.0, 1.0] and derive the verdict.
-///
-/// Blur is an additive escalator on top of the normalized engine-evidence
-/// weights: with no client telemetry (`blur_rate == 0`) the score is
-/// unchanged, and blur alone (`weight_blur`, default 0.15) can never reach
-/// the flag threshold — it pushes borderline engine evidence over the line.
 pub fn score(signals: &SignalValues, cfg: &AcConfig) -> (f64, Verdict) {
     let s = cfg.weight_timing * signals.timing_anomaly
         + cfg.weight_cpl_vs_elo * signals.cpl_vs_elo

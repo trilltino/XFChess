@@ -1,11 +1,3 @@
-//! `/ws/auth` — a WebSocket handshake that verifies a client-supplied JWT
-//! before accepting the connection. Mounted live in `signing/mod.rs`. The
-//! JWT check itself is real (rejects invalid/expired tokens); the message
-//! loop that runs afterward is not — every client message currently gets a
-//! hardcoded `{"login_status": true, "token": "updated_token", "wallet_pubkey":
-//! "updated_pubkey"}` response rather than any real state, so this endpoint
-//! is not yet a working live-sync channel past the initial handshake.
-
 use axum::{
     extract::{ws::Message, State, WebSocketUpgrade},
     response::IntoResponse,
@@ -15,9 +7,6 @@ use tracing::{error, info};
 
 use super::AppState;
 
-/// Verifies the client's JWT over the WebSocket, then echoes placeholder
-/// data on subsequent messages (see module docs — the post-auth loop is
-/// not yet real).
 pub async fn handle_auth_websocket(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,

@@ -1,14 +1,3 @@
-//! Shard initialization instructions — one per tournament size tier.
-//!
-//! Tier      max_players   Shards   Rent saved vs. always-4
-//! ───────── ───────────── ──────   ───────────────────────
-//! Small     ≤ 64          1        ~0.102 SOL
-//! Medium    ≤ 128         2        ~0.068 SOL
-//! Large     256           4        —
-//!
-//! Call the appropriate instruction after `initialize_tournament`.
-//! The handler validates that `tournament.max_players` matches the tier.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -16,9 +5,6 @@ use anchor_lang::prelude::*;
 
 // ── Small (≤ 64 players — 1 shard) ───────────────────────────────────────────
 
-/// Accounts for the small tier (≤64 players, 1 shard). `max_players` is
-/// checked against the tier bound so the wrong-size instruction can't be
-/// called for a given tournament.
 #[derive(Accounts)]
 #[instruction(tournament_id: u64)]
 pub struct InitializeShardsSmall<'info> {
@@ -45,7 +31,6 @@ pub struct InitializeShardsSmall<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Initializes shard 0 with empty player/ELO/standings vectors.
 pub fn handler_small(ctx: Context<InitializeShardsSmall>, tournament_id: u64) -> Result<()> {
     require!(
         ctx.accounts.tournament.status == TournamentStatus::Registration,
@@ -66,7 +51,6 @@ pub fn handler_small(ctx: Context<InitializeShardsSmall>, tournament_id: u64) ->
 
 // ── Medium (≤ 128 players — 2 shards) ────────────────────────────────────────
 
-/// Accounts for the medium tier (65-128 players, 2 shards).
 #[derive(Accounts)]
 #[instruction(tournament_id: u64)]
 pub struct InitializeShardsMedium<'info> {
@@ -102,7 +86,6 @@ pub struct InitializeShardsMedium<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Initializes shards 0-1 with empty player/ELO/standings vectors.
 pub fn handler_medium(ctx: Context<InitializeShardsMedium>, tournament_id: u64) -> Result<()> {
     require!(
         ctx.accounts.tournament.status == TournamentStatus::Registration,
@@ -126,7 +109,6 @@ pub fn handler_medium(ctx: Context<InitializeShardsMedium>, tournament_id: u64) 
 
 // ── Large (256 players — 4 shards) ───────────────────────────────────────────
 
-/// Accounts for the large tier (256 players, 4 shards).
 #[derive(Accounts)]
 #[instruction(tournament_id: u64)]
 pub struct InitializeTournamentShards<'info> {
@@ -177,7 +159,6 @@ pub struct InitializeTournamentShards<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Initializes shards 0-3 with empty player/ELO/standings vectors.
 pub fn handler(ctx: Context<InitializeTournamentShards>, tournament_id: u64) -> Result<()> {
     require!(
         ctx.accounts.tournament.status == TournamentStatus::Registration,

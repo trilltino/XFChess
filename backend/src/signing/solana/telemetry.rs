@@ -1,7 +1,3 @@
-//! Transaction telemetry wrapper for Solana operations
-//!
-//! Wraps transaction submission with detailed logging, metrics, and error classification.
-
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -11,7 +7,6 @@ use tracing::{error, info, warn};
 
 use crate::telemetry::logging::RequestContext;
 
-/// Extended transaction result with telemetry data
 #[derive(Debug)]
 pub struct TransactionTelemetry {
     pub signature: Signature,
@@ -21,7 +16,6 @@ pub struct TransactionTelemetry {
     pub error: Option<TxErrorDetail>,
 }
 
-/// Detailed error information for transaction failures
 #[derive(Debug, Clone)]
 pub struct TxErrorDetail {
     pub category: TxErrorCategory,
@@ -30,7 +24,6 @@ pub struct TxErrorDetail {
     pub logs: Vec<String>,
 }
 
-/// Classification of transaction errors
 #[derive(Debug, Clone)]
 pub enum TxErrorCategory {
     // Client errors (fix the request)
@@ -67,7 +60,6 @@ impl std::fmt::Display for TxErrorCategory {
     }
 }
 
-/// Submit transaction with full telemetry
 pub async fn submit_with_telemetry(
     rpc: &RpcClient,
     tx: &Transaction,
@@ -125,7 +117,6 @@ pub async fn submit_with_telemetry(
     }
 }
 
-/// Submit to Execution Rollup with telemetry
 pub async fn submit_er_with_telemetry(
     rpc: &RpcClient,
     tx: &Transaction,
@@ -227,11 +218,6 @@ pub async fn submit_er_with_telemetry(
     }
 }
 
-/// Classifies an already-stringified error message (any source — a typed
-/// `ClientError`, or a plain `String` error from a `spawn_blocking` closure
-/// that can't carry the typed error across the join boundary). Shared by
-/// `classify_error` below and by callers (e.g. `tasks/settlement_worker.rs`)
-/// that only have a `String` to work with.
 pub fn classify_error_str(error_str: &str) -> TxErrorCategory {
     if error_str.contains("insufficient funds") {
         return TxErrorCategory::InsufficientFunds;
@@ -251,7 +237,6 @@ pub fn classify_error_str(error_str: &str) -> TxErrorCategory {
     TxErrorCategory::Unknown
 }
 
-/// Classify an RPC error into categories
 fn classify_error(error: &solana_client::client_error::ClientError) -> TxErrorDetail {
     let error_str = error.to_string();
     let category = classify_error_str(&error_str);
@@ -263,7 +248,6 @@ fn classify_error(error: &solana_client::client_error::ClientError) -> TxErrorDe
     }
 }
 
-/// Classify error from transaction status
 fn classify_error_from_status(error: &solana_sdk::transaction::TransactionError) -> TxErrorDetail {
     use solana_sdk::transaction::TransactionError;
 

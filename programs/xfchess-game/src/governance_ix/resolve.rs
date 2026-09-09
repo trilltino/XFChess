@@ -1,27 +1,9 @@
-//! Dispute resolution by the platform dispute authority.
-//!
-//! Allocates the pot per the authority's ruling and settles the bond the
-//! challenger posted in `dispute_game`: refunded if the challenger's claim is
-//! upheld (or the game is ruled a draw), forfeited to the treasury if the ruling
-//! goes to the opponent. The game is set to `Settled` so `finalize_game` cannot
-//! re-process it.
-//!
-//! **Deliberately never touches ELO or profile stats** (`wins`/`losses`/
-//! `draws`/`win_streak`/`ranked_games`, all mutated by
-//! `lifecycle::settlement::update_profiles` on the normal path) — confirmed
-//! product decision, not an oversight or a TODO. A disputed game is
-//! inherently contested; its outcome shouldn't feed either player's
-//! competitive rating even after a ruling. Only the wager pot and the
-//! challenger's bond move here. Do not add an `update_profiles` call to this
-//! path without that decision being deliberately revisited.
-
 use crate::common::escrow;
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-/// Accounts for the platform dispute authority ruling on a pending dispute.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct ResolveDispute<'info> {
@@ -29,26 +11,19 @@ pub struct ResolveDispute<'info> {
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [b"dispute", &game_id.to_le_bytes()], bump)]
     pub dispute: Account<'info, DisputeRecord>,
-    /// System-owned wager escrow PDA — paid out via signed CPI.
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: SystemAccount<'info>,
-    /// Only the platform dispute authority may resolve.
     #[account(address = crate::constants::dispute_authority::ID @ GameErrorCode::UnauthorizedDisputeResolution)]
     pub dispute_authority: Signer<'info>,
-    /// White player wallet — must match game.white.
     #[account(mut, constraint = white_account.key() == game.white @ GameErrorCode::NotInGame)]
     pub white_account: SystemAccount<'info>,
-    /// Black player wallet — must match game.black.
     #[account(mut, constraint = black_account.key() == game.black @ GameErrorCode::NotInGame)]
     pub black_account: SystemAccount<'info>,
-    /// Platform treasury — seeded PDA so funds can't be redirected.
     #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
     pub platform_treasury: SystemAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
-/// Applies the authority's ruling (see module docs for the full payout
-/// breakdown) and settles both the pot and the challenger's bond.
 pub fn handler(
     ctx: Context<ResolveDispute>,
     game_id: u64,

@@ -1,5 +1,3 @@
-//! Braid HTTP Protocol Implementation for Rust (Core + Server)
-
 pub mod error;
 pub mod traits;
 

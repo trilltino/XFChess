@@ -18,7 +18,6 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 const ALPN: &[u8] = b"iroh+h3";
 
-/// Streaming responses
 #[cfg_attr(not(target_family = "wasm"), tokio::test)]
 #[wasm_bindgen_test]
 async fn streaming_response() {
@@ -28,7 +27,6 @@ async fn streaming_response() {
     endpoint_1.online().await;
     endpoint_2.online().await;
 
-    /// server: stream "Pong!" 10 times
     async fn streaming_ping() -> impl IntoResponse {
         let stream = futures::stream::repeat(Ok::<Bytes, Infallible>(Bytes::from_static(b"Pong!")));
         Body::from_stream(stream.take(10))
@@ -52,7 +50,6 @@ async fn streaming_response() {
     assert_eq!(count, 10);
 }
 
-/// Streaming request body
 #[cfg_attr(not(target_family = "wasm"), tokio::test)]
 #[wasm_bindgen_test]
 async fn streaming_request_body() {

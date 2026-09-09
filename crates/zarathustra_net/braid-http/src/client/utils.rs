@@ -1,9 +1,3 @@
-//! Utility functions for the Braid HTTP client.
-
-//! Small shared helpers for the client: header value parsing, message → update
-//! conversion, and the runtime shims that let the same code run on tokio and in
-//! a browser.
-
 use crate::client::parser::Message;
 use crate::error::{BraidError, Result};
 use crate::protocol;
@@ -34,7 +28,6 @@ pub fn parse_heartbeat(value: &str) -> Result<Duration> {
     Ok(Duration::from_secs_f64(num))
 }
 
-/// Convert one parsed wire [`Message`] into the public [`Update`] type.
 pub fn message_to_update(msg: Message) -> Update {
     let version = extract_version(&msg.headers).unwrap_or_else(|| {
         // An update with no Version can't take part in causal ordering. Give it a

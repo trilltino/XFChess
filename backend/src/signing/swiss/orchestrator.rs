@@ -1,20 +1,3 @@
-//! Swiss tournament match orchestrator.
-//!
-//! After each Swiss round is paired, the orchestrator:
-//! 1. Creates on-chain game accounts for each pairing using
-//!    `session_create_game` / `session_join_game` (tournament session keys).
-//! 2. Stores the `game_id ↔ pairing` mapping.
-//! 3. Pushes pairings with game IDs to Braid subscribers.
-//! 4. On game-end gossip: signs `record_swiss_result` with the session key
-//!    and pushes standings patches.
-//!
-//! The orchestrator runs as a Tokio task spawned per-round — but `spawn_orchestrator`
-//! itself is not currently called anywhere; see `tasks/mod.rs`'s module doc for
-//! why (no producer ever sends it an `OrchestratorEvent` yet).
-//!
-//! Reference: session_create_game instruction —
-//! `programs/xfchess-game/src/tournament_ix/session/session_create_game.rs`
-
 use crate::signing::storage::tournament::{MatchStatus, TournamentStore};
 use crate::signing::swiss::service::SwissService;
 use serde::{Deserialize, Serialize};
@@ -27,7 +10,6 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{error, info, warn};
 use xfchess_braid_server::{bridge, ResourceHub};
 
-/// A single in-flight game associated with a Swiss pairing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveGame {
     pub tournament_id: u64,
@@ -39,16 +21,13 @@ pub struct ActiveGame {
     pub finished: bool,
 }
 
-/// Event emitted when a game ends, consumed by the orchestrator.
 #[derive(Debug, Clone)]
 pub enum OrchestratorEvent {
-    /// A round was just paired — create games for all pairings.
     RoundPaired {
         tournament_id: u64,
         round: u8,
         pairings: Vec<Pairing>,
     },
-    /// A game ended — record the result on-chain and in the backend.
     GameEnded {
         tournament_id: u64,
         game_id: u64,
@@ -56,7 +35,6 @@ pub enum OrchestratorEvent {
     },
 }
 
-/// Tracks all active games across tournaments.
 #[derive(Clone, Default)]
 pub struct OrchestratorState {
     inner: Arc<RwLock<OrchestratorInner>>,
@@ -64,13 +42,9 @@ pub struct OrchestratorState {
 
 #[derive(Default)]
 struct OrchestratorInner {
-    /// game_id → ActiveGame
     games: HashMap<u64, ActiveGame>,
-    /// (tournament_id, round) → count of finished games
     finished_counts: HashMap<(u64, u8), usize>,
-    /// (tournament_id, round) → total games
     total_counts: HashMap<(u64, u8), usize>,
-    /// Monotonic game ID counter for off-chain games.
     next_game_id: u64,
 }
 
@@ -84,12 +58,10 @@ impl OrchestratorState {
         }
     }
 
-    /// Look up a game by its game_id.
     pub async fn get_game(&self, game_id: u64) -> Option<ActiveGame> {
         self.inner.read().await.games.get(&game_id).cloned()
     }
 
-    /// Check if all games in a round are finished.
     pub async fn is_round_complete(&self, tournament_id: u64, round: u8) -> bool {
         let inner = self.inner.read().await;
         let key = (tournament_id, round);
@@ -99,7 +71,6 @@ impl OrchestratorState {
     }
 }
 
-/// The orchestrator processes events and manages game lifecycle.
 pub struct SwissOrchestrator {
     store: TournamentStore,
     swiss: Arc<SwissService>,
@@ -135,7 +106,6 @@ impl SwissOrchestrator {
         (orchestrator, tx)
     }
 
-    /// Run the orchestrator event loop.
     pub async fn run(mut self) {
         info!("[orchestrator] Swiss match orchestrator started");
         while let Some(event) = self.event_rx.recv().await {
@@ -160,7 +130,6 @@ impl SwissOrchestrator {
         info!("[orchestrator] Swiss match orchestrator stopped");
     }
 
-    /// Create game accounts for all pairings in a round.
     async fn handle_round_paired(&self, tournament_id: u64, round: u8, pairings: Vec<Pairing>) {
         info!(
             "[orchestrator] Creating {} games for tournament {} round {}",
@@ -250,7 +219,6 @@ impl SwissOrchestrator {
         );
     }
 
-    /// Record a game result and check if the round is complete.
     async fn handle_game_ended(&self, tournament_id: u64, game_id: u64, result: MatchResult) {
         let active = match self.state.get_game(game_id).await {
             Some(g) => g,
@@ -415,7 +383,6 @@ impl SwissOrchestrator {
         }
     }
 
-    /// Synchronous lookup of game_id for a specific board (called during iteration).
     fn lookup_game_id_sync(&self, tournament_id: u64, round: u8, board: u16) -> u64 {
         // This is called in a context where we already hold references,
         // so we use try_read to avoid deadlock.
@@ -431,7 +398,6 @@ impl SwissOrchestrator {
     }
 }
 
-/// Spawn the orchestrator as a background task.
 pub fn spawn_orchestrator(
     store: TournamentStore,
     swiss: Arc<SwissService>,

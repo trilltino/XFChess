@@ -1,18 +1,3 @@
-//! Instruction: `authorize_tournament_session`.
-//!
-//! Creates a [`TournamentSessionDelegation`] for `(tournament_id, player)`.
-//! After this succeeds, the `session_key` may co-sign `create_game`,
-//! `join_game` and `record_swiss_result` for any match inside that
-//! tournament without a wallet popup — up to the configured spending and
-//! wager limits, and until `expires_at`.
-//!
-//! The player must be registered in the tournament (`tournament.players`
-//! contains `player.key()`) and the tournament must not be completed or
-//! cancelled.
-//!
-//! Reference: anchor-lang error construction —
-//! <https://docs.rs/anchor-lang/latest/anchor_lang/error/index.html>.
-
 use crate::constants::*;
 use crate::errors::XfchessGameError;
 use crate::state::{
@@ -20,24 +5,12 @@ use crate::state::{
 };
 use anchor_lang::prelude::*;
 
-/// Arguments for `authorize_tournament_session`.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
 pub struct AuthorizeTournamentSessionArgs {
-    /// Hot key allowed to co-sign tournament ixs.
     pub session_key: Pubkey,
-    /// Session lifetime in seconds. If `None`, uses
-    /// [`TournamentSessionDelegation::DEFAULT_DURATION`].
     pub duration_secs: Option<i64>,
-    /// Tournament-wide spending cap (lamports). If `None`, uses
-    /// [`TournamentSessionDelegation::DEFAULT_SPENDING_LIMIT`].
     pub spending_limit: Option<u64>,
-    /// Per-match wager cap (lamports). If `None`, uses
-    /// [`TournamentSessionDelegation::DEFAULT_MAX_WAGER`].
     pub max_wager: Option<u64>,
-    /// Lamports deposited into the delegation PDA vault at authorization
-    /// time. The session key can spend from this vault (up to
-    /// `spending_limit`) without further wallet popups. Any remainder can be
-    /// refunded later via `close_tournament_session`.
     pub deposit_lamports: u64,
 }
 
@@ -149,26 +122,21 @@ pub struct AuthorizeTournamentSessionCtx<'info> {
     )]
     pub tournament: Account<'info, Tournament>,
 
-    /// TournamentPlayersShard 0 always present (all tournament sizes).
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
-    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Option<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Option<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump

@@ -1,14 +1,9 @@
-//! JWT authentication for wallet-based API requests.
-
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
-/// Default token time-to-live in seconds (7 days) when `JWT_TTL_SECS` is unset.
 const DEFAULT_TOKEN_TTL_SECS: i64 = 604_800;
 
-/// Resolves the token TTL from the `JWT_TTL_SECS` env var, falling back to the
-/// default. Lets operators shorten the takeover window without a recompile.
 fn token_ttl_secs() -> i64 {
     std::env::var("JWT_TTL_SECS")
         .ok()
@@ -17,24 +12,20 @@ fn token_ttl_secs() -> i64 {
         .unwrap_or(DEFAULT_TOKEN_TTL_SECS)
 }
 
-/// JWT claims containing wallet identity and expiration.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    /// Wallet public key in base58.
     pub sub: String,
     #[serde(default)]
     pub iat: i64,
     pub exp: i64,
 }
 
-/// Creates and verifies authentication tokens.
 pub struct JwtIssuer {
     encoding: EncodingKey,
     decoding: DecodingKey,
 }
 
 impl JwtIssuer {
-    /// Creates an issuer using `secret` for signing and verification.
     pub fn new(secret: &str) -> Self {
         Self {
             encoding: EncodingKey::from_secret(secret.as_bytes()),
@@ -42,7 +33,6 @@ impl JwtIssuer {
         }
     }
 
-    /// Issues a token for a wallet public key.
     pub fn issue(&self, wallet_pubkey: &str) -> Result<String, jsonwebtoken::errors::Error> {
         let now = Utc::now().timestamp();
         let claims = Claims {
@@ -53,34 +43,15 @@ impl JwtIssuer {
         encode(&Header::default(), &claims, &self.encoding)
     }
 
-    /// Verifies a token and extracts its claims.
     pub fn verify(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
         let data = decode::<Claims>(token, &self.decoding, &Validation::default())?;
         Ok(data.claims)
     }
 }
 
-/// Request extension inserted by the dual-accept auth middleware when — and
-/// only when — a request authenticated via a per-user JWT. Its presence means
-/// the caller cryptographically proved control of this wallet; the legacy
-/// relay-secret path deliberately never inserts it, because a shared secret
-/// held by every game client proves nothing about *which* player is calling.
-///
-/// Handlers must not read this as `Option<Extension<AuthedWallet>>`. That shape
-/// is what made the relay secret a universal impersonation key: every
-/// per-caller check was written `if let Some(authed) = authed { ... }`, so a
-/// request arriving without a proven identity **skipped** the check instead of
-/// failing it. Use the [`RequireWallet`] extractor instead — it fails closed.
 #[derive(Clone, Debug)]
 pub struct AuthedWallet(pub String);
 
-/// Fail-closed extractor for "this route acts on behalf of exactly one wallet".
-///
-/// Yields the caller's cryptographically proven wallet, or rejects the request
-/// with `401` when no [`AuthedWallet`] was established. Because it is a
-/// mandatory extractor rather than an `Option`, a handler simply cannot be
-/// written in a way that silently proceeds without an identity — the "forgot to
-/// check" failure mode becomes impossible rather than merely discouraged.
 pub struct RequireWallet(pub String);
 
 impl<S> axum::extract::FromRequestParts<S> for RequireWallet
@@ -107,9 +78,6 @@ where
 }
 
 impl RequireWallet {
-    /// Asserts the authenticated caller is exactly `claimed`, for handlers that
-    /// take the acted-on wallet in their request body. Mirrors
-    /// `routes::auth::require_caller_owns_wallet` for the extension-based path.
     pub fn require_is(&self, claimed: &str) -> Result<(), (axum::http::StatusCode, String)> {
         if self.0 == claimed {
             return Ok(());
@@ -125,7 +93,6 @@ impl RequireWallet {
     }
 }
 
-/// Extracts a token from a `Bearer` authorization value.
 pub fn extract_bearer(header: &str) -> Option<&str> {
     header.strip_prefix("Bearer ")
 }

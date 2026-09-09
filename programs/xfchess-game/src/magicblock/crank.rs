@@ -1,5 +1,3 @@
-//! MagicBlock scheduled-task adapter.
-
 #[cfg(feature = "cranks")]
 use anchor_lang::prelude::*;
 #[cfg(feature = "cranks")]
@@ -7,9 +5,6 @@ use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 #[cfg(feature = "cranks")]
 use magicblock_magic_program_api::{args::ScheduleTaskArgs, instruction::MagicBlockInstruction};
 
-/// Builds the MagicBlock `ScheduleTask` instruction that registers a
-/// recurring `crank_time_check` callback for a game, wrapping the inner
-/// crank instruction and its account metas per the MagicBlock scheduler ABI.
 #[cfg(feature = "cranks")]
 pub fn build_time_check_schedule_instruction(
     payer: Pubkey,
@@ -66,12 +61,6 @@ pub fn build_time_check_schedule_instruction(
     ))
 }
 
-/// Builds the MagicBlock `CancelTask` instruction that stops a previously
-/// scheduled `crank_time_check` task. `payer` must be the same signer that
-/// originally scheduled the task — MagicBlock requires the cancelling
-/// authority to match. Mirrors `build_time_check_schedule_instruction`'s
-/// account-list shape (payer, game) since this crate exposes no dedicated
-/// task-context PDA helper to derive account 1 independently.
 #[cfg(feature = "cranks")]
 pub fn build_time_check_cancel_instruction(
     payer: Pubkey,

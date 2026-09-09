@@ -1,43 +1,3 @@
-//! Live spectator feed for on-chain games, over Braid-HTTP 209.
-//!
-//! ```text
-//! GET /spectate/{game_id}/moves    209 subscribe (or 200 snapshot)
-//! ```
-//!
-//! # What this replaces
-//!
-//! Spectating used to be a 2-second poll of `GET /games/moves/{id}` that
-//! re-fetched the whole move list and diffed it client-side against a local
-//! `applied_move_count`. On a game whose moves land sub-second on the ER, that
-//! is up to 2s of added latency per move, and the cost grows with game length
-//! times spectators.
-//!
-//! Here a spectator subscribes once and receives **the moves so far, then each
-//! new move as it is recorded** — which is what watching a game in progress
-//! actually is, and it removes the catch-up path entirely.
-//!
-//! # Why not `game_log.rs`
-//!
-//! That module serves the same shape for *casual* games, but its `put_event` is
-//! built for client-authored writes: it validates a causal chain against
-//! caller-supplied `content_version`/`content_parent` and checks the poster is a
-//! participant. On-chain moves arrive server-side through `record_move`, which
-//! has already proved participation on-chain. Pushing them through `put_event`
-//! would mean synthesizing version hashes to satisfy an invariant that exists to
-//! constrain untrusted clients. These are separate resources on purpose.
-//!
-//! # The broadcast delay
-//!
-//! A tournament game may carry a non-zero `broadcast_delay_secs`, and the
-//! polled feed filters moves older than that horizon ([`filter_visible_moves`]).
-//! A live subscription would walk straight around that filter, so **a delayed
-//! game is never streamed here**: the route answers `404`, and the client falls
-//! back to the delay-gated poll it already implements. `record_move` applies the
-//! same check before publishing, so the resource for a delayed game never even
-//! exists.
-//!
-//! [`filter_visible_moves`]: crate::db::repository::filter_visible_moves
-
 use axum::{
     body::Body,
     extract::{Path, State},
@@ -59,16 +19,8 @@ use crate::db::repository::GameRepository;
 use crate::signing::routes::main::spectator_moves_path;
 use crate::signing::AppState;
 
-/// How often an idle subscription proves it is alive.
 const HEARTBEAT_SECS: u64 = 20;
 
-/// Whether a game's moves may be streamed live.
-///
-/// The anti-ghosting control, kept as one pure function because both sides of
-/// the guard have to agree: this route refuses to open a subscription, and
-/// `record_move` refuses to publish into the resource at all. Pure so the
-/// decision is unit-testable without a database or an HTTP stack — the same
-/// reason `spectator::feed_is_delayed` is pure on the client.
 pub fn is_streamable(broadcast_delay_secs: i64) -> bool {
     broadcast_delay_secs <= 0
 }
@@ -194,7 +146,6 @@ async fn get_spectator_moves(
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-/// Pull the appended value out of an `AppendLog` update's `add /-` patch.
 fn appended_entry(update: &BraidUpdate) -> Option<serde_json::Value> {
     if update.is_snapshot {
         return Some(update.body.clone());
@@ -207,7 +158,6 @@ fn appended_entry(update: &BraidUpdate) -> Option<serde_json::Value> {
         .cloned()
 }
 
-/// A persisted move as the same `ChessMessage::Move` a live append carries.
 fn move_record_to_json(m: &crate::db::repository::MoveRecord) -> serde_json::Value {
     let payload = MovePayload::from_uci(
         m.move_uci.clone(),
@@ -223,12 +173,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// The anti-ghosting control. A tournament game with a broadcast delay
-    /// must never be streamable: the polled feed hides moves newer than the
-    /// delay horizon, and a live subscription would hand them over instantly.
-    ///
-    /// Both the subscribe route and `record_move`'s publish call this, so a
-    /// regression here opens the hole in two places at once.
     #[test]
     fn a_delayed_game_is_never_streamable() {
         assert!(is_streamable(0), "a live game streams");
@@ -250,8 +194,6 @@ mod tests {
         assert_eq!(appended_entry(&update), Some(entry));
     }
 
-    /// History and tail must decode through the same client path, so a
-    /// persisted move has to serialize to the same shape a live one does.
     #[test]
     fn a_persisted_move_matches_the_live_message_shape() {
         let record = crate::db::repository::MoveRecord {

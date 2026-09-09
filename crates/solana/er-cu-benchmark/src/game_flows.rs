@@ -1,5 +1,3 @@
-//! Orchestrators for 1v1 and Swiss tournament flows.
-
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -14,26 +12,13 @@ use crate::{
     with_retry, LAMPORTS_PER_SOL, TOURNAMENT_STATUS_COMPLETED,
 };
 
-/// Flat on-chain fee-accounting constants — mirror
-/// `programs/xfchess-game/src/constants.rs` (this crate doesn't depend on
-/// the program crate). Used by `verify_fee_accounting` to reproduce
-/// `lifecycle::transitions`/`lifecycle::settlement`'s exact math.
 const CREATE_GAME_COST: u64 = 5_000;
 const JOIN_GAME_COST: u64 = 5_000;
 const DELEGATE_COST: u64 = 5_000;
 const UNDELEGATE_COST: u64 = 5_000;
 const RECORD_RESULT_COST: u64 = 5_000;
-/// Flat tx-fee reimbursement `settle_finished_game` pays before anything
-/// else — mirrors `lifecycle::settlement::settle_finished_game`'s `tx_fee`.
 const SETTLEMENT_TX_FEE: u64 = 10_000;
 
-/// Reconciles `Game.fees_advanced` (read once the undelegate has landed back
-/// on the base layer) against the exact sum of flat costs
-/// `lifecycle::transitions` accrues for a full create->join->delegate->N
-/// moves->undelegate lifecycle — proves the fee-accounting fix (undelegate
-/// now accrues `UNDELEGATE_COST` + `ER_SESSION_FEE_LAMPORTS`, previously
-/// silently dropped) actually lands on real MagicBlock devnet, not just that
-/// the constants exist.
 fn verify_fees_advanced(fees_advanced: u64, move_count: u64) -> anyhow::Result<()> {
     let expected = CREATE_GAME_COST
         + JOIN_GAME_COST
@@ -57,11 +42,6 @@ fn verify_fees_advanced(fees_advanced: u64, move_count: u64) -> anyhow::Result<(
     Ok(())
 }
 
-/// Reconciles the `treasury_vault` balance delta at `finalize_game` against
-/// `lifecycle::settlement::settle_finished_game`'s exact reimbursement
-/// formula (`fees_advanced.min(pot - tx_fee)`), not just `fees_advanced`
-/// itself — the real on-chain payout is clamped by what's left in the pot
-/// after the flat tx-fee deduction.
 async fn verify_treasury_reimbursement(
     base_rpc: &RpcClient,
     treasury_vault: Pubkey,
@@ -95,18 +75,8 @@ async fn verify_treasury_reimbursement(
     Ok(())
 }
 
-/// Guaranteed SOL prize pool funded before a Swiss or single-elimination
-/// benchmark tournament opens registration — small enough to run repeatedly
-/// against a devnet wallet, large enough that payout deltas are unambiguous.
 const TOURNAMENT_PRIZE_LAMPORTS: u64 = 3_000_000;
 
-/// Snapshot both players' base-layer SOL balances, print the before/after
-/// delta once called again post-finalize, and fail loudly if the escrow
-/// didn't actually pay the winner more than the loser — i.e. verify the
-/// smart contract paid the winning pair, not just that `finalize_game`'s
-/// transaction landed. The scripted move sequence
-/// ([`generate_100_move_sequence`]) always ends in a Fool's Mate delivered
-/// by black, so black is the deterministic winner here.
 async fn verify_winner_payout(
     base_rpc: &RpcClient,
     white: &Pubkey,
@@ -148,15 +118,6 @@ async fn verify_winner_payout(
     Ok(())
 }
 
-/// Snapshot each placed player's SOL balance, crank
-/// `distribute_tournament_prizes`, snapshot again, and verify every place
-/// received *exactly* `TOURNAMENT_PRIZE_LAMPORTS * share_bps / 10_000` —
-/// matching `ledger::prize_amount`'s own math — proving the smart contract
-/// paid the winning players, not just that the crank transaction landed.
-///
-/// `places` is `[1st, 2nd, 3rd]` (as returned by `fetch_tournament_places`);
-/// `prize_shares_bps` are the corresponding basis-point shares. Places that
-/// are `None` (e.g. a 2-player tournament has no 3rd place) are skipped.
 async fn verify_tournament_payout(
     base_rpc: &RpcClient,
     program_id: Pubkey,
@@ -220,7 +181,6 @@ async fn verify_tournament_payout(
     Ok(())
 }
 
-/// Run a full 1v1 game flow on ER with CU logging.
 pub async fn run_1v1_game_flow(
     base_rpc: &RpcClient,
     er_rpc: &RpcClient,
@@ -890,14 +850,6 @@ pub async fn run_1v1_game_flow(
     Ok(logger.total_cu())
 }
 
-/// Run a full 1v1 game flow using the *global persistent session* (not the
-/// per-tournament or per-game one): a single `authorize_global_session` per
-/// player replaces the wallet popup on every `create_game`/`join_game` call
-/// (good for up to 200 games). Everything past matchmaking — delegation, ER
-/// moves, undelegation, resign, prize claim, finalize — is identical to
-/// [`run_1v1_game_flow`] and still goes through the existing per-game
-/// `SessionDelegation`/`authorize_session_key`/`record_move` path; the global
-/// session only replaces the create/join step.
 pub async fn run_global_session_1v1_game_flow(
     base_rpc: &RpcClient,
     er_rpc: &RpcClient,
@@ -1382,7 +1334,6 @@ pub async fn run_global_session_1v1_game_flow(
     Ok(logger.total_cu())
 }
 
-/// Run a Swiss tournament flow on ER with CU logging.
 pub async fn run_swiss_tournament_flow(
     base_rpc: &RpcClient,
     _er_rpc: &RpcClient,
@@ -1892,20 +1843,6 @@ pub async fn run_swiss_tournament_flow(
     Ok(logger.total_cu())
 }
 
-/// Run a full single-elimination tournament flow on-chain: initialize with a
-/// real guaranteed SOL prize pool, register `size` players (seeded by ELO,
-/// highest first), build and play the bracket, then verify the escrow
-/// actually pays every placed player once the final match auto-completes the
-/// tournament.
-///
-/// Unlike Swiss, single-elimination needs no `advance_round`/
-/// `complete_swiss_tournament` cranks: `record_result::handler` already sets
-/// `winner`/`status = Completed` inline the moment the final match's result
-/// lands (record_result.rs:70-76). Bracket results are recorded by the
-/// tournament authority (`master`) rather than the players — no session keys
-/// or ER involved — mirroring `program_interface::tournament_e2e::
-/// run_tournament`'s approach ("higher seed wins"), which this benchmark
-/// crate can't depend on directly (it has no dependency on the game client).
 pub async fn run_single_elimination_tournament_flow(
     base_rpc: &RpcClient,
     program_id: Pubkey,

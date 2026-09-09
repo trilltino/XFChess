@@ -1,6 +1,5 @@
 use crate::types::AcReport;
 
-/// Stable JSON schema — version field lets consumers detect breaking changes.
 pub fn render(report: &AcReport) -> serde_json::Value {
     serde_json::json!({
         "schema_version": 1,

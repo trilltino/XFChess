@@ -1,20 +1,3 @@
-//! RetryFailures middleware for IrohH3Client
-//!
-//! Automatically retries failed HTTP requests up to a configured limit.
-//! - Retries on transport errors (`Error`) or non-success HTTP statuses (except 410 Gone)
-//! - Stops retrying if a response is 410 Gone or a request eventually succeeds
-//! - Uses **exponential backoff** between retries (`base_delay_ms * 2^(attempts-1)`)
-//!
-//! # Behavior
-//!
-//! - **Retryable conditions**:
-//!     - Transport or network errors
-//!     - Non-success HTTP status codes (except 410 Gone)
-//! - **Non-retry conditions**:
-//!     - 2xx successful responses
-//!     - 410 Gone responses
-//! - **Body handling**: The request body is replaced with `Body::empty()` for retries to avoid replay issues.
-
 use crate::{
     body::Body,
     error::{Error, MiddlewareError},
@@ -25,18 +8,13 @@ use n0_future::time; // unifies wasm/tokio task spawning.
 use std::ops::ControlFlow;
 use tracing::{debug, instrument, warn};
 
-/// Middleware that automatically retries failed requests with exponential backoff.
 pub struct RetryFailures {
-    /// Maximum number of retry attempts.
     pub max_retries: usize,
 
-    /// Base delay in milliseconds for exponential backoff.
-    /// Actual delay for retry `n` = `base_delay_ms * 2^(n-1)`.
     pub base_delay_ms: u64,
 }
 
 impl RetryFailures {
-    /// Construct a new RetryFailures middleware.
     pub fn new(max_retries: usize, base_delay_ms: u64) -> Self {
         Self {
             max_retries,
@@ -44,7 +22,6 @@ impl RetryFailures {
         }
     }
 
-    /// Perform one retry step.
     #[instrument(
         skip(self, parts, body_slot, attempts, next),
         fields(attempts = *attempts)

@@ -1,14 +1,3 @@
-//! Persisted ledger of this wallet's own wagered on-chain games + recovery scan.
-//!
-//! Safety net against stranded wagers: the wager escrow PDA only releases its
-//! SOL through the on-chain `cancel_game` instruction (or settlement /
-//! expiry-withdrawal). Any lobby that disappears without one — app crash
-//! mid-create, dismissed wallet popup, a Cancel button that only cleared
-//! local UI state — leaves the wager locked in escrow with no trace in the
-//! UI. This module remembers every wagered game this wallet created or joined
-//! (a small JSON ledger under the config dir) so the lobby can resurface
-//! still-recoverable ones as one-click refund entries.
-
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -19,26 +8,15 @@ use tokio::sync::oneshot;
 
 use crate::solana::instructions::{GAME_SEED, PROGRAM_ID};
 
-/// Cap so a long-tail ledger can never turn the scan into an unbounded RPC
-/// storm — entries beyond this simply stop being tracked.
 const MAX_LEDGER_ENTRIES: usize = 64;
-/// How many most-recent entries each scan checks on-chain.
 const SCAN_BATCH: usize = 20;
 
-/// `GameStatus` Borsh discriminants (programs/xfchess-game/src/state/game.rs)
-/// where escrow may still be recoverable via `cancel_game`:
-/// 1 = WaitingForOpponent (creator cancels the open lobby),
-/// 2 = Active (cancellable at zero moves, or after a 24h stall).
 const STATUS_WAITING_FOR_OPPONENT: u8 = 1;
 const STATUS_ACTIVE: u8 = 2;
 
-/// Anchor layout offsets into the `Game` account (8-byte discriminator first):
-/// game_id(8) white(32) black(32) => status byte at 80; `wager_amount` is
-/// pinned at +212 by the program's `wager_amount_offset_is_212` test => 220.
 const STATUS_OFFSET: usize = 8 + 8 + 32 + 32;
 const WAGER_OFFSET: usize = 8 + 212;
 
-/// A ledgered game that still holds this wallet's escrow on-chain.
 #[derive(Debug, Clone)]
 pub struct ReclaimableWager {
     pub game_id: u64,
@@ -76,9 +54,6 @@ fn save(ids: &[u64]) {
     }
 }
 
-/// Remember a wagered game this wallet just created or joined (most-recent
-/// first, deduped, capped). Called only for non-zero wagers — free games have
-/// nothing to recover.
 pub fn record(game_id: u64) {
     if game_id == 0 {
         return;
@@ -90,8 +65,6 @@ pub fn record(game_id: u64) {
     save(&ids);
 }
 
-/// Drop a game from the ledger — after a successful refund, or when the user
-/// explicitly dismisses a dead entry.
 pub fn forget(game_id: u64) {
     let mut ids = load();
     let before = ids.len();
@@ -101,11 +74,6 @@ pub fn forget(game_id: u64) {
     }
 }
 
-/// Check recent ledgered games on-chain and keep those that still hold this
-/// wallet's escrow and look cancellable right now. Entries whose account is
-/// gone entirely are pruned from the ledger; finished/settled/expired/cancelled
-/// games are skipped (nothing left to reclaim) but stay ledgered so a future
-/// re-record doesn't churn the file.
 fn scan_reclaimable(wallet: &Pubkey, rpc_url: &str) -> Vec<ReclaimableWager> {
     let program_id = match PROGRAM_ID.parse::<Pubkey>() {
         Ok(p) => p,
@@ -165,7 +133,6 @@ fn scan_reclaimable(wallet: &Pubkey, rpc_url: &str) -> Vec<ReclaimableWager> {
     out
 }
 
-/// Run [`scan_reclaimable`] off the render thread; result arrives via `tx`.
 pub fn spawn_scan(wallet: Pubkey, rpc_url: String, tx: oneshot::Sender<Vec<ReclaimableWager>>) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {

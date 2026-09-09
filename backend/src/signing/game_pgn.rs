@@ -1,21 +1,7 @@
-//! Shared PGN assembly for finished games.
-//!
-//! Used by both the manual `/game/finalize` route (`routes::main::finalize_game`)
-//! and the automatic settlement worker (`tasks::settlement_worker::finalize_on_chain`)
-//! so a game gets an identical, fully-tagged PGN regardless of which path
-//! finalized it on-chain.
-
 use crate::db::repository::GameRepository;
 use crate::signing::elo_cache::EloCache;
 use nimzovich_engine::{PgnAssembler, PgnResult};
 
-/// Assemble a PGN for a finished game and persist it via `set_pgn_text`.
-///
-/// `white`/`black` are wallet pubkey strings; `white_username`/`black_username`
-/// are the resolved display names (falls back to the pubkey when no username
-/// is set). ELO ratings are looked up live from `elo_cache` so the PGN reflects
-/// each wallet's rating at finalize time — the same source of truth the ratings
-/// UI reads from, not a stale value carried from earlier in the request.
 pub async fn assemble_and_store_pgn(
     repo: &GameRepository,
     elo_cache: &EloCache,

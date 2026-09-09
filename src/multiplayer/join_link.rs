@@ -1,19 +1,11 @@
-//! `xfchess://join/<game_id>/<host_node_id_b58>` deep-link helpers.
-//!
-//! These URIs can be copied out of the lobby UI and pasted / shared anywhere.
-//! In Tauri they are also registered as a custom protocol so the OS can open
-//! the app directly when the link is clicked.
-
 use crate::multiplayer::spectator::{parse_spectate_link, SpectateViaLinkEvent};
 use crate::multiplayer::traits::{Message, MessageReader, MessageWriter};
 use bevy::prelude::*;
 
-/// Generate a join link for the given game + host node.
 pub fn make_join_link(game_id: &str, host_node_id_b58: &str) -> String {
     format!("xfchess://join/{}/{}", game_id, host_node_id_b58)
 }
 
-/// Parse a join link.  Returns `(game_id, host_node_id_b58)` on success.
 pub fn parse_join_link(url: &str) -> Option<(String, String)> {
     let path = url.strip_prefix("xfchess://join/")?;
     let mut parts = path.splitn(2, '/');
@@ -25,14 +17,12 @@ pub fn parse_join_link(url: &str) -> Option<(String, String)> {
     Some((game_id, node_id))
 }
 
-/// Bevy message fired when the OS hands us a deep-link URL (via Tauri IPC or CLI arg).
 #[derive(Message, Debug, Clone)]
 pub struct JoinViaLinkEvent {
     pub game_id: String,
     pub host_node_id: String,
 }
 
-/// Plugin that registers the event type.
 pub struct JoinLinkPlugin;
 
 impl Plugin for JoinLinkPlugin {
@@ -42,7 +32,6 @@ impl Plugin for JoinLinkPlugin {
     }
 }
 
-/// Translate a `JoinViaLinkEvent` into the normal P2P connect flow.
 fn handle_join_via_link(
     mut link_events: MessageReader<JoinViaLinkEvent>,
     mut connect_events: MessageWriter<crate::multiplayer::network::p2p::ConnectToPeerEvent>,
@@ -63,7 +52,6 @@ fn handle_join_via_link(
     }
 }
 
-/// Dispatch a raw deep-link URL, routing to join or spectate as appropriate.
 pub fn dispatch_deep_link(
     url: &str,
     join_events: &mut impl FnMut(JoinViaLinkEvent),

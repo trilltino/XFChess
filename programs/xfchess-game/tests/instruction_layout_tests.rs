@@ -1,11 +1,3 @@
-//! Locks the borsh layout of `initialize_tournament` args against the
-//! hand-built encodings in the external builders (backend
-//! `signing/solana/instructions.rs` and the game client's
-//! `solana/program_interface/instructions.rs`). Those builders construct
-//! instruction data manually, so an enum reorder or added arg on-chain
-//! silently breaks them with InstructionDidNotDeserialize (error 102) —
-//! this test catches the drift at `cargo test` time.
-
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::InstructionData;
 use xfchess_game::state::TournamentType;
@@ -14,8 +6,6 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Replicates the client/backend builders' byte construction for a
-/// SOL-only single-elimination tournament.
 fn hand_built(discriminator: &[u8], host_treasury: &Pubkey) -> Vec<u8> {
     let name = "E2E Cup 2p";
     let mut hand = discriminator.to_vec();
@@ -40,8 +30,6 @@ fn hand_built(discriminator: &[u8], host_treasury: &Pubkey) -> Vec<u8> {
     hand
 }
 
-/// Exact bytes captured from a failing devnet run (tournament 1784206847);
-/// deserializes them the way the on-chain dispatch does.
 #[test]
 fn initialize_tournament_deserializes_captured_devnet_bytes() {
     let hex = "4bda5650317f9bbaffd5586a000000000a0000004532452043757020327040420f000000000002000100000000ffffffff0200581bb80b00000000000000000000000000000000000000000000000000a3ad5c77f852da8b757c967a26f5fa0b3757d5dce0a9ea9a53b060e4741a37680058020000000000000500";

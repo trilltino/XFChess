@@ -1,23 +1,3 @@
-//! Real-time on-chain observability via Triton's WS pubsub `programSubscribe`.
-//!
-//! `settlement_worker.rs` finds out about on-chain changes by polling every
-//! 30s (`getMultipleAccounts`) — fine for driving finalize/undelegate, but it
-//! means the stale-delegation signal is only ever as fresh as the last poll.
-//! XFChess's production RPC provider is already Triton One
-//! (`signing/solana/rpc.rs`), and `crates/solana/er-cu-benchmark` already
-//! proved push-streaming works against it (`rpc_bench/stream.rs`,
-//! `rpc_bench/geyser.rs`) — this wires that same capability into the app for
-//! real: one `programSubscribe` watches every account under the XFChess
-//! program, so a human (or Grafana) can tell "we're getting live pushes from
-//! chain" apart from "we've gone quiet and are only finding out every 30s."
-//!
-//! Deliberately additive only. This does not feed into `settlement_worker`'s
-//! own finalize/undelegate decisions — it only powers the
-//! `xfchess_er_subscription_connected` / `xfchess_er_last_push_unix` gauges.
-//! If the WS connection can't be established or drops, the worker reconnects
-//! on a fixed backoff forever; the polling-based settlement path is
-//! completely unaffected either way.
-
 use crate::signing::AppState;
 use crate::telemetry::worker_metrics::{ER_LAST_PUSH_UNIX, ER_SUBSCRIPTION_CONNECTED};
 use solana_client::nonblocking::pubsub_client::PubsubClient;
@@ -31,12 +11,8 @@ use std::time::Duration;
 use tokio_stream::StreamExt;
 use tracing::{info, warn};
 
-/// How long to wait before retrying after a subscription fails or drops.
 const RECONNECT_BACKOFF: Duration = Duration::from_secs(10);
 
-/// Converts an http(s) RPC URL to its ws(s) pubsub form (same host + token
-/// path) — same helper as the benchmark probe this is modeled on
-/// (`crates/solana/er-cu-benchmark/src/rpc_bench/stream.rs::to_ws`).
 fn to_ws(url: &str) -> String {
     if let Some(rest) = url.strip_prefix("https://") {
         format!("wss://{rest}")
@@ -54,9 +30,6 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Spawns the background watch task. Never returns an error to the caller —
-/// this is a best-effort observability signal layered on top of the
-/// settlement worker, not something anything else depends on.
 pub fn spawn_er_watch(state: Arc<AppState>) {
     tokio::spawn(async move {
         let program_id = match Pubkey::from_str(&state.config.program_id) {
@@ -83,9 +56,6 @@ pub fn spawn_er_watch(state: Arc<AppState>) {
     });
 }
 
-/// Opens one WS pubsub connection, subscribes to every account under
-/// `program_id`, and stamps `ER_LAST_PUSH_UNIX` on each push until the stream
-/// closes or errors. Returns once the stream ends — the caller reconnects.
 async fn watch_once(state: &Arc<AppState>, program_id: &Pubkey) -> anyhow::Result<()> {
     let ws_url = to_ws(&state.config.solana_rpc_url);
     let client = PubsubClient::new(&ws_url)

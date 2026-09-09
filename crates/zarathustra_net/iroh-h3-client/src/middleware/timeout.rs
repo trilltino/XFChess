@@ -1,9 +1,3 @@
-//! Timeout middleware for IrohH3Client
-//!
-//! Automatically applies a timeout to each HTTP request.
-//! - If the request does not complete within the specified duration, returns an `Error::Other`.
-//! - Works for any request type and does not modify the request or response.
-
 use crate::{
     body::Body,
     error::{Error, MiddlewareError},
@@ -14,14 +8,11 @@ use n0_future::time;
 use std::time::Duration;
 use tracing::{debug, instrument};
 
-/// Middleware that applies a timeout to each request.
 pub struct Timeout {
-    /// Maximum allowed duration for a single request.
     pub duration: Duration,
 }
 
 impl Timeout {
-    /// Construct a new Timeout middleware.
     pub fn new(duration: Duration) -> Self {
         Self { duration }
     }
@@ -57,7 +48,6 @@ mod tests {
     use http::{Response, StatusCode};
     use std::sync::{Arc, Mutex};
 
-    /// Mock service that can delay or return responses/errors in sequence.
     struct MockService {
         results: Arc<Mutex<Vec<Result<Response<Body>, Error>>>>,
         delay_ms: u64,

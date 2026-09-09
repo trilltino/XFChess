@@ -1,36 +1,25 @@
-//! Longitudinal per-player evidence: a rolling window of the last 30 games'
-//! signals, persisted to SQLite so a single suspicious game can be weighed
-//! against a player's own established baseline rather than judged in
-//! isolation.
-
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tracing::warn;
 
 use crate::types::{SideAnalysis, Verdict};
 
-/// Rolling anti-cheat history for one player, persisted in the
-/// `player_anticheat_stats` table.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerStats {
     pub pubkey: String,
     pub games_analysed: u32,
     pub lifetime_cpl: f64,
-    /// Centipawn loss for the last 30 analysed games, most recent first.
     pub last_30_cpls: Vec<f64>,
-    /// Top-engine-move rate for the last 30 analysed games, most recent first.
     pub last_30_t1s: Vec<f64>,
     pub flags_received: u32,
     pub reviews_received: u32,
 }
 
 impl PlayerStats {
-    /// True once there's enough game history (5+ games) to compute a meaningful baseline.
     pub fn has_sufficient_history(&self) -> bool {
         self.last_30_cpls.len() >= 5
     }
 
-    /// Mean CPL over the rolling window; `f64::MAX` if there's no history yet.
     pub fn rolling_avg_cpl(&self) -> f64 {
         if self.last_30_cpls.is_empty() {
             return f64::MAX;
@@ -38,7 +27,6 @@ impl PlayerStats {
         self.last_30_cpls.iter().sum::<f64>() / self.last_30_cpls.len() as f64
     }
 
-    /// Mean top-engine-move rate over the rolling window; 0.0 if there's no history yet.
     pub fn rolling_avg_t1(&self) -> f64 {
         if self.last_30_t1s.is_empty() {
             return 0.0;
@@ -46,7 +34,6 @@ impl PlayerStats {
         self.last_30_t1s.iter().sum::<f64>() / self.last_30_t1s.len() as f64
     }
 
-    /// Standard deviation of CPL over the rolling window; `f64::MAX` with fewer than 2 samples.
     pub fn rolling_cpl_stddev(&self) -> f64 {
         if self.last_30_cpls.len() < 2 {
             return f64::MAX;
@@ -61,8 +48,6 @@ impl PlayerStats {
         var.sqrt()
     }
 
-    /// How many standard deviations `game_cpl` sits below this player's rolling average
-    /// (positive = suspiciously better than their own baseline).
     pub fn game_z_score(&self, game_cpl: f64) -> f64 {
         let stddev = self.rolling_cpl_stddev();
         if stddev < 1.0 {
@@ -72,7 +57,6 @@ impl PlayerStats {
     }
 }
 
-/// Load a player's rolling stats, or a zeroed `PlayerStats` if they have no history yet.
 pub async fn load_stats(pool: &SqlitePool, pubkey: &str) -> PlayerStats {
     let row: Option<(i64, f64, String, String, i64, i64)> = sqlx::query_as(
         "SELECT games_analysed, lifetime_cpl, last_30_cpls, last_30_t1s,
@@ -106,7 +90,6 @@ pub async fn load_stats(pool: &SqlitePool, pubkey: &str) -> PlayerStats {
     }
 }
 
-/// Fold one game's `SideAnalysis` into the player's rolling stats and persist the result.
 pub async fn update_stats(pool: &SqlitePool, side: &SideAnalysis) {
     let pubkey = &side.pubkey;
     let mut stats = load_stats(pool, pubkey).await;

@@ -1,5 +1,3 @@
-//! Sequence playback: steps through the encoded game and schedules animations.
-
 use bevy::prelude::*;
 
 use super::animation::{MiniFadeOut, MiniMoveAnimation};
@@ -154,7 +152,6 @@ fn apply_step(
     }
 }
 
-/// Once the trailing pause elapses, despawn remaining pieces and start over.
 pub fn restart_when_complete(
     time: Res<Time>,
     mut playback: ResMut<SequencePlayback>,

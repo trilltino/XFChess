@@ -1,5 +1,3 @@
-//! Client networking for online games, Braid transport, P2P, and VPS calls.
-
 pub mod braid_transport;
 pub mod game_id_store;
 pub mod identity;

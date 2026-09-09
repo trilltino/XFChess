@@ -1,5 +1,3 @@
-//! Core module - Game state management and application infrastructure.
-
 pub mod crash;
 pub mod error_handling;
 #[cfg(target_os = "android")]

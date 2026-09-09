@@ -1,29 +1,3 @@
-//! Game initialization system for resetting resources on new game
-//!
-//! This system runs when entering the `InGame` state to ensure all game resources
-//! are reset to their default values, providing a clean slate for each new game.
-//!
-//! # Bevy Pattern
-//!
-//! Follows the pattern from `reference/bevy/examples/state/states.rs` where
-//! `setup_game` runs `OnEnter(AppState::InGame)` to initialize game state.
-//!
-//! # System Execution
-//!
-//! This system runs `OnEnter(GameState::InGame)` and must execute BEFORE
-//! piece and board spawning systems to ensure a clean state.
-//!
-//! # Resources Reset
-//!
-//! - `CurrentTurn` - Reset to White, move 1
-//! - `CurrentGamePhase` - Reset to Playing
-//! - `Selection` - Clear selected piece
-//! - `MoveHistory` - Clear all moves
-//! - `GameTimer` - Reset to 10 minutes, start timer
-//! - `CapturedPieces` - Clear all captures
-//! - `GameOverState` - Reset to Playing
-//! - `FastBoardState` - Clear bitboards
-//! - `TurnStateContext` - Reset to default phase
 use crate::core::{DespawnOnExit, GameState};
 
 use crate::engine::board_state::ChessEngine;
@@ -34,12 +8,6 @@ use crate::game::resources::*;
 use crate::rendering::pieces::{Piece, PieceColor};
 use bevy::prelude::*;
 
-/// Sweep any board visuals that survived a state transition into a new game:
-/// menu/cinematic pieces (`MenuBg`) or a stale `Piece` from a previous game.
-/// Leaked menu pieces on their home squares overlap the fresh spawn invisibly —
-/// only ones the ambient animation had moved show up, as "extra" pieces on
-/// non-start squares. Runs before piece spawning; logs each leak by name so
-/// the source transition is identifiable from the field.
 pub fn purge_stale_board_visuals(
     mut commands: Commands,
     leftovers: Query<
@@ -60,17 +28,6 @@ pub fn purge_stale_board_visuals(
     }
 }
 
-/// System that resets all game resources when entering InGame state
-///
-/// This ensures each new game starts with clean state, preventing
-/// resource persistence from previous games.
-///
-/// # Execution Order
-///
-/// This system must run BEFORE piece/board spawning to ensure
-/// resources are reset before entities are created.
-///
-/// For usage examples, see `tests/systems_tests.rs`
 pub fn reset_game_resources(
     mut commands: Commands,
     mut current_turn: ResMut<CurrentTurn>,
@@ -170,14 +127,6 @@ pub fn reset_game_resources(
     info!("[GAME_INIT] All game resources reset successfully - ready for new game");
 }
 
-/// System that initializes players based on game mode
-///
-/// Creates player resources based on:
-/// - OnlineMultiplayer: local player is human, remote player is not (color from P2PConnectionState)
-/// - MultiplayerLocal: both players human
-/// - VsAI: one human, one AI (based on ai_color)
-///
-/// This system runs when entering InGame state to set up players.
 pub fn initialize_players(
     _commands: Commands,
     mut players: ResMut<Players>,
@@ -258,12 +207,6 @@ pub fn initialize_players(
     );
 }
 
-/// Deferred timer start: enable the game timer only once pieces are present in ECS.
-///
-/// This prevents clock time being consumed during asset loading between
-/// `OnEnter(InGame)` and when the board is actually interactive.
-/// Uses a small frame-counter guard so the timer doesn't start on the same
-/// frame pieces are spawned (avoids 1-frame edge cases).
 pub fn start_timer_when_ready(
     mut game_timer: ResMut<GameTimer>,
     mut engine: ResMut<ChessEngine>,
@@ -321,12 +264,6 @@ pub fn start_timer_when_ready(
     }
 }
 
-/// Pre-warm the move/capture sound decoders on game entry.
-///
-/// The first time an mp3 `AudioPlayer` is spawned, rodio decodes the file on the
-/// audio thread — a one-off cost that otherwise lands on the *first move*. We
-/// play the move + capture clips once, silent and self-despawning, when entering
-/// InGame so that decode happens during board setup instead of mid-first-move.
 pub fn warmup_game_audio(
     mut commands: Commands,
     sounds: Option<Res<crate::game::resources::sounds::GameSounds>>,
@@ -344,18 +281,6 @@ pub fn warmup_game_audio(
     }
 }
 
-/// System that initializes the chess engine from ECS board state
-///
-/// This system runs AFTER pieces are spawned to sync the engine's internal
-/// board state with the ECS piece positions. This establishes the engine
-/// as the authoritative source for move validation.
-///
-/// # Execution Order
-///
-/// This system must run AFTER `create_pieces` to ensure pieces exist in ECS
-/// before syncing to the engine.
-///
-/// For usage examples, see `tests/systems_tests.rs`
 pub fn initialize_engine_from_ecs(
     mut engine: ResMut<ChessEngine>,
     pieces_query: Query<(Entity, &Piece, &HasMoved)>,

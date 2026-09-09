@@ -1,18 +1,3 @@
-//! Server-Sent Events (SSE) stream parser.
-//!
-//! This module provides [`SseStream`], a [`futures::Stream`] implementation
-//! that incrementally parses an HTTP/3 response body into individual
-//! Server-Sent Events according to the SSE specification.
-//!
-//! It handles:
-//! - buffering arbitrary frame boundaries,
-//! - reconstructing `\n`-delimited SSE lines,
-//! - grouping lines into events (separated by blank lines),
-//! - extracting fields such as `data:`, `id:`, and `event:`,
-//! - maintaining `last_event_id` semantics.
-//!
-//! The output item of the stream is [`Result<SseEvent, Error>`].
-
 use std::{
     collections::VecDeque,
     pin::{Pin, pin},
@@ -27,61 +12,21 @@ use tracing::instrument;
 
 use crate::{error::Error, response::Response};
 
-/// A streaming Server-Sent Events (SSE) parser.
-///
-/// `SseStream` consumes an HTTP response body that yields `Bytes` frames
-/// and incrementally parses them according to the SSE specification.
-///
-/// ## Key Features
-///
-/// - Handles arbitrary frame boundaries
-/// - Reconstructs `\n`-terminated SSE lines
-/// - Builds events incrementally as data arrives
-/// - Supports `data:`, `id:`, and `event:` fields
-/// - Maintains `last_event_id` semantics
-///
-/// This implementation avoids repeated scans and uses a `VecDeque<u8>`
-/// for efficient front-draining of processed bytes.
 pub struct SseStream {
-    /// The HTTP response body being streamed.
-    ///
-    /// Each yielded frame contains raw bytes representing SSE text.
     body: BoxBody<Bytes, Error>,
 
-    /// A deque of unprocessed raw bytes.
-    ///
-    /// Bytes are appended at the back and consumed from the front as
-    /// complete lines (ending in `\n`) are detected.
     buffer: VecDeque<u8>,
 
-    /// Scratch buffer used for assembling a single line.
-    ///
-    /// This buffer is reused for every parsed line to avoid repeated
-    /// heap allocations. A fresh empty buffer is obtained via
-    /// `mem::take(&mut self.line_buf)`, filled, processed, and then
-    /// returned (empty) to `self.line_buf` for the next line.
     line_buf: Vec<u8>,
 
-    /// The SSE event currently being constructed from incoming lines.
-    ///
-    /// Every non-blank line updates this pending event. A blank line
-    /// completes the event and moves it into `ready_events`.
     pending_event: SseEvent,
 
-    /// A queue of fully constructed SSE events ready to be emitted.
-    ///
-    /// The stream always yields events from this queue before polling the
-    /// underlying HTTP body.
     ready_events: VecDeque<SseEvent>,
 
-    /// The most recent `id:` field received from the server.
-    ///
-    /// This is updated by each event that includes an `id:` field.
     last_event_id: Option<String>,
 }
 
 impl SseStream {
-    /// Create a new SSE stream from an HTTP response.
     pub fn new(response: Response) -> Self {
         Self {
             body: response.body.into_stream(),
@@ -93,9 +38,6 @@ impl SseStream {
         }
     }
 
-    /// Construct an `SseStream` from any byte stream (test-only).
-    ///
-    /// This allows injecting arbitrary `Bytes` frames for unit tests.
     #[cfg(test)]
     pub(crate) fn from_stream<S>(stream: S) -> Self
     where
@@ -117,14 +59,10 @@ impl SseStream {
         }
     }
 
-    /// Retrieve the most recently received SSE event ID, if any.
     pub fn last_event_id(&self) -> Option<&str> {
         self.last_event_id.as_deref()
     }
 
-    /// Append raw bytes from a received frame into the internal buffer,
-    /// extract complete `\n`-terminated lines, and process each line into
-    /// SSE event fields.
     fn append_frame(&mut self, mut frame: impl Buf) {
         let old_len = self.buffer.len();
 
@@ -175,10 +113,6 @@ impl SseStream {
         }
     }
 
-    /// Process a single SSE text line.
-    ///
-    /// - A blank line completes the pending event.
-    /// - Other lines update the pending event's fields.
     fn process_line(&mut self, line: &str) {
         // Blank line = end of event
         if line.is_empty() {
@@ -210,7 +144,6 @@ impl SseStream {
         }
     }
 
-    /// Retrieve the next completed event from the internal queue, if any.
     fn poll_ready_event(&mut self) -> Option<SseEvent> {
         self.ready_events.pop_front()
     }
@@ -219,12 +152,6 @@ impl SseStream {
 impl Stream for SseStream {
     type Item = Result<SseEvent, Error>;
 
-    /// Poll the SSE stream for the next event.
-    ///
-    /// Returns:
-    /// - `Poll::Ready(Some(Ok(event)))` when an SSE event is available
-    /// - `Poll::Ready(Some(Err(err)))` if the underlying stream fails
-    /// - `Poll::Ready(None)` when the stream ends with no more events
     #[instrument(skip(self, cx))]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // Emit any queued complete events immediately.
@@ -262,12 +189,6 @@ impl Stream for SseStream {
     }
 }
 
-/// A single Server-Sent Event.
-///
-/// Fields correspond to standard SSE fields:
-/// - `id` — event ID used for reconnection,
-/// - `event` — event type,
-/// - `data` — textual payload (may contain newlines).
 #[derive(Debug, Default)]
 pub struct SseEvent {
     id: Option<String>,
@@ -276,17 +197,14 @@ pub struct SseEvent {
 }
 
 impl SseEvent {
-    /// Get the event ID, if supplied.
     pub fn id(&self) -> Option<&str> {
         self.id.as_deref()
     }
 
-    /// Get the event type name, if supplied.
     pub fn event(&self) -> Option<&str> {
         self.event.as_deref()
     }
 
-    /// Get the event data payload.
     pub fn data(&self) -> &str {
         &self.data
     }

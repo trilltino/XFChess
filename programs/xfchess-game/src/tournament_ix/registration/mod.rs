@@ -1,5 +1,3 @@
-//! Tournament player registration instructions
-
 pub mod leave;
 pub mod register;
 

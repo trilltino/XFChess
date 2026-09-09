@@ -1,12 +1,3 @@
-/// Pre-fitted ELO → expected average CPL table.
-///
-/// Derived from Lichess database dumps (database.lichess.org) analysed at
-/// Stockfish depth 20. Each entry is (elo_floor, expected_cpl, sigma).
-/// sigma ≈ 30% of expected_cpl, based on observed inter-game variance.
-///
-/// To re-fit: download a Lichess monthly PGN dump, run every game through
-/// Stockfish at depth 20, compute mean + stdev CPL per 50-ELO bucket,
-/// then replace this table.
 const TABLE: &[(u32, f64, f64)] = &[
     (600, 280.0, 84.0),
     (700, 240.0, 72.0),
@@ -33,8 +24,6 @@ const TABLE: &[(u32, f64, f64)] = &[
     (2800, 4.0, 1.2),
 ];
 
-/// Returns `(expected_cpl, sigma)` for the given ELO.
-/// Linearly interpolates between table entries.
 pub fn expected_cpl(elo: u32) -> (f64, f64) {
     let elo_f = elo as f64;
 
@@ -64,9 +53,6 @@ pub fn expected_cpl(elo: u32) -> (f64, f64) {
     (TABLE[0].1, TABLE[0].2)
 }
 
-/// Sigmoid-mapped z-score: how suspicious is `observed_cpl` for a player at `elo`?
-/// Returns 0.0 (unsuspicious) to 1.0 (very suspicious).
-/// A player playing *better* than their ELO predicts scores higher.
 pub fn cpl_vs_elo_signal(elo: u32, observed_cpl: f64) -> f64 {
     let (expected, sigma) = expected_cpl(elo);
     if sigma <= 0.0 {

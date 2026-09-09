@@ -1,11 +1,3 @@
-//! Casual (off-chain) game recording.
-//!
-//! Bot games and local-P2P games played while logged into an Account are
-//! recorded here for history only — deliberately with no on-chain effect
-//! (on-chain `elo_rating` stays driven only by real wagered/ranked
-//! settlement). Guest-tier play never calls this at all. See
-//! docs/plans/identity-implementation-plan.md.
-
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 
@@ -14,9 +6,7 @@ use crate::signing::AppState;
 
 #[derive(Deserialize)]
 pub struct CasualGameRequest {
-    /// "bot" | "local_p2p"
     pub opponent_type: String,
-    /// "win" | "loss" | "draw"
     pub result: String,
     pub pgn: Option<String>,
 }
@@ -30,9 +20,6 @@ pub fn casual_games_routes() -> Router<AppState> {
     Router::new().route("/api/games/casual", post(record_casual_game))
 }
 
-/// POST /api/games/casual
-/// JWT-authed (any of the three Account login doors — wallet, email,
-/// eventually Lichess). Requires no on-chain state at all.
 async fn record_casual_game(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

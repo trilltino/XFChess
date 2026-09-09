@@ -1,5 +1,3 @@
-//! Protocol-level utilities for Braid-HTTP.
-
 pub mod constants;
 pub mod formatter;
 pub mod headers;

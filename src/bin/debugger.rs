@@ -1,14 +1,3 @@
-//! Standalone Transaction Debugger Binary
-//!
-//! This binary runs as a sidecar process to monitor rollup transactions
-//! from the XFChess game client.
-//!
-//! # Usage
-//!
-//! ```bash
-//! ./xfchess-debugger --game-id 12345 --log-file ./game.log
-//! ```
-
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -19,7 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-/// Log entry structure for the debugger
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct LogEntry {
     timestamp: u64,
@@ -28,32 +16,25 @@ struct LogEntry {
     message: String,
 }
 
-/// CLI Arguments
 #[derive(Parser, Debug)]
 #[command(name = "xfchess-debugger")]
 #[command(about = "Transaction debugger for XFChess rollup monitoring")]
 struct Args {
-    /// Game ID to monitor
     #[arg(long)]
     game_id: u64,
 
-    /// Log file path
     #[arg(long, default_value = "rollup_debug.log")]
     log_file: PathBuf,
 
-    /// Enable pretty colored output
     #[arg(long, default_value = "true")]
     pretty_print: bool,
 
-    /// WebSocket port for remote monitoring (optional)
     #[arg(long)]
     websocket_port: Option<u16>,
 
-    /// Read from stdin instead of file
     #[arg(long)]
     stdin: bool,
 
-    /// Follow mode (keep reading new entries)
     #[arg(short, long)]
     follow: bool,
 }

@@ -38,25 +38,14 @@ pub struct MoveRecord {
     pub ply: u32,
     pub move_uci: String,
     pub fen_after: String,
-    /// Server wall-clock ms when move was signed.
     pub signed_at_ms: u64,
-    /// signed_at_ms - prev signed_at_ms (0 for ply 0).
     pub latency_ms: u32,
-    /// Client-reported: window lost focus since this player's previous move
-    /// (the alt-tab-to-engine signature). False when no telemetry was sent.
     #[serde(default)]
     pub blurred: bool,
-    /// Client-reported think time for this move in ms (None = no telemetry).
-    /// A *claim*, not a fact — the backend audits it against server-observed
-    /// budgets before it reaches analysis (see docs/plans/think-time-telemetry.md).
     #[serde(default)]
     pub think_ms: Option<u32>,
 }
 
-/// Where a side's per-move timing came from. Server timestamps are
-/// unforgeable but collapse to garbage for batch-submitted games; client
-/// think times are accurate but audited claims. `None` means timing signals
-/// are disabled for that side rather than fed bad numbers.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TimingSource {
     Client,
@@ -80,7 +69,6 @@ pub struct PlyEval {
     pub move_uci: String,
     pub top1_cp: i32,
     pub top2_cp: i32,
-    /// Centipawn loss: top1_cp − played_cp (clamped to 0 minimum).
     pub cpl: i32,
     pub is_t1: bool,
     pub complexity: Complexity,
@@ -89,11 +77,8 @@ pub struct PlyEval {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Complexity {
-    /// top1 − top2 < forced_delta_cp: only reasonable move.
     Forced,
-    /// top1 − top2 in [forced_delta, complex_delta): clear best but not only.
     Simple,
-    /// top1 − top2 >= complex_delta: multiple moves are plausible.
     Complex,
 }
 
@@ -101,22 +86,13 @@ pub enum Complexity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalValues {
-    /// Ratio of suspiciously fast moves on Complex positions (0.0–1.0).
     pub timing_anomaly: f64,
-    /// Sigmoid-mapped z-score: how far below ELO-expected CPL the player is (0.0–1.0).
     pub cpl_vs_elo: f64,
-    /// T1 rate on Complex positions only (0.0–1.0).
     pub t1_rate: f64,
-    /// Average CPL across non-Forced plies (for display).
     pub avg_cpl: f64,
-    /// Number of Complex positions used in the sample.
     pub complex_ply_count: u32,
-    /// Fraction of this side's moves with client-reported window blur
-    /// (0.0–1.0; 0.0 when no telemetry was received).
     #[serde(default)]
     pub blur_rate: f64,
-    /// Provenance of the timing data behind `timing_anomaly` — surfaces in
-    /// reports so reviewers know what they're reading.
     #[serde(default)]
     pub timing_source: TimingSource,
 }

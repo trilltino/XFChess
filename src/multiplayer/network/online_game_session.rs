@@ -1,8 +1,3 @@
-//! Owns live networking for casual, wagered, and tournament games.
-//!
-//! Moves, resignations, and chat use Iroh gossip and are mirrored to the
-//! durable Braid log; heartbeats and clock snapshots remain gossip-only.
-
 use bevy::prelude::*;
 use braid_chess::MovePayload;
 use tracing::{info, warn};
@@ -11,37 +6,14 @@ use crate::multiplayer::network::protocol::NetworkMessage;
 use crate::multiplayer::types::{is_online_game_mode, NetworkEvent, OnlineStartBarrier};
 use bevy::prelude::*;
 
-/// Configuration + runtime state for a single PvP game.
 #[derive(Resource)]
 pub struct OnlineGameSession {
-    /// Base URL of the VPS backend (e.g. `http://127.0.0.1:8090`).
-    ///
-    /// Serves both the VPS `record_move` REST call *and* the durable Braid
-    /// moves/chat streams (`braid_transport`) — it is on the live move path,
-    /// not just an out-of-band bookkeeping endpoint.
     pub base_url: String,
-    /// Posted game identifier.
     pub game_id: String,
-    /// Whether the session is active.
     pub active: bool,
-    /// Incrementing move counter for [`MovePayload::move_number`].
     pub next_move_number: u32,
-    /// Next nonce for on-chain replay protection.
     pub next_nonce: u64,
-    /// Wager amount in SOL (0 = casual).
     pub wager_amount: f64,
-    /// Content-addressed version of the last move *this client* published.
-    ///
-    /// Two things read it, both per-sender by design:
-    /// - the `parent_version` of the next outgoing gossip `Move`, which the
-    ///   peer checks against its per-sender equivocation lane
-    ///   (`CausalChainState::head_version`);
-    /// - `GameSnapshot::head_version`, for mid-game catch-up.
-    ///
-    /// It is deliberately *not* the Braid moves-stream parent. That stream is
-    /// shared with the opponent, so its head advances on their writes too;
-    /// `braid_transport::BraidStreamHeads` owns it. The old name
-    /// (`last_version`) invited exactly that conflation.
     pub last_published_move_version: String,
 }
 
@@ -59,17 +31,6 @@ impl Default for OnlineGameSession {
     }
 }
 
-/// Derives the numeric id used for gossip topics, wire messages, and causal
-/// dedup keys from a session's string game id. A bare `.parse::<u64>()` on a
-/// non-numeric id (e.g. a `"p2p_3538781462"`-style or human-readable room
-/// code) always fails and silently fell back to `0`, which collapsed every
-/// casual game onto the same gossip topic (`GAME_TOPIC/0`) instead of a
-/// topic anyone actually subscribed to. Pure numeric ids (tournament / wager
-/// / rejoin flows, where this must equal the real on-chain/PDA id) still
-/// parse straight through unchanged; anything else is hashed into a stable
-/// u64 so the derivation works for *any* room-code format without needing
-/// to know its shape — this is the single canonical implementation, callers
-/// must not reimplement it.
 pub fn numeric_game_id(game_id: &str) -> u64 {
     if let Ok(n) = game_id.parse::<u64>() {
         return n;
@@ -95,13 +56,11 @@ impl OnlineGameSession {
     }
 }
 
-/// Bevy event to publish a resign over iroh gossip.
 #[derive(Message, Debug, Clone)]
 pub struct PublishOnlineResign {
     pub player: String,
 }
 
-/// Bevy event to publish a chat message over iroh gossip.
 #[derive(Message, Debug, Clone)]
 pub struct PublishOnlineChat {
     pub player: String,
@@ -109,7 +68,6 @@ pub struct PublishOnlineChat {
     pub timestamp_ms: u64,
 }
 
-/// Bevy event emitted when an inbound chat message arrives from the peer.
 #[derive(Message, Debug, Clone)]
 pub struct OnlineChatMessage {
     pub player: String,
@@ -117,7 +75,6 @@ pub struct OnlineChatMessage {
     pub timestamp_ms: u64,
 }
 
-/// Plugin registering the online game session resource, events, and systems.
 pub struct OnlineGameSessionPlugin;
 
 impl Plugin for OnlineGameSessionPlugin {
@@ -152,8 +109,6 @@ fn reset_start_barrier(mut barrier: ResMut<OnlineStartBarrier>) {
     barrier.reset(0);
 }
 
-/// Announce readiness once this client has a complete board and, when needed,
-/// has observed the Solana game's ER delegation.
 pub fn announce_game_readiness(
     session: Res<OnlineGameSession>,
     mut barrier: ResMut<OnlineStartBarrier>,
@@ -226,18 +181,6 @@ pub fn announce_game_readiness(
     }
 }
 
-/// Chooses the publisher identity for Braid dual-transport PUTs.
-///
-/// The backend's game-log participant check (`check_participant` in
-/// `game_log.rs`) resolves ground truth per game: for an on-chain game
-/// (any Solana lobby / tournament game has a `Game` account — the
-/// participants cache resolves stake-0 games too) `sender_identity` must be
-/// the wallet pubkey on-chain as `Game.white`/`black`; for a pure casual P2P
-/// game (no `SolanaGameSync.game_id`) ground truth is the JOIN_ACK-verified
-/// Iroh-node-id pair registered by the relay's `accept_join`, so the
-/// identity must be the base58 node id instead. Sending the wrong kind for a
-/// game resolves to `NotAParticipant` → HTTP 403 — which is exactly how
-/// v0.2.7 broke casual P2P whenever a wallet happened to be connected.
 #[cfg(feature = "solana")]
 fn braid_sender_identity(
     solana_state: Option<
@@ -272,9 +215,6 @@ fn braid_sender_identity(node_b58: &str) -> String {
     node_b58.to_string()
 }
 
-/// Read `MoveMadeEvent`s, send them as `NetworkMessage::Move` over iroh gossip,
-/// and update the session's causal version chain. This replaces the old
-/// `publish_local_moves_via_braid` + `handle_publish_move` pair.
 fn publish_local_move(
     mut session: ResMut<OnlineGameSession>,
     mut move_events: MessageReader<crate::game::events::MoveMadeEvent>,
@@ -429,8 +369,6 @@ fn publish_local_move(
     }
 }
 
-/// Activate a fresh online game session for `game_id` against `base_url` and
-/// subscribe to the corresponding iroh gossip topic. Idempotent.
 pub fn start_session(
     session: &mut OnlineGameSession,
     base_url: String,
@@ -461,7 +399,6 @@ pub fn start_session(
     }
 }
 
-/// Bevy system: send `PublishOnlineResign` events over iroh gossip.
 fn handle_publish_resign(
     mut session: ResMut<OnlineGameSession>,
     mut reader: MessageReader<PublishOnlineResign>,
@@ -528,7 +465,6 @@ fn handle_publish_resign(
     }
 }
 
-/// Bevy system: send `PublishOnlineChat` events as `NetworkMessage::Chat` over online transport.
 fn handle_publish_chat(
     session: Res<OnlineGameSession>,
     mut reader: MessageReader<PublishOnlineChat>,
@@ -587,7 +523,6 @@ fn handle_publish_chat(
     }
 }
 
-/// Drain incoming `NetworkMessage::Chat` events into `OnlineChatMessage` Bevy events.
 fn drain_chat_messages(
     session: Res<OnlineGameSession>,
     mut network_events: MessageReader<NetworkEvent>,
@@ -616,7 +551,6 @@ fn drain_chat_messages(
     }
 }
 
-/// Drain incoming `NetworkMessage::Clock` events into `SpectatorClockState`.
 fn drain_clock_to_spectator(
     session: Res<OnlineGameSession>,
     mut network_events: MessageReader<NetworkEvent>,
@@ -644,7 +578,6 @@ fn drain_clock_to_spectator(
     }
 }
 
-/// Broadcast `NetworkMessage::Clock` over online transport after each local move.
 fn publish_clock_on_move(
     mut move_events: MessageReader<crate::game::events::MoveMadeEvent>,
     session: Res<OnlineGameSession>,
@@ -683,8 +616,6 @@ fn publish_clock_on_move(
     }
 }
 
-/// When a new peer joins the gossip topic mid-game, broadcast a `GameSnapshot`
-/// so they can catch up immediately.
 #[cfg(feature = "solana")]
 fn broadcast_snapshot_to_new_peer(
     session: Res<OnlineGameSession>,
@@ -739,8 +670,6 @@ fn broadcast_snapshot_to_new_peer(
         .detach();
 }
 
-/// Build a `MovePayload` for the VPS `record_move` REST call.
-/// Does NOT send anything over the network — call site handles the HTTP.
 pub fn make_move_payload(
     session: &OnlineGameSession,
     uci: String,

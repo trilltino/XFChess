@@ -1,16 +1,3 @@
-//! Puzzle routes — serve positions, verify solutions server-side, rate the
-//! player, and pay admin-funded bounties. See docs/PUZZLES.md.
-//!
-//! Trust model: the solution `line` NEVER leaves the VPS. The client receives
-//! only the position (and the opponent's setup move, which leaks nothing). The
-//! client submits the moves it played; the backend replays them against the
-//! stored line and decides win/loss. Only a server-verified win can pay out.
-//!
-//! The earn model is admin-prefunded bounties only (no staking, no ladder): an
-//! operator funds a puzzle / band / daily with the VPS authority key, and a
-//! verified solve that passes the anti-cheat gate pays the posted reward as a
-//! plain SOL transfer from the VPS wallet (off-chain budget accounting, v1).
-
 use std::str::FromStr;
 
 use axum::{
@@ -74,7 +61,6 @@ const DAILY_PAYOUT_CAP: i64 = 5; // max paid solves per wallet per day
 
 // ── Router builders ─────────────────────────────────────────────────────────
 
-/// Public, player-facing puzzle routes (wallet-scoped, nonce-protected).
 pub fn puzzle_routes() -> Router<AppState> {
     Router::new()
         .route("/puzzle/next", get(get_next))
@@ -155,8 +141,6 @@ async fn get_daily(
     serve_puzzle(&pool, &q.wallet, &puzzle, "daily", reward).await
 }
 
-/// Common serve path: record a single-use challenge, return the position + the
-/// opponent setup move (line[0]) and the player's colour — but never the line.
 async fn serve_puzzle(
     pool: &sqlx::SqlitePool,
     wallet: &str,
@@ -268,9 +252,6 @@ struct MoveReq {
     uci: String,
 }
 
-/// One move at a time. Reveals the opponent's reply only *after* a correct
-/// player move (never a future player move). The final correct move awards the
-/// win and pays any bounty. A wrong move ends the puzzle as a loss.
 async fn post_move(
     State(state): State<AppState>,
     Json(req): Json<MoveReq>,
@@ -347,8 +328,6 @@ struct Outcome {
     paid_lamports: i64,
 }
 
-/// Shared finalisation: rating update, bounty payout (earn/daily, anti-cheat
-/// gated), and the single per-(wallet,puzzle) round record.
 async fn finalize(
     state: &AppState,
     pool: &sqlx::SqlitePool,
@@ -596,9 +575,6 @@ async fn save_rating(pool: &sqlx::SqlitePool, wallet: &str, rating: i64, dev: i6
     .await;
 }
 
-/// Elo-style update against the puzzle's rating as the "opponent", with the
-/// rating deviation shrinking toward a confident floor as the player solves
-/// more (a lightweight stand-in for full Glicko-2).
 fn rating_update(player: i64, dev: i64, puzzle: i64, won: bool) -> (i64, i64) {
     let expected = 1.0 / (1.0 + 10f64.powf((puzzle - player) as f64 / 400.0));
     let score = if won { 1.0 } else { 0.0 };
@@ -639,9 +615,6 @@ enum PayoutDecision {
     Withhold(&'static str),
 }
 
-/// Anti-cheat gate (docs/PUZZLES.md §7). A puzzle is deterministic, so a bot
-/// with an engine solves instantly and perfectly — these checks decide whether
-/// a verified win actually pays.
 async fn payout_decision(
     pool: &sqlx::SqlitePool,
     wallet: &str,
@@ -709,8 +682,6 @@ async fn debit_bounty(pool: &sqlx::SqlitePool, id: i64, reward: i64, budget: i64
     .await;
 }
 
-/// Pay a SOL bounty as a plain transfer signed by the VPS authority key
-/// (off-chain budget accounting, v1 — mirrors the prefunded-prize model).
 async fn pay_sol(state: &AppState, to: &str, lamports: u64) -> anyhow::Result<String> {
     let to_pk = Pubkey::from_str(to)?;
     let authority = state.vps_authority.clone();
@@ -734,8 +705,6 @@ async fn pay_sol(state: &AppState, to: &str, lamports: u64) -> anyhow::Result<St
 
 // ── FEN helper ───────────────────────────────────────────────────────────────
 
-/// The player controls the side that moves *after* the engine's setup move,
-/// i.e. the opposite of the FEN side-to-move field.
 fn player_color_after_setup(fen: &str) -> &'static str {
     match fen.split_whitespace().nth(1) {
         Some("w") => "black",
@@ -747,8 +716,6 @@ fn player_color_after_setup(fen: &str) -> &'static str {
 // Admin: curation + funding (docs/PUZZLES.md §9). Mounted behind require_api_key.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Operator routes — browse the pool by ELO/name, label/feature/enable puzzles,
-/// and fund bounties with the VPS authority. Auth is applied at mount time.
 pub fn puzzle_admin_routes() -> Router<AppState> {
     Router::new()
         .route("/admin/puzzles", get(admin_list))
@@ -950,9 +917,6 @@ struct FundReq {
     max_per_wallet: Option<i64>,
 }
 
-/// Fund a bounty. v1 keeps the budget as off-chain accounting backed by the VPS
-/// wallet (the prefunding action), mirroring `fund_tournament_prize`; an
-/// on-chain escrow PDA is the optional later step (docs/PUZZLES.md §9.3).
 async fn admin_fund(
     State(state): State<AppState>,
     Json(body): Json<FundReq>,

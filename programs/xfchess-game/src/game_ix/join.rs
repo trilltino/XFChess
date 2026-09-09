@@ -1,13 +1,8 @@
-//! Instruction allowing a second player to match the wager and join a game.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-/// Accounts for a second player joining an open PvP game. `white_profile` is
-/// read (not just referenced) to support cross-border platform-fee
-/// calculation between the two players' jurisdictions.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct JoinGame<'info> {
@@ -15,10 +10,8 @@ pub struct JoinGame<'info> {
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [PROFILE_SEED, player.key().as_ref()], bump)]
     pub player_profile: Account<'info, PlayerProfile>,
-    /// CHECK: PDA for escrowing SOL.
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// CHECK: White player profile for cross-border fee calculation
     #[account(seeds = [PROFILE_SEED, game.white.as_ref()], bump)]
     pub white_profile: Account<'info, PlayerProfile>,
     #[account(mut)]
@@ -28,9 +21,6 @@ pub struct JoinGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Joins an open PvP game as black: transitions the game via
-/// `join_waiting_game` and, for a SOL wager, transfers the joiner's stake
-/// into escrow (SPL-token wagers are funded through a separate path).
 pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let player = ctx.accounts.player.key();

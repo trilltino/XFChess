@@ -1,5 +1,3 @@
-//! API-key authentication middleware for admin routes.
-
 use axum::{
     extract::{Request, State},
     http::StatusCode,
@@ -12,33 +10,15 @@ use crate::signing::auth::AuthedWallet;
 use crate::signing::AppState;
 
 tokio::task_local! {
-    /// The resolved admin identity for the current request, set by
-    /// `require_api_key` and read by `admin::add_audit` — this is how the
-    /// audit log attributes an action to a named operator without every
-    /// handler needing an `Extension<AdminActor>` parameter. Axum runs the
-    /// handler in the same task as the middleware chain, so a task-local
-    /// scope set here is visible for the whole request lifetime.
     pub static ADMIN_ACTOR: String;
 }
 
-/// Returns the actor name resolved by `require_api_key` for the request
-/// currently executing on this task, or `"unknown"` if called outside one
-/// (e.g. a unit test that invokes a handler directly).
 pub fn current_admin_actor() -> String {
     ADMIN_ACTOR
         .try_with(|a| a.clone())
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
-/// Resolves the `X-API-Key` header against configured admin keys and, on a
-/// match, returns the actor name to attribute the request to.
-///
-/// Supports two forms, checked in order:
-/// - `ADMIN_API_KEYS=alice:<key>,ci:<key2>` — named keys, each compared in
-///   constant time; the matching name becomes the actor.
-/// - `ADMIN_API_KEY=<key>` — single legacy key, actor is `"legacy"`.
-/// - Debug builds only, neither set: the literal key `"dev"`, actor
-///   `"dev-default"`.
 fn resolve_admin_actor(provided_key: &str) -> Result<String, StatusCode> {
     if let Ok(named) = env::var("ADMIN_API_KEYS") {
         let mut any_configured = false;
@@ -87,7 +67,6 @@ fn resolve_admin_actor(provided_key: &str) -> Result<String, StatusCode> {
     }
 }
 
-/// Validates the `X-API-Key` header and scopes the resolved admin actor.
 pub async fn require_api_key(request: Request, next: Next) -> Result<Response, StatusCode> {
     let provided_key = request
         .headers()
@@ -108,14 +87,6 @@ pub async fn require_api_key(request: Request, next: Next) -> Result<Response, S
     Ok(ADMIN_ACTOR.scope(actor, next.run(request)).await)
 }
 
-/// Catch-all persistence for every mutating `/admin/*` request, independent
-/// of whether the handler calls `admin::add_audit`. This is the safety net
-/// from Phase 3 of `docs/plans/admin-panel-and-production-hardening.md`: a
-/// new admin route that forgets to log its own action is still captured here
-/// with method/path/status/actor, so the audit trail can't silently miss a
-/// mutation. Read-only `GET`/`HEAD` requests are skipped — they don't change
-/// state and would otherwise dominate the log with noise. Must be layered
-/// *inside* (after) `require_api_key` so `current_admin_actor()` is populated.
 pub async fn persist_admin_request(
     State(state): State<AppState>,
     request: Request,
@@ -160,16 +131,6 @@ pub async fn persist_admin_request(
     response
 }
 
-/// Middleware protecting the session-key signing endpoints (`/move/record`,
-/// `/session/*`, `/game/finalize`, …) which the VPS signs on the caller's
-/// behalf. Requires a matching `X-Relay-Secret` header when `RELAY_SHARED_SECRET`
-/// is configured.
-///
-/// When the env var is unset it **fails open** — these endpoints are firewalled
-/// to the game client on the VPS, so an unset secret keeps existing deployments
-/// working while a one-time warning flags that they're relying on the network
-/// boundary alone. Set `RELAY_SHARED_SECRET` (and the matching client value) to
-/// add application-layer auth.
 pub async fn require_relay_secret(request: Request, next: Next) -> Result<Response, StatusCode> {
     use std::sync::Once;
     static UNSET_WARNING: Once = Once::new();
@@ -201,22 +162,6 @@ pub async fn require_relay_secret(request: Request, next: Next) -> Result<Respon
     Ok(next.run(request).await)
 }
 
-/// Dual-accept guard for the session-key signing endpoints.
-///
-/// A request is allowed if **either**:
-///  1. it carries a valid, non-revoked per-user JWT (`Authorization: Bearer …`) —
-///     the preferred path; the caller's wallet is stashed as [`AuthedWallet`] so
-///     handlers can apply per-caller authorization, **or**
-///  2. it carries the legacy `X-Relay-Secret` matching `RELAY_SHARED_SECRET`.
-///
-/// This is the rollout bridge from the shared secret to per-user auth: old
-/// clients (relay secret) and new clients (JWT) both work, so the secret can be
-/// retired once clients have migrated. The game client fetches a JWT
-/// automatically on every wallet connection before any session/lobby action
-/// (see `src/multiplayer/network/vps/client.rs`), so this guard fails
-/// **closed**: if neither a valid JWT nor `RELAY_SHARED_SECRET` is presented,
-/// the request is rejected rather than allowed through on the assumption that
-/// a firewall is doing the job instead.
 pub async fn require_relay_or_jwt(
     State(state): State<AppState>,
     mut request: Request,
@@ -261,11 +206,6 @@ pub async fn require_relay_or_jwt(
     }
 }
 
-/// Constant-time string comparison to prevent timing attacks.
-///
-/// Shared across admin auth surfaces (this middleware's `X-API-Key` check and
-/// `routes/dispute.rs`'s `ADMIN_TOKEN` check) so no secret is ever compared with
-/// a short-circuiting `==`/`!=`.
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;

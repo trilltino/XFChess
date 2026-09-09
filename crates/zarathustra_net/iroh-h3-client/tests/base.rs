@@ -9,7 +9,6 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 const ALPN: &[u8] = b"iroh+h3";
 
-/// Basic request & headers
 #[cfg_attr(not(target_family = "wasm"), tokio::test)]
 #[wasm_bindgen_test]
 async fn basic_get_and_headers() {
@@ -19,7 +18,6 @@ async fn basic_get_and_headers() {
     endpoint_1.online().await;
     endpoint_2.online().await;
 
-    /// simple handler returns a static body and sets a custom header
     async fn hello() -> impl IntoResponse {
         (
             axum::response::AppendHeaders([("x-test", "value")]),

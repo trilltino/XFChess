@@ -1,7 +1,3 @@
-//! Visual effects module
-//!
-//! Manages move hints and last move highlighting effects.
-
 pub mod check_highlight;
 pub mod dynamic_lighting;
 pub mod last_move;

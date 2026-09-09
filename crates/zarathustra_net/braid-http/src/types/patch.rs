@@ -1,18 +1,11 @@
-//! Patch representing a partial update to a resource.
-
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-/// A patch representing a partial update to a resource.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Patch {
-    /// The addressing unit type (e.g., `"json"`, `"bytes"`)
     pub unit: String,
-    /// The range specification
     pub range: String,
-    /// The patch content
     pub content: Bytes,
-    /// Content length in bytes
     pub content_length: Option<usize>,
 }
 
@@ -29,7 +22,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Patch {
 }
 
 impl Patch {
-    /// Create a new patch.
     #[must_use]
     pub fn new(
         unit: impl Into<String>,

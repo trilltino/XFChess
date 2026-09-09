@@ -1,7 +1,3 @@
-//! Solana addon types for multiplayer integration
-//!
-//! Provides types for Solana wallet, game sync, and competitive match state.
-
 use bevy::prelude::*;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
@@ -9,21 +5,18 @@ use std::sync::Arc;
 
 use crate::multiplayer::vps_client::UserStatus;
 
-/// Result type for Solana operations
 #[derive(Debug, Clone)]
 pub enum SolanaResult<T> {
     Success(T),
     Error(String),
 }
 
-/// Solana wallet resource
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SolanaWallet {
     pub pubkey: Option<Pubkey>,
     pub keypair: Option<Arc<solana_sdk::signature::Keypair>>,
     pub ranked_active: bool,
     pub tournament_match_id: Option<u64>,
-    /// Cached verification status from VPS backend
     pub user_status: Option<UserStatus>,
 }
 
@@ -33,13 +26,9 @@ impl SolanaWallet {
     }
 }
 
-/// Game synchronization state with Solana
 #[derive(Resource, Debug, Clone)]
 pub struct SolanaGameSync {
     pub game_id: Option<u64>,
-    /// SessionDelegation key authorized for the active on-chain game. Sent
-    /// with durable Braid writes so the backend can bind each write to the
-    /// wallet's enabled per-game session.
     pub session_pubkey: Option<Pubkey>,
     pub session_pubkey_update: std::sync::Arc<std::sync::Mutex<Option<Pubkey>>>,
     pub moves_submitted: u32,
@@ -48,15 +37,6 @@ pub struct SolanaGameSync {
     pub last_signature: Option<Signature>,
     pub rpc_url: String,
     pub result_tx: Option<tokio::sync::mpsc::Sender<SolanaResult<Signature>>>,
-    /// True only for games whose move flow genuinely depends on MagicBlock
-    /// Ephemeral-Rollup delegation: wagered lobby games, tournament games,
-    /// and rejoins of either. Move input is gated on delegation completing
-    /// (`can_move_color` in `game/systems/input.rs`) *only* when this is set.
-    ///
-    /// Pre-v0.2.8 the gate keyed off `game_id.is_some()` instead — which
-    /// permanently locked White in stake-0 free lobby games (`game_id` set,
-    /// but no delegation ever completes for them) and in pure casual P2P
-    /// games that inherited a stale `game_id` from an earlier Solana game.
     pub requires_delegation: bool,
 }
 
@@ -77,15 +57,6 @@ impl Default for SolanaGameSync {
     }
 }
 
-/// Clears any on-chain game context (`SolanaGameSync` +
-/// `CompetitiveMatchState`) when entering a pure casual P2P game.
-///
-/// Without this, leftover `game_id`/`active` from a previous Solana lobby or
-/// tournament match leaks into the casual game: the input gate would block
-/// White forever waiting for a delegation a casual game never gets, and the
-/// Braid publisher would send the wallet pubkey as its identity instead of
-/// the Iroh node id the backend's casual relay roster actually knows (HTTP
-/// 403) — the two failure modes that broke free P2P games in v0.2.7.
 pub fn clear_on_chain_game_state(
     sync: Option<&mut SolanaGameSync>,
     competitive: Option<&mut CompetitiveMatchState>,
@@ -98,7 +69,6 @@ pub fn clear_on_chain_game_state(
     }
 }
 
-/// Competitive match state
 #[derive(Resource, Debug, Clone, Default)]
 pub struct CompetitiveMatchState {
     pub match_id: Option<u64>,
@@ -117,7 +87,6 @@ pub struct CompetitiveMatchState {
     pub last_error: Option<String>,
 }
 
-/// Player profile on Solana
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SolanaProfile {
     pub username: String,
@@ -131,7 +100,6 @@ pub struct SolanaProfile {
 }
 
 impl SolanaProfile {
-    /// Total games played, computed from wins + losses + draws.
     pub fn games_played(&self) -> u32 {
         self.wins + self.losses + self.draws
     }

@@ -1,14 +1,3 @@
-//! Local profile picker, shown on launch until a profile is active.
-//!
-//! Several people can share one machine. Every profile ever created on this
-//! device (`identity::list_profiles`) is offered as a clickable entry;
-//! picking one activates it immediately via `identity::set_active_profile`.
-//! A "+" entry reveals a name field to create a new profile
-//! (`identity::create_profile`), which also gets its own PGN save subfolder
-//! (`identity::profile_pgn_dir`). Confirming either path populates
-//! `PlayerIdentity` immediately — every later launch loads the last-active
-//! profile silently, with no prompt, unless a wallet connects instead.
-
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -22,8 +11,6 @@ const MAX_NAME_LEN: usize = 20;
 pub struct ProfileOnboardingState {
     draft: String,
     error: Option<String>,
-    /// Show the "new profile" name field instead of the profile list. Forced
-    /// true automatically when no profiles exist yet.
     creating: bool,
 }
 

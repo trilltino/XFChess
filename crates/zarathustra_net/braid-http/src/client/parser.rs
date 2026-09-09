@@ -1,5 +1,3 @@
-//! Message parser for Braid protocol streaming.
-
 use crate::error::{BraidError, Result};
 use crate::types::Patch;
 use bytes::{Buf, Bytes, BytesMut};
@@ -28,10 +26,6 @@ pub struct MessageParser {
     expected_body_length: usize,
     read_body_length: usize,
     patches: Vec<Patch>,
-    /// `Some(n)` when the block carried a `Patches` header, including `Some(0)`.
-    /// `None` means no such header — the block is a snapshot and has a body.
-    /// Collapsing `Some(0)` into `None` would make a zero-patch update
-    /// indistinguishable from a snapshot; `braid-fuzz` tests exactly that case.
     expected_patches: Option<usize>,
     patches_read: usize,
     patch_headers: BTreeMap<String, String>,
@@ -65,23 +59,11 @@ impl MessageParser {
         }
     }
 
-    /// A parser for a `209` subscription stream.
-    ///
-    /// The body of a `209` is always a sequence of self-describing update blocks,
-    /// so parsing starts at a header block regardless of what the response-level
-    /// headers said.
-    ///
-    /// This replaces an earlier heuristic that keyed off
-    /// `Transfer-Encoding: chunked` plus a zero `Content-Length`. `reqwest`
-    /// consumes the transfer encoding while decoding and does not reliably expose
-    /// that header, so a conformant server that simply streamed a `209` without
-    /// advertising chunking would have been parsed as one opaque body.
     #[must_use]
     pub fn for_subscription() -> Self {
         MessageParser::new()
     }
 
-    /// A parser for a single non-streaming response body of known length.
     #[must_use]
     pub fn for_response(headers: BTreeMap<String, String>, content_length: usize) -> Self {
         let mut parser = MessageParser::new();
@@ -433,18 +415,10 @@ impl Default for MessageParser {
     }
 }
 
-/// One decoded block from a Braid stream.
-///
-/// `body` and `patches` are mutually exclusive and mirror the wire exactly: a
-/// block either declared `Content-Length` (a snapshot, `body`) or `Patches: N`
-/// (a patch update, `patches` — possibly empty when `N` is 0).
 #[derive(Debug, Clone)]
 pub struct Message {
     pub headers: BTreeMap<String, String>,
-    /// The snapshot body, or `None` if this block carried patches instead.
     pub body: Option<Bytes>,
-    /// The patches, or `None` if this block carried a snapshot body instead.
-    /// `Some(vec![])` is a `Patches: 0` update, which is not a snapshot.
     pub patches: Option<Vec<Patch>>,
     pub status_code: Option<u16>,
     pub encoding: Option<String>,
@@ -467,9 +441,6 @@ impl Message {
         self.headers.get("parents").map(|s| s.as_str())
     }
 
-    /// The snapshot body, decoded per the `Encoding` header.
-    ///
-    /// Returns an empty slice for a patch update, which has no body.
     pub fn decode_body(&self) -> Result<Bytes> {
         let body = self.body.clone().unwrap_or_default();
         match self.encoding.as_deref() {

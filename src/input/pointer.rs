@@ -1,17 +1,3 @@
-//! Advanced pointer interaction system with hover effects and cursor management
-//!
-//! Not cfg-gated on Android, and deliberately so: `bevy_picking`'s touch
-//! backend (`bevy_picking::input::touch_pick_events`, verified against the
-//! pinned 0.19.0 source, not assumed) only ever emits `TouchPhase::Started/
-//! Moved/Ended/Canceled`-derived press/move/release events — it never
-//! synthesizes `Pointer<Over>`/`Pointer<Out>`, which is what every observer
-//! in this file listens for. So on a touch-only device these observers are
-//! attached (six times over in `rendering/pieces/pieces.rs`, once in
-//! `rendering/board/board.rs`) but never fire — genuinely inert, not merely
-//! untested. Tap-to-select relies on `Pointer<Click>` in
-//! `game/systems/input.rs`, which touch does generate, and needs none of
-//! this file's hover-driven legal-move-preview or cursor-icon logic to work.
-
 use crate::game::components::GamePhase;
 use crate::game::resources::{CurrentGamePhase, CurrentTurn, Selection};
 use crate::rendering::pieces::Piece;
@@ -20,13 +6,10 @@ use bevy::picking::events::{Out, Over, Pointer};
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, SystemCursorIcon};
 
-/// Resource tracking the current cursor position within the game window
 #[derive(Resource, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct CursorState {
-    /// Current cursor position within window bounds, None if outside
     pub position: Option<Vec2>,
-    /// Time accumulator for debug logging rate-limiting
     pub last_update: f32,
 }
 
@@ -39,13 +22,10 @@ impl Default for CursorState {
     }
 }
 
-/// Resource tracking the current cursor icon style
 #[derive(Resource, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct CursorStyle {
-    /// Current cursor icon being displayed
     pub current: CursorIcon,
-    /// Set of entities currently triggering a pointer cursor
     pub active_hovers: std::collections::HashSet<Entity>,
 }
 
@@ -68,7 +48,6 @@ impl CursorStyle {
     }
 }
 
-/// Resource for caching material handles to avoid repeated asset lookups
 #[derive(Resource, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct HoverMaterials;
@@ -79,7 +58,6 @@ impl Default for HoverMaterials {
     }
 }
 
-/// Observer function for piece hover events (Pointer<Over>)
 pub fn on_piece_hover(
     hover: On<Pointer<Over>>,
     piece_query: Query<&Piece>,
@@ -102,7 +80,6 @@ pub fn on_piece_hover(
     }
 }
 
-/// Observer function for piece unhover events (Pointer<Out>)
 pub fn on_piece_unhover(unhover: On<Pointer<Out>>, mut cursor_style: Option<ResMut<CursorStyle>>) {
     if let Some(ref mut cs) = cursor_style {
         cs.active_hovers.remove(&unhover.entity);
@@ -110,7 +87,6 @@ pub fn on_piece_unhover(unhover: On<Pointer<Out>>, mut cursor_style: Option<ResM
     }
 }
 
-/// Observer function for square hover events (Pointer<Over>)
 pub fn on_square_hover(
     hover: On<Pointer<Over>>,
     square_query: Query<&Square>,
@@ -135,7 +111,6 @@ pub fn on_square_hover(
     }
 }
 
-/// Observer function for square unhover events (Pointer<Out>)
 pub fn on_square_unhover(unhover: On<Pointer<Out>>, mut cursor_style: Option<ResMut<CursorStyle>>) {
     if let Some(ref mut cs) = cursor_style {
         cs.active_hovers.remove(&unhover.entity);

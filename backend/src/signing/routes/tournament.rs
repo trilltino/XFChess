@@ -1,12 +1,3 @@
-//! Tournament API routes for 2-256 player single-elimination and Swiss tournaments.
-//!
-//! This module provides HTTP endpoints for tournament management:
-//! - Admin endpoints: create, record results, set match game IDs
-//! - Player endpoints: list tournaments, join, get my match, get bracket, register node ID
-//! - Gossip endpoints: subscribe to tournament updates, get bootstrap peers
-//!
-//! Tournaments use ELO-based seeding and support power-of-2 player counts.
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -43,52 +34,29 @@ use crate::signing::{AppState, TournamentTrigger};
 
 // ── Request / Response types ──────────────────────────────────────────────────
 
-/// Request to create a new tournament.
 #[derive(Deserialize, Serialize)]
 pub struct CreateTournamentReq {
     pub tournament_id: u64,
     pub name: String,
-    /// Total entry fee in lamports. If omitted, auto-calculated from live SOL/GBP rate (£3.00 = 50p platform + £2.50 prize).
     pub entry_fee_lamports: Option<u64>,
-    /// Platform fee portion in lamports. If omitted, auto-calculated as 50p from live rate.
     pub platform_fee_lamports: Option<u64>,
-    /// Max players: 2, 4, 8, 16, 32, 64, 128, or 256
     pub max_players: u16,
-    /// Tournament format: "SingleElimination" or "Swiss"
     #[serde(default = "default_format")]
     pub format: String,
-    /// Number of Swiss rounds (required for Swiss format)
     pub swiss_rounds: Option<u8>,
-    /// Minimum ELO rating for players (optional)
     pub elo_min: Option<u32>,
-    /// Maximum ELO rating for players (optional)
     pub elo_max: Option<u32>,
-    /// Minimum players required to start tournament (optional)
     pub min_players: Option<u16>,
-    /// Prize distribution in basis points [1st-10th]. Default: competitive split based on max_players
     pub prize_shares: Option<[u16; 10]>,
-    /// Winner takes all mode (overrides prize_shares with [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0])
     #[serde(default)]
     pub winner_takes_all: bool,
-    /// Unix timestamp for when the tournament is scheduled to open (None = open immediately)
     pub scheduled_at: Option<i64>,
-    /// Whether CACF KYC verification is required to join
     #[serde(default)]
     pub kyc_required: bool,
-    /// Optional join password. When set, the tournament is private and
-    /// `/confirm-join` requires a matching password.
-    ///
-    /// Until 2026-08-21 there was no way to set this at all — `password_hash`
-    /// was never written by any route, so `is_private` was permanently false,
-    /// the client's password prompt could never appear, and `/confirm-join`
-    /// checked nothing. The whole private-tournament path was inert in both
-    /// directions.
     #[serde(default)]
     pub password: Option<String>,
 }
 
-/// Argon2 hash of a join password, matching the scheme already used for
-/// private P2P lobbies (`signing/p2p_relay/routes.rs`).
 fn hash_join_password(password: &str) -> Option<String> {
     use argon2::{
         password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
@@ -101,7 +69,6 @@ fn hash_join_password(password: &str) -> Option<String> {
         .map(|h| h.to_string())
 }
 
-/// Constant-time-ish verification via argon2, same as the P2P lobby path.
 fn verify_join_password(hash: &str, provided: &str) -> bool {
     use argon2::{password_hash::PasswordHash, password_hash::PasswordVerifier, Argon2};
     PasswordHash::new(hash)
@@ -117,63 +84,45 @@ fn default_format() -> String {
     "SingleElimination".to_string()
 }
 
-/// Request to register a player's P2P node ID.
 #[derive(Deserialize, Serialize)]
 pub struct RegisterNodeReq {
     pub player: String,
     pub node_id: String,
 }
 
-/// Request to subscribe to tournament gossip updates.
 #[derive(Deserialize, Serialize)]
 pub struct SubscribeNodeReq {
     pub player: String,
     pub node_id: String,
 }
 
-/// Response for tournament subscription.
 #[derive(Serialize)]
 pub struct SubscribeNodeRes {
     pub ok: bool,
-    /// Bootstrap peer node IDs to connect to
     pub bootstrap_peers: Vec<String>,
-    /// Tournament topic URL
     pub topic_url: String,
 }
 
-/// Request to record a match result.
 #[derive(Deserialize, Serialize)]
 pub struct RecordResultReq {
     pub match_index: usize,
     pub winner: String,
     pub loser: String,
-    /// Optional: "forfeit" | "no_show" — stored for audit; normal win/loss rules apply
     #[serde(default)]
     pub reason: Option<String>,
 }
 
-/// Request to reseed players in a tournament (pre-start only).
 #[derive(Deserialize, Serialize)]
 pub struct ReseedReq {
-    /// Ordered player list (wallet pubkeys) after reseeding.
     pub players: Vec<String>,
 }
 
-/// Request to set the game ID for a match.
 #[derive(Deserialize, Serialize)]
 pub struct SetMatchGameIdReq {
     pub match_index: usize,
     pub game_id: u64,
 }
 
-/// Tournament summary for listing.
-///
-/// Field set must match the game client's `TournamentSummary`
-/// (`src/multiplayer/network/vps/tournament.rs`) — `is_private` and
-/// `is_tournament` are non-optional there (no `#[serde(default)]`), so
-/// omitting either makes deserialization fail on *every* response and the
-/// client silently shows "No tournaments available" regardless of what's
-/// actually in the store. Keep the two in sync.
 #[derive(Serialize)]
 pub struct TournamentSummary {
     pub tournament_id: u64,
@@ -184,20 +133,11 @@ pub struct TournamentSummary {
     pub registered: usize,
     pub status: String,
     pub is_private: bool,
-    /// Always true here — this endpoint only ever lists bracket/Swiss
-    /// tournaments, never posted 1v1 wager games.
     pub is_tournament: bool,
     pub usdc_mint: Option<String>,
     pub min_elo: u32,
     pub max_elo: u32,
-    /// "swiss" or "single_elimination" — see `TournamentFormat`. String (not
-    /// the enum) so the client doesn't need to track the Swiss `rounds` payload.
     pub format: String,
-    /// Unix seconds the event is scheduled to start, or `None` for an
-    /// unscheduled tournament. Previously only reachable one-at-a-time via
-    /// `GET /tournament/{id}/schedule-status`, which meant anything rendering
-    /// a list by date needed an extra request per row. Additive and optional,
-    /// so older clients that don't know the field keep deserializing fine.
     pub scheduled_at: Option<i64>,
 }
 
@@ -210,9 +150,6 @@ fn format_label(format: &TournamentFormat) -> String {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-/// POST /tournament/{id}/subscribe-node - Subscribe to tournament gossip updates
-///
-/// Called by game client to register for gossip updates and receive bootstrap peers.
 async fn subscribe_node(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -256,9 +193,6 @@ async fn subscribe_node(
     }))
 }
 
-/// GET /tournament/{id}/bootstrap-peers?player={pubkey} - Get bootstrap peers for a player
-///
-/// Returns list of peer node IDs to connect to for P2P gossip.
 async fn get_bootstrap_peers(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -291,7 +225,6 @@ async fn get_bootstrap_peers(
     })))
 }
 
-/// POST /admin/tournament/create - Creates a new tournament.
 async fn create_tournament(
     State(state): State<AppState>,
     Json(req): Json<CreateTournamentReq>,
@@ -301,12 +234,20 @@ async fn create_tournament(
     let format = match req.format.as_str() {
         "Swiss" => {
             let rounds = req.swiss_rounds.ok_or_else(|| {
-                (StatusCode::BAD_REQUEST, "Swiss tournaments require a round count".to_string())
+                (
+                    StatusCode::BAD_REQUEST,
+                    "Swiss tournaments require a round count".to_string(),
+                )
             })?;
             TournamentFormat::Swiss { rounds }
         }
         "SingleElimination" | "" => TournamentFormat::SingleElimination,
-        _ => return Err((StatusCode::BAD_REQUEST, "Unsupported tournament format".to_string())),
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Unsupported tournament format".to_string(),
+            ))
+        }
     };
 
     // Validate the player count. Single-elimination needs a full power-of-2
@@ -318,7 +259,8 @@ async fn create_tournament(
             if !VALID_PLAYER_COUNTS.contains(&req.max_players) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    "Single-elimination tournaments require a power-of-two player count".to_string(),
+                    "Single-elimination tournaments require a power-of-two player count"
+                        .to_string(),
                 ));
             }
         }
@@ -339,25 +281,17 @@ async fn create_tournament(
     // rather than silently defaulting to a free tournament in that case.
     let platform_fee_lamports = match req.platform_fee_lamports {
         Some(v) => v,
-        None => state
-            .rate_cache
-            .gbp_to_lamports(0.50)
-            .await
-            .ok_or((
-                StatusCode::SERVICE_UNAVAILABLE,
-                "SOL/GBP rate is not available yet".to_string(),
-            ))?,
+        None => state.rate_cache.gbp_to_lamports(0.50).await.ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "SOL/GBP rate is not available yet".to_string(),
+        ))?,
     };
     let entry_fee_lamports = match req.entry_fee_lamports {
         Some(v) => v,
-        None => state
-            .rate_cache
-            .gbp_to_lamports(3.00)
-            .await
-            .ok_or((
-                StatusCode::SERVICE_UNAVAILABLE,
-                "SOL/GBP rate is not available yet".to_string(),
-            ))?,
+        None => state.rate_cache.gbp_to_lamports(3.00).await.ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "SOL/GBP rate is not available yet".to_string(),
+        ))?,
     };
 
     // Default competitive prize shares based on tournament size
@@ -436,13 +370,12 @@ async fn create_tournament(
     // before the store write below ever ran) resumes instead of permanently
     // failing with "account already in use". This only fires for tournament
     // IDs with no store row yet, per the guard just above.
-    let program_id = Pubkey::from_str(&state.config.program_id)
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Configured Solana program ID is invalid".to_string(),
-            )
-        })?;
+    let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Configured Solana program ID is invalid".to_string(),
+        )
+    })?;
     let authority = state.vps_authority.clone();
 
     let tid_bytes = req.tournament_id.to_le_bytes();
@@ -621,7 +554,6 @@ async fn create_tournament(
     })))
 }
 
-/// GET /tournaments - Lists all tournaments.
 async fn list_tournaments(State(state): State<AppState>) -> Json<Vec<TournamentSummary>> {
     let store = &state.tournament_store;
     let all = store.list().await;
@@ -647,7 +579,6 @@ async fn list_tournaments(State(state): State<AppState>) -> Json<Vec<TournamentS
     Json(summaries)
 }
 
-/// GET /tournaments/my?player=<pubkey> - Lists tournaments a specific player has registered for.
 async fn list_my_tournaments(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -680,7 +611,6 @@ async fn list_my_tournaments(
     Ok(Json(my_tournaments))
 }
 
-/// GET /tournament/:id - Gets tournament details.
 async fn get_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -693,12 +623,6 @@ async fn get_tournament(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-/// GET /tournament/:id/registration-info — public, read-only data the game
-/// client needs to build its own `register_player` instruction (the actual
-/// on-chain registration + entry-fee-escrow deposit). `host_treasury` is not
-/// secret — it's the same public key stamped into the on-chain Tournament
-/// account at creation (see `create_tournament`'s doc comment) — this just
-/// saves the client from having to separately fetch and decode that account.
 async fn get_registration_info(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -716,7 +640,6 @@ async fn get_registration_info(
     })))
 }
 
-/// POST /tournament/:id/register-node - Registers a player's P2P node ID.
 async fn register_node(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -741,7 +664,6 @@ async fn register_node(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-/// GET /tournament/:id/my-match?player=<pubkey> - Gets a player's current match.
 async fn get_my_match(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -767,16 +689,6 @@ async fn get_my_match(
     }
 }
 
-/// GET /tournament/:id/my-status?player=<pubkey> — everything the game client
-/// needs to render a player's position in one call.
-///
-/// Supersedes `/my-match`, which is kept for compatibility but is ambiguous:
-/// it returns `{"found": false}` both for a player who isn't in the tournament
-/// and for one who just won and is waiting on their next opponent. The client
-/// couldn't distinguish those, so a player who advanced was silently dropped
-/// back to the menu with no sign the tournament was still running.
-///
-/// See docs/plans/tournament-end-to-end-fix-plan.md §4.2.
 async fn get_my_status(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -794,11 +706,6 @@ async fn get_my_status(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-/// One game in a tournament, as a spectator needs to see it.
-///
-/// Everything a viewer decides on — can I watch this, is anything happening,
-/// who won — is computed here rather than inferred by the client, so the game
-/// client and any web viewer agree by construction.
 #[derive(Debug, Serialize)]
 pub struct SpectatorGameEntry {
     pub game_id: u64,
@@ -808,31 +715,15 @@ pub struct SpectatorGameEntry {
     pub black: Option<String>,
     pub white_name: Option<String>,
     pub black_name: Option<String>,
-    /// `live` | `upcoming` | `finished`.
     pub state: &'static str,
-    /// Moves recorded so far. Zero means an empty board — nothing to watch yet.
     pub move_count: i64,
-    /// Unix seconds of the last move; 0 when there are none. Drives the
-    /// "last move 12s ago" staleness chip.
     pub last_move_at: i64,
-    /// `1-0` / `0-1` / `1/2-1/2`, once finished.
     pub result: Option<String>,
-    /// 0 = live feed. Non-zero means the viewer must take the delayed path,
-    /// and must not open a live subscription (see `spectator.rs`).
     pub broadcast_delay_secs: i64,
-    /// Whether the Watch button should be enabled at all.
     pub watchable: bool,
-    /// Why not, when `watchable` is false — shown to the viewer instead of an
-    /// unexplained greyed-out button.
     pub not_watchable_reason: Option<&'static str>,
 }
 
-/// GET /tournament/:id/games — every game in this tournament, with live state.
-///
-/// Replaces the client walking `/bracket` for *every advertised tournament* and
-/// guessing watchability from the bracket record's `status` — which flips to
-/// `Active` when the orchestrator creates the game account, long before either
-/// player has moved.
 async fn get_tournament_games(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -966,7 +857,6 @@ async fn get_tournament_games(
     })))
 }
 
-/// GET /tournament/:id/bracket - Gets the tournament bracket.
 async fn get_bracket(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1019,7 +909,6 @@ async fn get_bracket(
     })))
 }
 
-/// POST /admin/tournament/:id/record-result - Records a match result.
 async fn record_result(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1097,9 +986,6 @@ async fn record_result(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-/// POST /admin/tournament/:id/advance-round — manually advance stuck Swiss round.
-/// Should only be called when all matches in the current round are Completed but
-/// the scheduler hasn't auto-advanced (e.g., backend restart cleared in-memory state).
 async fn advance_round(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1155,7 +1041,6 @@ async fn advance_round(
     }
 }
 
-/// POST /admin/tournament/:id/reseed — reorder player list before tournament starts.
 async fn reseed_players(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1179,7 +1064,6 @@ async fn reseed_players(
     ))
 }
 
-/// POST /admin/tournament/:id/set-match-game-id - Sets the game ID for a match.
 async fn set_match_game_id(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1222,7 +1106,6 @@ async fn set_match_game_id(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-/// POST /admin/tournament/:id/initialize-swiss - Initializes a Swiss tournament and starts round 1
 async fn initialize_swiss_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1324,11 +1207,6 @@ async fn initialize_swiss_tournament(
     })))
 }
 
-/// POST /tournament/:id/join - Joins a tournament.
-///
-/// Enforces CACF KYC when `kyc_required` is set on the tournament.
-/// Players must have completed identity registration via `/identity/register`
-/// (on the website or in-game) before they can enter a KYC-gated tournament.
 async fn join_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1447,15 +1325,10 @@ struct ConfirmJoinReq {
     player: String,
     elo: u32,
     signature: String,
-    /// Required when the tournament has a `password_hash`. Checked below —
-    /// this endpoint previously accepted no password at all, so a private
-    /// tournament's password gate was purely decorative.
     #[serde(default)]
     password: Option<String>,
 }
 
-/// POST /tournament/:id/confirm-join - Confirms a signed registration on-chain
-/// before adding the player to the scheduler's local view.
 async fn confirm_join(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1611,7 +1484,6 @@ fn default_join_elo() -> u32 {
     1200
 }
 
-/// GET /tournament/:id/build-register-tx - Builds a player-signed registration transaction.
 async fn build_register_transaction(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1622,13 +1494,11 @@ async fn build_register_transaction(
     join_tournament(Path(id), State(state), caller, Json(body)).await
 }
 
-/// Request to build a leave transaction.
 #[derive(Deserialize)]
 pub struct BuildLeaveTxReq {
     pub player: String,
 }
 
-/// POST /tournament/:id/build-leave-tx - Builds a partially signed transaction to leave a tournament.
 async fn build_leave_transaction(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1689,7 +1559,6 @@ async fn build_leave_transaction(
     })))
 }
 
-/// POST /tournament/:id/leave - Removes a player from a tournament after tx is confirmed.
 async fn leave_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1721,8 +1590,6 @@ async fn leave_tournament(
     })))
 }
 
-/// Seeds players by ELO descending (highest first).
-/// Call before generating bracket.
 fn seed_players_by_elo(t: &mut TournamentRecord) {
     let mut indexed: Vec<(usize, u32)> = t.player_elos.iter().copied().enumerate().collect();
     indexed.sort_by(|a, b| b.1.cmp(&a.1));
@@ -1745,13 +1612,6 @@ fn seed_players_by_elo(t: &mut TournamentRecord) {
 // (`/fund-prize-tx`, returned a literal "placeholder" transaction) and has
 // been removed to avoid anyone wiring the wrong route.
 
-/// POST /admin/tournament/{id}/cancel - Cancel a tournament on-chain: refunds
-/// entry fees to registered players and returns the guaranteed prize to the
-/// operator, then marks the tournament Cancelled in the store. Signed and
-/// submitted directly by the backend's own operator key (`vps_authority`),
-/// same as `create_tournament` — the tournament's on-chain `host_treasury`
-/// is always set to that same key at creation, so it can satisfy both
-/// Signer slots the instruction requires.
 async fn build_cancel_transaction(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1904,31 +1764,16 @@ async fn build_cancel_transaction(
     })))
 }
 
-/// Detects the specific `AccountNotInitialized` Anchor error on the
-/// `tournament` account from a failed `cancel_tournament` simulation — the
-/// signal that the on-chain PDA this store row references no longer exists.
 fn is_missing_tournament_account_error(e: &impl std::fmt::Display) -> bool {
     let msg = e.to_string();
     msg.contains("account: tournament") && msg.contains("AccountNotInitialized")
 }
 
-/// Detects the on-chain `TournamentNotActive` AnchorError (code 6050) from a
-/// failed `cancel_tournament` simulation — the store believed the tournament
-/// was Registration/Active (that's what let the request past the pre-check),
-/// but the chain has already moved past that. Distinct from
-/// `is_missing_tournament_account_error`, which is a missing account rather
-/// than a status mismatch.
 fn is_tournament_not_active_error(e: &impl std::fmt::Display) -> bool {
     let msg = e.to_string();
     msg.contains("TournamentNotActive") || msg.contains("Error Number: 6050")
 }
 
-/// Mirrors the on-chain `Tournament` account's leading fields (up to and
-/// including `status`) just closely enough to decode them with Borsh —
-/// trailing fields (win places, prize_shares, etc.) are irrelevant here and
-/// left undecoded, which Borsh allows (it only reads what the struct asks
-/// for). `authority`/`fee_payer`-style Pubkeys are read as raw `[u8; 32]`
-/// since only byte-for-byte layout matters, not the Pubkey type itself.
 #[derive(BorshDeserialize)]
 struct OnChainTournamentPrefix {
     tournament_id: u64,
@@ -1943,9 +1788,6 @@ struct OnChainTournamentPrefix {
     status: OnChainTournamentStatus,
 }
 
-/// Mirrors `programs/xfchess-game/src/state/tournament.rs`'s `TournamentStatus`
-/// — variant order must match exactly (Borsh encodes the tag as a plain u8
-/// index in declaration order).
 #[derive(BorshDeserialize, Debug, Clone, Copy, PartialEq)]
 enum OnChainTournamentStatus {
     Registration,
@@ -1968,10 +1810,6 @@ impl OnChainTournamentStatus {
     }
 }
 
-/// Reads the real on-chain `Tournament` account and decodes its status.
-/// Shared by `sync_tournament_status` and `build_cancel_transaction`'s
-/// `TournamentNotActive` recovery path — both need the same "what does the
-/// chain actually think" lookup, just with different callers around it.
 fn fetch_onchain_tournament_status(
     state: &AppState,
     id: u64,
@@ -2006,16 +1844,6 @@ fn fetch_onchain_tournament_status(
     Ok(decoded.status.to_store_status())
 }
 
-/// POST /admin/tournament/{id}/sync-status — reads the real on-chain
-/// Tournament account and overwrites the store's status to match it.
-///
-/// The store and on-chain state can drift apart (e.g. a partially-failed
-/// request, a store row surviving a chain rollback/redeploy on a test
-/// validator) with no built-in way to reconcile them — cancel/register
-/// requests would then keep failing against on-chain state the admin panel
-/// can't see. This is the fix: pull chain truth and make the store agree
-/// with it, so subsequent actions (cancel, delete, registration) work
-/// against a consistent picture again.
 async fn sync_tournament_status(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -2050,8 +1878,6 @@ async fn sync_tournament_status(
     })))
 }
 
-/// GET /admin/tournament/{id}/registration-reconciliation — compares local
-/// registration count and prize state with the on-chain Tournament account.
 async fn registration_reconciliation(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -2090,11 +1916,6 @@ async fn registration_reconciliation(
     })))
 }
 
-/// DELETE /admin/tournament/{id} — removes a Cancelled or Completed
-/// tournament's row from the store so it stops cluttering the admin panel's
-/// list. On-chain state is untouched (there's nothing left to manage once a
-/// tournament is in either of those terminal states); this is purely a local
-/// housekeeping action, not a chain operation.
 async fn delete_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -2133,7 +1954,6 @@ async fn delete_tournament(
     Ok(Json(serde_json::json!({ "ok": true, "tournament_id": id })))
 }
 
-/// GET /admin/tournament/:id/gossip-status - Check if gossip topic is registered.
 async fn get_gossip_status(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -2148,28 +1968,18 @@ async fn get_gossip_status(
     })))
 }
 
-/// Player-facing tournament routes (no admin auth required).
 pub fn tournaments_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(list_tournaments))
         .route("/my", get(list_my_tournaments))
 }
 
-/// Creates gossip-enabled tournament routes (requires AppState).
 pub fn tournament_gossip_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}/subscribe-node", post(subscribe_node))
         .route("/{id}/bootstrap-peers", get(get_bootstrap_peers))
 }
 
-/// Read-only tournament views. Nothing here mutates state, so these stay open.
-///
-/// Five routes used to live here that do mutate: `leave`, `build-leave-tx`,
-/// `register-node`, and the two `session-*-game` routes. Because only
-/// `tournament_join_routes` was wrapped in auth, joining a tournament required a
-/// credential while *evicting a paying entrant* did not, and any caller could
-/// overwrite another entrant's P2P node ID. They now live in
-/// [`tournament_join_routes`] alongside join, where the guard actually applies.
 pub fn tournament_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}", get(get_tournament))
@@ -2182,9 +1992,6 @@ pub fn tournament_routes() -> Router<AppState> {
         .merge(tournament_gossip_routes())
 }
 
-/// Authenticated player mutation routes — every one is wrapped in
-/// `require_relay_or_jwt` by `infrastructure::router`, and every handler binds
-/// the action to the caller's own wallet.
 pub fn tournament_join_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}/join", post(join_tournament))
@@ -2203,11 +2010,8 @@ pub fn tournament_join_routes() -> Router<AppState> {
         )
 }
 
-/// Admin-only tournament management routes.
-/// POST /admin/tournament/:id/set-round-deadline — set deadline Unix timestamp for the current round.
 #[derive(Deserialize)]
 struct SetRoundDeadlineReq {
-    /// Unix timestamp (seconds) when the round must end. Pass null to clear.
     deadline_at: Option<i64>,
 }
 
@@ -2230,12 +2034,6 @@ async fn set_round_deadline(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-/// POST /admin/tournament/:id/approve-prize-release — manual sign-off required
-/// before `spawn_prize_distributor` will pay out a prize pool above
-/// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` (see `tasks::tournament_scheduler`).
-/// Idempotent: re-approving an already-approved or already-paid tournament is
-/// a harmless no-op. `require_api_key`-gated like every other admin route in
-/// this file.
 async fn approve_prize_release(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -2274,21 +2072,15 @@ pub fn admin_tournament_routes() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct TournamentSessionReq {
-    /// The game_id assigned to this tournament match.
     game_id: u64,
-    /// The creating player's wallet pubkey.
     wallet_pubkey: String,
 }
 
 #[derive(Serialize)]
 struct TournamentSessionResp {
-    /// The ephemeral session public key that was created for this game.
     session_pubkey: String,
 }
 
-/// POST /tournament/:id/session-create-game
-/// Creates a VPS session for the white (creator) side of a tournament match game.
-/// Idempotent: returns the existing session pubkey if already created.
 async fn tournament_session_create_game(
     Path(tournament_id): Path<u64>,
     State(state): State<AppState>,
@@ -2335,10 +2127,6 @@ async fn tournament_session_create_game(
     }))
 }
 
-/// POST /tournament/:id/session-join-game
-/// Creates/retrieves the VPS session for the black (joiner) side of a tournament match.
-/// The session keypair was created by white's call to session-create-game;
-/// this call returns the same session pubkey so the joiner can include it in join_game.
 async fn tournament_session_join_game(
     Path(tournament_id): Path<u64>,
     State(state): State<AppState>,
@@ -2491,13 +2279,6 @@ mod tests {
         assert!(json.is_ok());
     }
 
-    /// Regression test for a real bug: the game client's `TournamentSummary`
-    /// (`src/multiplayer/network/vps/tournament.rs`) requires `is_private`
-    /// and `is_tournament` with no `#[serde(default)]`, so if this backend
-    /// struct ever drops a field the client expects, every `/tournaments`
-    /// response silently fails to parse client-side and the game shows "No
-    /// tournaments available" no matter what's actually in the store. Assert
-    /// the exact field set the client needs stays present here.
     #[test]
     fn test_tournament_summary_has_fields_client_requires() {
         let summary = TournamentSummary {
@@ -2794,7 +2575,6 @@ mod tests {
 
 // ── Schedule Status ─────────────────────────────────────────────────────
 
-/// Response for `GET /tournament/:id/schedule-status`.
 #[derive(serde::Serialize)]
 struct ScheduleStatusResponse {
     phase: String,

@@ -1,11 +1,3 @@
-//! Main menu screen and popup rendering helpers.
-//!
-//! This module contains the UI that was split out of `src/states/main_menu.rs`
-//! so the main menu state stays focused on plugin setup and high-level flow.
-//! The parent module calls into these helpers to render the Solana lobby,
-//! braid lobby, tournament browser, host configuration, waiting screens, and
-//! popups while keeping the shared state in `MainMenuUIContext`.
-
 use super::*;
 #[cfg(feature = "solana")]
 use crate::core::GameMode as CoreGameMode;
@@ -598,8 +590,12 @@ fn begin_solana_lobby_cancel(
     let (tx, rx) = tokio::sync::oneshot::channel();
     spawn_cancel_lobby(
         lobby.cached_rpc_url.clone(),
-        crate::solana::instructions::PROGRAM_ID.parse().unwrap_or_default(),
-        ctx.solana_state.as_ref().and_then(|state| state.wallet_pubkey),
+        crate::solana::instructions::PROGRAM_ID
+            .parse()
+            .unwrap_or_default(),
+        ctx.solana_state
+            .as_ref()
+            .and_then(|state| state.wallet_pubkey),
         game_id,
         lobby.wager_lamports(),
         lobby.cached_node_id.clone(),
@@ -611,11 +607,6 @@ fn begin_solana_lobby_cancel(
     lobby.status = LobbyStatus::Cancelling { game_id };
 }
 
-/// Render spectator popup to view all games.
-///
-/// `sol_usd_rate` is the current USD-per-SOL quote (see `wager_rate::SolUsdRate`),
-/// pre-resolved by the caller since this function isn't solana-feature-gated
-/// (spectating free games works without the feature) but the rate resource is.
 pub(super) fn render_spectator_popup(
     ctx: &egui::Context,
     competitive: &mut CompetitiveMenuState,
@@ -754,7 +745,6 @@ pub(super) fn render_spectator_popup(
         });
 }
 
-/// Loading screen for the website-style menu.
 pub(super) fn render_loading_screen_website(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
     let screen_rect = ctx.input(|i| i.content_rect());
 
@@ -803,8 +793,6 @@ pub(super) fn render_loading_screen_website(ctx: &egui::Context, ctx_menu: &mut 
             });
         });
 }
-
-/// Render join lobby popup — kept for legacy callers; no longer wired to a button.
 
 #[cfg(feature = "solana")]
 fn render_create_tab(
@@ -1483,9 +1471,6 @@ fn render_solana_browse_tab(
     });
 }
 
-/// Tournament tab: lists only the Solana games created by the backend
-/// tournament orchestrator (bracket matches with an on-chain game_id).
-/// Active games get a Watch button that enters delay-gated spectator mode.
 #[cfg(feature = "solana")]
 fn render_solana_tournament_tab(
     ui: &mut egui::Ui,
@@ -1645,7 +1630,6 @@ fn wallet_pubkey_from_cached(bytes: &Option<Vec<u8>>) -> Option<solana_sdk::pubk
     Some(solana_sdk::pubkey::Pubkey::from(arr))
 }
 
-/// System to render a popup asking if the user wants to create a regular P2P lobby or a Solana wager lobby.
 pub(super) fn render_lobby_selection_popup(
     mut contexts: bevy_egui::EguiContexts,
     mut menu_state: ResMut<NextState<crate::core::MenuState>>,
@@ -1746,7 +1730,6 @@ pub(super) fn render_lobby_selection_popup(
         });
 }
 
-/// Part 2F — P2P lobby browser (MenuState::BraidLobby).
 pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ctx.learn_viewport.rect_px = None;
 
@@ -2189,7 +2172,6 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
     });
 }
 
-/// Part 4B — Tournament browser screen shown when MenuState::Tournaments is active.
 pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ctx.learn_viewport.rect_px = None;
     // Set by a Finished tab's Replay button; acted on after the UI closure,
@@ -3595,10 +3577,6 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
     });
 }
 
-/// Waiting screen shown to the *joiner* after sending JOIN_ACK, while we wait
-/// for the host to click "Start Game". Joining a lobby no longer starts the
-/// match immediately — the host has to explicitly kick it off, which signals
-/// us over the VPS relay (see `poll_for_game_start_message` in `p2p_vps.rs`).
 fn render_p2p_joiner_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ui.vertical_centered(|ui| {
         ui.add_space(40.0);
@@ -3688,10 +3666,6 @@ fn render_p2p_joiner_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIConte
     });
 }
 
-/// Called when the host clicks "Start Game" on the waiting screen after an
-/// opponent has joined. Sends the GAME_START signal so the joiner enters the
-/// game too, then transitions the host in (or, for a wagered game, on to the
-/// Solana lobby to create the on-chain game first).
 fn start_p2p_host_game(ctx: &mut MainMenuUIContext) {
     let Some(game_id) = ctx.p2p_host.game_id.clone() else {
         return;
@@ -3801,10 +3775,6 @@ fn start_p2p_host_game(ctx: &mut MainMenuUIContext) {
     }
 }
 
-/// Classifies a time control by base minutes per side into its standard
-/// (abbreviation, full name) pair. Shared by the casual P2P room code prefix
-/// and the Solana wager game-id display label so the two surfaces can never
-/// drift apart on what counts as "Blitz" vs "Rapid".
 fn time_control_category(base_time_minutes: u32) -> (&'static str, &'static str) {
     match base_time_minutes {
         0..=2 => ("BU", "Bullet"),
@@ -3814,13 +3784,6 @@ fn time_control_category(base_time_minutes: u32) -> (&'static str, &'static str)
     }
 }
 
-/// Generates a short, human-friendly room code for casual P2P games —
-/// prefixed with the time control's category and length so a code like
-/// "BZ5-XK4Q" tells a friend it's a 5-minute Blitz game before they even
-/// join, instead of the old opaque `p2p_3538781462`. Meant to be read
-/// aloud, typed, or shared in chat (the "Join by code" field in
-/// `render_braid_lobby_screen`). Random-suffix charset excludes visually
-/// ambiguous characters (0/O, 1/I/L).
 fn generate_room_code(base_time_minutes: u32) -> String {
     let (abbrev, _) = time_control_category(base_time_minutes);
     const CHARS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -3830,7 +3793,6 @@ fn generate_room_code(base_time_minutes: u32) -> String {
     format!("{abbrev}{base_time_minutes}-{suffix}")
 }
 
-/// Puts the host directly into the game (the free/non-wagered path).
 fn enter_p2p_host_game(ctx: &mut MainMenuUIContext, game_id: &str) {
     // Pure casual P2P entry: clear any stale on-chain game context from a
     // previous Solana lobby / tournament match, or the old `game_id` leaks
