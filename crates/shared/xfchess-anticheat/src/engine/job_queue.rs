@@ -13,7 +13,6 @@ pub struct AnalysisJob {
     pub game: GameRecord,
 }
 
-/// Bounded channel sender for queuing games for analysis.
 #[derive(Clone)]
 pub struct AnalysisQueue {
     tx: mpsc::Sender<AnalysisJob>,
@@ -28,7 +27,6 @@ impl AnalysisQueue {
         Ok(job_id)
     }
 
-    /// Jobs currently sitting in the in-memory queue.
     pub fn depth(&self) -> usize {
         self.tx.max_capacity() - self.tx.capacity()
     }

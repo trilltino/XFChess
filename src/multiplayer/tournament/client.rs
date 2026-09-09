@@ -1,8 +1,3 @@
-//! Tournament client for real-time Swiss tournament updates via gossip.
-//!
-//! This plugin integrates with the braid-iroh gossip protocol to receive
-//! instant updates for pairings, results, and standings.
-
 use bevy::prelude::*;
 use braid_chess::{SwissMessage, SwissPairing};
 use tokio::sync::mpsc;
@@ -10,7 +5,6 @@ use tracing::info;
 
 use crate::multiplayer::OnlineNetworkState;
 
-/// Plugin for tournament gossip client
 pub struct TournamentClientPlugin;
 
 impl Plugin for TournamentClientPlugin {
@@ -23,26 +17,17 @@ impl Plugin for TournamentClientPlugin {
     }
 }
 
-/// State of the tournament client
 #[derive(Resource, Default)]
 pub struct TournamentClientState {
-    /// Currently active tournament ID
     pub active_tournament: Option<u64>,
-    /// Gossip message receiver
     gossip_rx: Option<mpsc::UnboundedReceiver<SwissMessage>>,
-    /// Current round number
     pub current_round: u8,
-    /// Current pairings for the player
     pub my_pairing: Option<PlayerPairing>,
-    /// Current standings
     pub standings: Vec<StandingsEntry>,
-    /// Player's current rank
     pub my_rank: Option<u16>,
-    /// Player's wallet pubkey
     pub player_id: Option<String>,
 }
 
-/// Player's pairing information
 #[derive(Debug, Clone)]
 pub struct PlayerPairing {
     pub round: u8,
@@ -57,7 +42,6 @@ pub enum PlayerColor {
     Black,
 }
 
-/// Standings entry for UI display
 #[derive(Debug, Clone)]
 pub struct StandingsEntry {
     pub player_id: String,
@@ -65,7 +49,6 @@ pub struct StandingsEntry {
     pub rank: u16,
 }
 
-/// Event emitted when a new round starts
 #[derive(Message, Debug, Clone)]
 pub struct RoundStarted {
     pub tournament_id: u64,
@@ -73,7 +56,6 @@ pub struct RoundStarted {
     pub my_pairing: Option<PlayerPairing>,
 }
 
-/// Event emitted when a result is recorded
 #[derive(Message, Debug, Clone)]
 pub struct ResultRecorded {
     pub tournament_id: u64,
@@ -83,7 +65,6 @@ pub struct ResultRecorded {
     pub black_score: f64,
 }
 
-/// Event emitted when standings are updated
 #[derive(Message, Debug, Clone)]
 pub struct StandingsUpdated {
     pub tournament_id: u64,
@@ -92,7 +73,6 @@ pub struct StandingsUpdated {
 }
 
 impl TournamentClientState {
-    /// Join a tournament and subscribe to gossip updates
     pub fn join_tournament(&mut self, tournament_id: u64, player_id: String) {
         self.active_tournament = Some(tournament_id);
         let player_id_clone = player_id.clone();
@@ -108,7 +88,6 @@ impl TournamentClientState {
         );
     }
 
-    /// Leave the current tournament
     pub fn leave_tournament(&mut self) {
         if let Some(id) = self.active_tournament {
             info!("[tournament-client] Left tournament {}", id);
@@ -121,23 +100,19 @@ impl TournamentClientState {
         self.my_rank = None;
     }
 
-    /// Set the gossip receiver channel
     pub fn set_gossip_receiver(&mut self, rx: mpsc::UnboundedReceiver<SwissMessage>) {
         self.gossip_rx = Some(rx);
     }
 
-    /// Check if currently in a tournament
     pub fn is_in_tournament(&self) -> bool {
         self.active_tournament.is_some()
     }
 
-    /// Get the active tournament ID
     pub fn active_tournament(&self) -> Option<u64> {
         self.active_tournament
     }
 }
 
-/// Process incoming gossip messages and emit Bevy events
 fn process_gossip_messages(
     mut client_state: ResMut<TournamentClientState>,
     mut round_started_events: MessageWriter<RoundStarted>,
@@ -263,7 +238,6 @@ fn process_gossip_messages(
     }
 }
 
-/// Find the pairing for a specific player
 fn find_player_pairing(
     player_id: &str,
     round: u8,
@@ -290,7 +264,6 @@ fn find_player_pairing(
     None
 }
 
-/// System to initialize tournament client when joining a tournament
 pub fn handle_discovery_events(
     mut _commands: Commands,
     mut _client_state: ResMut<TournamentClientState>,

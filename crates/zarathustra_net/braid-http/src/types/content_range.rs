@@ -1,14 +1,9 @@
-//! Content-Range specification for patches.
-
 use std::fmt;
 use std::str::FromStr;
 
-/// Content-Range specification for patches.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ContentRange {
-    /// The addressing unit type (e.g., "json", "bytes").
     pub unit: String,
-    /// The range specification within the resource.
     pub range: String,
 }
 

@@ -1,9 +1,6 @@
-//! Shared header parsing and formatting for Braid-HTTP.
-
 use crate::error::{BraidError, Result};
 use crate::types::Version;
 
-/// Parse version header value.
 pub fn parse_version_header(value: &str) -> Result<Vec<Version>> {
     tracing::info!("[BraidHTTP] Parsing version header: '{}'", value);
     // 1. Try Structured Field Values (Strict Standard)
@@ -62,7 +59,6 @@ pub fn parse_version_header(value: &str) -> Result<Vec<Version>> {
     Ok(Vec::new())
 }
 
-/// Format version header value.
 pub fn format_version_header(versions: &[Version]) -> String {
     versions
         .iter()

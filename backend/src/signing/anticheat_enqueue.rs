@@ -1,39 +1,22 @@
-//! Shared anti-cheat enqueue path for finalized games.
-//!
-//! Both settlement routes — the `/game/finalize` HTTP handler and the
-//! auto-settlement worker — call [`enqueue_game_analysis`] so that every
-//! settled game enters the analysis pipeline with the same context
-//! (tournament round, real wager) regardless of how it was finalized.
-
 use crate::signing::AppState;
 use crate::telemetry::worker_metrics;
 use std::sync::atomic::Ordering;
 use tracing::{error, info, warn};
 use xfchess_anticheat::ingest::{build_game_record, GameMeta, MoveRow};
 
-/// Games shorter than this are too thin to score meaningfully.
 const MIN_PLIES: usize = 10;
 
-/// Everything the enqueue path needs to know about a settled game.
 pub struct FinalizedGame {
     pub game_id: u64,
     pub white: String,
     pub black: String,
-    /// "white" | "black" | None (draw).
     pub winner: Option<String>,
     pub wager_lamports: u64,
-    /// From the on-chain Game account when available; when `None` the
-    /// tournament store is scanned for a match holding this game_id.
     pub tournament_id: Option<u64>,
-    /// 0 = unknown; a default is substituted.
     pub base_time_seconds: u32,
     pub increment_seconds: u32,
 }
 
-/// Builds a `GameRecord` from the stored moves and queues it for Stockfish
-/// analysis. Also writes a durable row to the `anticheat_queue` table so a
-/// full in-memory queue (or a crash) loses nothing — the row is deleted by
-/// the worker on success.
 pub async fn enqueue_game_analysis(state: &AppState, game: FinalizedGame) {
     let Some(queue) = state.anticheat_queue.clone() else {
         return;
@@ -179,19 +162,8 @@ pub async fn enqueue_game_analysis(state: &AppState, game: FinalizedGame) {
     worker_metrics::ANTICHEAT_QUEUE_DEPTH.store(queue.depth() as u64, Ordering::Relaxed);
 }
 
-/// Slack on the wall-clock budget (think times include UI/render lag and the
-/// clock estimate is a lower bound).
 const BUDGET_SLACK: f64 = 1.25;
 
-/// Audits client think times against the server-observed game duration and
-/// strips any side whose claimed thinking can't physically fit.
-///
-/// The wall clock is the larger of two server-observed spans: the move
-/// timestamps (accurate for real-time submission, ~0 when batched) and the
-/// telemetry `reported_at` arrivals (accurate even when moves are batched,
-/// since each client reports its moves in real time). Using the larger keeps
-/// honest batched games trustworthy while still catching a client that claims
-/// more thinking than the game physically lasted.
 fn audit_think_times(rows: &mut [MoveRow], reported_at: &[Option<i64>], game_id: &str) {
     // Strongest available wall-clock estimate, in ms.
     let move_span_ms = match (rows.first(), rows.last()) {
@@ -233,16 +205,10 @@ fn audit_think_times(rows: &mut [MoveRow], reported_at: &[Option<i64>], game_id:
     }
 }
 
-/// How often the re-ingest sweep retries dropped or orphaned queue rows.
 const REINGEST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
-/// Only retry rows at least this old — younger ones may still be in flight in
-/// the in-memory queue, and re-enqueueing them would duplicate analysis.
 const REINGEST_MIN_AGE_SECS: i64 = 10 * 60;
-/// Rows retried per sweep.
 const REINGEST_BATCH: i64 = 50;
 
-/// Spawns the sweep that picks `anticheat_queue` rows back up after a queue
-/// overflow or a server restart, rebuilding the job from the `games` table.
 pub fn spawn_reingest_sweep(state: std::sync::Arc<AppState>) {
     if state.anticheat_queue.is_none() {
         return;
@@ -333,11 +299,6 @@ async fn fetch_elo(state: &AppState, pubkey: &str) -> u32 {
         .unwrap_or(1200)
 }
 
-/// Resolves `(tournament_id, 1-based round)` for a game.
-///
-/// With an on-chain hint the round is looked up on that tournament's match
-/// list; without one (the HTTP path doesn't carry it) every live tournament
-/// is scanned for a match holding this game_id.
 async fn resolve_tournament_context(
     state: &AppState,
     hint: Option<u64>,

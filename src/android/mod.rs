@@ -1,5 +1,3 @@
-//! Android entry point and platform glue.
-
 pub mod platform;
 
 use crate::{build_app, GameConfig};
@@ -23,9 +21,6 @@ pub fn main() {
     app.run();
 }
 
-/// Pauses audio while Android suspends the app. The render loop is already
-/// handled by Bevy's mobile settings; `Suspended` avoids reacting to transient
-/// `WillSuspend` events.
 pub fn handle_app_lifecycle(
     mut lifecycle_events: bevy::ecs::message::MessageReader<bevy::window::AppLifecycle>,
     sinks: Query<&bevy::audio::AudioSink>,

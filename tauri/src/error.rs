@@ -1,40 +1,14 @@
-//! Error handling for XFChess Tauri application.
-//!
-//! This module provides custom error types for different domains
-//! of the application to improve error handling and debugging.
-//!
-//! # Error Types
-//!
-//! - `AppError`: General application errors
-//! - `IpcError`: IPC communication errors
-//! - `WindowError`: Window management errors
-//! - `ConfigError`: Configuration errors
-//! - `AuthError`: Authentication errors
-
 use std::fmt;
 
-/// General application error type.
-///
-/// This enum represents common errors that can occur throughout
-/// the XFChess application. It provides context-specific
-/// error information for better debugging and user feedback.
 #[derive(Debug, Clone)]
 pub enum AppError {
-  /// I/O related errors (file operations, network, etc.)
   Io(String),
-  /// Configuration related errors
   Config(String),
-  /// Authentication related errors
   Auth(String),
-  /// Window management errors
   Window(String),
-  /// IPC communication errors
   Ipc(String),
-  /// Validation errors
   Validation(String),
-  /// External service errors
   External(String),
-  /// Generic errors with custom message
   Generic(String),
 }
 
@@ -55,50 +29,40 @@ impl fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
-/// Convenience constructors for common error types.
 impl AppError {
-  /// Create a new I/O error
   pub fn io<S: Into<String>>(msg: S) -> Self {
     AppError::Io(msg.into())
   }
 
-  /// Create a new configuration error
   pub fn config<S: Into<String>>(msg: S) -> Self {
     AppError::Config(msg.into())
   }
 
-  /// Create a new authentication error
   pub fn auth<S: Into<String>>(msg: S) -> Self {
     AppError::Auth(msg.into())
   }
 
-  /// Create a new window error
   pub fn window<S: Into<String>>(msg: S) -> Self {
     AppError::Window(msg.into())
   }
 
-  /// Create a new IPC error
   pub fn ipc<S: Into<String>>(msg: S) -> Self {
     AppError::Ipc(msg.into())
   }
 
-  /// Create a new validation error
   pub fn validation<S: Into<String>>(msg: S) -> Self {
     AppError::Validation(msg.into())
   }
 
-  /// Create a new external service error
   pub fn external<S: Into<String>>(msg: S) -> Self {
     AppError::External(msg.into())
   }
 
-  /// Create a new generic error
   pub fn generic<S: Into<String>>(msg: S) -> Self {
     AppError::Generic(msg.into())
   }
 }
 
-/// Result type alias for application operations.
 pub type AppResult<T> = Result<T, AppError>;
 
 // Implement conversions from common error types

@@ -1,171 +1,53 @@
-//! Move history tracking resource
-//!
-//! Maintains a complete chronological record of all moves made during the game.
-//! This enables critical features like:
-//!
-//! - **Undo/Redo**: Restore previous game states
-//! - **PGN Export**: Save games in Portable Game Notation format
-//! - **Move Review**: Let players analyze their game afterward
-//! - **Three-fold Repetition**: Detect draw conditions automatically
-//!
-//! # Architecture
-//!
-//! MoveHistory stores a `Vec<MoveRecord>` where each record contains:
-//! - Piece moved (type and color)
-//! - From/to positions
-//! - Special move flags (castling, en passant, check, checkmate)
-//! - Captured piece (if any)
-//!
-//! # Integration
-//!
-//! Updated by [`crate::game::systems::game_logic`] after each move validation.
-//! Read by UI systems to display move notation and game review features.
-//!
-//! # Reference
-//!
-//! - `reference/chess_engine/src/types.rs` - Move representation patterns
-//! - PGN specification: https://en.wikipedia.org/wiki/Portable_Game_Notation
-
 use crate::game::components::MoveRecord;
 use bevy::prelude::*;
 
-/// Resource storing the complete move history for the current game
-///
-/// # Fields
-///
-/// - `moves`: Ordered vector of all moves made since game start
-///
-///
-/// For usage examples, see `tests/resources/history_tests.rs`
 #[derive(Resource, Debug, Default, Reflect)]
 #[reflect(Resource)]
 pub struct MoveHistory {
-    /// Chronological list of all moves made in the game
-    ///
-    /// Index 0 = Move 1 (White's first move)
-    /// Index 1 = Move 1 (Black's response)
-    /// Index 2 = Move 2 (White's move)
-    /// etc.
     pub moves: Vec<MoveRecord>,
 
-    /// SAN (Standard Algebraic Notation) string for each move, parallel to
-    /// `moves` by index. Populated via [`Self::add_move_with_san`] at the
-    /// production call site (`nimzovich_engine`'s SAN generator); left empty
-    /// by plain [`Self::add_move`] calls (e.g. in tests), in which case the
-    /// UI falls back to its own simplified notation for that entry.
     pub sans: Vec<String>,
 }
 
 impl MoveHistory {
-    /// Add a new move to the history
-    ///
-    /// Appends the move record to the end of the move list. Should be called
-    /// after move validation succeeds but before switching turns.
-    ///
-    /// # Arguments
-    ///
-    /// * `record` - The move record to add
-    ///
-    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn add_move(&mut self, record: MoveRecord) {
         self.moves.push(record);
     }
 
-    /// Same as [`Self::add_move`], but also records the move's SAN notation
-    /// at the matching index — the preferred entry point at the production
-    /// call site so the move list can render correct algebraic notation
-    /// (with disambiguation and promotion) without re-deriving it in the UI.
     pub fn add_move_with_san(&mut self, record: MoveRecord, san: String) {
         self.moves.push(record);
         self.sans.push(san);
     }
 
-    /// SAN notation for the move at `index`, if it was recorded with one.
     pub fn san_at(&self, index: usize) -> Option<&str> {
         self.sans.get(index).map(String::as_str)
     }
 
-    /// Get the most recent move, if any
-    ///
-    /// Returns `None` if the game just started and no moves have been made yet.
-    /// Useful for detecting en passant opportunities and displaying last move UI.
-    ///
-    /// # Returns
-    ///
-    /// - `Some(&MoveRecord)` - Reference to the last move made
-    /// - `None` - Game just started, no moves yet
-    ///
-    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn last_move(&self) -> Option<&MoveRecord> {
         self.moves.last()
     }
 
-    /// Get the total number of half-moves (ply) made
-    ///
-    /// In chess, a "ply" or "half-move" is one player's move. Two ply = one full move.
-    /// This is useful for:
-    /// - Fifty-move rule (draw after 50 moves with no captures or pawn moves)
-    /// - Calculating game progress
-    ///
-    /// # Returns
-    ///
-    /// Number of half-moves (0 at game start)
-    ///
-    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn len(&self) -> usize {
         self.moves.len()
     }
 
-    /// Check if move history is empty (no moves made yet)
-    ///
-    /// # Returns
-    ///
-    /// `true` if game just started, `false` if at least one move has been made
-    ///
-    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn is_empty(&self) -> bool {
         self.moves.is_empty()
     }
 
-    /// Clear all move history (for starting a new game)
-    ///
-    /// Removes all moves from the history. Should be called when starting
-    /// a new game or loading a saved game.
-    ///
-    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn clear(&mut self) {
         self.moves.clear();
         self.sans.clear();
     }
 
-    /// Get a specific move by index (ply number)
-    ///
-    /// # Arguments
-    ///
-    /// * `index` - Zero-based ply index (0 = first move)
-    ///
-    /// # Returns
-    ///
-    /// - `Some(&MoveRecord)` - Move at that index
-    /// - `None` - Index out of bounds
-    ///
-    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn get_move(&self, index: usize) -> Option<&MoveRecord> {
         self.moves.get(index)
     }
 
-    /// Iterate over all moves in chronological order
-    ///
-    /// Returns an iterator over references to each MoveRecord.
-    ///
-    /// For usage examples, see `tests/resources/history_tests.rs`
     pub fn iter(&self) -> std::slice::Iter<'_, MoveRecord> {
         self.moves.iter()
     }
 
-    /// Iterate mutably over all moves in chronological order
-    ///
-    /// Returns an iterator over mutable references to each MoveRecord.
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, MoveRecord> {
         self.moves.iter_mut()
     }
@@ -178,7 +60,6 @@ mod tests {
 
     #[test]
     fn test_move_history_default() {
-        //! Verifies MoveHistory starts empty
         let history = MoveHistory::default();
 
         assert!(history.is_empty());
@@ -188,7 +69,6 @@ mod tests {
 
     #[test]
     fn test_add_move() {
-        //! Tests adding a single move to history
         let mut history = MoveHistory::default();
 
         let move_record = MoveRecord {
@@ -212,7 +92,6 @@ mod tests {
 
     #[test]
     fn test_last_move_returns_correct_move() {
-        //! Tests that last_move returns the most recent move
         let mut history = MoveHistory::default();
 
         let first_move = MoveRecord {
@@ -249,7 +128,6 @@ mod tests {
 
     #[test]
     fn test_len_increments_correctly() {
-        //! Tests that length increases with each move
         let mut history = MoveHistory::default();
 
         assert_eq!(history.len(), 0);
@@ -277,7 +155,6 @@ mod tests {
 
     #[test]
     fn test_clear_removes_all_moves() {
-        //! Tests clearing move history
         let mut history = MoveHistory::default();
 
         // Add several moves
@@ -306,7 +183,6 @@ mod tests {
 
     #[test]
     fn test_get_move_by_index() {
-        //! Tests retrieving specific moves by index
         let mut history = MoveHistory::default();
 
         let move1 = MoveRecord {
@@ -352,7 +228,6 @@ mod tests {
 
     #[test]
     fn test_iter_returns_all_moves() {
-        //! Tests iterating over move history
         let mut history = MoveHistory::default();
 
         // Add 3 moves
@@ -385,7 +260,6 @@ mod tests {
 
     #[test]
     fn test_move_history_with_captures() {
-        //! Tests history tracking moves with captures
         let mut history = MoveHistory::default();
 
         let capture_move = MoveRecord {
@@ -409,7 +283,6 @@ mod tests {
 
     #[test]
     fn test_move_history_with_special_moves() {
-        //! Tests history tracking special moves (castling, en passant, checkmate)
         let mut history = MoveHistory::default();
 
         // Castling
@@ -459,7 +332,6 @@ mod tests {
 
     #[test]
     fn test_realistic_game_opening() {
-        //! Tests recording a realistic game opening (1. e4 e5 2. Nf3)
         let mut history = MoveHistory::default();
 
         // 1. e4

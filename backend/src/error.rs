@@ -6,7 +6,6 @@ use axum::{
 use serde_json::json;
 use thiserror::Error;
 
-/// Application error type
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("Bad request: {0}")]
@@ -51,7 +50,6 @@ impl IntoResponse for AppError {
     }
 }
 
-/// Application result type
 pub type AppResult<T> = Result<T, AppError>;
 
 #[cfg(test)]

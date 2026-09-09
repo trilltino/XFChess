@@ -1,11 +1,3 @@
-//! Core Solana Blinks functionality.
-//!
-//! This module provides the core Blinks functionality following the Solana Action specification:
-//! - Action metadata endpoints
-//! - Transaction building for tournament registration
-//! - Wallet balance checking
-//! - Pre-sign validation
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -17,81 +9,52 @@ use crate::signing::storage::tournament::TournamentStore;
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 
-/// Solana Action metadata response following the Blinks specification.
 #[derive(Serialize, Deserialize)]
 pub struct ActionMetadata {
-    /// Icon URL for the action
     pub icon: String,
-    /// Title of the action
     pub title: String,
-    /// Description of the action
     pub description: String,
-    /// Button label
     pub label: String,
-    /// Action links
     pub links: ActionLinks,
 }
 
-/// Action links defining available actions.
 #[derive(Serialize, Deserialize)]
 pub struct ActionLinks {
-    /// List of available actions
     pub actions: Vec<Action>,
 }
 
-/// A single action definition.
 #[derive(Serialize, Deserialize)]
 pub struct Action {
-    /// Button label for this action
     pub label: String,
-    /// URL to POST for this action
     pub href: String,
 }
 
-/// Request to build a registration transaction.
 #[derive(Deserialize)]
 pub struct RegisterTransactionRequest {
-    /// Wallet public key
     pub account: String,
 }
 
-/// Response containing a base64-encoded transaction.
 #[derive(Serialize)]
 pub struct TransactionResponse {
-    /// Base64-encoded transaction ready to sign
     pub transaction: String,
-    /// Estimated fee in lamports
     pub fee_estimate: u64,
 }
 
-/// Validation result for pre-sign checks.
 #[derive(Serialize)]
 pub struct ValidationResult {
-    /// Whether validation passed
     pub valid: bool,
-    /// Error message if validation failed
     pub error: Option<String>,
-    /// Next action in the chain
     pub next_action: Option<String>,
 }
 
-/// Balance check result.
 #[derive(Serialize)]
 pub struct BalanceResult {
-    /// Wallet public key
     pub wallet: String,
-    /// SOL balance in lamports
     pub balance_lamports: u64,
-    /// Whether balance is sufficient for registration
     pub sufficient: bool,
-    /// Required amount in lamports
     pub required_lamports: u64,
 }
 
-/// Gets action metadata for a tournament.
-///
-/// Returns JSON metadata that wallets display to users showing
-/// tournament details and the registration action.
 pub async fn get_action_metadata(
     tournament_id: u64,
     store: &TournamentStore,
@@ -121,11 +84,6 @@ pub async fn get_action_metadata(
     })
 }
 
-/// Builds a registration transaction for a player.
-///
-/// Returns a **partially signed** transaction (fee payer co-signs, player must
-/// add their signature before broadcasting). The player's wallet signs to
-/// authorize the entry-fee transfer from their account into the escrow PDA.
 pub async fn build_register_transaction(
     tournament_id: u64,
     wallet_pubkey: &Pubkey,
@@ -195,8 +153,6 @@ pub async fn build_register_transaction(
     })
 }
 
-/// Builds an unsigned `claim_tournament_prize` transaction for a winner.
-/// The claimant signs it with their wallet and broadcasts.
 pub async fn build_claim_prize_transaction(
     tournament_id: u64,
     claimant: &Pubkey,
@@ -252,12 +208,6 @@ pub async fn build_claim_prize_transaction(
     })
 }
 
-/// Builds the admin start-tournament transaction batch.
-///
-/// Returns base64-encoded transactions (one `start_tournament` + batches of
-/// `initialize_match` for every bracket slot). Caller broadcasts in order.
-/// Each batch holds up to 20 `initialize_match` instructions to stay within
-/// the 1232-byte transaction size limit.
 pub async fn build_start_tournament_transactions(
     tournament_id: u64,
     store: &TournamentStore,
@@ -346,7 +296,6 @@ pub async fn build_start_tournament_transactions(
     Ok(out)
 }
 
-/// Checks if a wallet has sufficient SOL balance for registration.
 pub async fn check_wallet_balance(
     wallet_pubkey: &Pubkey,
     tournament_id: u64,
@@ -376,14 +325,6 @@ pub async fn check_wallet_balance(
     })
 }
 
-/// Validates a player for tournament registration (anti-cheat checks).
-///
-/// Performs pre-sign validation including:
-/// - Tournament capacity check
-/// - Registration status check
-/// - ELO range validation
-/// - KYC status check (if required)
-/// - IP pattern detection (if IP provided)
 pub async fn validate_registration(
     tournament_id: u64,
     wallet_pubkey: &Pubkey,
@@ -484,14 +425,6 @@ pub async fn validate_registration(
     })
 }
 
-/// Builds the `register_player` instruction using the Anchor discriminator.
-///
-/// Account order matches `RegisterPlayer` in the Solana program:
-///   tournament, player_profile, player (signer), escrow_pda,
-///   shard_0, shard_1?, shard_2?, shard_3?, host_treasury, system_program
-///
-/// Absent optional shards must be passed as the program ID (Anchor's `None`
-/// marker) — they cannot simply be omitted because accounts follow them.
 #[allow(clippy::too_many_arguments)]
 fn build_register_player_instruction(
     program_id: &Pubkey,

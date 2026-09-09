@@ -1,28 +1,11 @@
-//! Main-menu music: a small looping playlist of public-domain piano pieces that
-//! fade into one another, plus a discrete egui widget to see the current track,
-//! skip it, or mute.
-//!
-//! Design:
-//! - Each track plays once ([`PlaybackMode::Once`]); when it finishes (`empty()`)
-//!   the next one is spawned and fades in. Skipping fades the current track out
-//!   while the next fades in (a true crossfade).
-//! - Volume is driven per-voice in [`drive_menu_music`] toward a target, so mute
-//!   and crossfades are all just "move current volume toward target".
-//! - Voices carry `DespawnOnExit(MainMenu)`, so music is strictly menu-only and
-//!   stops the instant a game starts.
-
 use bevy::audio::{AudioSinkPlayback, PlaybackMode, Volume};
 use bevy::prelude::*;
 
 use crate::core::{DespawnOnExit, GameState};
 
-/// Default background volume (linear). Quiet — it sits under the menu.
 const BASE_VOLUME: f32 = 0.30;
-/// Fade rate in linear-volume units per second (≈2.5s for a full fade/crossfade).
 const FADE_PER_SEC: f32 = 0.12;
 
-/// The menu playlist + playback state. Persists across menu re-entries so the
-/// track selection and mute toggle survive returning from a game.
 #[derive(Resource)]
 pub struct MenuMusic {
     tracks: Vec<Handle<AudioSource>>,
@@ -31,7 +14,6 @@ pub struct MenuMusic {
     muted: bool,
     volume: f32,
     skip_requested: bool,
-    /// When true the now-playing widget is hidden (music keeps playing).
     widget_hidden: bool,
 }
 
@@ -67,8 +49,6 @@ impl FromWorld for MenuMusic {
     }
 }
 
-/// One playing (or fading) track. Exactly one voice is non-`outgoing` at a time
-/// (the active track); skips/ends turn it `outgoing` so it fades out and despawns.
 #[derive(Component)]
 pub struct MenuMusicVoice {
     current: f32,
@@ -77,7 +57,6 @@ pub struct MenuMusicVoice {
     has_played: bool,
 }
 
-/// Spawn a fading-in voice for `index`. Starts silent; the drive system ramps it.
 fn spawn_voice(commands: &mut Commands, music: &MenuMusic, index: usize) {
     let Some(handle) = music.tracks.get(index) else {
         return;
@@ -101,7 +80,6 @@ fn spawn_voice(commands: &mut Commands, music: &MenuMusic, index: usize) {
     ));
 }
 
-/// Start the playlist on entering the menu (if nothing is already playing).
 pub fn start_menu_music(
     mut commands: Commands,
     music: Res<MenuMusic>,
@@ -113,7 +91,6 @@ pub fn start_menu_music(
     spawn_voice(&mut commands, &music, music.index);
 }
 
-/// Drives fades, advances to the next track on natural end, and handles skips.
 pub fn drive_menu_music(
     time: Res<Time>,
     mut commands: Commands,
@@ -174,8 +151,6 @@ pub fn drive_menu_music(
     }
 }
 
-/// Discrete now-playing widget: a play/mute dot, the track title, and a skip
-/// button, anchored to the top-right.
 pub fn menu_music_widget(mut contexts: bevy_egui::EguiContexts, mut music: ResMut<MenuMusic>) {
     use bevy_egui::egui;
 

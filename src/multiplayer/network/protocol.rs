@@ -1,13 +1,3 @@
-//! Wire protocol for peer-to-peer game messages.
-//!
-//! [`NetworkMessage`] is the single enum carried over both the Iroh/QUIC
-//! P2P transport and the HTTP relay fallback — variants cover move
-//! exchange, batch commit/confirmation for on-chain move batching,
-//! invites/matchmaking handshake (`GameInvite`/`InviteResponse`/`GameStart`),
-//! in-game signaling (`DrawOffer`, `Resign`, `FlagTimeout`, `Chat`, `Clock`),
-//! Braid-relay resync (`BraidResyncRequest`/`Response`, `GameSnapshot`), and
-//! liveness (`Ping`/`Pong`). [`SignedNetworkMessage`] wraps a message with
-//! its sender's signature for authenticity between peers.
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "solana")]
 use solana_sdk::pubkey::Pubkey;
@@ -43,54 +33,19 @@ pub enum NetworkMessage {
         move_uci: String,
         next_fen: String,
         nonce: u64,
-        /// Wall-clock time the move was sent (ms since UNIX epoch).
         #[serde(default)]
         timestamp_ms: u64,
-        /// Ed25519 public key of the key that signs this message's gossip
-        /// envelope — i.e. `OnlineNetworkState::session_signing_key`'s derived
-        /// verifying key, **not** the iroh NodeId. (It was documented as the
-        /// NodeId, and a version of the sender did populate it that way; since
-        /// the receiver overwrites it with the verified signer in
-        /// `bind_identity`, the two never matched and every move failed the
-        /// roster check. Hence the explicit name.)
-        ///
-        /// Empty on legacy messages — skip causal check if absent.
-        /// Serialized as `agent_id` for wire compatibility with older peers.
         #[serde(default, rename = "agent_id")]
         signer_pubkey: Vec<u8>,
-        /// Monotonic counter per sender across all games.
-        /// Allows detecting replays and sequence gaps independently of nonce.
         #[serde(default)]
         seq: u64,
-        /// version_hash(prev_fen, prev_turn) of the move this one builds on.
-        /// "0" on the first move. Used to detect equivocation forks.
-        ///
-        /// This is the *per-sender gossip* chain, not the shared Braid stream
-        /// head — see `braid_transport::BraidStreamHeads`.
         #[serde(default)]
         parent_version: String,
     },
     SessionInfo {
         game_id: u64,
         player_pubkey: Pubkey,
-        /// VPS/backend on-chain session-delegation key (used to route which
-        /// key signs this player's on-chain moves) — NOT the key that signs
-        /// this message's own outer P2P envelope. Kept separate from
-        /// `signing_pubkey` below; conflating the two previously made every
-        /// move look like it came from "a non-participant signer" once a
-        /// roster existed at all (see `signing_pubkey`'s doc comment).
         session_pubkey: Pubkey,
-        /// The sender's gossip message-signing pubkey (`OnlineNetworkState
-        /// ::session_signing_key`, a fresh ephemeral keypair generated per
-        /// connection — see `sync_session_key_to_network`). This, not
-        /// `session_pubkey` above, is what the receiver's `bind_identity`
-        /// verifies incoming `Move`/`Resign` envelopes against and sets as
-        /// `signer_pubkey`. The per-game participant roster built in
-        /// `multiplayer::systems` MUST be populated from this field —
-        /// populating it from `session_pubkey` instead means the roster can
-        /// never contain a key that any real move's verified signer will
-        /// ever match, so every move gets rejected as "non-participant"
-        /// as soon as the roster has any entry at all.
         #[serde(default)]
         signing_pubkey: Pubkey,
         expires_at: i64,
@@ -146,16 +101,11 @@ pub enum NetworkMessage {
         game_id: u64,
         from_node: String,
         from_wallet: String,
-        /// The inviter's chosen profile name — lets the recipient's opponent
-        /// panel show a real name instead of falling back to "Player"/
-        /// "Opponent". See `P2PConnectionState::opponent_display_name`.
         from_display: String,
     },
     InviteResponse {
         game_id: u64,
         accepted: bool,
-        /// The responder's chosen profile name, mirroring `from_display`
-        /// above so the host learns the joiner's name too.
         display_name: String,
     },
     GameStart {
@@ -166,13 +116,11 @@ pub enum NetworkMessage {
         white_display: String,
         black_display: String,
     },
-    /// Sent after a participant has initialized its board and is allowed to start.
     GameReady {
         game_id: u64,
         player_pubkey: Pubkey,
         ready_token: String,
     },
-    /// Sent after both participants have announced readiness.
     GameStartConfirmed {
         game_id: u64,
         start_token: String,
@@ -184,78 +132,56 @@ pub enum NetworkMessage {
         move_number: u32,
         is_check: bool,
     },
-    /// Sent by a player offering a draw.
     DrawOffer {
         game_id: u64,
-        /// "white" or "black"
         player: String,
     },
-    /// Response to a DrawOffer — accepted=true means the game ends in a draw.
     DrawResponse {
         game_id: u64,
-        /// "white" or "black" — the player sending this response
         player: String,
         accepted: bool,
     },
-    /// Sent when a player's clock runs out to let the opponent verify and trigger game-over.
     FlagTimeout {
         game_id: u64,
-        /// The player whose clock expired ("white" or "black").
         flagged_player: String,
     },
-    /// Periodic liveness ping so both clients can detect a dropped connection.
     Ping {
         game_id: u64,
-        /// Sender's wall-clock timestamp (milliseconds since UNIX epoch).
         timestamp_ms: u64,
     },
-    /// Pong reply to a Ping.
     Pong {
         game_id: u64,
         timestamp_ms: u64,
     },
-    /// Offer to rematch after a game ends.
     RematchOffer {
         game_id: u64,
         player: String,
     },
-    /// Response to a RematchOffer.
     RematchResponse {
         game_id: u64,
         player: String,
         accepted: bool,
     },
-    /// Request moves missed since `since_version` (content-hash of last applied move).
-    /// Sent by a reconnecting client so the peer can replay the gap.
     BraidResyncRequest {
         game_id: u64,
         since_version: String,
     },
-    /// Response to [`BraidResyncRequest`]: ordered list of missed move payloads.
     BraidResyncResponse {
         game_id: u64,
-        /// JSON-encoded [`braid_chess::MovePayload`] values, oldest first.
         move_payloads: Vec<String>,
     },
-    /// Broadcast by any peer when a new neighbor joins a game gossip topic.
-    /// Carries the full current game state so the newcomer can catch up instantly.
     GameSnapshot {
         game_id: u64,
-        /// Current FEN (authoritative board position).
         fen: String,
-        /// All moves so far, each JSON-encoded as [`braid_chess::MovePayload`].
         move_payloads: Vec<String>,
-        /// Content-addressed version of the last move in the log.
         head_version: String,
     },
-    /// Clock snapshot sent after each local move so peers/spectators can track time.
     Clock {
         game_id: u64,
         white_ms: u64,
         black_ms: u64,
         timestamp_ms: u64,
     },
-    /// In-game chat message sent over the online transport.
     Chat {
         game_id: u64,
         player: String,
@@ -300,8 +226,6 @@ impl NetworkMessage {
         }
     }
 
-    /// Short variant name for logging — cheap enough to compute on every
-    /// send/receive without the cost (or noise) of dumping full contents.
     pub fn kind_str(&self) -> &'static str {
         match self {
             NetworkMessage::Move { .. } => "Move",
@@ -391,9 +315,6 @@ pub fn calculate_batch_hash(
     format!("{:x}", hasher.finalize())
 }
 
-/// A signed wrapper around [`NetworkMessage`] that carries an Ed25519 signature
-/// from the on-chain session key.  Peers verify the signature before accepting
-/// the inner message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedNetworkMessage {
     pub msg: NetworkMessage,
@@ -483,8 +404,6 @@ mod tests {
 }
 
 impl SignedNetworkMessage {
-    /// Sign a [`NetworkMessage`] with the given Ed25519 signing key.
-    /// The key bytes are the raw 32-byte seed (same format as Solana keypairs).
     pub fn sign(msg: NetworkMessage, signing_key_bytes: &[u8; 32]) -> Self {
         use ed25519_dalek::{Signer, SigningKey};
         let signing_key = SigningKey::from_bytes(signing_key_bytes);
@@ -498,8 +417,6 @@ impl SignedNetworkMessage {
         }
     }
 
-    /// Verify the Ed25519 signature on this message.
-    /// Returns `true` iff the signature is cryptographically valid.
     pub fn verify(&self) -> bool {
         use ed25519_dalek::{Signature, VerifyingKey};
         if self.session_pubkey.len() != 32 || self.signature.len() != 64 {

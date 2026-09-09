@@ -1,5 +1,3 @@
-//! Scheduled-task instructions for automated game management.
-
 pub mod cancel_time_check;
 pub mod crank_time_check;
 pub mod schedule_time_check;

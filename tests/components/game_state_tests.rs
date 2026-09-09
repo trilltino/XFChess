@@ -1,13 +1,6 @@
-//! Integration tests for game state components extracted from doc tests
-//!
-//! These tests demonstrate usage patterns for GamePhase and MoveRecord.
-//! Original location: src/game/components/game_state.rs module docs
-
 use xfchess::game::components::{GamePhase, MoveRecord};
 use xfchess::rendering::pieces::{PieceColor, PieceType};
 
-/// Test demonstrating how to check game phase in a system
-/// Original: game_state.rs module-level example
 #[test]
 fn example_display_game_status() {
     let phases = vec![
@@ -27,8 +20,6 @@ fn example_display_game_status() {
     }
 }
 
-/// Test demonstrating how to create a move record
-/// Original: game_state.rs module-level example
 #[test]
 fn example_recording_a_move() {
     let move_record = MoveRecord {
@@ -49,8 +40,6 @@ fn example_recording_a_move() {
     assert!(move_record.captured.is_none());
 }
 
-/// Test demonstrating checking if moves are allowed
-/// Original: GamePhase struct-level example
 #[test]
 fn example_allow_moves_system() {
     fn allow_moves(phase: GamePhase) -> bool {
@@ -64,8 +53,6 @@ fn example_allow_moves_system() {
     assert!(!allow_moves(GamePhase::Setup));
 }
 
-/// Test demonstrating Scholar's Mate checkmate move
-/// Original: MoveRecord struct-level example
 #[test]
 fn example_scholars_mate_checkmate() {
     // Scholar's Mate final move: Qf7#

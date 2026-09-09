@@ -1,5 +1,3 @@
-//! Input module - picking and observer patterns.
-
 pub mod pointer;
 
 use bevy::prelude::*;

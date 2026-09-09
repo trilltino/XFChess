@@ -1,13 +1,3 @@
-//! Live SOL/USD rate fetching for wager tier pricing.
-//!
-//! This module keeps a cached SOL/USD quote in a Bevy resource and refreshes
-//! it from the VPS-backed backend endpoint every 60 seconds so the main menu
-//! can display live SOL values for the fixed USD wager tiers. USD is the
-//! primary currency shown throughout the game client and admin panel — SOL
-//! remains the on-chain settlement unit and is what the wallet-ui signing
-//! popup shows, but every in-game amount an admin or player types/reads
-//! should be in USD.
-
 use bevy::prelude::*;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -15,14 +5,10 @@ use tracing::{error, info, warn};
 
 use crate::multiplayer::vps_client;
 
-/// Snapshot of the latest SOL/USD exchange rate.
 #[derive(Debug, Clone)]
 pub struct SolUsdRateSnapshot {
-    /// SOL purchasable for 1 USD.
     pub sol_per_usd: f64,
-    /// USD per 1 SOL.
     pub usd_per_sol: f64,
-    /// Unix timestamp when the rate was fetched.
     pub fetched_at: i64,
 }
 
@@ -32,18 +18,12 @@ enum SolUsdRateMessage {
     Error(String),
 }
 
-/// Cached SOL/USD exchange-rate resource used by the wager-tier UI.
 #[derive(Resource)]
 pub struct SolUsdRate {
-    /// Latest successful exchange-rate snapshot, if one has been fetched.
     pub current: Option<SolUsdRateSnapshot>,
-    /// Last time a refresh request was dispatched.
     pub last_refresh: Option<Instant>,
-    /// Refresh cadence for the backend fetch loop.
     pub refresh_interval: Duration,
-    /// Whether a background refresh request is currently in flight.
     pub is_refreshing: bool,
-    /// Most recent fetch error, if any.
     pub last_error: Option<String>,
     response_tx: Sender<SolUsdRateMessage>,
     response_rx: Receiver<SolUsdRateMessage>,
@@ -65,23 +45,19 @@ impl Default for SolUsdRate {
 }
 
 impl SolUsdRate {
-    /// Convert a USD wager into SOL using the latest cached rate.
     pub fn sol_for_usd(&self, usd: f64) -> Option<f64> {
         self.current.as_ref().map(|rate| usd * rate.sol_per_usd)
     }
 
-    /// Convert a SOL amount into USD using the latest cached rate.
     pub fn usd_for_sol(&self, sol: f64) -> Option<f64> {
         self.current.as_ref().map(|rate| sol * rate.usd_per_sol)
     }
 
-    /// Return the latest cached SOL/USD snapshot, if available.
     pub fn snapshot(&self) -> Option<&SolUsdRateSnapshot> {
         self.current.as_ref()
     }
 }
 
-/// Plugin that keeps the SOL/USD rate cache warm.
 pub struct SolUsdRatePlugin;
 
 impl Plugin for SolUsdRatePlugin {
@@ -92,12 +68,10 @@ impl Plugin for SolUsdRatePlugin {
     }
 }
 
-/// Immediately start fetching the live SOL/USD rate when the app boots.
 fn kick_off_sol_usd_refresh(mut rate: ResMut<SolUsdRate>) {
     dispatch_refresh(&mut rate);
 }
 
-/// Poll for completed refreshes and schedule the next backend fetch.
 fn poll_sol_usd_refresh(mut rate: ResMut<SolUsdRate>) {
     while let Ok(message) = rate.response_rx.try_recv() {
         match message {
@@ -130,7 +104,6 @@ fn poll_sol_usd_refresh(mut rate: ResMut<SolUsdRate>) {
     }
 }
 
-/// Dispatch a background refresh request against the backend rate endpoint.
 fn dispatch_refresh(rate: &mut SolUsdRate) {
     rate.is_refreshing = true;
     rate.last_refresh = Some(Instant::now());

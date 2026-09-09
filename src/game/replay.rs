@@ -1,14 +1,3 @@
-//! PGN Replay module — playback controls for loaded chess games.
-//!
-//! Provides:
-//! - Auto-advance with configurable speed
-//! - Step forward / backward
-//! - Jump to any move
-//! - 2D/3D view toggle support (both render from the same ECS `Piece` components)
-//!
-//! The replay uses an internal `nimzovich_engine::Game` to apply moves and
-//! stores FEN snapshots after every ply for instant backward navigation.
-
 use crate::core::{DespawnOnExit, GameMode, GameState};
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{HasMoved, PieceMoveAnimation};
@@ -30,50 +19,31 @@ use nimzovich_engine::{
 // Resources
 // ---------------------------------------------------------------------------
 
-/// Bevy resource wrapping the parsed PGN game.
 #[derive(Resource, Debug, Clone)]
 pub struct ParsedPgnGameResource {
     pub inner: nimzovich_engine::ParsedPgnGame,
-    /// When true, the replay UI renders the eval sparkline overlay.
     pub show_eval_graph: bool,
-    /// When true, the move list hides moves after the current ply (puzzle mode).
     pub puzzle_mode: bool,
-    /// When true, the answer has been revealed in puzzle mode.
     pub puzzle_revealed: bool,
 }
 
-/// Tracks the playback state of a loaded PGN replay.
 #[derive(Resource)]
 pub struct PgnReplayState {
-    /// Internal engine — always at the position of `current_ply`.
     pub engine: nimzovich_engine::Game,
-    /// FEN string after each ply. Index 0 = start, index N = after ply N.
     pub fen_snapshots: Vec<String>,
-    /// Current ply (half-move). 0 = start, moves[0] = ply 1, etc.
     pub current_ply: usize,
-    /// Whether playback is paused.
     pub paused: bool,
-    /// Seconds between auto-advances.
     pub speed: f32,
-    /// Timer for auto-advance.
     pub timer: Timer,
-    /// Has the board been spawned yet?
     pub board_ready: bool,
-    /// Whether the position changed this frame (triggers re-sync).
     pub position_dirty: bool,
 
     // ── Cinematic / shorts ──
-    /// Board state from the previous ply (used to diff and tween the moved piece).
     pub prev_board: [i8; 64],
-    /// The ply index that the engine was last rebuilt to (for diffing).
     pub engine_ply: usize,
-    /// True when the next board spawn should inject a PieceMoveAnimation tween.
     pub animate_next_advance: bool,
-    /// Slow-motion factor for piece tweens: 1.0 = normal, <1.0 = slow.
     pub slow_factor: f32,
-    /// Remaining seconds of cinematic slow-motion.
     pub cinematic_timer: f32,
-    /// Ply index for which annotations were last loaded (usize::MAX = never).
     pub last_annotation_ply: usize,
 
     // ── In-replayer PGN paste ──
@@ -118,8 +88,6 @@ impl PgnReplayState {
 // Setup / Cleanup
 // ---------------------------------------------------------------------------
 
-/// Run when entering `InGame` with `GameMode::PgnReplay`.
-/// Parses the SAN moves into FEN snapshots and initialises the replay engine.
 pub fn setup_replay(
     parsed_pgn: Option<Res<ParsedPgnGameResource>>,
     mut replay: ResMut<PgnReplayState>,
@@ -183,7 +151,6 @@ pub fn setup_replay(
     info!("[REPLAY] Setup complete — ready to spawn board");
 }
 
-/// Despawn all pieces when exiting replay.
 pub fn cleanup_replay(mut commands: Commands, pieces: Query<Entity, With<Piece>>) {
     for entity in pieces.iter() {
         commands.entity(entity).despawn();
@@ -197,7 +164,6 @@ pub fn cleanup_replay(mut commands: Commands, pieces: Query<Entity, With<Piece>>
 // Playback Systems
 // ---------------------------------------------------------------------------
 
-/// Auto-advance the replay when playing and timer fires.
 pub fn replay_auto_advance_system(
     mut replay: ResMut<PgnReplayState>,
     parsed_pgn: Option<Res<ParsedPgnGameResource>>,
@@ -220,7 +186,6 @@ pub fn replay_auto_advance_system(
     }
 }
 
-/// Apply the current ply to the engine and mark position dirty.
 pub fn replay_apply_move_system(
     mut replay: ResMut<PgnReplayState>,
     parsed_pgn: Option<Res<ParsedPgnGameResource>>,
@@ -253,8 +218,6 @@ pub fn replay_apply_move_system(
     }
 }
 
-/// Sync the replay engine to the main ChessEngine resource so the board
-/// rendering (2D and 3D) sees the correct position.
 pub fn replay_sync_engine_system(replay: Res<PgnReplayState>, mut engine: ResMut<ChessEngine>) {
     let fen = engine_to_fen(&replay.engine);
     if engine.fen != fen {
@@ -266,7 +229,6 @@ pub fn replay_sync_engine_system(replay: Res<PgnReplayState>, mut engine: ResMut
 // Piece Spawning from Engine Board
 // ---------------------------------------------------------------------------
 
-/// Despawn all existing pieces and respawn from the current engine board.
 pub fn replay_spawn_pieces_system(
     mut commands: Commands,
     mut replay: ResMut<PgnReplayState>,
@@ -386,7 +348,6 @@ pub fn replay_spawn_pieces_system(
 // UI
 // ---------------------------------------------------------------------------
 
-/// Replay control bar and move list overlay.
 pub fn replay_ui_system(
     mut contexts: EguiContexts,
     mut replay: ResMut<PgnReplayState>,
@@ -1279,12 +1240,10 @@ pub fn replay_ui_system(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Convert an engine `Game` back to a FEN string.
 fn engine_to_fen(game: &nimzovich_engine::Game) -> String {
     game_to_fen(game)
 }
 
-/// Convert engine piece ID to PieceType.
 fn engine_id_to_piece_type(id: i8) -> PieceType {
     use nimzovich_engine::{BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID};
     match id {
@@ -1298,7 +1257,6 @@ fn engine_id_to_piece_type(id: i8) -> PieceType {
     }
 }
 
-/// Return the rotation for a piece matching the regular game's `piece_rotation` / `knight_rotation`.
 fn replay_piece_rotation(piece_type: PieceType, color: PieceColor) -> Quat {
     match piece_type {
         PieceType::Knight => match color {
@@ -1312,8 +1270,6 @@ fn replay_piece_rotation(piece_type: PieceType, color: PieceColor) -> Quat {
     }
 }
 
-/// Spawn a single piece for the replay using the same parent+child structure as the regular game.
-/// Returns the spawned entity so callers can inject `PieceMoveAnimation` on it.
 fn spawn_piece_at_replay(
     commands: &mut Commands,
     meshes: &PieceMeshes,

@@ -7,13 +7,6 @@ use crate::cross_game;
 use crate::report::{json, txt};
 use crate::types::{AcReport, SideAnalysis, Verdict};
 
-/// Z-score threshold (standard deviations below a player's own rolling CPL
-/// average) above which a game is logged as cross-game advisory evidence.
-/// ~2σ is the point a single-game result stops looking like normal variance
-/// against that player's own history — a common significance threshold, not
-/// tuned against real data yet (see `elo_baseline.rs` for how the ELO-based
-/// signal *was* fitted). Advisory only: never adjusts `weighted_score` or
-/// `verdict`.
 const CROSS_GAME_Z_ALERT: f64 = 2.0;
 
 pub async fn save_report(
@@ -76,12 +69,6 @@ pub async fn save_report(
     Ok(())
 }
 
-/// Weighs this game's CPL against the player's own rolling history
-/// (`cross_game::load_stats`/`game_z_score`) and logs it when it stands out —
-/// advisory evidence for the dispute flow, same as the rest of this crate's
-/// output. Deliberately does not touch `weighted_score`/`verdict`: this is
-/// the read side of data `update_stats` has been persisting every game, so
-/// it's now actually used instead of only ever written.
 async fn log_cross_game_evidence(pool: &SqlitePool, side: &SideAnalysis) {
     let stats = cross_game::load_stats(pool, &side.pubkey).await;
     if !stats.has_sufficient_history() {

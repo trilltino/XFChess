@@ -1,8 +1,3 @@
-//! Shorts creation features for PGN replay:
-//!   - Annotation overlays (arrows + square highlights) in 2D (egui) and 3D (Bevy meshes)
-//!   - Puzzle mode: hide the answer move, show "Can you find it?" UI
-//!   - Screenshot export via Bevy's render pipeline
-
 use crate::core::GameMode;
 use crate::game::replay::{ParsedPgnGameResource, PgnReplayState};
 use crate::game::view_mode::ViewMode;
@@ -15,37 +10,26 @@ use bevy_egui::{egui, EguiContexts};
 // Resources & Events
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Arrow and square-highlight annotations drawn over the board in replay mode.
 #[derive(Resource, Default)]
 pub struct ReplayAnnotations {
-    /// (from_file, from_rank, to_file, to_rank, color_kind)
-    /// color_kind: 0 = green, 1 = orange (Shift held), 2 = blue (Alt held)
     pub arrows: Vec<(u8, u8, u8, u8, u8)>,
-    /// (file, rank, color_kind)
     pub highlights: Vec<(u8, u8, u8)>,
-    /// Right-click drag origin for the in-progress arrow preview
     pub drag_from: Option<(u8, u8)>,
-    /// Set whenever arrows/highlights change so 3D meshes rebuild exactly once
     pub dirty: bool,
 }
 
-/// Puzzle mode state, separate from ParsedPgnGameResource so it can be toggled at runtime.
 #[derive(Resource, Default)]
 pub struct PuzzleOverlay {
     pub enabled: bool,
     pub revealed: bool,
-    /// Ply at which the puzzle starts — the move after this ply is the answer
     pub puzzle_ply: usize,
-    /// FEN string typed by the user for custom position entry
     pub fen_input: String,
     pub show_fen_input: bool,
 }
 
-/// Fired (by the UI button) to take a screenshot this frame.
 #[derive(Message, Default)]
 pub struct ScreenshotRequested;
 
-/// Marker on Bevy mesh entities spawned as 3D arrow/highlight annotations.
 #[derive(Component)]
 pub struct ReplayAnnotation3D;
 
@@ -81,13 +65,11 @@ fn kind_highlight_egui(kind: u8) -> egui::Color32 {
     }
 }
 
-/// Board-coordinates → egui offset within the board widget.
 fn b2s(file: u8, rank: u8, sq: f32) -> egui::Vec2 {
     // White perspective: a-file left, rank-1 bottom
     egui::Vec2::new(file as f32 * sq, (7.0 - rank as f32) * sq)
 }
 
-/// Screen position → board (file, rank), returns None if outside the board.
 fn s2b(pos: egui::Pos2, board_min: egui::Pos2, sq: f32) -> Option<(u8, u8)> {
     let rel = pos - board_min;
     if rel.x < 0.0 || rel.y < 0.0 || rel.x >= sq * 8.0 || rel.y >= sq * 8.0 {
@@ -119,8 +101,6 @@ fn piece_sym(piece_type: PieceType, color: PieceColor) -> &'static str {
 // System: 2D board + annotation overlay (egui, runs in PgnReplay + 2D mode)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Renders the full 2D board with piece symbols and annotation overlays using egui.
-/// Replaces the regular `render_2d_board` (which is disabled in PgnReplay mode).
 pub fn replay_2d_annotation_system(
     mut contexts: EguiContexts,
     mut annotations: ResMut<ReplayAnnotations>,
@@ -367,7 +347,6 @@ pub fn replay_2d_annotation_system(
 // System: 3D annotation meshes (Bevy entities, runs in PgnReplay + 3D mode)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Rebuilds 3D arrow and square-highlight mesh entities whenever annotations change.
 pub fn replay_3d_annotations_system(
     mut commands: Commands,
     mut annotations: ResMut<ReplayAnnotations>,
@@ -489,7 +468,6 @@ pub fn replay_3d_annotations_system(
 // System: Screenshot
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// When a ScreenshotRequested event is received, saves a PNG to the user's Pictures folder.
 pub fn replay_screenshot_system(
     mut events: MessageReader<ScreenshotRequested>,
     mut commands: Commands,
@@ -525,8 +503,6 @@ pub fn replay_screenshot_system(
 // System: Clear annotations when ply changes
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Clears annotation arrows/highlights whenever the replay moves to a new ply.
-/// Highlights persist on the same ply; arrows clear on any navigation.
 pub fn clear_annotations_on_ply_change(
     replay: Res<PgnReplayState>,
     mut annotations: ResMut<ReplayAnnotations>,
@@ -542,7 +518,6 @@ pub fn clear_annotations_on_ply_change(
 // Cinematic resources + events
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Full-screen flash effect driven by cinematic events.
 #[derive(Resource, Default)]
 pub struct CinematicEffect {
     pub flash_color: [f32; 3], // RGB 0..1
@@ -550,13 +525,10 @@ pub struct CinematicEffect {
     pub flash_decay: f32, // alpha reduction per second
 }
 
-/// Drives the quality-badge (!! / ?? / …) overlay for 1.8 seconds after a move.
 #[derive(Resource, Default)]
 pub struct QualityBadgeState {
     pub quality: nimzovich_engine::MoveQuality,
-    /// Remaining display time in seconds
     pub timer: f32,
-    /// 0.0 = invisible, 1.0 = fully visible (fade in 0.2 → hold → fade out 0.2)
     pub alpha: f32,
 }
 
@@ -571,8 +543,6 @@ pub struct CheckmateFlash;
 // System: load PGN annotations per-ply and fire cinematic events
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// When the replay advances to a new ply, load embedded PGN annotations
-/// (arrows, highlights, quality badge) and dispatch cinematic events.
 pub fn load_pgn_annotations_system(
     mut replay: ResMut<PgnReplayState>,
     pgn: Option<Res<ParsedPgnGameResource>>,
@@ -654,7 +624,6 @@ pub fn load_pgn_annotations_system(
 // System: tick cinematic timers (Update)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Ticks CinematicEffect flash alpha and PgnReplayState cinematic / slow-factor.
 pub fn cinematic_tick_system(
     time: Res<Time>,
     mut effect: ResMut<CinematicEffect>,
@@ -719,7 +688,6 @@ pub fn cinematic_tick_system(
 // System: cinematic flash overlay (EguiPrimaryContextPass)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Renders the full-screen color flash overlay for blunder/brilliant/checkmate.
 pub fn cinematic_effect_system(
     mut contexts: EguiContexts,
     effect: Res<CinematicEffect>,
@@ -763,7 +731,6 @@ pub fn cinematic_effect_system(
 // System: quality badge overlay (EguiPrimaryContextPass)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Draws the !! / ?? / ?! quality badge centred on screen for 1.8 s.
 pub fn quality_badge_system(
     mut contexts: EguiContexts,
     badge: Res<QualityBadgeState>,
@@ -825,7 +792,6 @@ pub fn quality_badge_system(
 // System: hook text overlay (EguiPrimaryContextPass)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Draws the creator-authored hook text overlay for the current ply.
 pub fn hook_text_system(
     mut contexts: EguiContexts,
     mut shorts: ResMut<crate::game::shorts_state::ShortsState>,
@@ -930,8 +896,6 @@ pub fn hook_text_system(
 // System: sequence capture (Update)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// When capture mode is active, waits for the tween settle delay, fires
-/// ScreenshotRequested, then advances the ply until the sequence is complete.
 pub fn capture_sequence_system(
     time: Res<Time>,
     mut shorts: ResMut<crate::game::shorts_state::ShortsState>,

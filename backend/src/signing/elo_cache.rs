@@ -1,10 +1,3 @@
-//! ELO caching system for on-chain player profile data.
-//!
-//! This module provides an in-memory cache of player ELO ratings
-//! queried from on-chain PlayerProfile accounts. This enables
-//! fast matchmaking without requiring clients to know their
-//! current ELO rating.
-
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::{
@@ -15,65 +8,32 @@ use std::{
 };
 use tracing::{info, warn};
 
-/// Cached ELO data with timestamp.
 #[derive(Clone, Debug)]
 pub struct CachedElo {
-    /// Player's on-chain ELO rating in centiscale (K=32 Elo, not Glicko-2 —
-    /// see `programs/xfchess-game/src/elo/README.md`).
     pub elo_rating: f64,
-    /// Read from the on-chain `PlayerProfile.rd` byte offset, which is a dead
-    /// field no instruction ever writes (see docs/AUDIT_TRACKING.md Phase 8
-    /// findings) — this will always read back as `0.0` in practice.
     pub rd: f64,
-    /// Player's country code (ISO 3166-1 alpha-2)
     pub country: String,
-    /// Player's username
     pub username: String,
-    /// Lichess account verified on-chain
     pub lichess_verified: bool,
-    /// Lichess blitz rating (centiscale — divide by 100 for the real rating)
     pub lichess_blitz: u32,
-    /// Lichess last sync timestamp
     pub lichess_last_sync: i64,
-    /// Whether ELO was seeded from external rating. Dead going forward —
-    /// `link_external_elo` no longer sets this — but existing profiles that
-    /// were seeded before the removal still carry `true`.
     pub seeded_from_external: bool,
-    /// External ELO source (0=none, 1=lichess)
     pub external_elo_source: u8,
-    /// Per-time-control ratings (centiscale), appended to `PlayerProfile`
-    /// after `seeded_from_external`. `elo_rating` above is the Classical
-    /// bucket. See `elo::rating::bucket_for_time_control` in the program.
     pub elo_bullet: f64,
     pub elo_blitz: f64,
     pub elo_rapid: f64,
-    /// When this cache entry was last updated
     pub cached_at: Instant,
 }
 
-/// ELO cache for player profile data.
 #[derive(Clone)]
 pub struct EloCache {
-    /// RPC client for querying on-chain data
     rpc: Arc<RpcClient>,
-    /// Cache mapping pubkey to ELO data
     cache: Arc<Mutex<HashMap<String, CachedElo>>>,
-    /// Cache TTL - entries expire after this duration
     ttl: Duration,
-    /// Program ID for on-chain PlayerProfile accounts
     program_id: Pubkey,
 }
 
 impl EloCache {
-    /// Creates a new ELO cache with the given RPC URL, TTL, and program ID.
-    ///
-    /// # Arguments
-    /// * `rpc_url` - Solana RPC endpoint URL
-    /// * `ttl` - Time-to-live for cache entries
-    /// * `program_id` - Program ID for on-chain PlayerProfile accounts
-    ///
-    /// # Returns
-    /// A new EloCache instance
     pub fn new(rpc_url: String, ttl: Duration, program_id: Pubkey) -> Self {
         // Use the shared hardened constructor (bounded request timeout) rather than a
         // bespoke client — an RPC hang must not wedge profile/matchmaking reads.
@@ -87,13 +47,6 @@ impl EloCache {
         }
     }
 
-    /// Gets a player's ELO rating from cache, refreshing if expired.
-    ///
-    /// # Arguments
-    /// * `pubkey` - Player's wallet public key
-    ///
-    /// # Returns
-    /// Cached ELO data, or error if query fails
     pub async fn get_elo(&self, pubkey: &str) -> Result<CachedElo, String> {
         // Check cache first
         {
@@ -112,13 +65,6 @@ impl EloCache {
         self.fetch_elo(pubkey).await
     }
 
-    /// Fetches ELO data from on-chain PlayerProfile account.
-    ///
-    /// # Arguments
-    /// * `pubkey` - Player's wallet public key
-    ///
-    /// # Returns
-    /// Cached ELO data
     async fn fetch_elo(&self, pubkey: &str) -> Result<CachedElo, String> {
         let pk = Pubkey::from_str(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
@@ -233,13 +179,6 @@ impl EloCache {
         Ok(cached)
     }
 
-    /// Batch fetches ELO data for multiple players.
-    ///
-    /// # Arguments
-    /// * `pubkeys` - List of player public keys
-    ///
-    /// # Returns
-    /// Map of pubkey to ELO data
     pub async fn batch_get_elo(&self, pubkeys: &[String]) -> HashMap<String, CachedElo> {
         let mut results = HashMap::new();
 
@@ -257,10 +196,6 @@ impl EloCache {
         results
     }
 
-    /// Invalidates cache entry for a specific player.
-    ///
-    /// # Arguments
-    /// * `pubkey` - Player's wallet public key
     pub fn invalidate(&self, pubkey: &str) {
         let mut cache = self
             .cache
@@ -270,7 +205,6 @@ impl EloCache {
         info!("[EloCache] Invalidated cache for {}", pubkey);
     }
 
-    /// Clears all cached entries.
     pub fn clear(&self) {
         let mut cache = self
             .cache
@@ -280,7 +214,6 @@ impl EloCache {
         info!("[EloCache] Cleared all cache entries");
     }
 
-    /// Deserializes an f64 from account data at the given offset.
     fn deserialize_f64(&self, data: &[u8], offset: usize) -> Result<f64, String> {
         if offset + 8 > data.len() {
             return Err("Offset out of bounds".to_string());
@@ -291,7 +224,6 @@ impl EloCache {
         Ok(f64::from_le_bytes(bytes))
     }
 
-    /// Deserializes an i64 from account data at the given offset.
     fn deserialize_i64(&self, data: &[u8], offset: usize) -> Result<i64, String> {
         if offset + 8 > data.len() {
             return Err("Offset out of bounds".to_string());
@@ -302,7 +234,6 @@ impl EloCache {
         Ok(i64::from_le_bytes(bytes))
     }
 
-    /// Deserializes a String from account data at the given offset.
     fn deserialize_string(
         &self,
         data: &[u8],

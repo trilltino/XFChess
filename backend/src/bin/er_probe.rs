@@ -1,27 +1,3 @@
-//! Diagnostic: which endpoint's blockhash does the ER actually accept?
-//!
-//! Every ER-routed instruction (`record_move`, `undelegate_game`,
-//! `schedule_time_check`) has been failing with
-//! `-32003 ... Blockhash not found`. `sign_and_submit_er` fetches a blockhash
-//! and sends the transaction to the *same* URL, so the usual "stale blockhash"
-//! explanation doesn't apply — unless the URL's read path and write path are
-//! backed by different chains.
-//!
-//! This probe sends a deliberately-doomed transfer (random unfunded keypair,
-//! 0 lamports) to each endpoint using that endpoint's own blockhash. The
-//! transaction can never succeed — that's the point. What matters is *which
-//! error* comes back:
-//!
-//!   - "Blockhash not found"        -> the endpoint rejected the blockhash it
-//!                                     itself just handed us: read and write
-//!                                     paths disagree. Unusable for ER writes.
-//!   - "Attempt to debit ..." /
-//!     "AccountNotFound" / similar  -> blockhash ACCEPTED; the tx got far
-//!                                     enough to fail on funding. This is the
-//!                                     endpoint we should be submitting to.
-//!
-//! Run: `cargo run --bin er_probe`
-
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSendTransactionConfig;
 use solana_commitment_config::CommitmentConfig;
@@ -69,17 +45,6 @@ fn probe(label: &str, url: &str) {
     }
 }
 
-/// The decisive test. A transaction that *touches the delegated Game PDA*
-/// forces the router to forward it to whichever ER validator owns that
-/// delegation — unlike the plain transfer above, which the router can settle
-/// on its own chain. If the router hands out a blockhash from its own chain
-/// but forwards the transaction to a different validator's chain, this is
-/// exactly where "Blockhash not found" appears.
-///
-/// The instruction data is a garbage discriminator, so the program rejects it
-/// — again, deliberately. Reaching a *program* error means the blockhash and
-/// routing were fine and only the payload was bad, which is the success
-/// condition for this probe.
 fn probe_delegated(label: &str, url: &str, program_id: &str, game_pda: &str) {
     use solana_sdk::instruction::{AccountMeta, Instruction};
     use solana_sdk::pubkey::Pubkey;

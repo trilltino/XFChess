@@ -1,146 +1,60 @@
-//! Static Prometheus counters for background workers.
-//!
-//! Plain atomics rather than the `Metrics` registry because workers run in
-//! detached tasks where threading `Arc<RwLock<Metrics>>` through every spawn
-//! adds noise for no benefit. Rendered by [`render_prometheus`], which the
-//! `/metrics` endpoint appends to its output.
-
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // ── Settlement worker ─────────────────────────────────────────────────────────
 pub static SETTLEMENT_TICKS_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Duration of the most recent scan tick, in milliseconds.
 pub static SETTLEMENT_TICK_MILLIS: AtomicU64 = AtomicU64::new(0);
-/// Unix timestamp (seconds) of the start of the most recent scan tick — a
-/// liveness signal distinct from the tick counter itself: a worker that
-/// panics mid-loop stops advancing this even though the process is still up.
-/// Read by `GET /admin/tasks/status`.
 pub static SETTLEMENT_LAST_TICK_UNIX: AtomicU64 = AtomicU64::new(0);
 pub static SETTLEMENT_GAMES_SCANNED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static SETTLEMENT_FINALIZED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static SETTLEMENT_UNDELEGATED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Batched `getMultipleAccounts` calls issued by the settlement worker.
 pub static SETTLEMENT_RPC_CALLS_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Currently-delegated games with no on-chain activity for longer than
-/// `STALE_DELEGATION_SECS` (settlement_worker.rs) — a signal that the ER
-/// validator may not be committing/undelegating as expected. This is a
-/// monitoring signal only: XFChess has no way to force a delegated game back
-/// to the base layer without the ER's cooperation (see the persistency
-/// roadmap's MagicBlock section), so the response to this metric firing is
-/// operational (page, investigate, contact MagicBlock), not automatic.
 pub static SETTLEMENT_STALE_DELEGATED_GAUGE: AtomicU64 = AtomicU64::new(0);
-/// Active, wagered games the worker found still undelegated well past a
-/// normal create/join → delegate handshake and successfully redelegated
-/// (see `STALE_UNDELEGATED_SECS`/`redelegate_stale_game` in
-/// settlement_worker.rs) — the client-side delegation attempt failed or
-/// never ran, so this is the automatic recovery path for it.
 pub static SETTLEMENT_REDELEGATE_RETRIED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Redelegate attempts (above) that themselves failed to build or submit.
 pub static SETTLEMENT_REDELEGATE_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Games `force_undelegate_after_timeout` recovered without the ER's
-/// cooperation, whose escrow release (`governance_ix::recover_stuck_delegation`)
-/// the worker then attempted automatically but could not complete (e.g.
-/// `DISPUTE_AUTHORITY_KEYPAIR` unset, or the on-chain call itself failed) —
-/// a true fallback state needing the manual `POST
-/// /admin/dispute/recover_stuck_delegation` step. Should normally stay at 0;
-/// see `STUCK_DELEGATION_AUTO_RECOVERED_TOTAL` for the (expected) common case.
 pub static FORCE_UNDELEGATED_AWAITING_RECOVERY_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Games whose escrow the worker force-undelegated *and* automatically
-/// released via `recover_stuck_delegation` in the same tick, closing the
-/// ER-unavailability escape hatch end-to-end with no human step.
 pub static STUCK_DELEGATION_AUTO_RECOVERED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 // ── ER real-time subscription (Triton WS pubsub, see tasks/er_watch.rs) ───────
-/// 1 if the `accountSubscribe` WS pubsub connection to Triton is currently up,
-/// 0 if it's down/reconnecting — in which case `settlement_worker` has fallen
-/// back to poll-only staleness detection (same behavior as before this
-/// existed, never a regression, just less timely).
 pub static ER_SUBSCRIPTION_CONNECTED: AtomicU64 = AtomicU64::new(0);
-/// Unix timestamp (seconds) of the most recent account-update push received
-/// from any watched, ER-delegated Game PDA. 0 if none received yet.
 pub static ER_LAST_PUSH_UNIX: AtomicU64 = AtomicU64::new(0);
 
 // ── Tournament scheduler / prize distributor ──────────────────────────────────
-/// Unix timestamp (seconds) of the most recent tournament-scheduler
-/// (round-advancement) loop pass.
 pub static TOURNAMENT_SCHEDULER_LAST_TICK_UNIX: AtomicU64 = AtomicU64::new(0);
-/// Unix timestamp (seconds) of the most recent prize-distributor loop pass.
 pub static PRIZE_DISTRIBUTOR_LAST_TICK_UNIX: AtomicU64 = AtomicU64::new(0);
 
 // ── Time-check crank (ER) ─────────────────────────────────────────────────────
-/// `schedule_time_check` calls submitted successfully after `delegate_game`.
 pub static TIME_CHECK_SCHEDULED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// `schedule_time_check` calls that failed to build or submit. Best-effort —
-/// delegation itself already succeeded, so these are logged/counted, not
-/// retried inline.
 pub static TIME_CHECK_SCHEDULE_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// `cancel_time_check` calls submitted successfully alongside `undelegate_game`.
 pub static TIME_CHECK_CANCELLED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// `cancel_time_check` calls that failed to build or submit. A stray
-/// scheduled task on an undelegated/foreign account is expected to fail
-/// harmlessly on its own next tick, so this is a cleanliness signal, not a
-/// correctness one.
 pub static TIME_CHECK_CANCEL_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 // ── Anti-cheat enqueue ────────────────────────────────────────────────────────
 pub static ANTICHEAT_ENQUEUED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static ANTICHEAT_DROPPED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Free games whose T0 timing screen came back clean — no engine analysis.
 pub static ANTICHEAT_SCREENED_OUT_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Jobs sitting in the in-memory analysis queue (sampled at enqueue time).
 pub static ANTICHEAT_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
-/// Sides whose client think-time telemetry was discarded for exceeding the
-/// server-observed wall-clock budget (a tamper signal).
 pub static TELEMETRY_DISCARDED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 // ── Sybil / multi-accounting ──────────────────────────────────────────────────
-/// Wallets surfaced for review by the linkage/collusion signals (soft).
 pub static LINKAGE_FLAGGED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Prize-entry registrations refused for a hard linkage/KYC collision.
 pub static LINKAGE_HARD_BLOCKED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 // ── Prize distribution ────────────────────────────────────────────────────────
 pub static PRIZE_DISTRIBUTED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Ticks where a distribution was deferred waiting for anti-cheat analysis.
 pub static PRIZE_DISTRIBUTION_HELD_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Prize places skipped because the winner had a flagged verdict.
 pub static PRIZE_DISTRIBUTION_FLAGGED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Distribution ticks deferred because the prize pool exceeds
-/// `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` and no admin has approved release
-/// yet (`POST /admin/tournament/{id}/approve-prize-release`). Distinct from
-/// `PRIZE_DISTRIBUTION_HELD_TOTAL` (anti-cheat pending) — this is a deliberate
-/// human-in-the-loop gate on large payouts, not a transient hold.
 pub static PRIZE_DISTRIBUTION_AWAITING_APPROVAL_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 // ── Auth ───────────────────────────────────────────────────────────────────
-/// Requests to a session-signing endpoint (`require_relay_or_jwt`) rejected
-/// specifically because `RELAY_SHARED_SECRET` is unset/empty and no valid JWT
-/// was presented — i.e. the deployment itself is unconfigured, not just an
-/// individual caller sending a bad credential. Should be 0 on any properly
-/// configured production deployment; a nonzero rate is a misconfiguration
-/// alert, not routine traffic noise.
 pub static AUTH_UNCONFIGURED_RELAY_REJECTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-/// `/session/create` calls refused by the per-wallet funding guard — either the
-/// sliding-window rate limit or the unactivated-session cap. Every one of these
-/// is a fee-payer drain attempt that was stopped, so a sustained nonzero rate is
-/// worth alerting on rather than filtering out as noise.
 pub static SESSION_CREATE_THROTTLED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-/// Sponsored on-chain profile creations refused because the global daily
-/// lamport budget was already spent. Each sponsorship transfers real rent to a
-/// caller-controlled wallet, so this is the backstop on that faucet.
 pub static SPONSORSHIP_BUDGET_EXHAUSTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 // ── Exchange rates (RateCache) ──────────────────────────────────────────────
-/// Both the primary and secondary rate sources failed on the same refresh —
-/// only stale cache (or nothing) was available.
 pub static RATES_FETCH_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// A fetched rate was discarded for falling outside the sanity bounds
-/// (a decimal/parsing bug or a genuinely broken upstream feed).
 pub static RATES_SANITY_REJECTED_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Primary and secondary sources both returned usable rates but disagreed
-/// beyond the alert threshold — logged and counted, primary still served.
 pub static RATES_SOURCE_DIVERGENCE_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 pub fn render_prometheus() -> String {

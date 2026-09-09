@@ -1,5 +1,3 @@
-//! Instructions managing multi-player structured tournaments.
-
 pub mod lifecycle;
 pub mod matches;
 pub mod prizes;

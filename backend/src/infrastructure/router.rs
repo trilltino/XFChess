@@ -1,5 +1,3 @@
-//! Application router construction and composition.
-
 use crate::infrastructure::auth_middleware::{
     persist_admin_request, require_api_key, require_relay_or_jwt,
 };
@@ -20,7 +18,6 @@ use crate::signing::swiss::handlers::{swiss_admin_routes, swiss_read_routes};
 use crate::signing::{build_router, AppState};
 use axum::{extract::State, middleware, Router};
 
-/// Builds the complete application router.
 pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
     let signing_router = build_router(signing_state.clone());
 
@@ -217,14 +214,6 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         ))
 }
 
-/// CORS layer built from `SigningConfig::allowed_origins` (parsed from the
-/// `ALLOWED_ORIGINS` env var — comma-separated list, e.g.
-/// `https://xfchess.com,https://www.xfchess.com`).
-///
-/// If `allowed_origins` is empty we fall back to permissive (any origin) —
-/// convenient for local dev. `SigningConfig::validate` refuses to start in
-/// production with an empty list, so a production process reaching this
-/// function always has a real allow-list.
 fn cors_layer(allowed_origins: &[String]) -> tower_http::cors::CorsLayer {
     use axum::http::{header, HeaderValue, Method};
     use tower_http::cors::{AllowOrigin, CorsLayer};

@@ -1,8 +1,3 @@
-//! Session-signed variant of `create_game` for tournament play.
-//!
-//! Uses the tournament-scoped session key to co-sign game creation,
-//! drawing funds from the delegation PDA vault for rent and wagers.
-
 use crate::account_ix::session_guards;
 use crate::common::escrow::debit_program_pda;
 use crate::constants::*;
@@ -31,26 +26,21 @@ pub struct SessionCreateGame<'info> {
     )]
     pub tournament: Box<Account<'info, Tournament>>,
 
-    /// TournamentPlayersShard 0 always present (all tournament sizes).
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Box<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
-    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
@@ -71,7 +61,6 @@ pub struct SessionCreateGame<'info> {
     )]
     pub session_delegation: Box<Account<'info, TournamentSessionDelegation>>,
 
-    /// Session key signer (hot key, not the player wallet).
     pub session_signer: Signer<'info>,
 
     #[account(
@@ -82,16 +71,11 @@ pub struct SessionCreateGame<'info> {
                 || tournament_players_shard_3.as_ref().is_some_and(|s| s.players.iter().any(|p| *p == player.key()))
         } @ XfchessGameError::UnauthorizedAccess,
     )]
-    /// CHECK: Verified against tournament player list and delegation PDA.
     pub player: UncheckedAccount<'info>,
 
-    /// CHECK: Created manually in the handler — see the identical comment in
-    /// `game_ix::global_create::GlobalCreateGame::game` for why `init, payer
-    /// = session_delegation` cannot work when the payer is a PDA.
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: UncheckedAccount<'info>,
 
-    /// CHECK: PDA for escrowing SOL wager.
     #[account(
         mut,
         seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()],

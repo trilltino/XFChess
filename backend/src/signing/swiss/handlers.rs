@@ -1,12 +1,3 @@
-//! HTTP handlers for Swiss-format tournaments.
-//!
-//! Exposes round management endpoints — start/current round, pairings,
-//! result recording, standings, absence/withdrawal, forbidden pairings,
-//! manual pairings, and result overrides — mounted under `/tournament/{id}/...`
-//! by the signing service router. Handlers delegate to [`SwissService`]
-//! for pairing generation, scoring, and state persistence, and translate
-//! service errors into appropriate HTTP status codes.
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -26,7 +17,6 @@ use crate::signing::AppState;
 pub struct RecordResultReq {
     pub round: u8,
     pub board: u16,
-    /// Result: "1-0", "0-1", "0.5-0.5", "forfeit-white", "forfeit-black"
     pub result: String,
 }
 
@@ -74,7 +64,6 @@ pub struct CurrentRoundRes {
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
-/// Read-only Swiss routes — no authentication required
 pub fn swiss_read_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}/current-round", get(get_current_round))
@@ -82,7 +71,6 @@ pub fn swiss_read_routes() -> Router<AppState> {
         .route("/{id}/standings", get(get_standings))
 }
 
-/// State-mutating Swiss routes — must be wrapped with require_api_key by the caller
 pub fn swiss_admin_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}/round", post(start_round))
@@ -129,7 +117,6 @@ fn swiss_err(e: SwissServiceError) -> StatusCode {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-/// POST /tournament/{id}/round - Start next round
 async fn start_round(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -142,7 +129,6 @@ async fn start_round(
         .map_err(swiss_err)
 }
 
-/// GET /tournament/{id}/current-round
 async fn get_current_round(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -157,7 +143,6 @@ async fn get_current_round(
     }))
 }
 
-/// GET /tournament/{id}/pairings/{round}
 async fn get_pairings(
     Path((id, round)): Path<(u64, u8)>,
     State(state): State<AppState>,
@@ -169,7 +154,6 @@ async fn get_pairings(
     }
 }
 
-/// POST /tournament/{id}/result - Record a match result
 async fn record_result(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -187,7 +171,6 @@ async fn record_result(
         .map_err(swiss_err)
 }
 
-/// GET /tournament/{id}/standings
 async fn get_standings(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -200,7 +183,6 @@ async fn get_standings(
         .map_err(swiss_err)
 }
 
-/// POST /tournament/{id}/absent  — Gap 1
 async fn mark_absent(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -214,7 +196,6 @@ async fn mark_absent(
         .map_err(swiss_err)
 }
 
-/// POST /tournament/{id}/withdraw  — Gap 2
 async fn withdraw_player(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -228,7 +209,6 @@ async fn withdraw_player(
         .map_err(swiss_err)
 }
 
-/// POST /tournament/{id}/rejoin  — Gap 3
 async fn rejoin_player(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -242,7 +222,6 @@ async fn rejoin_player(
         .map_err(swiss_err)
 }
 
-/// POST /tournament/{id}/forbidden-pair  — Gap 6
 async fn add_forbidden_pair(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -256,7 +235,6 @@ async fn add_forbidden_pair(
         .map_err(swiss_err)
 }
 
-/// DELETE /tournament/{id}/forbidden-pair  — Gap 6
 async fn remove_forbidden_pair(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -270,7 +248,6 @@ async fn remove_forbidden_pair(
         .map_err(swiss_err)
 }
 
-/// POST /tournament/{id}/manual-pair  — Gap 6
 async fn add_manual_pairing(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -284,7 +261,6 @@ async fn add_manual_pairing(
         .map_err(swiss_err)
 }
 
-/// DELETE /tournament/{id}/manual-pair  — Gap 6
 async fn remove_manual_pairing(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -298,7 +274,6 @@ async fn remove_manual_pairing(
         .map_err(swiss_err)
 }
 
-/// PUT /tournament/{id}/result  — Gap 7 (admin-gated result override)
 async fn override_result(
     Path(id): Path<u64>,
     State(state): State<AppState>,

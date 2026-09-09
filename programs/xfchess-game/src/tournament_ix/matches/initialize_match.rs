@@ -1,13 +1,8 @@
-//! Instruction to initialize a single tournament match.
-//! Called by the backend to set up the bracket after tournament starts.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-/// Accounts for creating one bracket slot. Restricted to the tournament's
-/// own authority (the backend), not players.
 #[derive(Accounts)]
 #[instruction(tournament_id: u64, match_index: u16)]
 pub struct InitializeMatch<'info> {
@@ -31,9 +26,6 @@ pub struct InitializeMatch<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Populates a fresh `TournamentMatch` PDA: seeds, round, initial
-/// player(s), and where the winner advances to next. Fails unless the
-/// tournament is `Active` and `match_index` is in range.
 pub fn handler(
     ctx: Context<InitializeMatch>,
     tournament_id: u64,

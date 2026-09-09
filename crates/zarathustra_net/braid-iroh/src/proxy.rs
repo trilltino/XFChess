@@ -1,11 +1,3 @@
-//! Optional TCP proxy bridge for legacy HTTP clients.
-//!
-//! Lets a browser or curl talk to the P2P Braid network through a local
-//! TCP listener. Requests to `http://localhost:<port>/resource` get
-//! forwarded over iroh to the target peer.
-//!
-//! Requires the `proxy` feature flag.
-
 #[cfg(feature = "proxy")]
 pub mod bridge {
     use axum::{
@@ -20,7 +12,6 @@ pub mod bridge {
     use std::net::SocketAddr;
     use tower_http::trace::TraceLayer;
 
-    /// State shared across proxy request handlers.
     #[derive(Clone)]
     pub struct ProxyState {
         client: IrohH3Client,
@@ -28,7 +19,6 @@ pub mod bridge {
     }
 
     impl ProxyState {
-        /// Create a new proxy state with the given client and default peer.
         pub fn new(client: IrohH3Client, default_peer: EndpointId) -> Self {
             Self {
                 client,
@@ -37,16 +27,6 @@ pub mod bridge {
         }
     }
 
-    /// Start a local TCP proxy that forwards HTTP/1.1 requests to a target Braid peer
-    /// over HTTP/3.
-    ///
-    /// # Arguments
-    /// * `endpoint` - The iroh endpoint to use for P2P connections
-    /// * `listen_addr` - Local socket address to bind the HTTP/1.1 listener
-    /// * `default_peer` - The target peer ID to forward requests to
-    ///
-    /// # Returns
-    /// Returns `Ok(())` when the server shuts down gracefully, or an error if binding fails.
     pub async fn start_proxy(
         endpoint: &Endpoint,
         listen_addr: SocketAddr,
@@ -70,13 +50,6 @@ pub mod bridge {
         Ok(())
     }
 
-    /// Main proxy handler that forwards HTTP/1.1 requests to the P2P network via HTTP/3.
-    ///
-    /// This handler:
-    /// 1. Reconstructs the target URL from the default peer and request path
-    /// 2. Converts the incoming axum body to bytes for forwarding
-    /// 3. Sends the request via IrohH3Client
-    /// 4. Streams the response back to the HTTP/1.1 client
     async fn proxy_handler(
         State(state): State<ProxyState>,
         req: Request,
@@ -204,11 +177,9 @@ pub mod bridge {
 
 #[cfg(not(feature = "proxy"))]
 pub mod bridge {
-    //! Stub implementation when proxy feature is disabled.
     use iroh::{Endpoint, EndpointId};
     use std::net::SocketAddr;
 
-    /// Stub function that returns an error when proxy feature is not enabled.
     pub async fn start_proxy(
         _endpoint: &Endpoint,
         _listen_addr: SocketAddr,

@@ -1,31 +1,3 @@
-//! Full Braid-HTTP subscriber for chess game move streams.
-//!
-//! [`ChessSubscriber`] opens a long-lived `GET` with `Subscribe: true`
-//! and yields each [`ChessMessage`] as it arrives via server-sent Braid updates.
-//!
-//! Uses `braid-http`'s [`BraidClient`] which handles Braid update framing,
-//! reconnection, and heartbeat detection.
-//!
-//! # Example
-//!
-//! ```rust,no_run
-//! use braid_chess::{ChessSubscriber, ChessMessage};
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     let sub = ChessSubscriber::new("http://localhost:3000", "ABCD42").unwrap();
-//!     let (rx, _handle) = sub.subscribe_moves().await.unwrap();
-//!
-//!     while let Ok(msg) = rx.recv().await {
-//!         match msg {
-//!             ChessMessage::Move(mv) => println!("Opponent played: {}", mv.uci),
-//!             ChessMessage::Resign { player } => println!("{} resigned", player),
-//!             _ => {}
-//!         }
-//!     }
-//! }
-//! ```
-
 use crate::error::BraidChessError;
 use crate::message::ChessMessage;
 use crate::resource::ChessResource;
@@ -37,10 +9,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, warn};
 
-/// Subscribes to Braid resource streams and decodes them as [`ChessMessage`]s.
-///
-/// One [`ChessSubscriber`] per game.  Call [`subscribe_moves`], [`subscribe_engine`],
-/// or [`subscribe_clock`] to open streams for each sub-resource.
 pub struct ChessSubscriber {
     base_url: String,
     game_id: String,
@@ -48,12 +16,6 @@ pub struct ChessSubscriber {
 }
 
 impl ChessSubscriber {
-    /// Create a subscriber for the given game.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying HTTP client cannot be initialised
-    /// (e.g. TLS configuration issue).
     pub fn new(
         base_url: impl Into<String>,
         game_id: impl Into<String>,
@@ -68,10 +30,6 @@ impl ChessSubscriber {
 
     // ─── Subscription methods ────────────────────────────────────────────────
 
-    /// Subscribe to the move stream (`/game/{id}/moves`).
-    ///
-    /// Returns `(receiver, task_handle)`.  Receive [`ChessMessage`]s from the
-    /// `receiver`; drop it to stop the subscription background task.
     pub async fn subscribe_moves(
         &self,
     ) -> Result<(Receiver<ChessMessage>, JoinHandle<()>), BraidChessError> {
@@ -79,7 +37,6 @@ impl ChessSubscriber {
             .await
     }
 
-    /// Subscribe to engine hint stream (`/game/{id}/engine`).
     pub async fn subscribe_engine(
         &self,
     ) -> Result<(Receiver<ChessMessage>, JoinHandle<()>), BraidChessError> {
@@ -87,7 +44,6 @@ impl ChessSubscriber {
             .await
     }
 
-    /// Subscribe to clock state stream (`/game/{id}/clock`).
     pub async fn subscribe_clock(
         &self,
     ) -> Result<(Receiver<ChessMessage>, JoinHandle<()>), BraidChessError> {
@@ -95,7 +51,6 @@ impl ChessSubscriber {
             .await
     }
 
-    /// Subscribe to the chat stream (`/game/{id}/chat`).
     pub async fn subscribe_chat(
         &self,
     ) -> Result<(Receiver<ChessMessage>, JoinHandle<()>), BraidChessError> {
@@ -177,9 +132,6 @@ impl ChessSubscriber {
 
 // ─── Decode helpers ──────────────────────────────────────────────────────────
 
-/// Decode a Braid [`Update`] into a [`ChessMessage`].
-///
-/// Tries the snapshot body first, then the first patch's value body.
 fn decode_update(update: &Update) -> Option<ChessMessage> {
     if let Some(body_str) = update.body_str() {
         return parse_chess_message(body_str);

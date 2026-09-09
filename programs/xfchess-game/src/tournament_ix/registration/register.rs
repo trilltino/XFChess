@@ -1,15 +1,3 @@
-//! Instruction allowing players to opt-in and pay their entry fee for the tournament.
-//!
-//! Guaranteed-prize model: the prize pool is locked by the operator BEFORE any
-//! registration is possible (see fund_sol_prize / fund_usdc_prize) and never
-//! changes with entry count. The entry fee is NOT prize money — it is held in
-//! the escrow PDA as a refundable deposit until the tournament starts, at which
-//! point it is swept to host_treasury as operator revenue (see start.rs). If the
-//! tournament is cancelled or the player leaves, the fee is refunded in full.
-//!
-//! Shards 1-3 are optional — small/medium tournaments only initialize shard 0 or 0-1.
-//! Pass the remaining shards as None / the zero pubkey in those cases.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -32,45 +20,36 @@ pub struct RegisterPlayer<'info> {
     pub player_profile: Account<'info, PlayerProfile>,
     #[account(mut)]
     pub player: Signer<'info>,
-    /// CHECK: Tournament escrow PDA — holds the operator-funded guaranteed prize
-    /// plus entry-fee deposits (refundable custody until the tournament starts).
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// Shard 0 always present (all tournament sizes).
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Box<Account<'info, TournamentPlayersShard>>,
-    /// Shard 1 — present for ≥128-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// Shard 2 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// Shard 3 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_3: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// CHECK: Operator treasury. Kept in the account list for client compatibility;
-    /// entry fees no longer flow here at registration — they are swept from escrow
-    /// at start_tournament instead. Must match tournament.host_treasury.
     #[account(
         mut,
         constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess

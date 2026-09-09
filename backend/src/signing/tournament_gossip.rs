@@ -1,7 +1,3 @@
-//! Broadcasts versioned tournament updates over the Braid gossip transport.
-//!
-//! [`ResourceHub`]: xfchess_braid_server::ResourceHub
-
 use anyhow::Result;
 // Note: iroh crate not directly available, using String for node IDs
 pub type EndpointId = String;
@@ -15,28 +11,19 @@ use xfchess_braid_server::resource::protocol::{encode_for_gossip, BraidUpdate};
 
 use crate::signing::storage::tournament::TournamentStore;
 
-/// Handle to an active tournament gossip topic
 pub struct TopicHandle {
-    /// Gossip sender for broadcasting messages (None if topic is pre-registered without a live sender)
     pub sender: Option<iroh_gossip::api::GossipSender>,
-    /// Tournament ID
     pub tournament_id: u64,
-    /// Number of active subscribers
     pub subscriber_count: AtomicUsize,
 }
 
-/// Service managing tournament gossip topics
 pub struct TournamentGossipService {
-    /// Tournament storage for persistence
     store: TournamentStore,
-    /// Active tournament topics
     tournament_topics: Arc<RwLock<HashMap<u64, TopicHandle>>>,
-    /// VPS node ID for reliable bootstrap
     vps_node_id: Option<EndpointId>,
 }
 
 impl TournamentGossipService {
-    /// Create a new tournament gossip service
     pub fn new(store: TournamentStore, vps_node_id: Option<EndpointId>) -> Self {
         Self {
             store,
@@ -45,15 +32,6 @@ impl TournamentGossipService {
         }
     }
 
-    /// Broadcast one hub update to a tournament's peers.
-    ///
-    /// `path` is the resource the update belongs to (e.g.
-    /// `tournament/42/standings`); it travels with the update, since a gossip
-    /// receiver has no request line to read it from.
-    ///
-    /// Missing topic is not an error — a tournament nobody has subscribed to
-    /// P2P still publishes over HTTP, and a subscriber that arrives later gets
-    /// the state from the snapshot rather than from this broadcast.
     pub async fn broadcast_update(&self, tournament_id: u64, path: &str, update: &BraidUpdate) {
         let Some(sender) = self.get_topic(tournament_id).await else {
             return;
@@ -71,7 +49,6 @@ impl TournamentGossipService {
         }
     }
 
-    /// Register a topic for a tournament with a live gossip sender
     pub async fn register_topic(&self, tournament_id: u64, sender: iroh_gossip::api::GossipSender) {
         let handle = TopicHandle {
             sender: Some(sender),
@@ -85,7 +62,6 @@ impl TournamentGossipService {
         info!("[gossip] Registered topic for tournament {}", tournament_id);
     }
 
-    /// Ensure a topic placeholder exists for a tournament (used at init time before a sender is available).
     pub async fn ensure_topic_registered(&self, tournament_id: u64) {
         let mut topics = self.tournament_topics.write().await;
         if !topics.contains_key(&tournament_id) {
@@ -102,12 +78,6 @@ impl TournamentGossipService {
         }
     }
 
-    /// Get bootstrap peers for a player joining a tournament
-    ///
-    /// Returns up to 5 peers including:
-    /// 1. VPS node as reliable bootstrap
-    /// 2. Tournament host (first registered player)
-    /// 3. 3-4 random other players
     pub async fn get_bootstrap_peers(
         &self,
         tournament_id: u64,
@@ -169,7 +139,6 @@ impl TournamentGossipService {
         peers
     }
 
-    /// Get all registered node IDs for a tournament
     pub async fn get_tournament_peers(&self, tournament_id: u64) -> Vec<EndpointId> {
         let tournament = match self.store.get(tournament_id).await {
             Some(t) => t,
@@ -183,7 +152,6 @@ impl TournamentGossipService {
             .collect()
     }
 
-    /// Increment subscriber count for a tournament
     pub async fn increment_subscribers(&self, tournament_id: u64) {
         if let Some(handle) = self.tournament_topics.read().await.get(&tournament_id) {
             let count = handle.subscriber_count.fetch_add(1, Ordering::Relaxed) + 1;
@@ -194,7 +162,6 @@ impl TournamentGossipService {
         }
     }
 
-    /// Decrement subscriber count for a tournament
     pub async fn decrement_subscribers(&self, tournament_id: u64) {
         if let Some(handle) = self.tournament_topics.read().await.get(&tournament_id) {
             let count = handle
@@ -208,7 +175,6 @@ impl TournamentGossipService {
         }
     }
 
-    /// Get subscriber count for a tournament
     pub async fn get_subscriber_count(&self, tournament_id: u64) -> usize {
         self.tournament_topics
             .read()
@@ -218,7 +184,6 @@ impl TournamentGossipService {
             .unwrap_or(0)
     }
 
-    /// Get topic handle for a tournament
     pub async fn get_topic(&self, tournament_id: u64) -> Option<iroh_gossip::api::GossipSender> {
         self.tournament_topics
             .read()
@@ -227,7 +192,6 @@ impl TournamentGossipService {
             .and_then(|h| h.sender.clone())
     }
 
-    /// Check if a topic exists for a tournament
     pub async fn has_topic(&self, tournament_id: u64) -> bool {
         self.tournament_topics
             .read()
@@ -235,19 +199,16 @@ impl TournamentGossipService {
             .contains_key(&tournament_id)
     }
 
-    /// Remove a topic for a tournament
     pub async fn remove_topic(&self, tournament_id: u64) {
         self.tournament_topics.write().await.remove(&tournament_id);
         info!("[gossip] Removed topic for tournament {}", tournament_id);
     }
 }
 
-/// Parse a node ID string (just returns the string for now)
 fn parse_node_id(node_id_str: &str) -> Result<EndpointId> {
     Ok(node_id_str.to_string())
 }
 
-/// Format an EndpointId (just returns the string)
 pub fn format_node_id(node_id: &EndpointId) -> String {
     node_id.clone()
 }
@@ -258,14 +219,6 @@ mod tests {
     use std::sync::Mutex;
     use xfchess_braid_server::{bridge, ResourceHub};
 
-    /// The full publish path, end to end: a Swiss write lands on a hub
-    /// resource, the sink encodes that update for gossip, and a client decodes
-    /// it back into the event it was before this went through Braid.
-    ///
-    /// This is the seam the refactor introduced — server-side `BraidUpdate`,
-    /// wire `Update`, client-side `SwissMessage` — and the one place where a
-    /// path typo or a lost content-type silently degrades into "peers receive
-    /// nothing" rather than a compile error.
     #[test]
     fn a_hub_write_reaches_a_client_as_the_same_event() {
         let hub = ResourceHub::new();
@@ -328,9 +281,6 @@ mod tests {
         assert!(parse_node_id("valid_node_id").is_ok());
     }
 
-    /// A tournament nobody has joined P2P has no gossip topic. Broadcasting
-    /// into that must be a quiet no-op, not an error: the same update still
-    /// reached every HTTP `209` subscriber through the hub.
     #[tokio::test]
     async fn broadcast_without_a_topic_is_a_no_op() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()

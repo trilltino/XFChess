@@ -1,14 +1,3 @@
-//! RPC client helpers for Solana — resilient, provider-agnostic.
-//!
-//! Primary provider is whatever `SOLANA_RPC_URL` points at (we run **Triton One**
-//! `*.rpcpool.com` in prod; the x-token is embedded in the URL path and is a secret,
-//! so it lives only in the untracked `.env` and is **redacted** before any logging).
-//! `SOLANA_RPC_FALLBACK_URL` (default: public devnet) is used when the primary is
-//! failing, guarded by a lightweight circuit breaker so we don't hammer a dead endpoint.
-//!
-//! Every client created here carries request/connect **timeouts** — no RPC call can hang
-//! the backend indefinitely.
-
 use solana_client::client_error::Result as ClientResult;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -16,14 +5,10 @@ use solana_sdk::hash::Hash;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Default per-request timeout for all RPC clients.
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
-/// Consecutive primary failures before the breaker opens.
 const BREAKER_THRESHOLD: u32 = 3;
-/// How long the breaker stays open (skip primary, use fallback) once tripped.
 const BREAKER_COOLDOWN_SECS: i64 = 30;
 
-/// Creates an RPC client (confirmed commitment) with a bounded request timeout.
 pub fn make_rpc(url: &str) -> RpcClient {
     RpcClient::new_with_timeout_and_commitment(
         url.to_string(),
@@ -32,19 +17,15 @@ pub fn make_rpc(url: &str) -> RpcClient {
     )
 }
 
-/// Primary RPC URL (Triton in prod). Falls back to public devnet only if unset.
 pub fn rpc_url_or_devnet() -> String {
     std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".to_string())
 }
 
-/// Fallback RPC URL used when the primary is unhealthy.
 pub fn fallback_rpc_url() -> String {
     std::env::var("SOLANA_RPC_FALLBACK_URL")
         .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string())
 }
 
-/// Strip secrets (rpcpool x-token in the path, or an `api-key`/`x-token` query) from an
-/// RPC URL so it is safe to log. e.g. `https://x.rpcpool.com/<token>` -> `https://x.rpcpool.com/***`.
 pub fn redact_url(url: &str) -> String {
     // Drop any query string entirely (may carry api-key=...).
     let base = url.split('?').next().unwrap_or(url);
@@ -92,48 +73,11 @@ fn record_primary_failure() {
     }
 }
 
-/// Fetches a blockhash for a transaction that a **browser wallet extension**
-/// (Phantom/Solflare) will be asked to sign, at `finalized` commitment rather
-/// than the `confirmed` default `make_rpc` sets.
-///
-/// This is not about durability, it is about the wallet being able to tell
-/// which cluster the transaction belongs to. An extension has no way of
-/// knowing that from the transaction bytes except by looking the blockhash up
-/// on the cluster it is currently set to — and `isBlockhashValid` defaults to
-/// `finalized` commitment. A blockhash fetched at `confirmed` is younger than
-/// the ~32 slot (~13s) finalization lag, so that lookup returns **false** for
-/// a perfectly good devnet blockhash. Solflare reads that as "not a devnet
-/// transaction" and refuses to sign with "Network mismatch: your current
-/// network is set to devnet, but this transaction is for mainnet". Measured
-/// against our own devnet endpoint vs. a second devnet node:
-///
-/// ```text
-/// getLatestBlockhash{confirmed} -> isBlockhashValid{processed} = true
-///                               -> isBlockhashValid{finalized} = false  <- what the wallet sees
-/// getLatestBlockhash{finalized} -> isBlockhashValid{finalized} = true
-/// ```
-///
-/// The cost is ~13s of the ~60s validity window (a finalized blockhash is
-/// already ~32 slots old). The signing paths already retry once on a stale
-/// blockhash, and a slightly shorter window beats a transaction the wallet
-/// refuses to sign at all.
-///
-/// Only for transactions leaving the backend to be signed by a user wallet.
-/// Backend-signed transactions (settlement, treasury, cranks) broadcast
-/// immediately and should keep the faster `confirmed` default.
 pub fn wallet_signable_blockhash(rpc: &RpcClient) -> ClientResult<Hash> {
     rpc.get_latest_blockhash_with_commitment(CommitmentConfig::finalized())
         .map(|(hash, _last_valid_block_height)| hash)
 }
 
-/// Run a **read-only** RPC operation against the primary, transparently failing over to
-/// the fallback endpoint. A circuit breaker skips the primary during a cooldown after
-/// repeated failures. Use for idempotent reads (account/PDA fetches, `get_*`), NOT for
-/// `send_transaction` (which is not safe to blindly retry on another endpoint).
-///
-/// ```ignore
-/// let acct = read_with_failover(|rpc| rpc.get_account_data(&pda))?;
-/// ```
 pub fn read_with_failover<T, F>(op: F) -> ClientResult<T>
 where
     F: Fn(&RpcClient) -> ClientResult<T>,

@@ -1,19 +1,3 @@
-//! Live-devnet drills for paths `game_flows.rs`'s happy-path runs never
-//! exercise: whether MagicBlock's scheduler actually invokes a cranked
-//! instruction *autonomously* (as opposed to a client calling it directly,
-//! which is all `run_1v1_game_flow`'s Step 8 proves), and the entire
-//! ER-unavailability recovery chain (`request_force_undelegate` ->
-//! `force_undelegate_after_timeout` -> `recover_stuck_delegation`).
-//!
-//! Both are opt-in (`--mode crank-drill` / `--mode recovery-drill`), never
-//! part of the default benchmark run:
-//! - The crank drill costs ~1-2 real minutes.
-//! - The recovery drill costs ~60-70 real minutes (the delegation program's
-//!   own `DEFAULT_UNDELEGATION_REQUEST_TIMEOUT_SLOTS`, not something
-//!   client-side code can shorten) plus real devnet SOL moved through the
-//!   exact auto-recovery path `backend/src/tasks/settlement_worker.rs` now
-//!   runs unattended in production — run this deliberately, not casually.
-
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -27,16 +11,8 @@ use crate::{apply_compute_budget, instructions as ix, unique_id, with_retry};
 const GAME_SEED: &[u8] = b"game";
 const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 
-/// `GameStatus` discriminants (borsh enum tags, `state/game.rs`'s
-/// declaration order) — mirrors `backend/src/tasks/settlement_worker.rs`'s
-/// `parse_game_account` constants, duplicated here since this crate can't
-/// depend on the backend or the program crate.
 const STATUS_FINISHED: u8 = 5;
 
-/// Sets up a game through delegation with the given clock/increment, mirroring
-/// `run_1v1_game_flow`'s steps 1-5 exactly (profile init tolerant of
-/// already-exists, create, join, authorize + fund session keys, delegate).
-/// Returns `(game_id, game_pda, session_white, session_black)`.
 async fn setup_delegated_game(
     base_rpc: &RpcClient,
     program_id: Pubkey,
@@ -175,13 +151,6 @@ async fn setup_delegated_game(
     Ok((game_id, game_pda, session_white, session_black))
 }
 
-/// Proves MagicBlock's scheduler autonomously invokes `crank_time_check`
-/// (as opposed to a client calling it directly). Delegates a game with a 5s
-/// chess clock, schedules the crank at a 5s interval, waits, and reads the
-/// Game PDA back from the ER **without this drill ever building or sending
-/// a `crank_time_check` instruction itself** - if the game shows
-/// `status == Finished` anyway, only MagicBlock's own scheduler could have
-/// gotten it there.
 pub async fn run_crank_liveness_drill(
     base_rpc: &RpcClient,
     er_rpc: &RpcClient,
@@ -243,19 +212,6 @@ pub async fn run_crank_liveness_drill(
     }
 }
 
-/// Exercises the full ER-unavailability recovery chain against the real
-/// delegation program on devnet: delegate -> deliberately never undelegate
-/// -> `request_force_undelegate` -> wait out the real ~60min timeout ->
-/// `force_undelegate_after_timeout` (asserts the Game PDA really does come
-/// back wiped to zero bytes, matching the on-chain doc comments' claim) ->
-/// `recover_stuck_delegation` (asserts both wallets' balances actually move
-/// by escrow/2 each). This is the first time this path runs against a real
-/// validator instead of `solana-program-test`'s mocked delegation program.
-///
-/// `dispute_authority` must be the real keypair matching
-/// `constants::dispute_authority::ID` on-chain (see
-/// `keygen::load_dispute_authority_keypair`) - a wrong key fails the last
-/// step's signer constraint, not silently.
 pub async fn run_stuck_delegation_drill(
     base_rpc: &RpcClient,
     program_id: Pubkey,

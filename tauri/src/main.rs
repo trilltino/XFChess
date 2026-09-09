@@ -1,5 +1,3 @@
-//! Tauri desktop entry point for window management, IPC, shared state, and deep links.
-
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use axum::http::{Method, StatusCode};
@@ -31,47 +29,22 @@ use windows::tournament_admin::TournamentAdminWindow;
 // Shared State
 // ---------------------------------------------------------------------------
 
-/// Wallet public key in base58 format.
 #[allow(dead_code)]
 #[derive(Default, Clone)]
 struct WalletPubkey(Arc<Mutex<Option<String>>>);
 
-/// Username associated with the connected wallet.
 #[derive(Default, Clone)]
 struct WalletUsername(Arc<Mutex<Option<String>>>);
 
-/// Which provider the connected wallet came from: `phantom`, `solflare`, or
-/// `privy`. Reported by wallet-ui on `POST /wallet` and surfaced on `/status`.
-///
-/// The game client uses this to decide whether the no-popup global-session flow
-/// is safe to attempt: it is enabled only for `privy` embedded wallets, because
-/// the one unresolved blocker on that flow (a Solflare "network mismatch:
-/// current network devnet, but this transaction is for mainnet" rejection
-/// arriving with no user action) is an artifact of an extension carrying its own
-/// user-selected cluster. An embedded wallet has no such setting and cannot
-/// produce it. See `authorize_global_session_if_needed` in
-/// src/multiplayer/solana/integration/systems.rs.
 #[derive(Default, Clone)]
 struct WalletProvider(Arc<Mutex<Option<String>>>);
 
-/// JWT token issued by the backend on successful auth.
-/// Shared between the bridge HTTP server and the main app handle.
 #[derive(Default, Clone)]
 struct WalletJwt(Arc<Mutex<Option<String>>>);
 
-/// When the game client last polled `GET /status`. This bridge process
-/// survives independently of the game window (closing the game doesn't kill
-/// it — see `spawn_wallet_state_reaper`'s doc comment for why that used to
-/// mean a connected wallet stayed cached here forever, across every later
-/// launch, until the whole process was manually killed). Used only to detect
-/// "no game has been alive/polling for a while" so the cached wallet can be
-/// dropped on that basis, without needing to track the game's actual PID.
 #[derive(Default, Clone)]
 struct WalletLastSeen(Arc<Mutex<Option<std::time::Instant>>>);
 
-/// One correlated signing request. There is deliberately only one active
-/// request: the Bevy caller blocks until this request finishes, so accepting a
-/// second request would otherwise overwrite the first one's response channel.
 struct PendingRequest {
   id: String,
   tx: Vec<u8>,
@@ -82,27 +55,10 @@ struct PendingRequest {
 type PendingTxInner = Option<PendingRequest>;
 type PendingTx = Arc<Mutex<PendingTxInner>>;
 
-/// Change notification for `PendingTx` — fired (value is a no-op unit) every
-/// time the pending slot transitions Some<->None, so `/pending/stream` (SSE)
-/// can push instantly instead of wallet-ui polling `/pending` on a timer.
-/// A `watch::Sender` doubles as the subscribe factory: each SSE connection
-/// calls `.subscribe()` on a clone of this sender to get its own receiver.
 type PendingTxNotify = tokio::sync::watch::Sender<()>;
 
-/// How long to wait for the user to approve a transaction in the wallet
-/// popup before giving up. Must match `SIGN_TIMEOUT_SECS` in the game
-/// client's `src/multiplayer/solana/tauri_signer.rs` — that side sets the
-/// same read timeout on its end of this same TCP connection.
 const SIGN_TIMEOUT_SECS: u64 = 60;
 
-/// The port the axum HTTP server actually bound to, once it has. Two
-/// instances on one machine with no XFCHESS_WALLET_PORT override both try
-/// the same nominal port; the second one's bind fails outright (logged, not
-/// fatal), leaving that whole process running with no HTTP server at all —
-/// every URL built from the nominal port (the wallet-signing popup, /status
-/// polling, wallet-ui itself) then points at nothing. Set once bind_http_port
-/// finds a free port; every other caller of http_port() picks it up
-/// transparently instead of trusting the nominal value blindly.
 static ACTUAL_HTTP_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
 
 fn nominal_http_port() -> u16 {
@@ -112,8 +68,6 @@ fn nominal_http_port() -> u16 {
     .unwrap_or(7454)
 }
 
-/// Get the HTTP port for the wallet signing service — the real bound port
-/// if the server has started, else the nominal (env-derived) one.
 fn http_port() -> u16 {
   ACTUAL_HTTP_PORT
     .get()
@@ -121,19 +75,10 @@ fn http_port() -> u16 {
     .unwrap_or_else(nominal_http_port)
 }
 
-/// Path the HTTP bridge writes its actual bound port to, so the game client
-/// (a separate process) can discover it instead of assuming the nominal
-/// value always matches. Mirrors wallet_bridge_port_file() below for the
-/// raw-TCP listener; must match http_bridge_port_file() in the game
-/// client's src/multiplayer/solana/tauri_signer.rs.
 fn http_bridge_port_file() -> std::path::PathBuf {
   std::env::temp_dir().join(format!("xfchess-wallet-http-{}.port", nominal_http_port()))
 }
 
-/// Bind the HTTP server, trying the nominal port first and then a small
-/// range above it if that's taken (another instance already bound it).
-/// Writes whichever port actually worked to http_bridge_port_file() and
-/// records it in ACTUAL_HTTP_PORT before returning.
 async fn bind_http_port() -> Option<(TcpListener, u16)> {
   let nominal = nominal_http_port();
   for port in std::iter::once(nominal).chain(nominal.saturating_add(1)..=nominal.saturating_add(10))
@@ -149,22 +94,10 @@ async fn bind_http_port() -> Option<(TcpListener, u16)> {
   None
 }
 
-/// Path used to announce the raw-TCP wallet bridge's actual bound port to
-/// the game client, keyed by `base_port` (XFCHESS_WALLET_PORT) so multiple
-/// local instances (e.g. `just dev2`'s P1/P2) never collide on one file.
-/// Must match `wallet_bridge_port_file()` in the game client's
-/// `src/multiplayer/solana/tauri_signer.rs`.
 fn wallet_bridge_port_file(base_port: u16) -> std::path::PathBuf {
   std::env::temp_dir().join(format!("xfchess-wallet-bridge-{base_port}.port"))
 }
 
-/// Backend URL the game client (a separate process) has explicitly told us
-/// it resolved, via `POST /api/set-backend-url` — see `open_wallet_browser()`
-/// in `src/multiplayer/solana/tauri_signer.rs`. Preferred over independently
-/// re-deriving the same env-var precedence here, which is exactly what let
-/// the two processes silently disagree (see `get_backend_url`'s doc comment)
-/// if only one of them had `SIGNING_SERVICE_URL`/`BACKEND_URL` set in its
-/// environment.
 static BACKEND_URL_OVERRIDE: std::sync::OnceLock<std::sync::Mutex<Option<String>>> =
   std::sync::OnceLock::new();
 
@@ -172,22 +105,6 @@ fn backend_url_override_cell() -> &'static std::sync::Mutex<Option<String>> {
   BACKEND_URL_OVERRIDE.get_or_init(|| std::sync::Mutex::new(None))
 }
 
-/// Get the backend API base URL.
-///
-/// Resolution order:
-/// 1. Explicit override from the game client (`set_backend_url_override`).
-/// 2. `SIGNING_SERVICE_URL` / `BACKEND_URL` env vars — same order as the game
-///    client's own fallback in `vps_base()` (`src/multiplayer/network/vps/client.rs`),
-///    used when this process never heard from a game client (e.g. the popup
-///    was opened standalone, or an older game client build that predates
-///    `set-backend-url`).
-/// 3. Production Hetzner backend.
-///
-/// (1) and (2) MUST stay in the same order/precedence as the game client's
-/// own resolution — if they ever diverge, `/api/auth/*` calls proxied
-/// through this bridge silently 502 while the game client's own VPS calls
-/// succeed, a confusing split-brain failure that looks like a server outage
-/// but isn't.
 fn get_backend_url() -> String {
   if let Some(url) = backend_url_override_cell().lock().unwrap().clone() {
     return url;
@@ -197,11 +114,6 @@ fn get_backend_url() -> String {
     .unwrap_or_else(|_| "https://xfchess.com".to_string())
 }
 
-/// Record the backend URL the game client says it resolved. Logged loudly
-/// on every change (not just once) so a mismatch between two locally-running
-/// instances, or a stale override from a previous session's game client,
-/// is visible in the bridge's own log instead of only manifesting as
-/// confusing 502s downstream.
 fn set_backend_url_override(url: String) {
   let mut cell = backend_url_override_cell().lock().unwrap();
   let changed = cell.as_deref() != Some(url.as_str());
@@ -211,9 +123,6 @@ fn set_backend_url_override(url: String) {
   *cell = Some(url);
 }
 
-/// Per-instance cache directory, scoped by the wallet bridge port so that
-/// two dev sidecars (e.g. XFCHESS_WALLET_PORT=7454 and 7464) never share
-/// consent/wallet state.
 fn instance_cache_dir() -> PathBuf {
   dirs::data_local_dir()
     .unwrap_or_else(|| PathBuf::from("."))
@@ -221,7 +130,6 @@ fn instance_cache_dir() -> PathBuf {
     .join(format!("port-{}", http_port()))
 }
 
-/// Path to the consent record on disk.
 fn consent_path() -> PathBuf {
   instance_cache_dir().join("consent.json")
 }
@@ -1189,8 +1097,6 @@ fn new_session_id() -> String {
   uuid::Uuid::new_v4().to_string()
 }
 
-/// Start tracking a new popup session, logging `OPEN_POPUP_START`, and
-/// return its ID for embedding into the popup URL.
 fn begin_session() -> String {
   let id = new_session_id();
   tracing::info!(sid = %id, event = "OPEN_POPUP_START", "[Lifecycle] OPEN_POPUP_START");
@@ -1202,9 +1108,6 @@ fn begin_session() -> String {
   id
 }
 
-/// Log `WINDOW_FOUND` (or the timeout case) against whichever session is
-/// current, if any — `resize_wallet_popup_window`/the resize watcher don't
-/// otherwise know the sid, since they're matched purely by OS window title.
 fn log_window_event(event: &str) {
   let guard = current_session_cell().lock().unwrap();
   if let Some(s) = guard.as_ref() {
@@ -1215,11 +1118,6 @@ fn log_window_event(event: &str) {
   }
 }
 
-/// Called from `POST /api/ready` once wallet-ui's React app has mounted.
-/// `sid` comes from the page itself (read from its own URL) rather than
-/// trusting "whichever session is current" — a stale/reused popup page
-/// pinging this after a newer session has already started would otherwise
-/// misattribute REACT_READY to the wrong attempt.
 fn mark_session_ready(sid: &str) {
   let mut guard = current_session_cell().lock().unwrap();
   if let Some(s) = guard.as_mut() {
@@ -1238,19 +1136,10 @@ fn mark_session_ready(sid: &str) {
   }
 }
 
-/// Open the wallet UI in the user's real Chrome browser so Phantom/Solflare
-/// extensions are available. WebView2 inside Tauri cannot load extensions.
 fn open_wallet_popup(_app: &tauri::AppHandle) {
   open_wallet_popup_with_step(None, false);
 }
 
-/// Open the wallet UI to approve a pending transaction. Passing `?step=sign`
-/// tells wallet-ui (see hasExistingSession in App.tsx) to skip straight past
-/// the login/profile walkthrough when a session is already on disk — a plain
-/// `open_wallet_popup()` reopens the base URL, which always restarts at
-/// consent/entry, so a signing request that arrives after the user already
-/// logged in used to show a fresh "log in again" screen instead of the sign
-/// prompt, and the pending tx would silently time out 60s later.
 fn open_wallet_popup_for_signing(_app: &tauri::AppHandle) {
   // force_fresh=true: reusing whatever the popup already had loaded (e.g.
   // still sitting on the splash screen from an earlier, unrelated open) is
@@ -1279,12 +1168,6 @@ fn open_wallet_popup_with_step(step: Option<&str>, force_fresh: bool) {
   open_in_browser(&url, force_fresh);
 }
 
-/// Open a URL in Chrome app-mode (compact popup, no address bar).
-/// Falls back to the system default browser if Chrome is not found.
-/// PID of the last Chrome process spawned for the wallet popup, so `/hide`
-/// can actually close it — `window.close()` from inside the popup is
-/// unreliable since Chrome treats a CLI-launched `--app` window as not
-/// script-opened and blocks it.
 fn wallet_popup_pid_cell() -> &'static std::sync::Mutex<Option<u32>> {
   static CELL: std::sync::OnceLock<std::sync::Mutex<Option<u32>>> = std::sync::OnceLock::new();
   CELL.get_or_init(|| std::sync::Mutex::new(None))
@@ -1437,7 +1320,6 @@ fn open_in_browser(url: &str, force_fresh: bool) {
 #[derive(Default)]
 struct AdminTunnel(Arc<Mutex<Option<tauri_plugin_shell::process::CommandChild>>>);
 
-/// Probes `http://127.0.0.1:{port}/health` from Rust (no browser, so no CORS).
 #[cfg(feature = "tournament-admin")]
 async fn admin_health_ok(port: u16) -> bool {
   let url = format!("http://127.0.0.1:{port}/health");
@@ -1452,10 +1334,6 @@ async fn admin_health_ok(port: u16) -> bool {
   }
 }
 
-/// Brings up the PRODUCTION SSH tunnel and returns once the backend actually
-/// answers through it. Idempotent: if a healthy tunnel is already listening
-/// (ours or one you opened by hand in a terminal) it is reused rather than
-/// duplicated.
 #[cfg(feature = "tournament-admin")]
 #[tauri::command]
 async fn ensure_admin_tunnel(
@@ -1552,33 +1430,6 @@ fn kill_admin_tunnel(app: tauri::AppHandle) {
   kill_admin_tunnel_inner(&app);
 }
 
-/// Close the wallet-popup window.
-///
-/// This does NOT use the PID `open_in_browser` recorded from `Command::spawn`.
-/// Chrome (and Edge) enforce one process per user-data-dir: if the user
-/// already has a browser window open — normal for almost everyone — our
-/// `--app=` invocation just forwards the request to that *already-running*
-/// process via Chrome's own single-instance IPC and immediately exits, so
-/// the spawned PID we tracked belongs to a process that's already dead by
-/// the time this runs. `TerminateProcess` on it is therefore a silent no-op,
-/// which is exactly the "Continue doesn't close the window" bug.
-///
-/// Deliberately not using an isolated `--user-data-dir` to sidestep that —
-/// the wallet popup depends on the user's real Chrome profile for the
-/// Phantom/Solflare extensions it talks to via `window.phantom`/`window.solflare`;
-/// a fresh profile would have neither installed.
-///
-/// Instead: find the actual top-level window by title (the page is titled
-/// `XFChess #<port>` — see `tauri/wallet-ui/src/App.tsx`, which stamps its
-/// own bridge port onto `document.title` at load) whose owning process is
-/// chrome.exe/msedge.exe (never the main game, which is a native window
-/// under `xfchess.exe`, so this can't ever match the wrong "XFChess"-titled
-/// window), and post it a real `WM_CLOSE`.
-///
-/// The port suffix matters: with a bare "XFChess" title, two local
-/// instances (e.g. `just dev2`'s P1 on port 7454 and P2 on port 7464) are
-/// indistinguishable to `EnumWindows`, which searches the whole desktop —
-/// either player's popup closing would `WM_CLOSE` *both* players' popups.
 #[cfg(windows)]
 fn kill_wallet_popup() {
   use ::windows::core::BOOL;
@@ -1645,24 +1496,12 @@ fn kill_wallet_popup() {
 #[cfg(not(windows))]
 fn kill_wallet_popup() {}
 
-/// Timestamp of the last time the popup was hidden (not killed). `None`
-/// means "not currently hidden" — either it was never opened, it's showing,
-/// or it was actually killed. Read by the idle reaper (below) to decide when
-/// a long-forgotten hidden popup should finally be killed for real, and
-/// cleared whenever the popup is shown again or killed.
 fn wallet_popup_hidden_at_cell() -> &'static std::sync::Mutex<Option<std::time::Instant>> {
   static CELL: std::sync::OnceLock<std::sync::Mutex<Option<std::time::Instant>>> =
     std::sync::OnceLock::new();
   CELL.get_or_init(|| std::sync::Mutex::new(None))
 }
 
-/// Hide (not close) the wallet popup after a signature resolves, so the next
-/// signing request can reuse the same already-warm Chrome process/page
-/// instead of paying a full spawn + extension-reconnect cost. Same
-/// EnumWindows/title/owning-process match as `kill_wallet_popup` — see its
-/// doc comment for why title match (not the tracked spawn PID) is required.
-/// Falls back to a real kill if no matching window is found, so a bug here
-/// never leaves the wallet stuck (no popup, but the game keeps waiting).
 #[cfg(windows)]
 fn hide_wallet_popup() {
   use ::windows::core::BOOL;
@@ -1740,12 +1579,6 @@ fn hide_wallet_popup() {
   kill_wallet_popup();
 }
 
-/// Unhide and foreground a popup window previously hidden by
-/// `hide_wallet_popup`, so a *new* signing request reuses it instead of
-/// `open_in_browser` spawning a fresh Chrome process. Same title/owning-
-/// process match as `hide_wallet_popup`/`kill_wallet_popup` — deliberately
-/// not `force_foreground_window`'s PID+`IsWindowVisible` match, since a
-/// hidden window fails `IsWindowVisible` by definition.
 #[cfg(windows)]
 fn show_and_foreground_wallet_popup() -> bool {
   use ::windows::core::BOOL;
@@ -1799,21 +1632,9 @@ fn show_and_foreground_wallet_popup() -> bool {
   false
 }
 
-/// Target size for the wallet popup window — a compact sign-in card, not a
-/// full browser window. Must match the `--window-size` flag passed at spawn
-/// in `open_in_browser`.
 const WALLET_POPUP_WIDTH: i32 = 460;
 const WALLET_POPUP_HEIGHT: i32 = 720;
 
-/// Force the popup window to `WALLET_POPUP_WIDTH`x`WALLET_POPUP_HEIGHT`,
-/// keeping its current top-left position. `--window-size` on spawn is not
-/// enough on its own: this popup deliberately runs in the user's real Chrome
-/// profile (see `kill_wallet_popup`'s doc comment), and Chrome restores the
-/// *previous* app window's remembered bounds from that shared profile after
-/// creation, silently overriding the CLI flag — which is why a user dragging
-/// the window bigger once makes every future popup open oversized, forever,
-/// no matter what the spawn flag says. Same title/owning-process match as
-/// `kill_wallet_popup`.
 #[cfg(windows)]
 fn resize_wallet_popup_window(width: i32, height: i32) -> bool {
   use ::windows::core::BOOL;
@@ -1863,30 +1684,6 @@ fn resize_wallet_popup_window(_width: i32, _height: i32) -> bool {
   false
 }
 
-/// Enforces the popup's fixed size shortly after a fresh spawn. Two races to
-/// cover, not one:
-///  - The window doesn't exist the instant `Command::spawn` returns — Chrome
-///    forwards the `--app=` request over its single-instance IPC and the
-///    actual top-level window shows up some tens to hundreds of ms later.
-///  - The match is by *title* (`resize_wallet_popup_window`'s doc comment
-///    explains why PID matching isn't reliable here), and the title is only
-///    stamped once `wallet-ui`'s JS bundle finishes loading and evaluates
-///    `document.title = ...` (see App.tsx) — under load (e.g. two full game
-///    instances running at once, as with `just dev2`) that can take longer
-///    than a short poll window, so a watcher that gives up too early leaves
-///    the window at whichever size Chrome's shared profile happened to
-///    restore it to.
-/// Keeps reasserting for the whole window (not just until the first hit)
-/// since Chrome has also been observed to apply its own remembered bounds
-/// for that shared profile *after* creation, silently undoing a one-shot fix.
-/// Total time to keep polling for the popup window before giving up
-/// (`POLL_INTERVAL_MS` * `POLL_ATTEMPTS`). Was 8s (40*200ms), which is
-/// comfortable for a warm Chrome process but not for a genuinely cold start
-/// (first launch after reboot, machine under load, antivirus scanning the
-/// new process) — that's exactly the `gave up waiting for popup window to
-/// enforce its size` case, where the window shows up eventually just not
-/// within the old budget. 30s covers cold-start without leaving a runaway
-/// watcher: this task always exits once the loop ends regardless.
 const POPUP_WINDOW_POLL_INTERVAL_MS: u64 = 200;
 const POPUP_WINDOW_POLL_ATTEMPTS: u32 = 150;
 
@@ -1912,25 +1709,8 @@ fn spawn_wallet_popup_resize_watcher() {
   });
 }
 
-/// How long the bridge can go without a `/status` poll before it forgets the
-/// connected wallet. The game client polls every 5s while running (see
-/// `poll_wallet_bridge`) — this is a generous multiple of that, not a tight
-/// timeout, so a brief hitch never disconnects an active session.
 const WALLET_STATE_IDLE_CLEAR_SECS: u64 = 30;
 
-/// Background task, run for the app's lifetime: this bridge process outlives
-/// the game window on purpose (closing the game doesn't kill it, so a later
-/// launch can reconnect fast) — but with no expiry, that meant the connected
-/// wallet (pubkey + username + JWT) stayed cached here indefinitely, across
-/// every subsequent game launch, until someone manually killed the process.
-/// A player who closed the game, came back hours/days later, and connected a
-/// *different* wallet on the website would still see the old wallet's
-/// username in the game client, because it was never told anything changed —
-/// the two are entirely separate connections (see `post_wallet`'s doc
-/// comment). Clearing the cache once nothing has polled `/status` for
-/// `WALLET_STATE_IDLE_CLEAR_SECS` ties the cached identity to "a game is
-/// actually running and asking," which is the right lifetime for it, without
-/// needing to track the game process's PID directly.
 fn spawn_wallet_state_reaper(
   wallet_pubkey: WalletPubkey,
   wallet_username: WalletUsername,
@@ -1962,14 +1742,8 @@ fn spawn_wallet_state_reaper(
   });
 }
 
-/// How long a hidden popup can sit idle before it's actually killed, so a
-/// player who finishes their session doesn't leave a wallet-extension-
-/// capable Chrome window running invisibly in the background forever.
 const HIDDEN_POPUP_IDLE_KILL_SECS: u64 = 15 * 60;
 
-/// Background task, run for the app's lifetime: periodically checks whether
-/// the popup has been hidden (not killed, see `hide_wallet_popup`) for
-/// longer than `HIDDEN_POPUP_IDLE_KILL_SECS` and, if so, kills it for real.
 fn spawn_wallet_popup_idle_reaper() {
   tauri::async_runtime::spawn(async move {
     loop {
@@ -1989,8 +1763,6 @@ fn spawn_wallet_popup_idle_reaper() {
   });
 }
 
-/// Whether a process with this PID is still running. Used to decide whether
-/// a previously-spawned wallet popup can be refocused instead of duplicated.
 #[cfg(windows)]
 fn process_is_alive(pid: u32) -> bool {
   use ::windows::Win32::Foundation::CloseHandle;

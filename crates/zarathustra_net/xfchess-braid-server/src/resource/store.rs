@@ -1,5 +1,3 @@
-//! Versioned JSON document and append-log resource stores.
-
 use crate::resource::protocol::{BraidUpdate, Version};
 use json_patch::Patch;
 use parking_lot::RwLock;
@@ -8,13 +6,8 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::debug;
 
-/// Channel capacity: at most this many buffered updates per subscriber.
 const BROADCAST_CAPACITY: usize = 256;
 
-/// A versioned JSON document that accepts RFC 6902 patches.
-///
-/// Subscribers receive the current snapshot on connect then every subsequent
-/// patch as a [`BraidUpdate`].
 #[derive(Clone)]
 pub struct PatchedDoc {
     inner: Arc<RwLock<PatchedDocInner>>,
@@ -38,13 +31,11 @@ impl PatchedDoc {
         }
     }
 
-    /// Returns the current snapshot.
     pub fn snapshot(&self) -> (Value, Version) {
         let g = self.inner.read();
         (g.doc.clone(), g.version)
     }
 
-    /// Returns the current snapshot and a live update receiver.
     pub fn subscribe(&self) -> (BraidUpdate, broadcast::Receiver<BraidUpdate>) {
         let rx = self.tx.subscribe();
         let (doc, ver) = self.snapshot();
@@ -52,7 +43,6 @@ impl PatchedDoc {
         (snap, rx)
     }
 
-    /// Applies a JSON Patch and broadcasts the resulting update.
     pub fn apply(&self, patches: Patch) -> Result<BraidUpdate, json_patch::PatchError> {
         let mut g = self.inner.write();
         let parent = g.version;
@@ -67,7 +57,6 @@ impl PatchedDoc {
         Ok(update)
     }
 
-    /// Replaces the document and broadcasts a snapshot.
     pub fn replace(&self, new_doc: Value) -> BraidUpdate {
         let mut g = self.inner.write();
         let parent = g.version;
@@ -81,10 +70,6 @@ impl PatchedDoc {
     }
 }
 
-/// An append-only log of JSON values.
-///
-/// Subscribers receive all existing entries on connect, then each new entry
-/// as a [`BraidUpdate`].
 #[derive(Clone)]
 pub struct AppendLog {
     inner: Arc<RwLock<AppendLogInner>>,
@@ -108,13 +93,11 @@ impl AppendLog {
         }
     }
 
-    /// Returns all current entries.
     pub fn snapshot(&self) -> (Value, Version) {
         let g = self.inner.read();
         (Value::Array(g.entries.clone()), g.version)
     }
 
-    /// Returns the snapshot and a live receiver.
     pub fn subscribe(&self) -> (BraidUpdate, broadcast::Receiver<BraidUpdate>) {
         let rx = self.tx.subscribe();
         let (entries, ver) = self.snapshot();
@@ -122,7 +105,6 @@ impl AppendLog {
         (snap, rx)
     }
 
-    /// Appends an entry and broadcasts a single-element array patch.
     pub fn append(&self, entry: Value) -> BraidUpdate {
         let mut g = self.inner.write();
         g.entries.push(entry.clone());

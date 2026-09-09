@@ -1,10 +1,3 @@
-//! Gossip-backed Braid subscriptions.
-//!
-//! Maps resource URLs to iroh-gossip topics. When a peer PUTs an update,
-//! it gets broadcast to everyone subscribed to that URL's topic.
-//! This replaces Braid's traditional long-lived HTTP subscription responses
-//! with fully decentralized gossip.
-
 use braid_core::Update;
 use bytes::Bytes;
 use iroh::EndpointId;
@@ -16,34 +9,20 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
-/// A topic we've joined, plus when it was last used — lets the sweep in
-/// [`SubscriptionManager::new`] evict topics nobody has broadcast to or
-/// subscribed to in a long time, instead of holding every gossip session
-/// this node has ever touched for its whole lifetime.
 struct TopicEntry {
     sender: GossipSender,
     last_active: Instant,
 }
 
-/// Topics untouched for this long are dropped by the periodic sweep.
 const TOPIC_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const TOPIC_SWEEP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-/// Manages active gossip subscriptions keyed by resource URL.
-///
-/// Each URL gets a deterministic `TopicId` via blake3 hash, so any peer
-/// that knows the URL can join the correct topic without coordination.
 pub struct SubscriptionManager {
     gossip: Gossip,
-    /// Active topics: URL → sender handle + last-used time
     topics: Arc<Mutex<HashMap<String, TopicEntry>>>,
 }
 
 impl SubscriptionManager {
-    /// Wrap an existing gossip instance. Spawns a background sweep that
-    /// drops topics idle for longer than [`TOPIC_IDLE_TIMEOUT`] — otherwise
-    /// a long-running relay node accumulates one live gossip session per
-    /// resource URL it has ever seen, forever.
     pub fn new(gossip: Gossip) -> Self {
         let topics: Arc<Mutex<HashMap<String, TopicEntry>>> = Arc::new(Mutex::new(HashMap::new()));
 
@@ -69,8 +48,6 @@ impl SubscriptionManager {
         Self { gossip, topics }
     }
 
-    /// Normalize a URL for consistent topic lookup.
-    /// Ensures the URL starts with / and has no trailing /.
     pub fn normalize_url(url: &str) -> String {
         if url.starts_with('/') {
             url.trim_end_matches('/').to_string()
@@ -79,20 +56,12 @@ impl SubscriptionManager {
         }
     }
 
-    /// Derive a deterministic TopicId from a resource URL.
-    /// Any peer hashing the same URL gets the same topic.
-    /// Normalizes the URL to ensure consistency.
     pub fn topic_for_url(url: &str) -> TopicId {
         let normalized = Self::normalize_url(url);
         let hash = blake3::hash(normalized.as_bytes());
         TopicId::from_bytes(*hash.as_bytes())
     }
 
-    /// Subscribe to a resource URL. Joins the gossip topic and returns
-    /// a receiver stream of incoming gossip events.
-    ///
-    /// `bootstrap` should contain at least one known peer so the gossip
-    /// protocol can form the initial overlay.
     pub async fn subscribe(
         &self,
         url: &str,
@@ -115,23 +84,12 @@ impl SubscriptionManager {
         Ok((sender, receiver))
     }
 
-    /// Broadcast a Braid Update to all peers on a resource's gossip topic.
-    /// Serializes the update to JSON bytes before sending.
     pub async fn broadcast(&self, url: &str, update: &Update) -> anyhow::Result<()> {
         let normalized = Self::normalize_url(url);
         let bytes = serde_json::to_vec(update)?;
         self.broadcast_raw(&normalized, Bytes::from(bytes)).await
     }
 
-    /// Broadcast raw bytes to all peers on a resource's gossip topic.
-    /// This allows sending wrapped messages with metadata.
-    ///
-    /// Only holds the `topics` lock long enough to look up (or create) and
-    /// clone the sender — `GossipSender` is a cheap `Clone` over an mpsc
-    /// handle, so the actual `.broadcast().await` (which can block for an
-    /// unbounded time if the gossip actor is backed up) runs lock-free.
-    /// Otherwise a single slow topic would serialize broadcasts to every
-    /// other, unrelated topic behind this one lock.
     pub async fn broadcast_raw(&self, url: &str, data: Bytes) -> anyhow::Result<()> {
         let normalized = Self::normalize_url(url);
         let sender = {
@@ -180,14 +138,11 @@ impl SubscriptionManager {
         Ok(())
     }
 
-    /// Access the underlying gossip instance (e.g. for shutdown).
     #[allow(dead_code)]
     pub fn gossip(&self) -> &Gossip {
         &self.gossip
     }
 
-    /// Join additional peers to an existing topic.
-    /// This is useful for connecting to a peer after initial subscription.
     pub async fn join_peers(&self, url: &str, peers: Vec<EndpointId>) -> anyhow::Result<()> {
         let normalized = Self::normalize_url(url);
         let sender = {

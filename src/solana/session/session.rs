@@ -1,37 +1,22 @@
-//! Web-to-Native Session Bridge
-//!
-//! This module handles receiving session data from the web app via
-//! environment variables or temp files. The session allows the native
-//! game to sign transactions on behalf of the user's wallet using
-//! an ephemeral session keypair.
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
-/// Session data passed from web app to native game
 #[derive(Debug, Clone, Serialize, Deserialize, Resource)]
 pub struct GameSession {
-    /// The wallet public key that owns this session
     pub wallet_pubkey: Pubkey,
 
-    /// The session signer public key (ephemeral keypair)
     pub session_signer: Pubkey,
 
-    /// The session signer secret key (stored securely)
     #[serde(with = "serde_bytes")]
     pub session_signer_secret: Vec<u8>,
 
-    /// Session token PDA on-chain
     pub session_token_pda: Option<Pubkey>,
 
-    /// Session expiry timestamp (milliseconds)
     pub expires_at: i64,
 
-    /// Optional game ID to join
     pub game_id: Option<String>,
 
-    /// Role: 'host' or 'joiner'
     pub role: GameRole,
 }
 
@@ -51,7 +36,6 @@ impl std::fmt::Display for GameRole {
     }
 }
 
-/// Error type for session operations
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
     #[error("Session not found")]
@@ -68,7 +52,6 @@ pub enum SessionError {
 }
 
 impl GameSession {
-    /// Load session from environment or file
     pub fn load() -> Result<Self, SessionError> {
         // Try to load from environment variable first
         if let Ok(data) = std::env::var("XFCHESS_SESSION_DATA") {
@@ -89,7 +72,6 @@ impl GameSession {
         Err(SessionError::NotFound)
     }
 
-    /// Parse session from JSON string
     pub fn from_json(json: &str) -> Result<Self, SessionError> {
         let session: GameSession = serde_json::from_str(json)?;
 
@@ -102,7 +84,6 @@ impl GameSession {
         Ok(session)
     }
 
-    /// Find session file in temp directory
     fn find_temp_session() -> Result<Option<Self>, SessionError> {
         let temp_dir = std::env::temp_dir();
 
@@ -121,7 +102,6 @@ impl GameSession {
         Ok(None)
     }
 
-    /// Time remaining in seconds
     pub fn time_remaining(&self) -> i64 {
         let now = chrono::Utc::now().timestamp_millis();
         (self.expires_at - now) / 1000
@@ -132,20 +112,15 @@ impl GameSession {
     }
 }
 
-/// Resource to track session state in the game
 #[derive(Debug, Default, Resource)]
 pub struct SessionState {
-    /// Current active session
     pub session: Option<GameSession>,
 
-    /// Whether we're waiting for wallet signature (for joiners)
     pub awaiting_wallet_signature: bool,
 
-    /// Last error message
     pub last_error: Option<String>,
 }
 
-/// Plugin to handle session initialization
 pub struct SessionPlugin;
 
 impl Plugin for SessionPlugin {
@@ -155,7 +130,6 @@ impl Plugin for SessionPlugin {
     }
 }
 
-/// Initialize session at startup
 fn initialize_session(mut session_state: ResMut<SessionState>) {
     match GameSession::load() {
         Ok(session) => {

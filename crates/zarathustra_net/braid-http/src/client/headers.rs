@@ -1,34 +1,20 @@
-//! Braid-specific HTTP header handling.
-
 use crate::error::{BraidError, Result};
 use crate::protocol;
 use crate::types::Version;
 use http::header::{HeaderMap, HeaderValue};
 
-/// Braid-specific HTTP headers for requests and responses.
 #[derive(Clone, Debug, Default)]
 pub struct BraidHeaders {
-    /// Version identifier(s) from `Version` header
     pub version: Option<Vec<Version>>,
-    /// Parent version(s) from `Parents` header
     pub parents: Option<Vec<Version>>,
-    /// Current version(s) from `Current-Version` header
     pub current_version: Option<Vec<Version>>,
-    /// Subscribe header indicating subscription mode
     pub subscribe: bool,
-    /// Peer identifier from `Peer` header
     pub peer: Option<String>,
-    /// Heartbeat interval from `Heartbeats` header
     pub heartbeat: Option<String>,
-    /// Merge type from `Merge-Type` header
     pub merge_type: Option<String>,
-    /// Number of patches from `Patches` header
     pub patches_count: Option<usize>,
-    /// Content range from `Content-Range` header
     pub content_range: Option<String>,
-    /// Retry-After header for backoff guidance
     pub retry_after: Option<String>,
-    /// Additional non-Braid headers
     pub extra: std::collections::BTreeMap<String, String>,
 }
 
@@ -98,7 +84,6 @@ impl BraidHeaders {
         self
     }
 
-    /// Convert to HTTP HeaderMap.
     pub fn to_header_map(&self) -> Result<HeaderMap> {
         let mut headers = HeaderMap::new();
 
@@ -173,7 +158,6 @@ impl BraidHeaders {
         Ok(headers)
     }
 
-    /// Parse from HTTP HeaderMap.
     pub fn from_header_map(headers: &HeaderMap) -> Result<Self> {
         let mut braid_headers = BraidHeaders::new();
         for (name, value) in headers.iter() {
@@ -226,7 +210,6 @@ impl BraidHeaders {
     }
 }
 
-/// Utility for parsing Braid protocol headers.
 pub struct HeaderParser;
 
 impl HeaderParser {

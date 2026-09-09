@@ -13,13 +13,7 @@ pub struct ComplianceState {
     pub error_msg: Option<String>,
     pub status: SubmissionStatus,
     pub pubkey: Option<String>,
-    /// GDPR consent checkbox — the backend rejects `/identity/register`
-    /// outright (`400 GDPR consent is required`) without this being `true`.
     pub consent_kyc: bool,
-    /// In-flight submission result, polled by `poll_compliance_submission`.
-    /// `Ok(())` = the backend accepted the registration; `Err` carries either
-    /// a network failure or the backend's rejection reason (verbatim HTTP
-    /// status/body) so a real failure is visible instead of assumed away.
     tx_rx: Option<tokio::sync::oneshot::Receiver<Result<(), String>>>,
 }
 
@@ -62,11 +56,6 @@ impl Plugin for CompliancePlugin {
     }
 }
 
-/// Drains the in-flight submission's result, if any landed this frame.
-/// Separated from `draw_compliance_modal` (rather than polled inline) so the
-/// UI closure below only ever reads a already-resolved `SubmissionStatus`,
-/// matching the `lobby.tx_rx` poll-then-draw pattern already used for
-/// `create_game`/`join_game` elsewhere in this codebase.
 fn poll_compliance_submission(mut state: ResMut<ComplianceState>) {
     let Some(rx) = state.tx_rx.as_mut() else {
         return;
@@ -226,18 +215,6 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
         });
 }
 
-/// Signs `register_identity:{pubkey}:{timestamp}` with the connected wallet
-/// and POSTs the full registration payload to `/identity/register`,
-/// threading the real result back through `state.tx_rx`.
-///
-/// Replaces what used to be here: a hardcoded placeholder signature
-/// (`sig.verify` on the backend fails on that unconditionally → 401), no
-/// `consent_kyc` field at all (→ 400 "GDPR consent is required" even before
-/// the signature is checked), a fire-and-forget request whose result was
-/// never read, and `state.status` set to `Success` synchronously — before
-/// the request had even been sent, let alone answered. The visible symptom
-/// was "Verification complete!" on every submission regardless of what the
-/// backend actually did with it — see the CARF/KYC audit this fixes.
 fn submit_identity(state: &mut ComplianceState) {
     let pubkey = state
         .pubkey

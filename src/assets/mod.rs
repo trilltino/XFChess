@@ -1,43 +1,22 @@
-//! Asset management module
-//!
-//! Handles preloading and tracking of all game assets including:
-//! - Chess piece GLTF models
-//! - Board materials and textures
-//! - UI fonts and images
-//! - Sound effects (future)
-//!
-//! Provides a centralized resource for asset handles and loading progress.
-
 use bevy::asset::AssetLoadFailedEvent;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 
-/// Resource storing handles to all preloaded assets
-///
-/// This ensures assets stay loaded in memory and provides
-/// quick access without repeated AssetServer queries.
 #[derive(Resource, Default)]
 pub struct GameAssets {
-    /// Chess pieces GLTF file
     pub pieces_gltf: Handle<Gltf>,
 
-    /// Individual piece mesh handles (loaded from GLTF)
     pub piece_meshes: PieceMeshes,
 
-    /// Whether all assets have finished loading
     pub loaded: bool,
 
-    /// Whether asset loading has been started
     pub loading_started: bool,
 
-    /// Whether asset loading has failed
     pub failed: bool,
 
-    /// Error message if asset loading failed
     pub error_message: Option<String>,
 }
 
-/// Handles to individual piece meshes
 #[derive(Default)]
 pub struct PieceMeshes {
     pub king: Option<Handle<Mesh>>,
@@ -48,25 +27,18 @@ pub struct PieceMeshes {
     pub pawn: Option<Handle<Mesh>>,
 }
 
-/// Resource tracking asset loading progress (0.0 to 1.0)
 #[derive(Resource, Default)]
 pub struct LoadingProgress {
-    /// Current loading progress (0.0 = none, 1.0 = complete)
     pub progress: f32,
 
-    /// Total number of assets to load
     pub total_assets: usize,
 
-    /// Number of assets loaded so far
     pub loaded_assets: usize,
 
-    /// Whether loading is complete
     pub complete: bool,
 
-    /// Whether loading has failed
     pub failed: bool,
 
-    /// Error message if loading failed
     pub error_message: Option<String>,
 }
 
@@ -99,10 +71,6 @@ impl LoadingProgress {
     }
 }
 
-/// System to initiate asset loading
-///
-/// Called when entering MainMenu state. Starts loading all
-/// assets and initializes the progress tracker.
 pub fn start_asset_loading(
     mut game_assets: ResMut<GameAssets>,
     mut progress: ResMut<LoadingProgress>,
@@ -126,12 +94,8 @@ pub fn start_asset_loading(
     *progress = LoadingProgress::new(1);
 }
 
-/// Resource to track asset loading start time for timeout detection
-/// Note: This struct is kept for backward compatibility but the actual
-/// timeout tracking now uses Bevy's Time resource for WASM compatibility.
 #[derive(Resource, Default)]
 pub struct AssetLoadingTimer {
-    /// Start time in Bevy elapsed seconds (WASM-compatible)
     start_elapsed_secs: Option<f32>,
 }
 
@@ -146,11 +110,6 @@ impl AssetLoadingTimer {
     }
 }
 
-/// System to check asset loading status
-///
-/// Polls the AssetServer to determine when assets are fully loaded.
-/// Updates LoadingProgress resource accordingly.
-/// Also checks for timeout and load state to detect failures.
 pub fn check_asset_loading(
     mut game_assets: ResMut<GameAssets>,
     mut progress: ResMut<LoadingProgress>,
@@ -222,10 +181,6 @@ pub fn check_asset_loading(
     }
 }
 
-/// System to handle asset loading failures via events (backup method)
-///
-/// Listens to AssetLoadFailedEvent as a backup to load state checking.
-/// This provides additional error information if available.
 pub fn handle_asset_loading_errors(
     mut game_assets: ResMut<GameAssets>,
     mut progress: ResMut<LoadingProgress>,
@@ -253,9 +208,6 @@ pub fn handle_asset_loading_errors(
     }
 }
 
-/// System to handle generic asset loading failures (for untyped assets)
-///
-/// Listens to UntypedAssetLoadFailedEvent as a backup method to catch failures.
 pub fn handle_untyped_asset_loading_errors(
     mut game_assets: ResMut<GameAssets>,
     mut progress: ResMut<LoadingProgress>,

@@ -1,14 +1,3 @@
-//! Matchmaking queue and matching system for XFChess.
-//!
-//! Provides an in-memory matchmaking queue that matches players by ELO
-//! rating. Players join with a wallet signature and are periodically
-//! matched against opponents with similar ratings. ELO ratings are
-//! fetched from on-chain `PlayerProfile` accounts via the ELO cache.
-//!
-//! Submodules:
-//! - [`state`] — data types and [`SharedMatchmakingState`]
-//! - [`handlers`] — `/join`, `/status/{pubkey}`, `/leave` HTTP handlers
-
 use axum::{
     routing::{get, post},
     Router,
@@ -24,11 +13,6 @@ pub mod state;
 pub use handlers::{join, leave, status, JoinRequest, LeaveRequest};
 pub use state::{MatchResult, MatchmakingTicket, SharedMatchmakingState};
 
-/// Creates the matchmaking routes router.
-///
-/// # Returns
-/// An Axum Router with matchmaking endpoints.
-/// State is provided by the parent router's `.with_state(AppState)`.
 pub fn matchmaking_routes() -> Router<crate::signing::AppState> {
     Router::new()
         .route("/join", post(join))

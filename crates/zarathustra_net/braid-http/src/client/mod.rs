@@ -1,5 +1,3 @@
-//! Braid HTTP client implementation.
-
 mod channel;
 mod config;
 mod fetch;

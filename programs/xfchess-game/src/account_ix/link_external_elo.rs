@@ -1,16 +1,8 @@
-//! Instruction for linking a verified Lichess account to a player profile.
-//!
-//! The backend verifies ownership via bio-nonce, then signs this instruction
-//! with the `link_authority` keypair to write the attestation on-chain.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-/// Writes a verified Lichess rating attestation onto a player's profile.
-/// Only the configured `link_authority` (VPS backend signer) may call this —
-/// players cannot self-report ratings.
 #[derive(Accounts)]
 #[instruction(
     username: String,
@@ -26,14 +18,8 @@ pub struct LinkExternalElo<'info> {
     )]
     pub player_profile: Account<'info, PlayerProfile>,
 
-    /// CHECK: We just need their pubkey to form the seed and verify authority.
     pub player: AccountInfo<'info>,
 
-    /// Claims (or verifies existing ownership of) this Lichess username's
-    /// uniqueness lock — see `LichessUsernameRecord`'s own doc comment for
-    /// why this exists. `init_if_needed` because the first link for a given
-    /// Lichess username creates the record; a re-sync of an already-linked
-    /// account reuses the same one.
     #[account(
         init_if_needed,
         payer = link_authority,
@@ -43,8 +29,6 @@ pub struct LinkExternalElo<'info> {
     )]
     pub lichess_username_record: Account<'info, LichessUsernameRecord>,
 
-    /// CHECK: The external-elo linking authority (VPS backend signer).
-    /// `mut` because it pays for `lichess_username_record` on first link.
     #[account(
         mut,
         signer,
@@ -55,9 +39,6 @@ pub struct LinkExternalElo<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Records the Lichess username and blitz/rapid/bullet ratings (converted to
-/// centiscale) on the caller's profile. On the first link only, also seeds
-/// `elo_rating` from the external rating (rapid, unless blitz is 500+ higher).
 pub fn handler(
     ctx: Context<LinkExternalElo>,
     username: String,

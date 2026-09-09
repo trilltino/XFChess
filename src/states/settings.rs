@@ -1,17 +1,8 @@
-//! Settings menu plugin
-//!
-//! Allows players to configure:
-//! - AI difficulty
-//! - Graphics quality
-//! - Board theme
-//! - Game preferences
-
 use crate::core::{GameSettings, GameState, GraphicsQuality, PreviousState};
 use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 
-/// Plugin for settings menu state
 pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
@@ -28,7 +19,6 @@ impl Plugin for SettingsPlugin {
     }
 }
 
-/// Wrapper for settings_ui that handles Result
 fn settings_ui_wrapper(
     contexts: EguiContexts,
     next_state: ResMut<NextState<GameState>>,
@@ -43,13 +33,9 @@ fn settings_ui_wrapper(
     }
 }
 
-/// Marker component for settings camera
 #[derive(Component)]
 struct SettingsCamera;
 
-/// Setup camera for settings screen
-/// Uses the persistent Egui camera and updates its transform
-/// Handles case where camera might not exist yet
 fn setup_settings_camera(
     persistent_camera: Res<crate::PersistentEguiCamera>,
     mut camera_query: Query<
@@ -97,7 +83,6 @@ fn setup_settings_camera(
     info!("[SETTINGS] Camera setup complete");
 }
 
-/// Settings menu UI
 fn settings_ui(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
@@ -179,7 +164,6 @@ fn settings_ui(
     Ok(())
 }
 
-/// Handle escape key to return to previous state
 fn handle_settings_escape(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut next_state: ResMut<NextState<GameState>>,

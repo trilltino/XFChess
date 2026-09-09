@@ -1,16 +1,9 @@
-//! Background notification poller for the XFChess Tauri app.
-//!
-//! Uses a dedicated OS thread with its own single-threaded Tokio runtime so
-//! it can be started from the Tauri `setup` closure before Tauri's async
-//! runtime handle is fully initialised.
-
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 use tracing::{error, info};
 
-/// State tracking for deduplication — only notify once per event.
 #[derive(Default, Clone)]
 pub struct NotificationState {
   pub last_tournament_id: Option<String>,
@@ -18,12 +11,6 @@ pub struct NotificationState {
   pub last_game_invite: Option<String>,
 }
 
-/// Starts the background poller on a dedicated thread with its own runtime.
-///
-/// `wallet_pubkey` is the *live* shared wallet state (not a one-time
-/// snapshot) — the app always starts disconnected, so reading it once at
-/// startup would mean the poller silently never runs for the whole session.
-/// Safe to call from the Tauri `setup` closure.
 pub fn start_poller(
   app: AppHandle,
   backend_url: String,

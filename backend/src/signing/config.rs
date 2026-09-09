@@ -1,119 +1,41 @@
-//! Configuration module for the XFChess signing service.
-//!
-//! This module loads configuration from environment variables for RPC endpoints,
-//! program IDs, JWT secrets, and fee-payer keys.
-
 use solana_sdk::pubkey::Pubkey;
 use std::env;
 use std::str::FromStr;
 
-/// Configuration structure for the signing service.
-///
-/// All fields are loaded from environment variables with sensible defaults
-/// for development environments.
 #[derive(Clone)]
 pub struct SigningConfig {
-    /// Port number for the HTTP server (default: 8090)
     pub port: u16,
-    /// Solana RPC URL for mainnet/devnet (default: devnet)
     pub solana_rpc_url: String,
-    /// Optional dedicated mainnet RPC URL, for reads that are independent of the
-    /// game program (which is devnet-only): price feeds, USDC balance checks for
-    /// the fiat onramp, ad hoc lookups. `None` when unset — callers should fall
-    /// back to a public mainnet endpoint or skip the mainnet-only feature.
     pub solana_mainnet_rpc_url: Option<String>,
-    /// MagicBlock Execution Rollup RPC URL (default: devnet EU endpoint)
     pub er_rpc_url: String,
-    /// Magic Router RPC URL — MagicBlock's generic per-transaction router
-    /// (default: devnet router endpoint). Used for ER writes (record_move,
-    /// undelegate); base writes use `solana_rpc_url`.
     pub magic_router_rpc_url: String,
-    /// XFChess program ID on Solana
     pub program_id: String,
-    /// Secret key for JWT token signing
     pub jwt_secret: String,
-    /// 32-byte hex string for identity encryption (AES-256-GCM)
     pub identity_encryption_key: String,
-    /// 32-byte hex string for identity blind index salt
     pub identity_salt: String,
-    /// Comma-separated base58 fee-payer private keys for transaction fees
     pub fee_payer_keys: Vec<String>,
-    /// Base58 encoded VPS authority private key
     pub vps_authority_key: Option<String>,
-    /// Base58 encoded KYC authority private key
     pub kyc_authority_key: Option<String>,
-    /// Base58 encoded external-elo linking authority private key
     pub link_authority_key: Option<String>,
-    /// Public key of the treasury-withdrawal authority — NOT a secret; the
-    /// private key is deliberately never loaded by this process. Must match
-    /// `treasury_authority::ID` in the on-chain program. `withdraw_treasury`
-    /// signing happens exclusively via the standalone `treasury_signer`
-    /// binary, run by an operator on a separate, minimally-networked host —
-    /// see that binary's module doc for why. Defaults to the deployed
-    /// devnet/mainnet treasury authority's pubkey; override with
-    /// `TREASURY_AUTHORITY_PUBKEY` only for a different deployment.
     pub treasury_authority_pubkey: String,
-    /// Admin token for protected endpoints (POST /admin/dispute/resolve, etc.)
     pub admin_token: Option<String>,
-    /// Tournament entry-fee recipient pubkey — a *different* address from
-    /// `treasury_authority_pubkey` above (that one is the withdraw-authority
-    /// signer; this one just receives entry fees directly). Deliberately
-    /// distinctly named to avoid the two being conflated — see
-    /// docs/plans/identity-implementation-plan.md.
     pub tournament_fee_recipient: String,
-    /// USDC mint address (devnet or mainnet)
     pub usdc_mint_pubkey: String,
-    /// Lichess OAuth client ID (from lichess.org/account/oauth/app)
     pub lichess_client_id: String,
-    /// Comma-separated list of allowed CORS origins (e.g.
-    /// `https://xfchess.com,https://www.xfchess.com`). Empty outside
-    /// production means "allow any origin" (dev convenience) — see
-    /// `infrastructure::router::cors_layer`. Must be non-empty in production;
-    /// enforced by [`Self::validate`].
     pub allowed_origins: Vec<String>,
 }
 
 impl SigningConfig {
-    /// True when `solana_rpc_url` points at a devnet cluster. Used to bypass
-    /// the profile/KYC/CACF wager-eligibility gate for test SOL — mainnet
-    /// stays fully gated regardless of this flag.
     pub fn is_devnet(&self) -> bool {
         self.solana_rpc_url.contains("devnet")
     }
 
-    /// True when `APP_ENV=production`. Gates whether missing/invalid secrets
-    /// (authority keys, JWT secret, CORS origins, ...) are a hard startup
-    /// failure or a warn-and-continue dev convenience — see [`Self::validate`].
     pub fn is_production(&self) -> bool {
         env::var("APP_ENV")
             .map(|v| v.eq_ignore_ascii_case("production"))
             .unwrap_or(false)
     }
 
-    /// Loads configuration from environment variables.
-    ///
-    /// # Environment Variables
-    /// - `SIGNING_PORT` - Server port (default: 8090)
-    /// - `SOLANA_RPC_URL` - Solana RPC endpoint (default: devnet)
-    /// - `SOLANA_MAINNET_RPC_URL` - Optional dedicated mainnet RPC endpoint (default: unset)
-    /// - `ER_RPC_URL` - MagicBlock ER endpoint (default: devnet EU)
-    /// - `PROGRAM_ID` - XFChess program ID
-    /// - `JWT_SECRET` - JWT signing secret
-    /// - `IDENTITY_ENCRYPTION_KEY` - 64-char hex for AES-256
-    /// - `IDENTITY_SALT` - 64-char hex for blind index
-    /// - `FEE_PAYER_KEYS` - Comma-separated base58 keys or file paths
-    /// - `VPS_AUTHORITY_KEY` - Base58 VPS authority key
-    /// - `KYC_AUTHORITY_KEY` - Base58 KYC authority key
-    /// - `LINK_AUTHORITY_KEY` - Base58 external-elo linking authority key
-    /// - `TREASURY_AUTHORITY_PUBKEY` - Public key only (never the secret —
-    ///   see `treasury_signer` bin); defaults to the deployed treasury pubkey
-    /// - `TOURNAMENT_FEE_RECIPIENT` - Host treasury pubkey for entry fees
-    /// - `USDC_MINT` - USDC mint address (devnet or mainnet)
-    /// - `LICHESS_CLIENT_ID` - Lichess OAuth client ID
-    /// - `ALLOWED_ORIGINS` - Comma-separated CORS allow-list (required in production)
-    ///
-    /// # Returns
-    /// A fully configured `SigningConfig` struct
     pub fn from_env() -> Self {
         Self {
             port: env::var("SIGNING_PORT")
@@ -167,13 +89,6 @@ impl SigningConfig {
         }
     }
 
-    /// Validate config at startup so bad/placeholder secrets fail loudly instead of
-    /// silently running an insecure production server.
-    ///
-    /// Behaviour depends on `APP_ENV`:
-    /// - `APP_ENV=production` → any problem is a hard **error** (caller should exit).
-    /// - otherwise (dev/local) → problems are **warnings** so `just backend` still runs
-    ///   with the throwaway placeholders from the justfile.
     pub fn validate(&self) -> Result<(), String> {
         let prod = self.is_production();
 
@@ -279,8 +194,6 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// Serialises the tests below — they all mutate the process-global
-    /// `APP_ENV` var, same reasoning as `RELAY_TEST_LOCK` in `tests/e2e_api.rs`.
     static APP_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn base_config() -> SigningConfig {

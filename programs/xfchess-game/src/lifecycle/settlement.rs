@@ -1,5 +1,3 @@
-//! Base-layer settlement for finished, undelegated games.
-
 use crate::common::escrow;
 use crate::constants::*;
 use crate::elo::glicko2::calculate_elo_update;
@@ -10,11 +8,6 @@ use crate::lifecycle::guards;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-/// The canonical settlement path for a `Finished`, undelegated game (ADR-0003):
-/// pays the wager pot out of escrow in order (tx-fee reimbursement, platform
-/// fee, country fee, per-player ELO-linking fee, then the result payout to
-/// winner or split on draw), moves the game to `Settled`, and updates both
-/// players' profile stats via `update_profiles`.
 pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
     let (result, wager_amount, game_white, wager_token, match_type, country_fee, fees_advanced) = {
         let game = &mut ctx.accounts.game;
@@ -160,9 +153,6 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
     update_profiles(ctx, result, game_white, wager_amount, match_type)
 }
 
-/// Finalizes a cancelled game by refunding each joined player's original SOL
-/// wager and closing the game account. No treasury reimbursement, ELO, or
-/// win/loss stats are applied because no game result exists.
 pub fn settle_cancelled_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
     {
         let game = &ctx.accounts.game;
@@ -351,11 +341,6 @@ fn update_profiles(
     Ok(())
 }
 
-/// Splits a draw's remaining escrow pot between both players without
-/// dropping a lamport: `remaining / 2` alone loses the odd lamport when
-/// `remaining` is odd, leaving it stranded in escrow below the rent-exempt
-/// minimum — which the runtime unconditionally rejects, blocking
-/// `finalize_game` forever for that game.
 fn split_draw_remaining(remaining: u64) -> (u64, u64) {
     let white_share = remaining / 2;
     let black_share = remaining - white_share;

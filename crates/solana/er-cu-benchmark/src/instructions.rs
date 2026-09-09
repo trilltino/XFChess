@@ -1,5 +1,3 @@
-//! Raw Anchor instruction builders for XFChess benchmark tests.
-
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use solana_sdk::{
@@ -20,16 +18,8 @@ const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
-/// MagicBlock delegation program ID (same one `delegate_game_ix` parses inline).
 const DELEGATION_PROGRAM_ID: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
 
-/// Parses `Game.fees_advanced` directly off raw account bytes fetched from
-/// either the base layer or the ER (the field means the same thing in both
-/// places — it's only reimbursed from the pot at `finalize_game` on the base
-/// layer). Mirrors the offset walk in
-/// `backend/src/signing/routes/main.rs::read_game_fee_breakdown` and
-/// `tasks::settlement_worker::parse_game_account` — keep all three in sync if
-/// `Game`'s field order ever changes. Returns `None` on unexpected layout.
 pub fn parse_game_fees_advanced(data: &[u8]) -> Option<u64> {
     let mut o = 8usize; // discriminator
     o += 8; // game_id
@@ -49,11 +39,6 @@ fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
     disc
 }
 
-/// Number of `TournamentPlayersShard` PDAs that actually exist for a
-/// tournament size — must mirror `initialize_shards.rs`'s three tiers
-/// (`initialize_shards_small`/`_medium`/`initialize_tournament_shards`).
-/// Ported from `src/solana/program_interface/instructions.rs::required_shards`
-/// (this crate can't depend on the game client).
 pub fn required_shards(max_players: u16) -> u8 {
     match max_players {
         0..=64 => 1,
@@ -62,12 +47,6 @@ pub fn required_shards(max_players: u16) -> u8 {
     }
 }
 
-/// AccountMeta for a `TournamentPlayersShard` slot: the real PDA when the
-/// shard actually exists for this tournament size, otherwise the program ID
-/// — Anchor's convention for a client-supplied `None` in an
-/// `Option<Account<'info, T>>` slot (passing the *real but uninitialized* PDA
-/// there instead fails with `AccountNotInitialized`/constraint errors, since
-/// Anchor tries to deserialize it as `Some`).
 fn shard_meta(program_id: &Pubkey, tournament_id: u64, idx: u8, max_players: u16) -> AccountMeta {
     if idx < required_shards(max_players) {
         let pda = Pubkey::find_program_address(
@@ -511,10 +490,6 @@ pub fn cancel_time_check_ix(
 // (ER-unavailability recovery drill — see recovery_drill.rs)
 // ---------------------------------------------------------------------------
 
-/// Starts the delegation program's ~60min no-validator-cooperation-needed
-/// undelegation countdown. `payer` must be the same key that funded the
-/// original `delegate_game` call for this game (checked against
-/// `delegation_metadata.rent_payer` on-chain).
 pub fn request_force_undelegate_ix(
     program_id: Pubkey,
     game_id: u64,
@@ -559,11 +534,6 @@ pub fn request_force_undelegate_ix(
     })
 }
 
-/// Completes a forced undelegation once `request_force_undelegate_ix`'s
-/// ~60min window has elapsed. **Data-loss warning:** wipes the `Game` PDA to
-/// zero bytes (delegation program's own design, not a bug) — follow up with
-/// `recover_stuck_delegation_ix` to release the escrow. `payer` must be the
-/// same key passed to `request_force_undelegate_ix`.
 pub fn force_undelegate_after_timeout_ix(
     program_id: Pubkey,
     game_id: u64,
@@ -617,9 +587,6 @@ pub fn force_undelegate_after_timeout_ix(
     })
 }
 
-/// Releases wager escrow (50/50 split) from a `Game` PDA that
-/// `force_undelegate_after_timeout_ix` wiped to zero bytes. `dispute_authority`
-/// must sign — same key `resolve_dispute`/`claim_stale_dispute` trust.
 pub fn recover_stuck_delegation_ix(
     program_id: Pubkey,
     game_id: u64,
@@ -654,16 +621,11 @@ pub fn recover_stuck_delegation_ix(
 // ---------------------------------------------------------------------------
 // initialize_tournament
 // ---------------------------------------------------------------------------
-/// TournamentType enum discriminants (state/tournament.rs's
-/// `TournamentType::Swiss { rounds: u8 }` / `TournamentType::SingleElimination`).
 const TOURNAMENT_TYPE_SWISS: u8 = 0;
 const TOURNAMENT_TYPE_SINGLE_ELIMINATION: u8 = 1;
 
-/// Wrapped SOL mint — used as a placeholder "USDC" mint for benchmarks.
 const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111111112";
 
-/// `Some(rounds)` builds a Swiss tournament; `None` builds single-elimination
-/// (which has no `rounds` field — the bracket size determines round count).
 pub fn initialize_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -779,7 +741,6 @@ fn shard_pda(program_id: &Pubkey, tournament_id: u64, idx: u8) -> Pubkey {
     .0
 }
 
-/// Small tier: ≤64 players, 1 shard.
 pub fn initialize_shards_small_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -806,7 +767,6 @@ pub fn initialize_shards_small_ix(
     })
 }
 
-/// Medium tier: 65-128 players, 2 shards.
 pub fn initialize_shards_medium_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -834,7 +794,6 @@ pub fn initialize_shards_medium_ix(
     })
 }
 
-/// Large tier: exactly 256 players, 4 shards.
 pub fn initialize_tournament_shards_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -866,9 +825,6 @@ pub fn initialize_tournament_shards_ix(
     })
 }
 
-/// Picks the right shard-init instruction for `max_players` — small (≤64),
-/// medium (65-128), or large (exactly 256). Callers no longer need to know
-/// about the tiering themselves.
 pub fn initialize_shards_for_size_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -919,11 +875,6 @@ pub fn initialize_tournament_escrow_ix(
 // ---------------------------------------------------------------------------
 // register_player
 // ---------------------------------------------------------------------------
-/// `max_players` determines which shards actually exist (see
-/// `required_shards`) — shards beyond that are passed as the program-ID
-/// `None` sentinel via `shard_meta`, matching `RegisterPlayer`'s
-/// `Option<Box<Account<...>>>` fields for shards 1-3
-/// (tournament_ix/registration/register.rs:50-70).
 pub fn register_player_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -977,11 +928,6 @@ pub fn register_player_ix(
 // ---------------------------------------------------------------------------
 // start_tournament
 // ---------------------------------------------------------------------------
-/// `max_players` determines which shards actually exist (see
-/// `required_shards`) — shards beyond that are passed as the program-ID
-/// `None` sentinel via `shard_meta`, matching `StartTournament`'s
-/// `Option<Account<...>>` fields for shards 1-3
-/// (tournament_ix/lifecycle/start.rs:27-48).
 pub fn start_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -1075,11 +1021,6 @@ pub fn record_match_result_ix(
 // ---------------------------------------------------------------------------
 // authorize_tournament_session
 // ---------------------------------------------------------------------------
-/// `max_players` determines which shards actually exist (see
-/// `required_shards`) — shards beyond that are passed as the program-ID
-/// `None` sentinel via `shard_meta`, matching
-/// `AuthorizeTournamentSessionCtx`'s `Option<Account<...>>` fields for
-/// shards 1-3.
 #[allow(clippy::too_many_arguments)]
 pub fn authorize_tournament_session_ix(
     program_id: Pubkey,
@@ -1208,8 +1149,6 @@ pub fn session_create_game_ix(
 // ---------------------------------------------------------------------------
 // session_join_game
 // ---------------------------------------------------------------------------
-/// `max_players` determines which shards actually exist — see
-/// `session_create_game_ix`'s identical note.
 pub fn session_join_game_ix(
     program_id: Pubkey,
     tournament_id: u64,
@@ -1271,10 +1210,6 @@ pub fn session_join_game_ix(
 // ---------------------------------------------------------------------------
 // record_swiss_result
 // ---------------------------------------------------------------------------
-/// `max_players` determines which shards actually exist (see
-/// `required_shards`) — shards beyond that are passed as the program-ID
-/// `None` sentinel via `shard_meta`, matching `RecordSwissResult`'s
-/// `Option<Account<'info, TournamentPlayersShard>>` fields for shards 1-3.
 pub fn record_swiss_result_ix(
     program_id: Pubkey,
     tournament_id: u64,
@@ -1612,13 +1547,6 @@ pub fn advance_winner_ix(
     })
 }
 
-/// Computes a match's (round, next_match_for_winner, next_match_slot) in the
-/// linear single-elimination bracket layout used on-chain: round-1 matches
-/// occupy indices `0..max_players/2`, each later round follows, and the final
-/// is always the last index. Ported from
-/// `src/solana/program_interface/instructions.rs` (used by the game client's
-/// own tournament e2e driver) since this benchmark crate has no dependency on
-/// the game client.
 pub fn bracket_position(max_players: u16, match_index: u16) -> (u8, Option<u16>, u8) {
     let total_matches = max_players.saturating_sub(1);
     let mut round_start = 0u16;

@@ -1,39 +1,14 @@
-//! The server's update type, and its bridge onto the Braid wire.
-//!
-//! [`BraidUpdate`] is the *domain* type: a monotonic `u64` version, its parents,
-//! and a JSON body. Turning it into bytes is not this module's job — that belongs
-//! to [`braid_http::protocol::formatter`], the single emitter shared with the
-//! client's parser.
-//!
-//! # Why the framing moved
-//!
-//! This module used to emit its own `multipart/mixed` framing with a
-//! `--xfchess-braid` boundary. That is not Braid: the protocol has no multipart
-//! boundaries. It went unnoticed because this workspace's own client skips header
-//! lines containing no colon, so it silently discarded the boundary markers and
-//! parsed the rest. The cost was that no braid.org tool — `view.braid.org`, the
-//! browser extension, the JavaScript client — could read our streams; and the
-//! old heartbeat (a complete empty *message* rather than a bare CRLF) decoded
-//! into a versionless update that logged two warnings every 20 seconds per
-//! subscriber.
-
 use braid_http::protocol::formatter;
 use braid_http::types::{Update, Version as WireVersion};
 use serde::{Deserialize, Serialize};
 
-/// A monotonic sequence counter used as the resource version.
 pub type Version = u64;
 
-/// A single streamed update — either an initial snapshot or a delta patch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BraidUpdate {
-    /// This update's version.
     pub version: Version,
-    /// Parent versions this update causally follows.
     pub parents: Vec<Version>,
-    /// JSON body.  Full document for snapshots; JSON-Patch array for deltas.
     pub body: serde_json::Value,
-    /// `true` when `body` is a full snapshot, `false` when it is a JSON-Patch.
     pub is_snapshot: bool,
 }
 
@@ -58,15 +33,6 @@ impl BraidUpdate {
 }
 
 impl From<&BraidUpdate> for Update {
-    /// Map the server's `u64` version domain onto the protocol's opaque
-    /// [`WireVersion`].
-    ///
-    /// Both snapshots and JSON-Patch deltas travel as a JSON *body*, not as Braid
-    /// `Patches`. A Braid patch carries a `Content-Range` addressing a region of
-    /// the resource; an RFC 6902 patch document is a self-contained JSON value
-    /// that happens to describe a change. Sending it as a body keeps every chunk
-    /// decodable by a client that reads bodies as JSON — which is exactly what
-    /// `braid_chess::ChessSubscriber` does.
     fn from(update: &BraidUpdate) -> Self {
         let body = serde_json::to_string(&update.body).unwrap_or_else(|_| "null".to_string());
 
@@ -93,9 +59,6 @@ impl From<&BraidUpdate> for Update {
     }
 }
 
-/// Serialize one update onto the wire.
-///
-/// See [`formatter`](braid_http::protocol::formatter) for the exact byte layout.
 pub fn format_chunk(update: &BraidUpdate) -> bytes::Bytes {
     formatter::format_update(&Update::from(update)).unwrap_or_else(|e| {
         // `format_update` only fails while serializing patches, and this
@@ -105,26 +68,10 @@ pub fn format_chunk(update: &BraidUpdate) -> bytes::Bytes {
     })
 }
 
-/// The keep-alive bytes for an idle subscription: a bare CRLF, which a
-/// conformant parser absorbs without producing an update.
 pub fn format_heartbeat() -> bytes::Bytes {
     formatter::format_heartbeat()
 }
 
-/// Encode one update for a gossip transport, tagged with its resource path.
-///
-/// # Why this is not [`format_chunk`]
-///
-/// The `209` framing that `format_chunk` emits carries no resource identity —
-/// over HTTP the request line already said which resource this is. Gossip has
-/// no request: a peer receives bytes on a topic that may carry updates for
-/// several resources, so the path has to travel *with* the update. [`Update`]
-/// has a `url` field for exactly this, and it survives a JSON round-trip,
-/// which the header framing does not.
-///
-/// This is the same convention `braid_iroh::SubscriptionManager::broadcast`
-/// already uses (a JSON-serialized [`Update`]) — the only addition is that
-/// `url` is populated, so a receiver can tell standings from pairings.
 pub fn encode_for_gossip(path: &str, update: &BraidUpdate) -> Option<Vec<u8>> {
     let mut wire = Update::from(update);
     wire.url = Some(path.to_string());

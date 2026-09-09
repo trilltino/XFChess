@@ -1,8 +1,3 @@
-//! Camera Director — automated camera moves for chess-shorts cinematics.
-//!
-//! On blunder/brilliant/checkmate events the director smoothly zooms the
-//! camera toward the destination square and then returns it to the overview.
-
 use crate::core::GameMode;
 use crate::game::replay_shorts::{BlunderFlash, BrilliantGlow, CheckmateFlash};
 use crate::game::systems::camera::CameraController;
@@ -45,7 +40,6 @@ impl Default for CameraDirectorMode {
 #[derive(Resource, Default)]
 pub struct CameraDirector {
     pub mode: CameraDirectorMode,
-    /// Target world position to zoom toward (board square centre)
     pub target_sq: Option<Vec3>,
 }
 
@@ -53,7 +47,6 @@ pub struct CameraDirector {
 // System
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Drives the camera toward/away from key board squares on cinematic events.
 pub fn camera_director_system(
     time: Res<Time>,
     game_mode: Res<GameMode>,
@@ -174,7 +167,6 @@ pub fn camera_director_system(
     }
 }
 
-/// Smooth-step cubic ease-in-out.
 fn smooth_step(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }

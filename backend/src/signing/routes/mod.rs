@@ -1,15 +1,3 @@
-//! HTTP route handlers for the signing service.
-//!
-//! This module organizes all API endpoints into submodules:
-//! - `main`: Core API (sessions, moves, games, auth)
-//! - `identity`: KYC/identity registration
-//! - `matchmaking`: ELO-based player matching
-//! - `tournament`: Tournament bracket management
-//! - `rates`: Fiat/crypto exchange rates for wager tier pricing
-//! - `history`: Game history queries
-//! - `dispute`: Dispute resolution
-
-/// Player moderation, anti-cheat review, treasury/wallet ops. See `admin.rs` module docs.
 pub mod admin;
 pub mod anticheat;
 pub mod archive;

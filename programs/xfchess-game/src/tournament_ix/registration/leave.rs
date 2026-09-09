@@ -1,6 +1,3 @@
-//! Instruction allowing players to voluntarily leave a tournament before it starts and receive a refund.
-//! The entry fee is refunded from the tournament escrow PDA — the operator's wallet is not involved.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -16,29 +13,24 @@ pub struct LeaveTournament<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// TournamentPlayersShard 0 always present (all tournament sizes)
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
-    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Option<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Option<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
@@ -47,7 +39,6 @@ pub struct LeaveTournament<'info> {
     pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
     #[account(mut)]
     pub player: Signer<'info>,
-    /// CHECK: Tournament escrow PDA — entry fees are held here, not in the operator's wallet.
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],

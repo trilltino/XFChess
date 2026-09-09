@@ -1,5 +1,3 @@
-//! Transaction signing and submission helpers for Solana.
-
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSendTransactionConfig;
@@ -16,12 +14,6 @@ use solana_system_interface::instruction as system_instruction;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
-/// Shared send+poll body for every write path below. `skip_preflight: true`
-/// everywhere except where a caller has a specific documented reason not to
-/// (none currently do — see [`cosign_and_submit_tx`] and [`sign_and_submit_er`]
-/// for why skipping preflight is deliberate, not an oversight). `context` is
-/// a short label used only in the timeout/failure error message so each call
-/// site's error text is unchanged from before this was factored out.
 fn send_and_poll(
     rpc: &RpcClient,
     tx: &impl solana_client::rpc_client::SerializableTransaction,
@@ -39,10 +31,6 @@ fn send_and_poll(
     poll_confirmation(rpc, sig, deadline, context)
 }
 
-/// Polls an already-submitted signature for confirmation up to `deadline`.
-/// Split out from [`send_and_poll`] so callers that build+sign+send inline
-/// (e.g. `cosign_and_submit_tx`, which needs the instruction summary in
-/// scope for its error message) can still share the poll loop.
 fn poll_confirmation(
     rpc: &RpcClient,
     sig: Signature,
@@ -67,7 +55,6 @@ fn poll_confirmation(
     }
 }
 
-/// Funds `dest` with `lamports` from `payer`, submit to `rpc_url`.
 pub fn fund_account(
     rpc: &RpcClient,
     payer: &Keypair,
@@ -123,7 +110,6 @@ pub fn fund_account(
     Ok(sig)
 }
 
-/// Signs `ix` with `signer` (fee-payer = signer) and submits to `rpc_url`.
 pub fn sign_and_submit(
     rpc: &RpcClient,
     signer: &Keypair,
@@ -136,24 +122,8 @@ pub fn sign_and_submit(
     send_and_poll(rpc, &tx, Duration::from_secs(30), "sign_and_submit")
 }
 
-/// Extra attempts if the ER RPC rejects a transaction with "Blockhash not
-/// found" despite the blockhash having been fetched immediately beforehand
-/// (see `sign_and_submit_er`'s doc comment) — reproduced live 4 times across
-/// `delegate_game`/`undelegate_game`/`record_move` in one debugging session,
-/// always as an outright send rejection, not a poll timeout. Since the
-/// blockhash is always fetched fresh right before use, this isn't a caching
-/// bug on our end; it looks like the MagicBlock devnet router occasionally
-/// serving a blockhash its own send path doesn't yet recognize. A short
-/// refetch-and-retry papers over that without masking a genuine failure —
-/// any other error still returns immediately, no retry.
 const BLOCKHASH_RETRY_ATTEMPTS: u32 = 3;
 
-/// Signs and submits to the MagicBlock ER with `skip_preflight = true`.
-///
-/// The ER's preflight simulator may reject transactions with -32003
-/// ("Attempt to load a program that does not exist") because the XFChess
-/// program is not in its preflight cache. Skipping preflight lets the TX land.
-/// After sending, we poll for confirmation (ER confirms in sub-second to ~5 s).
 pub fn sign_and_submit_er(
     rpc: &RpcClient,
     signer: &Keypair,
@@ -189,29 +159,11 @@ pub fn sign_and_submit_er(
     unreachable!("loop always returns Ok or Err before exhausting attempts")
 }
 
-/// Submits an already-signed serialized transaction.
-///
-/// Used for wallet-signed setup TXs. Accepts both legacy `Transaction`
-/// and `VersionedTransaction` (v0). Uses `confirmed` commitment.
 pub fn submit_signed_tx(rpc: &RpcClient, tx_bytes: &[u8]) -> Result<Signature> {
     let tx: VersionedTransaction = bincode::deserialize(tx_bytes).map_err(|e| anyhow!(e))?;
     send_and_poll(rpc, &tx, Duration::from_secs(30), "submit_signed_tx")
 }
 
-/// Co-signs a wallet-signed legacy transaction with the provided session keypair,
-/// then submits it.
-///
-/// Used by `activate_session` when `create_game` / `join_game` require both the
-/// player wallet signature (already present) and the VPS session key signature.
-///
-/// Uses `skip_preflight` for the same reason as [`sign_and_submit_er`]: the
-/// `recent_blockhash` was chosen by the client, often seconds-to-tens-of-seconds
-/// before it reaches here (wallet popup round-trip). Whichever backing node
-/// behind the RPC endpoint services the preflight simulation may not yet have
-/// that blockhash in its own recent-blockhashes view even though it's still
-/// valid network-wide, and preflight rejects with -32002 "Blockhash not found"
-/// before the TX ever reaches the network. Skipping preflight lets the real
-/// cluster decide; we then poll for confirmation ourselves.
 pub fn cosign_and_submit_tx(
     rpc: &RpcClient,
     session_keypair: &Keypair,

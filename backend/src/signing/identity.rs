@@ -1,9 +1,3 @@
-//! Identity vault for encrypted KYC/PII data storage.
-//!
-//! This module provides AES-256-GCM encryption for sensitive user identity data
-//! (full name, DOB, address, tax ID) with blind index support for searchable
-//! encrypted fields without revealing plaintext.
-
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Nonce,
@@ -11,23 +5,16 @@ use aes_gcm::{
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
-/// Country-specific validation rules for identity fields
 #[derive(Debug, Clone)]
 pub struct CountryValidationRules {
-    /// Whether full name is required
     pub requires_full_name: bool,
-    /// Whether date of birth is required
     pub requires_dob: bool,
-    /// Whether address is required
     pub requires_address: bool,
-    /// Tax ID format pattern (regex)
     pub tax_id_pattern: Option<Regex>,
-    /// Tax ID field name
     pub tax_id_field_name: &'static str,
 }
 
 impl CountryValidationRules {
-    /// Get validation rules for a specific country code
     pub fn for_country(country_code: &str) -> Self {
         match country_code {
             "GB" => CountryValidationRules {
@@ -85,7 +72,6 @@ impl CountryValidationRules {
         }
     }
 
-    /// Validate a field value according to country rules
     pub fn validate_field(&self, field_name: &str, value: &str) -> Result<(), String> {
         match field_name {
             "full_name" if self.requires_full_name && value.is_empty() => {
@@ -117,10 +103,6 @@ impl CountryValidationRules {
     }
 }
 
-/// Identity vault for encrypting and decrypting sensitive user data.
-///
-/// Uses AES-256-GCM for authenticated encryption and SHA-256 with salt
-/// for generating blind indexes (searchable hashes).
 #[derive(Clone, Default)]
 pub struct IdentityVault {
     encryption_key: [u8; 32],
@@ -128,14 +110,6 @@ pub struct IdentityVault {
 }
 
 impl IdentityVault {
-    /// Creates a new IdentityVault from hex-encoded key and salt.
-    ///
-    /// # Arguments
-    /// * `key_hex` - 64-character hex string (32 bytes) for AES-256 key
-    /// * `salt_hex` - 64-character hex string (32 bytes) for blind index salt
-    ///
-    /// # Returns
-    /// A new IdentityVault instance, or an error if inputs are invalid
     pub fn new(key_hex: &str, salt_hex: &str) -> Result<Self, String> {
         let key_bytes = hex::decode(key_hex).map_err(|e| format!("Invalid key hex: {}", e))?;
         let salt_bytes = hex::decode(salt_hex).map_err(|e| format!("Invalid salt hex: {}", e))?;
@@ -156,16 +130,6 @@ impl IdentityVault {
         })
     }
 
-    /// Generates a Blind Index (salted hash) for searching without decryption.
-    ///
-    /// The blind index allows searching by tax ID or other identifiers
-    /// without storing or revealing the plaintext data.
-    ///
-    /// # Arguments
-    /// * `raw_data` - The plaintext data to hash (e.g., tax ID)
-    ///
-    /// # Returns
-    /// A hex-encoded SHA-256 hash of the salted data
     pub fn generate_blind_index(&self, raw_data: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(&self.index_salt);
@@ -173,16 +137,6 @@ impl IdentityVault {
         hex::encode(hasher.finalize())
     }
 
-    /// Encrypts sensitive data using AES-256-GCM.
-    ///
-    /// Returns a BLOB containing [12-byte Nonce][Ciphertext].
-    /// The nonce is randomly generated for each encryption.
-    ///
-    /// # Arguments
-    /// * `plaintext` - The plaintext string to encrypt
-    ///
-    /// # Returns
-    /// A vector containing nonce + ciphertext, or an error on failure
     pub fn encrypt(&self, plaintext: &str) -> Result<Vec<u8>, String> {
         let cipher = Aes256Gcm::new(&self.encryption_key.into());
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng); // 12-bytes
@@ -196,23 +150,11 @@ impl IdentityVault {
         Ok(result)
     }
 
-    /// Decrypts a [Nonce][Ciphertext] BLOB.
-    ///
-    /// # Arguments
-    /// * `blob` - The encrypted blob (nonce + ciphertext)
-    ///
-    /// # Returns
-    /// The decrypted plaintext string, or an error on failure
     pub fn decrypt(&self, blob: &[u8]) -> Result<String, String> {
         let plaintext = self.decrypt_bytes(blob)?;
         String::from_utf8(plaintext).map_err(|e| format!("Invalid UTF-8: {}", e))
     }
 
-    /// Byte-native variant of [`Self::encrypt`] — for binary payloads (e.g. a
-    /// raw ed25519 keypair) rather than UTF-8 text. Same [Nonce][Ciphertext]
-    /// BLOB shape, so `encrypt`/`encrypt_bytes` output is interchangeable
-    /// with `decrypt`/`decrypt_bytes` as long as the caller matches the
-    /// plaintext type back up.
     pub fn encrypt_bytes(&self, plaintext: &[u8]) -> Result<Vec<u8>, String> {
         let cipher = Aes256Gcm::new(&self.encryption_key.into());
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng); // 12-bytes
@@ -226,8 +168,6 @@ impl IdentityVault {
         Ok(result)
     }
 
-    /// Byte-native variant of [`Self::decrypt`] — returns raw plaintext bytes
-    /// instead of requiring valid UTF-8.
     pub fn decrypt_bytes(&self, blob: &[u8]) -> Result<Vec<u8>, String> {
         if blob.len() < 12 {
             return Err("Invalid ciphertext blob length".into());
@@ -244,14 +184,6 @@ impl IdentityVault {
             .map_err(|e| format!("Decryption failed: {}", e))
     }
 
-    /// Validates identity fields based on country-specific rules.
-    ///
-    /// # Arguments
-    /// * `country_code` - ISO 3166-1 alpha-2 country code
-    /// * `fields` - HashMap of field names to values (full_name, dob, address, tax_id)
-    ///
-    /// # Returns
-    /// Ok(()) if all fields pass validation, or an error message if validation fails
     pub fn validate_fields(
         country_code: &str,
         fields: &std::collections::HashMap<&str, &str>,

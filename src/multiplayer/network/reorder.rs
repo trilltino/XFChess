@@ -1,44 +1,12 @@
-//! Per-game nonce reordering for the dual gossip+relay transport.
-//!
-//! Every online move is broadcast over BOTH Iroh gossip and the VPS relay
-//! fallback (see `online_game_session.rs`'s "Dual transport" comment), and
-//! the two paths have independent, uncorrelated latency. Before this module
-//! existed, the receiver's nonce check in `systems.rs` only rejected
-//! `nonce < expected` and accepted (and advanced past) anything else — so if
-//! move N+1 ever arrived before move N (plausible: relay is a fast HTTP
-//! round-trip, gossip is epidemic broadcast with no ordering guarantee —
-//! confirmed by iroh-gossip's own docs, which specify no delivery-order
-//! guarantee), N+1 would jump `expected` forward and N would be permanently
-//! rejected as a "replay" when it later arrived. That's silent state
-//! divergence in a wagered game, not just a display glitch.
-//!
-//! [`NonceSequencer`] fixes this by buffering out-of-order arrivals instead
-//! of skipping past them, releasing them in strict nonce order once the gap
-//! fills. It is deliberately transport-agnostic and Bevy-free — see
-//! `systems.rs::handle_network_events` for the ECS-facing wrapper
-//! (`PendingMoveBuffer`) that owns one `NonceSequencer` per `game_id`.
 use std::collections::BTreeMap;
 
-/// Result of feeding one (nonce, payload) pair to a [`NonceSequencer`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IngestOutcome<T> {
-    /// Duplicate/replay of an already-applied nonce — nothing to do.
     Duplicate,
-    /// Zero or more payloads are now ready to apply, oldest first. Empty
-    /// means this arrival filled a buffer slot but is still waiting on an
-    /// earlier gap.
     Ready(Vec<T>),
-    /// The buffer bound was exceeded — the sequencer has given up waiting
-    /// for `resync_from` and snapped `expected` forward past everything it
-    /// was holding. The caller must resync the receiver from an
-    /// authoritative source (e.g. `NetworkMessage::ResyncRequest`) because
-    /// buffered moves have been dropped, not applied.
     Overflow { resync_from: u64 },
 }
 
-/// Reorders arrivals for a single game so they can always be applied in
-/// strict nonce order, even when the two transports deliver them out of
-/// sequence, duplicated, or (up to a bound) drop one entirely.
 pub struct NonceSequencer<T> {
     expected: u64,
     buffered: BTreeMap<u64, T>,
@@ -46,11 +14,6 @@ pub struct NonceSequencer<T> {
 }
 
 impl<T> NonceSequencer<T> {
-    /// `max_buffered` bounds how many out-of-order arrivals get held while
-    /// waiting for a gap to fill, so one permanently-lost message can't grow
-    /// the buffer without limit. Chess's real move cadence never has more
-    /// than a couple of moves in flight at once, so a small bound (the
-    /// production wrapper uses 8) is generous, not tight.
     pub fn new(max_buffered: usize) -> Self {
         Self {
             expected: 1,
@@ -67,9 +30,6 @@ impl<T> NonceSequencer<T> {
         self.buffered.len()
     }
 
-    /// Feed one arrival. `nonce` must start at 1 for the first move of a
-    /// game and increment by exactly 1 per move, matching the convention in
-    /// `NetworkMessage::Move`/`Resign`'s `nonce` field.
     pub fn ingest(&mut self, nonce: u64, payload: T) -> IngestOutcome<T> {
         if nonce < self.expected {
             return IngestOutcome::Duplicate;
@@ -91,14 +51,6 @@ impl<T> NonceSequencer<T> {
         IngestOutcome::Ready(ready)
     }
 
-    /// Give up on the current gap: drop everything buffered and snap
-    /// `expected` forward past the highest nonce we've seen, so the next
-    /// legitimate arrival isn't immediately buffered again. Called either
-    /// when [`ingest`] exceeds `max_buffered`, or by the ECS wrapper's
-    /// wall-clock sweep when the oldest buffered entry has waited too long
-    /// (a gap with no further traffic — e.g. the opponent is stuck waiting
-    /// on the very move that got dropped — would never grow past one
-    /// buffered entry, so the count bound alone can't catch it).
     pub fn expire(&mut self) -> IngestOutcome<T> {
         let resync_from = self.expected;
         if let Some((&max_seen, _)) = self.buffered.iter().next_back() {
@@ -191,8 +143,6 @@ mod tests {
         assert!(!seq.has_buffered());
     }
 
-    /// Deterministic xorshift PRNG — avoids adding a new `proptest`/`rand`
-    /// dependency to the workspace for a single test file.
     struct XorShift(u64);
     impl XorShift {
         fn next(&mut self) -> u64 {
@@ -208,13 +158,6 @@ mod tests {
         }
     }
 
-    /// The property the user asked to be fuzzed: feed a `NonceSequencer`
-    /// arbitrarily interleaved, duplicated, and dropped arrivals (modeling
-    /// two transports with independent latency/loss racing each other) and
-    /// assert the sequence of payloads it ever releases as `Ready(..)` is
-    /// always a prefix-consistent, gap-free, duplicate-free run — i.e. the
-    /// single correct lineage, never a fork, never a skip, regardless of
-    /// arrival order.
     #[test]
     fn dual_transport_interleave_duplicate_drop_fuzz() {
         const MOVES: u64 = 40;

@@ -1,8 +1,3 @@
-//! Profile check system - Detects if wallet needs profile creation
-//!
-//! When a wallet connects, checks if the player has a profile with username.
-//! If not, redirects to ProfileCreation menu state.
-
 use bevy::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -14,7 +9,6 @@ use crate::multiplayer::TokioRuntime;
 use anchor_lang::AccountDeserialize;
 use xfchess_game::state::PlayerProfile;
 
-/// System to check profile status when wallet connects
 pub fn check_profile_on_connect(
     mut solana_state: ResMut<SolanaIntegrationState>,
     tokio_runtime: Res<TokioRuntime>,
@@ -112,8 +106,6 @@ pub fn check_profile_on_connect(
     solana_state.pending_profile_check = Some(handle);
 }
 
-/// System to handle the results of the async profile check.
-/// Populates cached_elo and cached_display_name; redirects to ProfileCreation when needed.
 pub fn handle_profile_check_tasks(mut solana_state: ResMut<SolanaIntegrationState>) {
     if let Some(task) = solana_state.pending_profile_check.take() {
         if task.is_finished() {
@@ -162,7 +154,6 @@ pub fn handle_profile_check_tasks(mut solana_state: ResMut<SolanaIntegrationStat
     }
 }
 
-/// System to auto-initialize profile when entering ProfileCreation without one
 pub fn auto_init_profile(solana_state: ResMut<SolanaIntegrationState>) {
     if solana_state.wallet_pubkey.is_none() {
         return;

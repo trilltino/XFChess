@@ -1,5 +1,3 @@
-//! Game Over popup — result, ELO delta, wager settlement, post-game actions.
-
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -10,7 +8,6 @@ use crate::ui::styles::*;
 
 // ── Payout resource ───────────────────────────────────────────────────────────
 
-/// Payout and meta information populated when the game ends.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct GameOverPayoutInfo {
     // Wager
@@ -18,8 +15,6 @@ pub struct GameOverPayoutInfo {
     pub country_fee: u64,
     pub elo_fee: u64,
     pub rent_return: u64,
-    /// Real backend-advanced operating cost (ER session/undelegate fees etc)
-    /// reimbursed to treasury_vault from the pot. 0 for free games.
     pub operating_cost: u64,
     pub winning_prize: u64,
     pub is_draw: bool,
@@ -31,10 +26,6 @@ pub struct GameOverPayoutInfo {
 
     // Settlement
     pub payout_confirmed: bool,
-    /// True once the real fee breakdown (country_fee/elo_fee/operating_cost)
-    /// has been overwritten with the on-chain-confirmed values from
-    /// `/game/finalize` — before this, the fields hold pre-finalize
-    /// estimates and should not be trusted for exact display.
     pub fee_breakdown_confirmed: bool,
     pub finalize_sig: Option<String>,
     pub game_ended_at: Option<std::time::Instant>,
@@ -43,25 +34,18 @@ pub struct GameOverPayoutInfo {
     pub dispute_sig: Option<String>,
 
     // ELO / rating
-    /// true = Rated or Wager match; false = free/practice (hide ELO section)
     pub is_rated: bool,
     pub elo_before: u32,
     pub elo_after: u32,
     pub win_streak: u32,
 
     // Tournament
-    /// Set when this game was part of a tournament.
     pub tournament_id: Option<u64>,
-    /// USDC mint address when prize is paid in USDC (otherwise SOL).
     pub usdc_mint: Option<String>,
-    /// USDC prize amount in token base units (6 decimals).
     pub usdc_prize_usdc: Option<u64>,
 }
 
 impl GameOverPayoutInfo {
-    /// USD-primary formatting for a lamport amount — SOL stays the secondary,
-    /// parenthetical figure. Falls back to SOL-only when no live rate is
-    /// cached yet (this popup should never block on a price feed).
     fn format_sol_usd(lamports: u64, usd_per_sol: Option<f64>) -> String {
         let sol = lamports as f64 / 1_000_000_000.0;
         let sol_str = Self::format_sol_dynamic(sol);
@@ -71,10 +55,6 @@ impl GameOverPayoutInfo {
         }
     }
 
-    /// Dynamic-precision SOL formatting: 3dp is enough for wager/prize-sized
-    /// amounts (always >= MIN_WAGER_LAMPORTS = 0.001 SOL), but rounds small
-    /// operating-cost line items (e.g. the ~0.0003 SOL ER session fee) to
-    /// "0.000 SOL" — bump to 6dp below 0.001 SOL so they stay visible.
     fn format_sol_dynamic(sol: f64) -> String {
         if sol == 0.0 {
             "0 SOL".to_string()
@@ -106,7 +86,6 @@ impl GameOverPayoutInfo {
         }
     }
 
-    /// Seconds since on-chain settlement was initiated.
     pub fn settlement_elapsed(&self) -> u64 {
         self.settlement_started_at
             .map(|t| t.elapsed().as_secs())
@@ -123,15 +102,11 @@ impl GameOverPayoutInfo {
 
 // ── PGN cache ────────────────────────────────────────────────────────────────
 
-/// PGN and final FEN computed once when the game ends (OnEnter GameOver).
-/// Avoids replaying all moves on every button click in the game-over popup.
 #[derive(Resource, Default)]
 pub struct CachedGamePgn {
     pub pgn: Option<nimzovich_engine::ParsedPgnGame>,
     pub pgn_string: String,
     pub final_fen: String,
-    /// Set to `true` once the authoritative Braid/VPS PGN has replaced the local one.
-    /// While `false`, Review/Save buttons show a subtle loading indicator.
     pub braid_pgn_ready: bool,
 }
 
@@ -166,7 +141,6 @@ pub fn cache_pgn_on_game_over(
 
 // ── PGN helpers ───────────────────────────────────────────────────────────────
 
-/// Replay all moves and return the final position as a FEN string.
 fn build_final_fen(history: &MoveHistory) -> String {
     use crate::game::components::PieceType;
     use nimzovich_engine::{do_move_with_promo, game_to_fen, new_game_no_tt};
@@ -182,7 +156,6 @@ fn build_final_fen(history: &MoveHistory) -> String {
     game_to_fen(&game)
 }
 
-/// Return the name of the ELO tier that an ELO value falls into.
 fn elo_tier(elo: u32) -> Option<&'static str> {
     match elo {
         0..=1199 => None,
@@ -196,9 +169,6 @@ fn elo_tier(elo: u32) -> Option<&'static str> {
     }
 }
 
-/// Convert the game's MoveHistory to a `ParsedPgnGame` using the engine
-/// to derive proper SAN notation.  Promotions default to Queen because
-/// MoveRecord doesn't store the promoted-to piece.
 fn build_pgn(
     history: &MoveHistory,
     result_str: &str,
@@ -248,7 +218,6 @@ fn build_pgn(
     }
 }
 
-/// Render a PGN string from a `ParsedPgnGame`.
 pub fn pgn_to_string(pgn: &nimzovich_engine::ParsedPgnGame) -> String {
     let mut out = String::new();
     for (k, v) in nimzovich_engine::ordered_tags(&pgn.tags) {
@@ -299,9 +268,6 @@ pub fn pgn_to_string(pgn: &nimzovich_engine::ParsedPgnGame) -> String {
 
 // ── Full result popup ─────────────────────────────────────────────────────────
 
-/// Opaque full-screen backdrop so the frozen 3D board (and anything left
-/// highlighted on it at the moment the game ended) isn't visible behind the
-/// game-over popup. Painted first so the popup window draws on top of it.
 fn paint_black_backdrop(ctx: &egui::Context) {
     egui::CentralPanel::default()
         .frame(egui::Frame::default().fill(egui::Color32::BLACK))
@@ -896,8 +862,6 @@ pub fn game_over_popup_system(
 
 // ── Spectator end-of-game overlay ────────────────────────────────────────────
 
-/// Read-only game-over popup shown when the local player is spectating.
-/// No payout, ELO, or dispute rows — just result + "Review Game" button.
 pub fn spectator_game_over_overlay(
     mut contexts: EguiContexts,
     game_over: Res<GameOverState>,
@@ -1022,7 +986,6 @@ pub fn spectator_game_over_overlay(
 
 // ── Dispute system (unchanged logic) ─────────────────────────────────────────
 
-/// Resource inserted when the player clicks "Dispute Result".
 #[derive(Resource)]
 pub struct PendingDispute {
     pub game_id: u64,

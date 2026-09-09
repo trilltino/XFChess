@@ -1,17 +1,3 @@
-//! triton-bench — head-to-head RPC suite proving the Triton integration's value.
-//!
-//! Subcommands:
-//!   read-load   read-RPC latency + 429 rate, Triton vs public devnet (ramping)
-//!   tx-land     transaction submit/confirm timing, Triton vs public devnet
-//!   geyser      Yellowstone gRPC push-streaming probe (needs --features geyser)
-//!   all         read-load + tx-land (+ geyser if compiled in)
-//!
-//! Examples (PowerShell):
-//!   $env:SOLANA_RPC_URL="https://<host>.devnet.rpcpool.com/<token>"
-//!   cargo run -p er-cu-benchmark --bin triton-bench -- read-load
-//!   cargo run -p er-cu-benchmark --bin triton-bench -- tx-land --count 10
-//!   cargo run -p er-cu-benchmark --bin triton-bench --features geyser -- geyser
-
 use clap::{Parser, Subcommand};
 use er_cu_benchmark::{
     keygen::load_or_generate_master_keypair,
@@ -26,11 +12,9 @@ const PUBLIC_DEVNET: &str = "https://api.devnet.solana.com";
 #[command(name = "triton-bench")]
 #[command(about = "Triton vs public-devnet RPC benchmark suite")]
 struct Cli {
-    /// Triton RPC URL (defaults to $SOLANA_RPC_URL).
     #[arg(long, env = "SOLANA_RPC_URL")]
     triton_url: Option<String>,
 
-    /// Baseline RPC URL to compare against.
     #[arg(long, default_value = PUBLIC_DEVNET)]
     baseline_url: String,
 
@@ -40,49 +24,34 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Read-RPC latency + 429 rate under ramping concurrency.
     ReadLoad {
-        /// Requests fired per concurrency level.
         #[arg(long, default_value = "200")]
         requests: usize,
-        /// Comma-separated concurrency levels.
         #[arg(long, default_value = "1,8,16,32,64,128")]
         levels: String,
     },
-    /// Transaction submit + confirm timing (needs a funded master keypair).
     TxLand {
-        /// Number of memo transactions per endpoint.
         #[arg(long, default_value = "10")]
         count: usize,
     },
-    /// WebSocket pubsub stream probe (Windows-friendly; no protobuf toolchain).
     Stream {
-        /// WS URL (defaults to the Triton URL converted to wss://).
         #[arg(long)]
         ws_url: Option<String>,
-        /// Stop after this many messages.
         #[arg(long, default_value = "20")]
         messages: usize,
-        /// Max seconds to observe the stream.
         #[arg(long, default_value = "15")]
         window: u64,
     },
-    /// Geyser gRPC push-streaming connectivity probe.
     Geyser {
-        /// gRPC endpoint (defaults to $GEYSER_GRPC_URL, else the Triton host on :443).
         #[arg(long, env = "GEYSER_GRPC_URL")]
         grpc_url: Option<String>,
-        /// x-token for gRPC auth (defaults to $GEYSER_X_TOKEN, else the Triton URL token).
         #[arg(long, env = "GEYSER_X_TOKEN")]
         x_token: Option<String>,
-        /// Stop after this many messages.
         #[arg(long, default_value = "20")]
         messages: usize,
-        /// Max seconds to observe the stream.
         #[arg(long, default_value = "15")]
         window: u64,
     },
-    /// Run read-load + tx-land (+ geyser if compiled in).
     All,
 }
 
@@ -199,7 +168,6 @@ async fn run_tx_land(triton: &str, baseline: &str, count: usize) -> anyhow::Resu
     Ok(())
 }
 
-/// Derive a sensible gRPC URL + token from the Triton HTTP URL when not given.
 #[cfg(feature = "geyser")]
 fn derive_geyser(
     triton: &str,

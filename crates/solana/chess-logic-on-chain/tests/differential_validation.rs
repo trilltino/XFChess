@@ -1,15 +1,3 @@
-//! Differential test: the on-chain validator must agree with the engine.
-//!
-//! `chess-logic-on-chain::validation::is_move_legal` is the gate that decides
-//! whether a move recorded on-chain (for a *staked* game) is legal. If it ever
-//! diverges from `nimzovich_engine`'s legality, that is a direct exploit:
-//!   - a **false accept** lets a player commit an illegal move and win money;
-//!   - a **false reject** stalls a legitimate game.
-//!
-//! For a corpus of positions we compute the engine's exact legal move set, then
-//! assert the on-chain validator accepts every legal move (no false rejects) and
-//! rejects every other from→to of the side to move (no false accepts).
-
 use chess_logic_on_chain::validation::is_move_legal;
 use nimzovich_engine::api::game::game_from_fen;
 use nimzovich_engine::{generate_pseudo_legal_moves, is_legal_move, Color};
@@ -43,8 +31,6 @@ fn coord_uci(src: i8, dst: i8, promo: &str) -> String {
 type UciSet = std::collections::BTreeSet<String>;
 type FromToSet = std::collections::BTreeSet<(i8, i8)>;
 
-/// The engine's legal moves: the full-UCI set (promotions carry the piece) and
-/// the set of legal (from, to) transitions ignoring the promotion piece.
 fn engine_legal(fen: &str) -> (UciSet, FromToSet) {
     let mut g = game_from_fen(fen);
     let color = fen_color(fen);
@@ -67,7 +53,6 @@ fn engine_legal(fen: &str) -> (UciSet, FromToSet) {
     (uci, from_to)
 }
 
-/// Squares occupied by the side to move (engine board is index 0..64).
 fn from_squares(fen: &str) -> Vec<i8> {
     let g = game_from_fen(fen);
     let color = fen_color(fen);

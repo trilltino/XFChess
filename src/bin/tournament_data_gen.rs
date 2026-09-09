@@ -1,14 +1,4 @@
 #![cfg(feature = "solana")]
-//! Tournament E2E data generator — runs a real single-elimination tournament
-//! on Solana devnet (default 4 players) and writes a JSON report with valid
-//! explorer links for every on-chain step.
-//!
-//! The admin keypair must be the program's `vps_authority`
-//! (keys/program-authority.json). Players are ephemeral keypairs funded from
-//! the admin wallet; results are recorded by the authority (higher seed wins).
-//!
-//! Usage:
-//!   cargo run --bin tournament_data_gen --features solana -- [--players 2|4|8|...]
 
 use xfchess::solana::program_interface::tournament_e2e::{load_keypair, run_tournament};
 

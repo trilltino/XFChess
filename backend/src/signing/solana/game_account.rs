@@ -1,27 +1,5 @@
-//! The single decoder for the on-chain `Game` account.
-//!
-//! This replaces four independent hand-rolled offset walks that had drifted
-//! apart — `tasks::settlement_worker::parse_game_account`,
-//! `routes::main::read_game_fee_breakdown`, `routes::main::resolve_game_signer`,
-//! and `routes::main::schedule_time_check_crank` — each of which carried a
-//! "keep in sync with the others" comment pointing at a different sibling.
-//!
-//! Two of them were wrong. Both stepped `move_count` (u16) straight to `turn`
-//! (u16), skipping `halfmove_clock` (u16, added for the 50-move rule), so every
-//! field from `created_at` onward was read two bytes early. That silently
-//! corrupted `updated_at` (the stale-delegation gauge), `wager_amount` (passed
-//! to anti-cheat scoring), `country_fee` (reported to players as their platform
-//! fee), and `is_delegated` — the flag the settlement worker branches on to
-//! decide whether a game needs undelegating before it can be finalized.
-//!
-//! `offsets_match_the_on_chain_layout` below pins the layout against the
-//! program's own `wager_amount_offset_is_212` test. If the `Game` struct gains
-//! or reorders a field, that test fails here rather than producing plausible
-//! nonsense at runtime.
-
 use solana_sdk::pubkey::Pubkey;
 
-/// Borsh discriminants for `GameStatus`, in declaration order.
 pub const STATUS_PENDING: u8 = 0;
 pub const STATUS_WAITING_FOR_OPPONENT: u8 = 1;
 pub const STATUS_ACTIVE: u8 = 2;
@@ -32,16 +10,10 @@ pub const STATUS_SETTLED: u8 = 6;
 pub const STATUS_EXPIRED: u8 = 7;
 pub const STATUS_CANCELLED: u8 = 8;
 
-/// Borsh discriminants for `GameResult`.
 pub const RESULT_NONE: u8 = 0;
 pub const RESULT_WINNER: u8 = 1;
 pub const RESULT_DRAW: u8 = 2;
 
-/// Every field of the on-chain `Game` this backend reads.
-///
-/// Decoded as one value rather than exposing per-field offset helpers: partial
-/// decoders are exactly how the previous copies drifted, since each only walked
-/// as far as the field it wanted and got the intervening widths wrong.
 #[derive(Debug, Clone)]
 pub struct GameAccount {
     pub game_id: u64,
@@ -49,8 +21,6 @@ pub struct GameAccount {
     pub black: Pubkey,
     pub status: u8,
     pub last_move_timestamp: i64,
-    /// Backend-advanced operating cost, reimbursed to `treasury_vault` at
-    /// settlement out of the pot.
     pub fees_advanced: u64,
     pub fee_payer: Pubkey,
     pub result_tag: u8,
@@ -61,32 +31,24 @@ pub struct GameAccount {
     pub created_at: i64,
     pub updated_at: i64,
     pub wager_amount: u64,
-    /// Flat platform fee in lamports, fixed at creation time. Not a percentage
-    /// of the pot — see `routes::main`'s fee reporting.
     pub country_fee: u64,
     pub base_time_seconds: u64,
     pub increment_seconds: u16,
     pub is_delegated: bool,
     pub tournament_id: Option<u64>,
-    /// Replay-protection counter. `record_move` requires `nonce + 1`.
     pub nonce: u64,
 }
 
 impl GameAccount {
-    /// True once the game has a committed outcome and can be finalized.
     pub fn is_finished(&self) -> bool {
         self.status == STATUS_FINISHED
     }
 
-    /// True once settlement has run and nothing further is owed.
     pub fn is_terminal(&self) -> bool {
         matches!(self.status, STATUS_SETTLED | STATUS_EXPIRED)
     }
 }
 
-/// Cursor over account bytes that returns `None` rather than panicking on a
-/// short or malformed account — a truncated account is a normal transient
-/// (fetched mid-write, wrong program, closed under us), not a crash.
 struct Reader<'a> {
     data: &'a [u8],
     at: usize,
@@ -133,12 +95,6 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Decodes a `Game` account, discriminator included.
-///
-/// Returns `None` on any truncation or malformed enum tag. Callers must treat
-/// that as "unknown", never as a zeroed default — the previous code's habit of
-/// falling back to `0` is what let a misread `wager_amount` flow into anti-cheat
-/// scoring as a genuine value.
 pub fn parse(data: &[u8]) -> Option<GameAccount> {
     let mut r = Reader::new(data);
 
@@ -232,9 +188,6 @@ pub fn parse(data: &[u8]) -> Option<GameAccount> {
 mod tests {
     use super::*;
 
-    /// Builds a byte image of a `Game` with `result = None`, `wager_token =
-    /// None`, `tournament_id = None`, `draw_offered_by = None` — the shape a
-    /// normal unwagered game has on chain.
     struct Builder {
         out: Vec<u8>,
     }
@@ -331,9 +284,6 @@ mod tests {
         assert_eq!(g.nonce, 9);
     }
 
-    /// Pins this decoder against the program's own `wager_amount_offset_is_212`
-    /// test. The old parsers landed on 210 and 218 because they skipped
-    /// `halfmove_clock`; if either number ever reappears here, this fails.
     #[test]
     fn offsets_match_the_on_chain_layout() {
         const WAGER_ABS_OFFSET: usize = 8 + 212;

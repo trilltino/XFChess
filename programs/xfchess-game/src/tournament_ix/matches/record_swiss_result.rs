@@ -1,5 +1,3 @@
-//! Instruction to record a Swiss tournament match result and update standings.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -14,30 +12,24 @@ pub struct RecordSwissResult<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// TournamentPlayersShard 0 always present (all tournament sizes).
-    /// `mut` is required — standings updates must persist.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
-    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Option<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Option<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
@@ -45,11 +37,9 @@ pub struct RecordSwissResult<'info> {
     )]
     pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
 
-    /// CHECK: Player who played the match
     #[account(mut)]
     pub player: Signer<'info>,
 
-    /// CHECK: Opponent in the match
     pub opponent: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,

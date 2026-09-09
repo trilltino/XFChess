@@ -1,14 +1,3 @@
-//! Delegation / undelegation account-constraint suite.
-//!
-//! The happy-path delegate/undelegate flows CPI into the MagicBlock delegation
-//! and magic programs, so they require a live ER and are covered by the devnet
-//! runbook in `docs/ER_TESTING.md`. What we *can* assert in-process are the
-//! account-validation guards — in particular the `address =` constraints on the
-//! magic accounts added to `undelegate_game` (a hardening fix). These reject
-//! before any CPI, so no external program is needed.
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use common::*;
@@ -120,15 +109,6 @@ async fn undelegate_rejects_not_delegated_game_before_cpi() {
     );
 }
 
-/// MagicBlock advisory (2026-07-22): `ephemeral_rollups_sdk::cpi::undelegate_account`
-/// (SDK <= 0.16.1) checked `buffer` was a signer owned by the delegation program,
-/// but never that it was *this account's own* buffer — any delegation-owned signer
-/// buffer was accepted, letting an attacker substitute a manufactured buffer from
-/// their own delegated account to overwrite someone else's restored account data.
-/// We replicate the fix (see `magicblock::delegation::undelegate_buffer_pda`) since
-/// bumping the SDK to 0.16.2 isn't possible yet (dependency ceiling — see
-/// docs/MAGICBLOCK_INTEGRATION.md). This asserts a non-canonical buffer is rejected
-/// before the CPI runs, no live ER or external program required.
 #[tokio::test]
 async fn process_undelegation_rejects_non_canonical_buffer() {
     let white = Pubkey::new_unique();

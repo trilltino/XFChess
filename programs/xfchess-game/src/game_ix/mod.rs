@@ -1,5 +1,3 @@
-//! Core chess game lifecycle instructions (create, join, cancel, finalize, resign, timeout).
-
 pub mod accept_draw;
 pub mod cancel;
 pub mod common;

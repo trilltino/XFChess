@@ -20,14 +20,6 @@ fn main() {
     }
 }
 
-/// Bake the shipped release version into the binary as `XFCHESS_VERSION`.
-///
-/// `Cargo.toml`'s version stays at 0.1.0 — releases are cut from git tags
-/// (`.github/workflows/release.yml` derives the installer version from
-/// `GITHUB_REF_NAME`), so `CARGO_PKG_VERSION` does not track what users
-/// actually downloaded. CI passes the tag through `XFCHESS_RELEASE_VERSION`
-/// so the in-game update checker can compare this build against the latest
-/// GitHub release; local and dev builds fall back to the manifest version.
 fn stamp_version() {
     println!("cargo:rerun-if-env-changed=XFCHESS_RELEASE_VERSION");
     let version = std::env::var("XFCHESS_RELEASE_VERSION")

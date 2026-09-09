@@ -1,11 +1,3 @@
-//! New-style main menu: full-screen 3D board background + bottom-left button list.
-//!
-//! The existing board with all 32 pieces in starting position is rendered in the
-//! background using the primary camera. A semi-transparent panel in the bottom-left
-//! lists the main navigation options.
-//!
-//! Press **K** to toggle back to the website-style (classic) menu.
-
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -15,9 +7,6 @@ use crate::game::resources::MenuSounds;
 use crate::rendering::pieces::{PieceColor, PieceMeshes, PieceType};
 use crate::ui::system_params::MainMenuUIContext;
 
-/// Click sounds are now played globally by [`menu_click_sound`] for *any* egui
-/// UI click (covering every popup — Host Game, Play vs Bot, dialogs, etc.), so
-/// this per-call helper is a no-op kept so existing call sites compile unchanged.
 fn play_click(_commands: &mut Commands, _sounds: Option<&MenuSounds>) {}
 
 #[cfg(feature = "solana")]
@@ -37,9 +26,6 @@ fn complete_logout(handle: &tokio::runtime::Handle) {
     });
 }
 
-/// Plays `menu_click.mp3` whenever the user presses the mouse over any egui UI
-/// area (menu items and every popup). The 3D board background is not an egui
-/// area, so clicks there stay silent. Runs while the main menu is active.
 pub(super) fn menu_click_sound(
     mut contexts: bevy_egui::EguiContexts,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -60,11 +46,9 @@ pub(super) fn menu_click_sound(
     }
 }
 
-/// Marker for all menu-background scene entities (board squares, pieces, lights).
 #[derive(Component)]
 pub struct MenuBg;
 
-/// Tracks whether background pieces have been spawned for the current MainMenu session.
 #[derive(Resource, Default)]
 pub struct MenuBgPiecesSpawned(pub bool);
 
@@ -73,14 +57,11 @@ pub struct MenuExitConfirm {
     pub visible: bool,
 }
 
-/// "Learn" focus mode — toggled with **L**. While active, every menu UI
-/// element is hidden except the ambient board caption.
 #[derive(Resource, Default)]
 pub struct MenuFocusMode {
     pub active: bool,
 }
 
-/// Which panel the new-style menu is currently showing.
 #[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
 pub enum NewMenuPanel {
     #[default]
@@ -113,25 +94,15 @@ impl NewMenuPanel {
     }
 }
 
-/// Camera world-space position for the board-view style (overridden by orbit each frame).
 pub const BOARD_CAM: Vec3 = Vec3::new(3.5, 14.0, -16.0);
-/// Board centre the camera looks at.
 pub const BOARD_CENTER: Vec3 = Vec3::new(3.5, 0.0, 3.5);
 
-/// Drives a slow cinematic orbit of the 3D menu camera around the board.
 #[derive(Resource)]
 pub struct MenuCameraOrbit {
-    /// Current horizontal angle (radians).
     pub angle: f32,
-    /// Distance from BOARD_CENTER on the XZ plane.
     pub radius: f32,
-    /// Camera Y height.
     pub height: f32,
-    /// Orbit speed (radians / second).
     pub speed: f32,
-    /// When true the camera holds a fixed isometric orthographic view
-    /// (same projection as the TempleOS in-game camera) instead of orbiting.
-    /// Toggled with **V**.
     pub ortho: bool,
 }
 
@@ -149,7 +120,6 @@ impl Default for MenuCameraOrbit {
 
 // ── Spawn systems ────────────────────────────────────────────────────────────
 
-/// Spawn the 8×8 board squares for the menu background.
 pub fn spawn_menu_bg_board(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -188,14 +158,6 @@ pub fn spawn_menu_bg_board(
     }
 }
 
-/// Spawn all 32 pieces in starting position for the menu background.
-/// Reuses the same [`PieceMeshes`] resource loaded at `Startup` by [`PiecePlugin`].
-///
-/// Self-healing: the guard is the actual world (are any ambient pieces present?),
-/// not a one-shot bool. A bool flag can desync from reality — e.g. a transient
-/// `MainMenu` exit despawns the pieces via `DespawnOnExit` but the flag stays set,
-/// leaving the board empty forever. Keying off `MenuBgPieceHome` existence means
-/// the pieces are always (re)spawned whenever they're missing and meshes are ready.
 pub fn spawn_menu_bg_pieces(
     mut commands: Commands,
     piece_meshes: Option<Res<PieceMeshes>>,
@@ -309,8 +271,6 @@ pub fn spawn_menu_bg_pieces(
     anim.active = true;
 }
 
-/// Purge any scene lights that are NOT tagged MenuBg before the menu re-spawns its own.
-/// This acts as a safety net for any in-game lights that slipped through DespawnOnExit.
 pub fn purge_stale_lights(
     mut commands: Commands,
     mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>,
@@ -324,8 +284,6 @@ pub fn purge_stale_lights(
     global_ambient.brightness = 95.0;
 }
 
-/// Spawn lights for the background board.
-/// Despawns any leftover MenuBg lights first so they don't stack on re-entry.
 pub fn spawn_menu_bg_lights(
     mut commands: Commands,
     mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>,
@@ -375,12 +333,8 @@ pub fn spawn_menu_bg_lights(
 
 // ── Camera & style systems ───────────────────────────────────────────────────
 
-/// No-op kept for API compatibility — volumetric fog removed for performance.
 pub fn setup_menu_fog(_commands: Commands, _cam: Res<crate::PersistentEguiCamera>) {}
 
-/// Continuously orbits the camera around BOARD_CENTER.
-/// Press **V** to toggle a fixed isometric orthographic view of the board
-/// (the TempleOS-style projection) instead of the orbit.
 pub fn orbit_camera_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -430,8 +384,6 @@ pub fn orbit_camera_system(
         .looking_at(BOARD_CENTER, Vec3::Y);
 }
 
-/// Handle keyboard shortcuts on the main menu.
-/// G → Settings, L → toggle Learn focus mode, ESC → back-navigate / exit.
 pub fn menu_escape_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut panel: ResMut<NewMenuPanel>,
@@ -465,8 +417,6 @@ pub fn menu_escape_system(
 
 // ── egui panel ───────────────────────────────────────────────────────────────
 
-/// Render the bottom-left button list.
-/// Modals (AI setup, controls popup) are rendered by the caller in `main_menu.rs`.
 pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     render_title_logo(ctx, cx);
     render_hint_bar(ctx);
@@ -549,25 +499,20 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             inner_margin: egui::Margin::same(28),
             ..egui::Frame::NONE
         })
-        .show(ctx, |ui| {
-            match current {
-                NewMenuPanel::Main => render_main_panel(ui, cx),
-                NewMenuPanel::PlayOnline => render_play_online_panel(ui, cx),
-                NewMenuPanel::Multiplayer => render_multiplayer_panel(ui, cx),
-                NewMenuPanel::Puzzles => render_puzzles_panel(ui, cx),
-                NewMenuPanel::Tournaments => render_tournaments_panel(ui, cx),
-                NewMenuPanel::SolanaConnect => render_solana_connect_panel(ui, cx),
-                NewMenuPanel::DirectConnection => render_direct_connection_panel(ui, cx),
-                NewMenuPanel::Settings => render_settings_panel(ui, cx),
-                NewMenuPanel::Profile => render_profile_panel(ui, cx),
-                NewMenuPanel::Updates => render_updates_panel(ui, cx),
-            }
+        .show(ctx, |ui| match current {
+            NewMenuPanel::Main => render_main_panel(ui, cx),
+            NewMenuPanel::PlayOnline => render_play_online_panel(ui, cx),
+            NewMenuPanel::Multiplayer => render_multiplayer_panel(ui, cx),
+            NewMenuPanel::Puzzles => render_puzzles_panel(ui, cx),
+            NewMenuPanel::Tournaments => render_tournaments_panel(ui, cx),
+            NewMenuPanel::SolanaConnect => render_solana_connect_panel(ui, cx),
+            NewMenuPanel::DirectConnection => render_direct_connection_panel(ui, cx),
+            NewMenuPanel::Settings => render_settings_panel(ui, cx),
+            NewMenuPanel::Profile => render_profile_panel(ui, cx),
+            NewMenuPanel::Updates => render_updates_panel(ui, cx),
         });
 }
 
-/// Title logo — pinned top-center and fades out when clicked. Not draggable
-/// (the welcome card is the draggable element). Shown on all panels while the
-/// 3D menu is active.
 fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     super::ensure_brand_logo_texture(ctx, &mut cx.brand_logo);
 
@@ -617,8 +562,6 @@ fn render_title_logo(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         });
 }
 
-/// Renders one `‹`/`›` nav glyph, returning its click response. Mirrors
-/// `render_title_logo`'s interact/cursor pattern above.
 fn caption_nav_arrow(ui: &mut egui::Ui, glyph: &str) -> egui::Response {
     let resp = ui.add(
         egui::Label::new(
@@ -634,13 +577,6 @@ fn caption_nav_arrow(ui: &mut egui::Ui, glyph: &str) -> egui::Response {
     resp
 }
 
-/// Caption under the ambient board naming the game it currently replays, with
-/// `‹`/`›` arrows that step the carousel forward/backward through
-/// `famous_games::FAMOUS_GAMES` (reusing the board's own end-of-game
-/// crossfade — see `board_animation::request_game_nav`).
-/// Anchored from screen-center with a positive Y offset (the menu camera
-/// looks straight at BOARD_CENTER, so the board itself is screen-centered)
-/// to sit close underneath the board rather than pinned to the screen edge.
 pub(super) fn render_board_caption(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     let caption = super::famous_games::FAMOUS_GAMES[cx.board_animator.game_index].caption;
     egui::Area::new("board_caption".into())
@@ -664,7 +600,6 @@ pub(super) fn render_board_caption(ctx: &egui::Context, cx: &mut MainMenuUIConte
         });
 }
 
-/// Keyboard hint bar pinned to bottom-right — always shown while the 3D menu is active.
 fn render_hint_bar(ctx: &egui::Context) {
     egui::Area::new("hint_bar".into())
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
@@ -696,9 +631,6 @@ fn render_hint_bar(ctx: &egui::Context) {
         });
 }
 
-/// Alpha announcement card shown on the startup (main) menu. Starts docked to
-/// the far right of the screen, locked in place (not draggable). Dismissable;
-/// stays closed for the rest of the session once closed.
 fn render_welcome_panel(
     ctx: &egui::Context,
     _commands: &mut Commands,
@@ -1022,9 +954,6 @@ fn render_play_online_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
 }
 
-/// Off-chain multiplayer options — lobbies, spectating, direct connect, tournaments.
-/// Nested one level under "Play Online" so that panel can offer a plain
-/// "Multiplayer" vs "Solana Multiplayer" choice up front.
 fn render_multiplayer_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     const W: f32 = 280.0;
     const SP: f32 = 6.0;
@@ -1107,11 +1036,6 @@ fn render_multiplayer_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
 }
 
-/// Raw node-ID P2P connection — no account, no login, not listed anywhere.
-/// Distinct from "Create Lobby"/"Join Lobby" above, which go through the
-/// VPS-backed public lobby directory. This is chess-player language, not
-/// programmer language: "This works by using an ID. You copy it and send it
-/// to your friend." See docs/plans/identity-implementation-plan.md.
 fn render_direct_connection_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     const W: f32 = 280.0;
 
@@ -1659,9 +1583,6 @@ fn render_updates_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
 }
 
-/// Drawn size of the platform mark, in points. A const because the texture is
-/// resampled to exactly this size (times the display scale) when it loads —
-/// see `platform_icon_texture`, which needs to agree with what's drawn here.
 const PLATFORM_ICON_SIZE: f32 = 48.0;
 
 fn render_platform_download(
@@ -1746,18 +1667,6 @@ fn render_platform_download(
     }
 }
 
-/// Loads a platform mark as a texture sized for `target_px` physical pixels.
-///
-/// The marks ship at 256-512px but draw at ~48pt, and handing the GPU that
-/// 5-10x minification with plain bilinear filtering and no mipmaps is what
-/// made them look chewed up — only a handful of source texels land under each
-/// screen pixel, so thin features (Tux's legs, the Chrome spokes) alias badly.
-/// Resampling once here with a proper filter means the texture is already the
-/// size it gets drawn at and the GPU has nothing left to throw away.
-///
-/// `target_px` is part of the cache key: the display scale can change (moving
-/// the window between monitors), and a texture rasterised for the old scale
-/// would be exactly the blurry/aliased thing this avoids.
 fn platform_icon_texture(
     ctx: &egui::Context,
     platform: Platform,
@@ -1806,8 +1715,6 @@ fn section(ui: &mut egui::Ui, title: &str) {
     section_sized(ui, title, 10.1);
 }
 
-/// `section` with an explicit heading size, for blocks that sit at a larger
-/// scale than the settings panel's stacked headings.
 fn section_sized(ui: &mut egui::Ui, title: &str, size: f32) {
     ui.label(
         egui::RichText::new(title)
@@ -2396,16 +2303,10 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
 }
 
-/// Official Solana devnet faucet — where a player with an empty wallet goes to
-/// get something to wager with.
 const FAUCET_URL: &str = "https://faucet.solana.com";
 
-/// How long the HUD shows "Address copied!" in place of the player's name.
 const COPIED_FLASH_SECS: f64 = 1.6;
 
-/// Render username + wallet balance in the top-left corner of the main menu.
-/// Clicking the name copies the wallet address; clicking the balance section
-/// cycles through SOL → USD → GBP.
 pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     let display_name = cx.player_identity.display_name().to_string();
     let is_guest = cx.player_identity.username.is_none();
@@ -2606,12 +2507,10 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
         });
 }
 
-/// Same as [`item`] but draws a `›` chevron on the right to signal expansion.
 fn item_expandable(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
     item_expandable_tip(ui, label, "", width)
 }
 
-/// Like [`item_expandable`] but shows `tip` as a hover tooltip when non-empty.
 fn item_expandable_tip(ui: &mut egui::Ui, label: &str, tip: &str, width: f32) -> bool {
     let btn_text = egui::Color32::from_rgb(218, 218, 232);
     let chevron_col = egui::Color32::from_rgb(120, 140, 180);
@@ -2670,12 +2569,10 @@ fn item_expandable_tip(ui: &mut egui::Ui, label: &str, tip: &str, width: f32) ->
     resp.clicked()
 }
 
-/// A transparent button with a left-side accent bar on hover.
 fn item(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
     item_tip(ui, label, "", width)
 }
 
-/// Like [`item`] but shows `tip` as a hover tooltip when non-empty.
 fn item_tip(ui: &mut egui::Ui, label: &str, tip: &str, width: f32) -> bool {
     let btn_text = egui::Color32::from_rgb(218, 218, 232);
 

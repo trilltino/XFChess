@@ -1,8 +1,3 @@
-//! Famous historical games replayed on the main-menu ambient board.
-//!
-//! Pure data — no playback logic here (that lives in `board_animation.rs`).
-//! Ordered chronologically; reorder freely, it's just an array.
-
 pub(super) struct FamousGame {
     pub caption: &'static str,
     pub pgn: &'static str,

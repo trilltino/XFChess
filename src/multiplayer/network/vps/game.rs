@@ -1,9 +1,3 @@
-//! Game lifecycle endpoints on the VPS.
-//!
-//! Covers move recording on the Execution Rollup, committing ER state back
-//! to devnet (`undelegate`), and finalizing games on-chain (winner payout,
-//! ELO updates, cleanup).
-
 use serde::{Deserialize, Serialize};
 
 use super::client::{client, vps_base};
@@ -15,13 +9,6 @@ struct RecordMoveReq<'a> {
     move_uci: &'a str,
     next_fen: &'a str,
     nonce: u64,
-    /// Wallet of the player whose move this actually is — White on odd
-    /// plies, Black on even. Required because a single relayer (the
-    /// creator's client) submits both players' moves through one backend,
-    /// and the backend must sign with — and derive the on-chain
-    /// `SessionDelegation`/`GlobalSessionDelegation` PDA from — the correct
-    /// player's session, not whichever session happens to be on file for
-    /// the game. See backend's `record_move` handler doc comment.
     mover_wallet: &'a str,
 }
 
@@ -44,20 +31,12 @@ struct FinalizeGameReq<'a> {
     wager_lamports: u64,
 }
 
-/// Full finalization result returned by the VPS after `/game/finalize`.
 #[derive(Debug, Clone, Default)]
 pub struct FinalizeResult {
-    /// On-chain transaction signature.
     pub sig: String,
-    /// Lamports sent to the winner (0 for free games).
     pub winner_lamports: u64,
-    /// Country/treasury fee deducted in lamports.
     pub country_fee: u64,
-    /// Real backend-advanced operating cost (create/join/delegate/moves/
-    /// undelegate + the MagicBlock ER session fee) reimbursed to
-    /// treasury_vault from the pot. 0 for free games (nothing reimbursed).
     pub operating_cost_lamports: u64,
-    /// Flat ELO-linking fee split between both players. 0 for free games.
     pub elo_fee: u64,
 }
 
@@ -98,10 +77,6 @@ struct BlurTelemetryReq<'a> {
     think_ms: Option<u32>,
 }
 
-/// Report a move's anti-cheat telemetry: whether the window lost focus since
-/// this player's previous move (the alt-tab signature) and how long the move
-/// took (`think_ms`). Fire-and-forget — failures are the caller's to log,
-/// never to surface to the player.
 pub fn report_blur(
     game_id: u64,
     move_number: u32,
@@ -126,11 +101,6 @@ pub fn report_blur(
     Ok(())
 }
 
-/// Ask VPS to build, sign, and submit a `record_move` instruction on the ER.
-/// Returns `(signature, er_endpoint)` — `er_endpoint` is the exact RPC URL
-/// the backend actually submitted through, straight from `routing::rpc_for`,
-/// so callers can build an accurate ER explorer link instead of guessing at
-/// a hardcoded client-side constant.
 pub fn record_move(
     game_id: u64,
     move_uci: &str,
@@ -160,12 +130,6 @@ pub fn record_move(
     Ok((resp.sig, resp.er_endpoint))
 }
 
-/// Ask the VPS to delegate a game to the Ephemeral Rollup on the caller's
-/// behalf — it already holds the per-game session key set as `game.fee_payer`
-/// during create/join, so this needs no wallet signature at all. For games
-/// created via the newer global-session flow, the client signs delegation
-/// itself locally instead (see `rollup::bridge::spawn_delegation_task`) —
-/// this path is for the original per-game session flow only.
 pub fn vps_delegate_game(game_id: u64) -> Result<String, String> {
     let response = client()?
         .post(format!("{}/game/delegate", vps_base()))
@@ -183,8 +147,6 @@ pub fn vps_delegate_game(game_id: u64) -> Result<String, String> {
     Ok(resp.sig)
 }
 
-/// Ask VPS to commit ER state back to devnet by submitting `undelegate_game` on the ER.
-/// Returns `(signature, er_endpoint)` — see [`record_move`] for why.
 pub fn vps_undelegate_game(game_id: u64) -> Result<(String, String), String> {
     let response = client()?
         .post(format!("{}/game/undelegate", vps_base()))
@@ -202,9 +164,6 @@ pub fn vps_undelegate_game(game_id: u64) -> Result<(String, String), String> {
     Ok((resp.sig, resp.er_endpoint))
 }
 
-/// Ask VPS to finalize the game on devnet (set Finished, pay wager, update ELO).
-/// Must be called after `vps_undelegate_game` has committed the ER state.
-/// Returns full [`FinalizeResult`] including winner payout and fee amounts.
 pub fn vps_finalize_game(
     game_id: u64,
     winner: Option<&str>,
@@ -240,8 +199,6 @@ pub fn vps_finalize_game(
     })
 }
 
-/// Submit the result of a Free Rated (no-wager) game so the backend updates ELO
-/// without requiring an on-chain finalize. Fires-and-forgets on the VPS side.
 pub fn vps_submit_free_rated_result(
     game_id: u64,
     winner: Option<&str>,
@@ -266,8 +223,6 @@ pub fn vps_submit_free_rated_result(
     Ok(())
 }
 
-/// Fetch the current `move_log.nonce` from the VPS (which reads the on-chain MoveLog PDA).
-/// Returns the *next* nonce to use (on-chain stored nonce + 1).
 pub fn vps_fetch_move_nonce(game_id: u64) -> Result<u64, String> {
     #[derive(Deserialize)]
     struct NonceResp {
@@ -288,8 +243,6 @@ pub fn vps_fetch_move_nonce(game_id: u64) -> Result<u64, String> {
     Ok(resp.nonce + 1)
 }
 
-/// Check if the wallet has an active (in-progress) game on the backend.
-/// Returns `Some(game_id)` if found, `None` if not or on error.
 pub fn get_active_game_for_wallet(wallet_pubkey: &str) -> Result<Option<u64>, String> {
     #[derive(Deserialize)]
     struct ActiveGameResp {
@@ -311,16 +264,6 @@ pub fn get_active_game_for_wallet(wallet_pubkey: &str) -> Result<Option<u64>, St
     Ok(resp.game_id)
 }
 
-/// Fetch the backend-verified on-chain `(white, black)` wallets for
-/// `game_id`, base58-encoded. `Ok(None)` for a casual (no-wallet) game,
-/// which never resolves to an on-chain `Game` account — same "not
-/// applicable, not an error" shape as `get_active_game_for_wallet`.
-///
-/// Closes the roster-building race on the P2P/gossip side
-/// (`docs/plans/networking-hardening-plan.md`'s Phase C): the caller seeds
-/// `CausalChainState::verified_wallets` from this so a `SessionInfo`'s
-/// claimed `player_pubkey` can be checked against on-chain truth before its
-/// `signing_pubkey` is trusted into the roster, regardless of arrival order.
 pub fn fetch_verified_participants(game_id: u64) -> Result<Option<(String, String)>, String> {
     #[derive(Deserialize)]
     struct ParticipantsResp {
@@ -346,8 +289,6 @@ pub fn fetch_verified_participants(game_id: u64) -> Result<Option<(String, Strin
     Ok(Some((resp.white, resp.black)))
 }
 
-/// Fetch the full move list for a game (used by spectator mode).
-/// Returns a list of UCI strings in order.
 pub fn get_game_moves_for_spectator(game_id: &str) -> Result<Vec<String>, String> {
     #[derive(Deserialize)]
     struct MoveEntry {
@@ -372,9 +313,6 @@ pub fn get_game_moves_for_spectator(game_id: &str) -> Result<Vec<String>, String
     Ok(resp.moves.into_iter().map(|m| m.move_uci).collect())
 }
 
-/// Fetch a game's public broadcast delay in seconds (0 = live). A spectator
-/// queries this before subscribing to the live P2P gossip feed: a non-zero
-/// delay means the only permitted public source is the delay-gated HTTP feed.
 pub fn get_broadcast_delay(game_id: &str) -> Result<u64, String> {
     #[derive(Deserialize)]
     struct DelayResp {
@@ -397,10 +335,6 @@ pub fn get_broadcast_delay(game_id: &str) -> Result<u64, String> {
     Ok(resp.delay_secs.max(0) as u64)
 }
 
-/// Fetch the full move log for a game as typed [`braid_chess::MovePayload`] values.
-///
-/// Used by Braid reconnection recovery: the caller filters the returned list
-/// to find moves that arrived after a given `since_version` hash.
 pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, String> {
     // Path and response shape must match `game_log.rs`'s registered route
     // exactly: `GET /game/{id}/moves` (singular "game"), returning a bare
@@ -428,8 +362,6 @@ pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, Str
         .collect())
 }
 
-/// Submit a dispute for a completed wager game. The VPS builds and submits the
-/// `dispute` on-chain instruction and opens a 48-hour arbitration window.
 pub fn vps_submit_dispute(game_id: u64, disputing_player: &str) -> Result<String, String> {
     let response = client()?
         .post(format!("{}/dispute/submit", vps_base()))

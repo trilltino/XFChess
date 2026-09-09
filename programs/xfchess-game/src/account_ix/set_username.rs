@@ -1,12 +1,7 @@
-//! Instruction for setting or updating a username associated with a profile.
-
 use crate::constants::*;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-/// Claims a `UsernameRecord` PDA for `username` and sets it on the caller's
-/// existing profile. `username_record` uses plain `init` (not
-/// `init_if_needed`), so this fails if the username is already taken.
 #[derive(Accounts)]
 #[instruction(username: String)]
 pub struct SetUsername<'info> {
@@ -18,8 +13,6 @@ pub struct SetUsername<'info> {
     )]
     pub player_profile: Account<'info, PlayerProfile>,
 
-    /// UsernameRecord PDA ensures uniqueness
-    /// Seeds: [USERNAME_SEED, username.as_bytes()]
     #[account(
         init,
         payer = player,
@@ -32,14 +25,11 @@ pub struct SetUsername<'info> {
     #[account(mut)]
     pub player: Signer<'info>,
 
-    /// CHECK: Player's authority (must match profile.authority)
     pub authority: AccountInfo<'info>,
 
     pub system_program: Program<'info, System>,
 }
 
-/// Validates `username`, creates its `UsernameRecord`, and marks the profile's
-/// `username_set` flag.
 pub fn handler(ctx: Context<SetUsername>, username: String) -> Result<()> {
     // Validate username format
     validate_username(&username)?;

@@ -1,12 +1,3 @@
-//! The admin API surface: player moderation, anti-cheat review, wallet/treasury
-//! balances and payouts, tournament escrow inspection, and operational status
-//! endpoints. Every route here is gated by the admin auth middleware upstream
-//! (not per-handler); `treasury_refund` additionally requires the
-//! `ADMIN_TOKEN` second factor since it moves real funds. IP bans, ELO
-//! overrides, and the audit log are in-memory only (`Lazy<Mutex<...>>`) —
-//! they reset on backend restart, unlike everything routed through
-//! `state.store` (SQLite-backed). See `admin_routes()` for the full route map.
-
 use crate::db::repository::GameRepository;
 async fn tournament_transactions(
     Path(id): Path<u64>,
@@ -62,16 +53,6 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Records an admin action. `actor` is resolved from the API key that
-/// authenticated the current request (see `auth_middleware::current_admin_actor`).
-/// Always updates the in-memory tail (fast path for the live view); when
-/// `pool` is given also persists to `admin_audit_log` **before returning** so
-/// the entry survives a restart. Awaited (not fire-and-forget) deliberately —
-/// an audit log that can silently lose an entry to a crash between "response
-/// sent" and "write landed" defeats its own purpose. `pool` is only absent in
-/// the handful of handlers that predate `AppState` threading (elo override,
-/// IP ban, token rotate) — those stay memory-only until they're refactored to
-/// take `State<AppState>`.
 async fn add_audit(pool: Option<sqlx::SqlitePool>, action: &str, target: &str, result: &str) {
     let actor = crate::infrastructure::auth_middleware::current_admin_actor();
     let ts = now_secs();
@@ -144,8 +125,6 @@ struct RefundReq {
     wallet: String,
     lamports: u64,
     reason: String,
-    /// Second factor for this financially-irreversible action (checked against
-    /// ADMIN_TOKEN in addition to the X-API-Key transport gate).
     #[serde(default)]
     admin_token: String,
 }
@@ -275,7 +254,6 @@ struct SaveTemplateReq {
     data: serde_json::Value,
 }
 
-/// GET /admin/tournament-templates — lists all saved templates.
 async fn list_templates(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -303,7 +281,6 @@ async fn list_templates(
     Ok(Json(json!({ "templates": templates })))
 }
 
-/// POST /admin/tournament-templates — creates or overwrites a named template.
 async fn save_template(
     State(state): State<AppState>,
     Json(req): Json<SaveTemplateReq>,
@@ -333,7 +310,6 @@ async fn save_template(
     Ok(Json(json!({ "ok": true, "name": req.name })))
 }
 
-/// DELETE /admin/tournament-templates/:name
 async fn delete_template(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -357,10 +333,6 @@ async fn delete_template(
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
-/// Builds the full `/admin/*` route tree (players, sessions, wallet balances,
-/// anti-cheat, games, audit log, treasury, tournament extras, tasks/infra
-/// status, moderation, disputes). Nest this on an app already behind admin
-/// auth middleware.
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
         // Players
@@ -480,11 +452,6 @@ struct AnticheatVerdictRow {
     analysed_at: i64,
 }
 
-/// GET /admin/anti-cheat/game/{id}/eval — real Stockfish-derived verdict for a
-/// game, from `anticheat_verdicts` (populated by `tasks/anticheat_worker.rs`
-/// after finalization). Aggregate per-game only — no move-by-move eval curve
-/// is stored today, so this reports the verdict/score/signals the worker
-/// actually computed rather than fabricating a per-move series.
 async fn get_game_eval(
     Path(game_id): Path<u64>,
     State(state): State<AppState>,
@@ -621,7 +588,6 @@ async fn get_player_elo_history(
     ))
 }
 
-/// Persists a ban for `wallet` (SQLite-backed via `BanRepository`, survives restart).
 async fn ban_player(
     State(state): State<AppState>,
     Path(wallet): Path<String>,
@@ -639,9 +605,6 @@ async fn ban_player(
     Ok(Json(json!({ "ok": true, "wallet": wallet })))
 }
 
-/// Sets a display-only ELO override for `wallet` in the in-memory
-/// `ELO_OVERRIDES` map (read back by `list_players`). Does not touch the
-/// on-chain `elo_rating` and does not survive a backend restart.
 async fn elo_override(
     Path(wallet): Path<String>,
     Json(req): Json<EloOverrideReq>,
@@ -790,10 +753,6 @@ struct PersistedAuditRow {
     result: String,
 }
 
-/// Reads the persistent `admin_audit_log` table (survives a backend restart,
-/// unlike the old in-memory-only `AUDIT_LOG` Vec this replaced as the primary
-/// source). Falls back to the in-memory tail only if the DB read fails, so a
-/// transient SQLite hiccup doesn't blank the panel's audit view.
 async fn get_audit_log(
     State(state): State<AppState>,
     Query(q): Query<AuditLogQuery>,
@@ -910,19 +869,6 @@ async fn treasury_fee_report(
     })))
 }
 
-/// Records a request to withdraw `lamports` from the platform treasury vault
-/// to `wallet`, and hands back the exact `treasury_signer` command an
-/// operator must run on a separate, minimally-networked host to actually
-/// execute it. This process **never holds or uses the treasury signing
-/// key** — see `bin/treasury_signer.rs`'s module doc: a compromise of this
-/// always-on, internet-facing host must not also be able to drain the
-/// treasury. Double-gated: the X-API-Key transport gate PLUS an ADMIN_TOKEN
-/// second factor in the body (this is a financially-irreversible money
-/// path) — the only admin route with this extra gate, since it's the only
-/// one that moves real funds outside normal settlement. The audit log entry
-/// is written here (request time), and `treasury_signer` itself logs the
-/// actual signature on submission — the two are correlated by wallet +
-/// lamports + reason in the audit trail.
 async fn treasury_refund(
     State(state): State<AppState>,
     Json(req): Json<RefundReq>,
@@ -1027,11 +973,6 @@ struct FundPrizeRequest {
     amount_lamports: u64,
 }
 
-/// Locks the guaranteed SOL prize for a tournament in its escrow PDA.
-/// Must be called after initialization but BEFORE the first registration —
-/// the program rejects registrations on paid tournaments until this runs,
-/// and rejects funding once anyone has registered (the guarantee is immutable).
-/// Funds are drawn from the server's vps_authority wallet.
 async fn fund_tournament_prize(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1118,11 +1059,6 @@ async fn fund_tournament_prize(
     })))
 }
 
-/// Reports real per-worker liveness from the `*_LAST_TICK_UNIX` gauges each
-/// background loop stamps on every pass (`telemetry::worker_metrics`). A
-/// worker whose last tick is more than 2x its own poll interval old is
-/// flagged `stale` — most likely panicked mid-loop and silently stopped
-/// (the process itself is still up, `/health` would still say ok).
 async fn tasks_status() -> Result<Json<serde_json::Value>, StatusCode> {
     use crate::telemetry::worker_metrics::{
         PRIZE_DISTRIBUTOR_LAST_TICK_UNIX, SETTLEMENT_LAST_TICK_UNIX,
@@ -1157,11 +1093,6 @@ async fn tasks_status() -> Result<Json<serde_json::Value>, StatusCode> {
     })))
 }
 
-/// Real numbers for the admin panel's KPI tiles — presence, confirmed
-/// transactions, ER staleness/subscription health, and fee-payer balance —
-/// in one JSON call instead of regex-scraping raw `/metrics` text (which the
-/// panel used to do; fragile, and broke silently if the text format ever
-/// reordered fields).
 async fn metrics_summary(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -1275,10 +1206,6 @@ async fn db_stats(State(state): State<AppState>) -> Result<Json<serde_json::Valu
     })))
 }
 
-/// Real certificate check: reads `TLS_DOMAIN` from the environment (the
-/// deploy script's actual `-Domain`, previously hardcoded here as the wrong
-/// `xfchess.gg` regardless of what was really deployed) and parses the live
-/// PEM for a real `days_remaining` instead of a permanent `null`.
 async fn tls_expiry() -> Result<Json<serde_json::Value>, StatusCode> {
     let domain = std::env::var("TLS_DOMAIN").unwrap_or_default();
     if domain.is_empty() {
@@ -1321,17 +1248,12 @@ async fn tls_expiry() -> Result<Json<serde_json::Value>, StatusCode> {
     }
 }
 
-/// Parses a PEM-encoded certificate file and returns its `notAfter` field as
-/// a Unix timestamp (seconds).
 fn parse_cert_not_after_unix(pem_bytes: &[u8]) -> Option<i64> {
     let (_, pem) = x509_parser::pem::parse_x509_pem(pem_bytes).ok()?;
     let cert = pem.parse_x509().ok()?;
     Some(cert.validity().not_after.timestamp())
 }
 
-/// Logs a rotation request only — does not actually rotate any key. Real
-/// authority-key rotation is a manual runbook (`ops/SECRETS_ROTATION.md`),
-/// deliberately not wired to a button here.
 async fn rotate_token() -> Result<Json<serde_json::Value>, StatusCode> {
     use rand::Rng;
     let mut bytes = [0u8; 24];
@@ -1393,14 +1315,10 @@ async fn assign_dispute(
 
 #[derive(Deserialize)]
 struct FillBotsReq {
-    /// How many bot slots to fill (default: fills to max_players)
     count: Option<u16>,
-    /// Base ELO assigned to bots (default: 1200)
     elo: Option<u32>,
 }
 
-/// POST /admin/tournament/:id/fill-bots — fills remaining slots with fake wallets and starts the
-/// bracket. Dev/test only; lets you simulate a full tournament without real players.
 async fn fill_tournament_bots(
     Path(id): Path<u64>,
     State(state): State<AppState>,

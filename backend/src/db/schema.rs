@@ -2,7 +2,6 @@ use anyhow::Result;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::str::FromStr;
 
-/// Initialize the SQLite database with required tables
 pub async fn init_db(database_url: &str) -> Result<SqlitePool> {
     // Create database if it doesn't exist
     if !Sqlite::database_exists(database_url).await? {
@@ -27,7 +26,6 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool> {
     Ok(pool)
 }
 
-/// Create the games and moves tables
 async fn create_tables(pool: &SqlitePool) -> Result<()> {
     // Games table
     sqlx::query(
@@ -131,7 +129,6 @@ async fn create_tables(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-/// Clean up old games (optional maintenance)
 pub async fn cleanup_old_games(pool: &SqlitePool, days_old: u32) -> Result<u64> {
     let cutoff_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?

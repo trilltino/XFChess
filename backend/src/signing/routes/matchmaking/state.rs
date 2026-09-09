@@ -1,10 +1,3 @@
-//! Shared data types and state for the matchmaking system.
-//!
-//! [`MatchmakingTicket`] represents a player waiting in the queue,
-//! [`MatchResult`] is the payload handed back once they are paired, and
-//! [`SharedMatchmakingState`] bundles the queue, pending matches, and ELO
-//! cache behind `Arc<Mutex<_>>` so Axum handlers can share them.
-
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -12,55 +5,30 @@ use std::{
 };
 use tracing::{error, info};
 
-/// Matchmaking ticket representing a player waiting for a match.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MatchmakingTicket {
-    /// Player's wallet public key.
     pub pubkey: String,
-    /// Player's ELO rating.
     pub elo: u32,
-    /// Unix timestamp when the player joined the queue.
     pub joined_at: u64,
 }
 
-/// Match result returned when a player is matched.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MatchResult {
-    /// The game ID for the matched game.
     pub game_id: u64,
-    /// Opponent's wallet public key.
     pub opponent: String,
-    /// Whether the player plays as white.
     pub is_white: bool,
-    /// Unix timestamp when the match was made — lets a background sweep
-    /// evict entries a player never came back to retrieve (e.g. a crash
-    /// right after being paired), instead of keeping them forever.
     pub matched_at: u64,
 }
 
-/// Shared state for the matchmaking system.
-///
-/// Contains the player queue, pending match results, and the ELO cache
-/// used to look up on-chain ratings.
 #[derive(Clone)]
 pub struct SharedMatchmakingState {
-    /// Queue of players waiting for matches.
     pub queue: Arc<Mutex<Vec<MatchmakingTicket>>>,
-    /// Map from pubkey to match result (one-time retrieval).
     pub matches: Arc<Mutex<HashMap<String, MatchResult>>>,
-    /// ELO cache for fetching player ratings.
     pub elo_cache: Arc<crate::signing::EloCache>,
-    /// Backing store for the queue/matches so a backend restart can reload
-    /// them instead of silently dropping every queued player and pending
-    /// match (`matchmaking_queue` / `matchmaking_matches`, migration 022).
-    /// The in-memory maps above stay the hot path; this is write-through.
     pub pool: sqlx::SqlitePool,
 }
 
 impl SharedMatchmakingState {
-    /// Build matchmaking state sharing the app's already-configured ELO
-    /// cache, so it queries the same RPC/program the rest of the backend
-    /// does instead of a second, independent devnet-hardcoded cache.
     pub fn new(elo_cache: Arc<crate::signing::EloCache>, pool: sqlx::SqlitePool) -> Self {
         Self {
             queue: Arc::new(Mutex::new(Vec::new())),
@@ -70,12 +38,6 @@ impl SharedMatchmakingState {
         }
     }
 
-    /// Reload the queue and pending matches from SQLite. Call once at
-    /// startup (before the matchmaking loop starts ticking) so a backend
-    /// restart resumes from where it left off instead of losing every
-    /// queued player and pending match. Any rows stale enough to be swept
-    /// by `run_matchmaking_service` are cleaned up on its next tick, so
-    /// this doesn't need to re-check staleness itself.
     pub async fn hydrate(&self) {
         match sqlx::query_as::<_, (String, i64, i64)>(
             "SELECT pubkey, elo, joined_at FROM matchmaking_queue",
@@ -180,10 +142,6 @@ mod tests {
         )
     }
 
-    /// Simulates a backend restart: write a ticket + a match result via one
-    /// `SharedMatchmakingState`, drop it, then hydrate a fresh instance
-    /// sharing only the SQLite pool and confirm both come back. This is the
-    /// property Phase 1 of the persistency plan exists to guarantee.
     #[tokio::test]
     async fn queue_and_match_survive_a_simulated_restart() {
         let pool = migrated_pool().await;

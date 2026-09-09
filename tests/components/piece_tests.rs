@@ -1,13 +1,6 @@
-//! Integration tests for piece components extracted from doc tests
-//!
-//! These tests demonstrate usage patterns for piece-related components.
-//! Original location: src/game/components/piece.rs module docs
-
 use bevy::prelude::*;
 use xfchess::game::components::{HasMoved, SelectedPiece};
 
-/// Test demonstrating how to mark a piece as moved
-/// Original: piece.rs module-level example
 #[test]
 fn example_move_piece_system() {
     // This demonstrates the pattern for updating HasMoved in a system
@@ -25,8 +18,6 @@ fn example_move_piece_system() {
     assert_eq!(has_moved.move_count, 1);
 }
 
-/// Test demonstrating how to check if a piece is selected
-/// Original: piece.rs module-level example
 #[test]
 fn example_highlight_selected_piece() {
     // Create a test entity
@@ -43,8 +34,6 @@ fn example_highlight_selected_piece() {
     assert_eq!(selected.position, (4, 4));
 }
 
-/// Test demonstrating how to select a piece
-/// Original: SelectedPiece struct-level example
 #[test]
 fn example_select_piece_command() {
     let piece_entity = Entity::from_bits(100);
@@ -60,8 +49,6 @@ fn example_select_piece_command() {
     assert_eq!(selected.position, position);
 }
 
-/// Test demonstrating castling check pattern
-/// Original: HasMoved struct-level example
 #[test]
 fn example_can_castle_check() {
     let unmoved_king = HasMoved::default();
@@ -79,8 +66,6 @@ fn example_can_castle_check() {
     assert!(!can_castle(&moved_king));
 }
 
-/// Test demonstrating move recording pattern
-/// Original: HasMoved struct-level example
 #[test]
 fn example_record_move() {
     let mut has_moved = HasMoved::default();

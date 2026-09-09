@@ -1,10 +1,3 @@
-//! Spectator HUD — shown at the bottom of the screen when `GameMode::Spectator`.
-//!
-//! Displays:
-//! - "Spectating game {id}" label
-//! - Live white/black clocks (interpolated locally between Braid broadcasts)
-//! - A rolling chat log fed by `OnlineChatMessage` events
-
 use crate::core::states::MenuState;
 use crate::core::states::{GameMode, GameState};
 use crate::multiplayer::network::online_game_session::OnlineChatMessage;
@@ -18,7 +11,6 @@ use bevy_egui::{egui, EguiContexts};
 
 const CHAT_MAX: usize = 8;
 
-/// In-memory chat log; reset when spectator session changes.
 #[derive(Resource, Default)]
 pub struct SpectatorChatLog {
     pub messages: Vec<(String, String)>, // (player, text)

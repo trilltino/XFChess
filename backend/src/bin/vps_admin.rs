@@ -1,18 +1,3 @@
-//! VPS Admin Console - Tournament Management CLI
-//!
-//! Run with: cargo run --bin vps_admin
-//!
-//! Requires ADMIN_API_KEY environment variable to be set.
-//!
-//! Provides admin commands for:
-//! - Creating tournaments (8/16/32/64/128 players)
-//! - Listing active/completed tournaments
-//! - Viewing tournament brackets
-//! - Recording match results
-//! - Setting match game IDs
-//! - Cancelling tournaments
-//! - Checking prize distributions
-
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
@@ -27,11 +12,6 @@ fn vps_base() -> String {
     SERVICE_URL.get_or_init(resolve_service_url).clone()
 }
 
-/// Resolve the backend URL once. An explicit `SIGNING_SERVICE_URL` wins (but is
-/// rejected if it is plain http to a non-loopback host — an admin/treasury tool
-/// must never send secrets over an unencrypted link to a remote box). With no
-/// env set, prompt the operator to pick LOCAL or PRODUCTION. There is no silent
-/// remote default (this used to fall back to a public ngrok tunnel).
 fn resolve_service_url() -> String {
     if let Ok(url) = env::var("SIGNING_SERVICE_URL") {
         if is_insecure_remote(&url) {
@@ -67,7 +47,6 @@ fn resolve_service_url() -> String {
     }
 }
 
-/// True for an `http://` URL whose host is neither 127.0.0.1 nor localhost.
 fn is_insecure_remote(url: &str) -> bool {
     if let Some(rest) = url.strip_prefix("http://") {
         let host = rest.split(['/', ':']).next().unwrap_or("");
@@ -76,7 +55,6 @@ fn is_insecure_remote(url: &str) -> bool {
     false
 }
 
-/// Blocking GET {url}/health with a short timeout; true on 2xx.
 fn health_ok(url: &str) -> bool {
     reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))

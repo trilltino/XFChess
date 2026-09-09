@@ -1,12 +1,8 @@
-//! Instruction to initialize the tournament escrow PDA.
-//! Must be called after `initialize_tournament` and before `register_player`.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-/// Minimal account type for the tournament SOL escrow (no data, just holds lamports).
 #[account]
 pub struct TournamentEscrow {}
 

@@ -1,26 +1,19 @@
-//! Version identifier for the Braid-HTTP protocol.
-
 use std::hash::Hash;
 
-/// A version identifier in the Braid protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Version {
-    /// String-based version ID.
     String(String),
-    /// Integer-based version ID.
     Integer(i64),
 }
 
 impl Version {
-    /// Create a new string-based version.
     #[inline]
     #[must_use]
     pub fn new(s: impl Into<String>) -> Self {
         Version::String(s.into())
     }
 
-    /// Create a new integer-based version.
     #[inline]
     #[must_use]
     pub fn integer(n: i64) -> Self {

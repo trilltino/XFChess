@@ -1,12 +1,6 @@
-//! Unused MoonPay/Transak/Banxa URL generation, never called by any route or
-//! other module (confirmed via search). The project's actual fiat on/off-ramp
-//! approach is USDC-based via the desktop wallet's Privy integration, not
-//! implemented in this crate — this file predates that direction.
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-/// Funding request parameters.
 #[derive(Serialize, Deserialize)]
 pub struct FundingRequest {
     pub wallet_address: String,
@@ -15,7 +9,6 @@ pub struct FundingRequest {
     pub provider: FundingProvider,
 }
 
-/// Funding provider options.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum FundingProvider {
@@ -24,7 +17,6 @@ pub enum FundingProvider {
     Banxa,
 }
 
-/// Funding response with redirect URL.
 #[derive(Serialize, Deserialize)]
 pub struct FundingResponse {
     pub redirect_url: String,
@@ -33,7 +25,6 @@ pub struct FundingResponse {
     pub currency: String,
 }
 
-/// Generates a funding URL for the specified provider.
 pub fn generate_funding_url(
     wallet_address: &str,
     amount_sol: f64,
@@ -57,7 +48,6 @@ pub fn generate_funding_url(
     }
 }
 
-/// Validates that a funding URL is properly formatted.
 pub fn validate_funding_url(url: &str) -> bool {
     url.starts_with("https://")
         && (url.contains("moonpay.com") || url.contains("transak.com") || url.contains("banxa.com"))

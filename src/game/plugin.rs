@@ -1,26 +1,3 @@
-//! Game plugin - Core chess game logic and systems.
-
-//! Systems are organized into sets with explicit ordering:
-//!
-//! Systems are organized into sets with explicit ordering:
-//! - `Input` - Handle user input (camera, piece selection)
-//! - `Validation` - Validate moves and sync board state
-//! - `Execution` - Execute moves and update game state
-//! - `Visual` - Update rendering (highlights, animations)
-//!
-//! System execution order is controlled via [`GameSystems`] sets and `.chain()`.
-//!
-//! # Resources
-//!
-//! All game resources are initialized here. See [`super::resources`] for details.
-//!
-//! # See Also
-//!
-//! - [`super::resources`] - Game resource definitions
-//! - [`super::systems`] - Game system implementations
-//! - [`super::system_sets`] - System set definitions
-//! - [`crate::core::CorePlugin`] - Core plugin that must be added first
-
 use super::ai::AIPlugin;
 use super::resources::*;
 use super::sync::GameSyncPlugin;
@@ -42,10 +19,6 @@ use bevy::input::common_conditions::{input_just_pressed, input_toggle_active};
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 
-/// Game plugin for XFChess
-///
-/// Registers all game systems and resources. This plugin should be added
-/// after CorePlugin and before state-specific plugins.
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
@@ -597,14 +570,12 @@ impl Plugin for GamePlugin {
     }
 }
 
-/// Run condition: current game mode matches `mode`.
 pub fn in_mode(
     mode: crate::core::states::GameMode,
 ) -> impl Fn(Res<crate::core::states::GameMode>) -> bool {
     move |game_mode: Res<crate::core::states::GameMode>| *game_mode == mode
 }
 
-/// Run condition: current game mode is NOT `mode`.
 pub fn not_in_mode(
     mode: crate::core::states::GameMode,
 ) -> impl Fn(Res<crate::core::states::GameMode>) -> bool {

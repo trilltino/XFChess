@@ -1,24 +1,6 @@
-//! Dynamic orbital lighting system for chess board
-//!
-//! Creates configurable point lights that orbit around the board center,
-//! providing dynamic lighting effects during gameplay.
-//!
-//! # Features
-//!
-//! - Configurable number of lights (2-6)
-//! - Custom colors for each light
-//! - Orbital movement around board center
-//! - Configurable radius, speed, and height
-//! - Shadow casting support
-//!
-//! # Reference
-//!
-//! Based on patterns from `reference/bevy/examples/3d/lighting.rs`
-
 use crate::core::{DespawnOnExit, DynamicLightingSettings, GameSettings, GameState};
 use bevy::prelude::*;
 
-/// Plugin for dynamic orbital lighting
 pub struct DynamicLightingPlugin;
 
 impl Plugin for DynamicLightingPlugin {
@@ -36,14 +18,11 @@ impl Plugin for DynamicLightingPlugin {
     }
 }
 
-/// Component marking lights that should orbit around the board
 #[derive(Component, Debug)]
 struct OrbitalLight {
-    /// Index of this light (0 to light_count-1)
     index: usize,
 }
 
-/// Spawn orbital lights when entering InGame state
 fn spawn_orbital_lights(mut commands: Commands, settings: Res<GameSettings>) {
     if !settings.dynamic_lighting.enabled {
         return;
@@ -92,7 +71,6 @@ fn spawn_orbital_lights(mut commands: Commands, settings: Res<GameSettings>) {
     }
 }
 
-/// Update orbital light positions and colors each frame
 fn update_orbital_lights(
     time: Res<Time>,
     settings: Res<GameSettings>,
@@ -133,8 +111,6 @@ fn update_orbital_lights(
     }
 }
 
-/// Sync light count when settings change
-/// Despawns excess lights or spawns new ones as needed
 fn sync_light_count(
     mut commands: Commands,
     time: Res<Time>,
@@ -203,7 +179,6 @@ fn sync_light_count(
     }
 }
 
-/// Despawn all orbital lights when exiting InGame state
 fn despawn_orbital_lights(mut commands: Commands, query: Query<Entity, With<OrbitalLight>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();

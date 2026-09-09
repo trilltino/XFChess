@@ -1,6 +1,3 @@
-//! Instruction for operator to deposit USDC into the prize escrow.
-//! Must be called before registration opens to lock the prize pool.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -17,32 +14,27 @@ pub struct FundUsdcPrize<'info> {
         constraint = tournament.usdc_prize_mint.is_some() @ GameErrorCode::InvalidGameStatus,
     )]
     pub tournament: Account<'info, Tournament>,
-    /// CHECK: USDC prize escrow PDA — the authority of the token account.
     #[account(
         seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub usdc_prize_escrow_authority: UncheckedAccount<'info>,
-    /// USDC prize escrow token account (holds the USDC prize pool).
     #[account(
         mut,
         associated_token::mint = usdc_mint,
         associated_token::authority = usdc_prize_escrow_authority,
     )]
     pub usdc_prize_escrow: Account<'info, TokenAccount>,
-    /// Operator's USDC ATA — source of the funds.
     #[account(
         mut,
         constraint = operator_usdc_ata.owner == operator.key() @ GameErrorCode::UnauthorizedAccess,
         constraint = operator_usdc_ata.mint == usdc_mint.key() @ GameErrorCode::InvalidGameStatus,
     )]
     pub operator_usdc_ata: Account<'info, TokenAccount>,
-    /// The USDC mint account.
     #[account(
         constraint = usdc_mint.key() == tournament.usdc_prize_mint.ok_or(GameErrorCode::InvalidMint)? @ GameErrorCode::InvalidMint
     )]
     pub usdc_mint: Account<'info, token::Mint>,
-    /// Operator funding the prize pool.
     #[account(mut)]
     pub operator: Signer<'info>,
     pub token_program: Program<'info, Token>,

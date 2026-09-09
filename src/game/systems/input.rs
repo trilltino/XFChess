@@ -1,21 +1,3 @@
-//! Input handling system for chess game interaction
-//!
-//! This module handles user input events (clicks, drags) for interacting with the chess board.
-//! It uses Bevy's observer pattern for entity-specific event handling.
-//!
-//! # Architecture
-//!
-//! - **Observers**: `on_piece_click` and `on_square_click` capture pointer events.
-//! - **System Params**: `InputSystemParams` groups common resources/queries to reduce argument bloat.
-//! - **Helper Logic**: `try_select_piece` and `try_move_sequence` handle the core game state updates.
-//!
-//! # Selection Logic
-//!
-//! 1. Verify click is primary button (left click).
-//! 2. If valid locally owned piece -> Select it.
-//! 3. If valid target square/piece -> Attempt move.
-//! 4. If invalid -> Clear selection.
-
 use crate::core::states::GameMode;
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{HasMoved, SelectedPiece};
@@ -42,10 +24,8 @@ use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-/// Query for mutable access to pieces (used for executing moves)
 pub type PieceMutQuery<'w, 's> = Query<'w, 's, (Entity, &'static mut Piece, &'static mut HasMoved)>;
 
-/// Query for read-only access to pieces (used for validation/selection)
 pub type PieceReadOnlyQuery<'w, 's> = Query<
     'w,
     's,
@@ -68,7 +48,6 @@ pub fn reset_in_game_exit_confirmation(mut confirmation: ResMut<InGameExitConfir
     confirmation.pending_exit = false;
 }
 
-/// Grouped system parameters for input handling to reduce argument count
 #[derive(SystemParam)]
 pub struct InputSystemParams<'w, 's> {
     pub commands: Commands<'w, 's>,
@@ -95,7 +74,6 @@ pub struct InputSystemParams<'w, 's> {
     // pub connection_state: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
 }
 
-/// Returns true if the current turn belongs to a human player.
 pub fn is_human_turn(params: &InputSystemParams) -> bool {
     // If we're spectating, it's NEVER a human turn (at least for THIS local instance)
     if *params.game_mode == crate::core::states::GameMode::Spectator {
@@ -106,9 +84,6 @@ pub fn is_human_turn(params: &InputSystemParams) -> bool {
     current.is_human
 }
 
-/// Returns true if the human player is allowed to move pieces of the given color.
-/// In PvP (vs AI) mode, the human chose a specific color and can only move that color's pieces.
-/// In network games, only the local player's color can be moved.
 pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bool {
     // First check if it's a human turn at all
     if !is_human_turn(params) {
@@ -168,12 +143,10 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
 // ResWithStandard is not a thing. Just Option<Res<'w, BraidClientResource>>.
 // Bevy SystemParam macro handles Option<Res<T>>.
 
-/// Helper to check if primary button (left click) was used
 fn is_primary(button: PointerButton) -> bool {
     matches!(button, PointerButton::Primary)
 }
 
-/// Helper to clear ECS selection markers
 pub fn reset_selected_markers(
     commands: &mut Commands,
     selected_pieces: &Query<Entity, With<SelectedPiece>>,
@@ -183,7 +156,6 @@ pub fn reset_selected_markers(
     }
 }
 
-/// Helper to clear all selection state
 pub fn clear_selection_state(
     commands: &mut Commands,
     selection: &mut Selection,
@@ -196,10 +168,6 @@ pub fn clear_selection_state(
 
 // === Helpers ===
 
-/// Attempts to select a piece
-///
-/// Validates ownership (current turn) and updates selection state.
-/// Also calculates legal moves for the selected piece.
 pub fn try_select_piece(
     params: &mut InputSystemParams,
     entity: Entity,
@@ -256,10 +224,6 @@ pub fn try_select_piece(
     }
 }
 
-/// Attempts to execute a move sequence
-///
-/// Validates move legality, handles multiplayer communication,
-/// and executes the move via `execute_move`.
 pub fn try_move_sequence(
     params: &mut InputSystemParams,
     target_pos: (u8, u8),
@@ -353,9 +317,6 @@ pub fn try_move_sequence(
 
 // === Observers ===
 
-/// Observer system: Handle click on a piece
-///
-/// Triggers piece selection or capture attempt.
 pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) {
     if !is_primary(click.event.button) {
         return;
@@ -449,9 +410,6 @@ pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) 
     );
 }
 
-/// Observer system: Handle drag start on a piece
-///
-/// Initiates drag-and-drop by selecting the piece and marking it as dragging.
 pub fn on_piece_drag_start(drag_start: On<Pointer<DragStart>>, mut params: InputSystemParams) {
     if params.game_over.is_game_over() {
         return;
@@ -496,18 +454,11 @@ pub fn on_piece_drag_start(drag_start: On<Pointer<DragStart>>, mut params: Input
     );
 }
 
-/// Observer system: Handle drag on a piece
-///
-/// Currently just tracks that dragging is in progress. Visual feedback
-/// could be added here (e.g., lifting the piece, showing ghost).
 pub fn on_piece_drag(_: On<Pointer<Drag>>, _params: InputSystemParams) {
     // Dragging is handled by the selection state
     // Visual feedback (like lifting the piece) could be added here
 }
 
-/// Observer system: Handle drag end on a piece
-///
-/// Attempts to execute a move to the square where the piece was dropped.
 pub fn on_piece_drag_end(
     drag_end: On<Pointer<DragEnd>>,
     mut params: InputSystemParams,
@@ -577,9 +528,6 @@ pub fn on_piece_drag_end(
     }
 }
 
-/// Observer system: Handle click on a square
-///
-/// Triggers move to empty square or selection of piece on that square.
 pub fn on_square_click(
     click: On<Pointer<Click>>,
     mut params: InputSystemParams,
@@ -634,7 +582,6 @@ pub fn on_square_click(
     try_move_sequence(&mut params, target_pos, capture_info, "square_click_move");
 }
 
-/// System: Toggle fullscreen mode when F11 is pressed
 pub fn toggle_fullscreen(mut window_query: Query<&mut Window>) {
     for mut window in window_query.iter_mut() {
         window.mode = match window.mode {
@@ -646,7 +593,6 @@ pub fn toggle_fullscreen(mut window_query: Query<&mut Window>) {
     }
 }
 
-/// System: Render a small "F11 to minimise" hint in the bottom-right corner when fullscreen.
 pub fn render_fullscreen_hint(mut contexts: bevy_egui::EguiContexts, window_query: Query<&Window>) {
     let is_fullscreen = window_query
         .single()
@@ -672,7 +618,6 @@ pub fn render_fullscreen_hint(mut contexts: bevy_egui::EguiContexts, window_quer
         });
 }
 
-/// System: Handle ESC key to exit to main menu (forfeit/leave game)
 pub fn handle_escape_key(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut confirmation: ResMut<InGameExitConfirmation>,

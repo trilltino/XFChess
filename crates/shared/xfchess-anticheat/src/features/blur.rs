@@ -1,15 +1,5 @@
-//! Blur signal — client-reported window-focus loss per move.
-//!
-//! The strongest pre-engine signal Lichess uses: a player alt-tabbing to an
-//! engine leaves the game window before (almost) every move. The flag is
-//! reported by the player's own client (see `POST /telemetry/blur` in the
-//! backend); absence of telemetry yields 0.0, so blur can only ever *add*
-//! suspicion, never clear it.
-
 use crate::types::MoveRecord;
 
-/// Fraction of one side's moves carrying a blur flag (0.0–1.0).
-/// `parity` 0 = white (even move indices), 1 = black.
 pub fn blur_rate(moves: &[MoveRecord], parity: usize) -> f64 {
     let mut total = 0u32;
     let mut blurred = 0u32;

@@ -1,7 +1,3 @@
-//! In-game profile panel — overlay showing username, ELO, W/L/D, recent games, ELO sparkline.
-//!
-//! Toggled open by setting `ProfileViewState.open = true`.
-
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -25,12 +21,10 @@ pub struct ProfileViewState {
     pub history: Vec<GameHistoryEntry>,
     pub fetching: bool,
     pub fetch_rx: Option<crossbeam_channel::Receiver<Result<Vec<GameHistoryEntry>, String>>>,
-    /// Estimated ELO progression computed from history (newest first → reversed for chart)
     pub elo_curve: Vec<f32>,
 }
 
 impl ProfileViewState {
-    /// Rebuild the ELO sparkline from history (oldest→newest, +15 win, -15 loss, +5 draw).
     pub fn rebuild_curve(&mut self, base_elo: u16) {
         let mut elo = base_elo as f32;
         let mut curve: Vec<f32> = vec![elo];
@@ -77,7 +71,6 @@ fn fetch_history_blocking(wallet: String) -> Result<Vec<GameHistoryEntry>, Strin
 
 // ── Systems ─────────────────────────────────────────────────────────────────
 
-/// Kick off a history fetch whenever the panel is first opened.
 pub fn fetch_profile_history(
     mut view: ResMut<ProfileViewState>,
     solana_state: Res<SolanaIntegrationState>,
@@ -106,7 +99,6 @@ pub fn fetch_profile_history(
     });
 }
 
-/// Poll the fetch channel and populate history + elo_curve.
 pub fn poll_profile_history(
     mut view: ResMut<ProfileViewState>,
     solana_state: Res<SolanaIntegrationState>,
@@ -134,7 +126,6 @@ pub fn poll_profile_history(
     }
 }
 
-/// Render the profile overlay panel.
 pub fn profile_view_ui(
     mut contexts: EguiContexts,
     mut view: ResMut<ProfileViewState>,

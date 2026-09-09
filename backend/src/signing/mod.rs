@@ -1,38 +1,3 @@
-//! XFChess signing service module.
-//!
-//! This module provides the backend signing service for the XFChess game.
-//! It handles:
-//! - JWT-based authentication for wallet owners
-//! - Session key management for game transactions
-//! - Solana instruction building and transaction signing
-//! - Tournament bracket management
-//! - Identity vault for encrypted KYC data
-//! - Matchmaking queue for player matching
-//! - CACF compliance for regulated jurisdictions
-//! - Solana Blinks for tournament registration
-//!
-//! # Module Organization
-//!
-//! - `auth`: JWT token issuance and verification
-//! - `blinks`: Solana Blinks API for tournament registration
-//! - `config`: Environment configuration
-//! - `feepayer`: Fee-payer keypair pool for transactions
-//! - `identity`: Identity vault for encrypted KYC data
-//! - `p2p_relay`: lobby-level P2P connection setup (announce/join/JOIN_ACK
-//!   handshake, region lookup) — NOT move sync, see its own doc comment
-//! - `routes`: HTTP route handlers (organized by feature), including
-//!   `routes::game_log` — the Braid-backed durable move/chat log that
-//!   replaced the old *move-relay* use of `p2p_relay`'s raw message/poll
-//!   endpoints (the lobby JOIN_ACK handshake still uses them directly)
-//! - `solana`: Solana instruction builders and RPC helpers
-//! - `storage`: SQLite-backed data stores, including CACF compliance status
-//!   (`storage::vault::{save_cacf, cacf_can_wager}`) for regulated
-//!   jurisdictions (UK, Brazil, Germany, Canada) — the actual enforcement
-//!   path used by `routes::kyc`; a separate, richer `cacf` module used to
-//!   exist here too but was never wired to any route and has been removed
-//! - `swiss`: Swiss pairing tournament system
-//! - `auth_ws`: WebSocket authentication
-
 pub mod anticheat_enqueue;
 pub mod auth;
 pub mod auth_ws;
@@ -78,7 +43,6 @@ pub use tournament_gossip::TournamentGossipService;
 pub use xfchess_anticheat::engine::job_queue::AnalysisQueue;
 pub use xfchess_braid_server::ResourceHub;
 
-/// Shared state injected into every route handler.
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<SigningConfig>,
@@ -93,10 +57,6 @@ pub struct AppState {
     pub vps_authority: Arc<Keypair>,
     pub kyc_authority: Arc<Keypair>,
     pub link_authority: Arc<Keypair>,
-    /// Public key only — the treasury-withdrawal secret key is deliberately
-    /// never loaded by this process. See `bin/treasury_signer.rs`'s module
-    /// doc for why, and `routes::admin::treasury_refund` for how a
-    /// withdrawal request is logged here without ever being signed here.
     pub treasury_authority_pubkey: Pubkey,
     pub tournament_store: Arc<TournamentStore>,
     pub swiss_service: Arc<SwissService>,
@@ -113,30 +73,11 @@ pub struct AppState {
     // ── Global session management ──────────────────────────────────────────────
     pub active_global_sessions: Arc<Mutex<HashMap<Pubkey, Keypair>>>,
 
-    /// Per-game locks serializing ER-routed writes (`record_move`,
-    /// `undelegate_game`, `schedule_time_check`, `cancel_time_check`).
-    ///
-    /// The ER rejects two concurrent writes to the same delegated account
-    /// with `InvalidWritableAccount` ("illegally used as writable") — not an
-    /// Anchor error, a rejection from MagicBlock's own runtime before our
-    /// program even runs. Before this lock existed, `delegate_game`'s own
-    /// follow-up `schedule_time_check_crank` call, `settlement_worker`'s
-    /// periodic redelegate-and-reschedule pass, and a client's `record_move`
-    /// batch could all independently fire ER writes for the same game with
-    /// no coordination between them. Reproduced live 2026-08-10: a
-    /// hand-recovery attempt got `InvalidWritableAccount` on every retry
-    /// (three attempts, up to 15s apart) despite no client-side race being
-    /// possible — the backend's own concurrent writers were still racing
-    /// each other. See `signing::routes::main::with_er_game_lock`.
     pub er_write_locks: Arc<Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
 
     pub solana_rpc_url: String,
     pub program_id: Pubkey,
-    /// Shared blocking RPC client — avoids a new TCP connection per route call.
     pub solana_rpc: Arc<solana_client::rpc_client::RpcClient>,
-    /// On-chain-verified, cached `(white, black)` per game_id — see
-    /// `solana::game_participants` module docs. Used by `game_log.rs` to
-    /// close the roster-building race for wagered games.
     pub game_participants: solana::game_participants::GameParticipantsCache,
 
     // ── Anti-cheat ─────────────────────────────────────────────────────────────
@@ -145,11 +86,9 @@ pub struct AppState {
     // ── Social (friends + presence) ────────────────────────────────────────────
     pub friends: Arc<FriendManager>,
     pub presence: Arc<PresenceStore>,
-    /// Pending lobby invites keyed by recipient node_id
     pub invite_store: Arc<std::sync::RwLock<HashMap<String, Vec<social::routes::LobbyInvite>>>>,
 
     // ── SIWS nonce store — one-time nonces keyed by nonce string ───────────────
-    /// Maps nonce → (wallet_pubkey, expires_unix_secs)
     pub siws_nonces: Arc<Mutex<HashMap<String, (String, u64)>>>,
 }
 
@@ -161,13 +100,6 @@ const _: () = {
     let _ = assert_bounds::<AppState>;
 };
 
-/// Loads an authority keypair from an env var value that's either a JSON
-/// keypair file path or a raw base58-encoded secret key.
-///
-/// Returns `Err` on a malformed/unreadable keyfile or bad base58 rather than
-/// silently falling back to a freshly generated keypair — callers decide
-/// whether that's fatal (production) or a warn-and-generate dev convenience
-/// (see `AppState::new`'s use of this).
 pub fn load_keypair_from_env_value(val: &str) -> Result<Keypair, String> {
     if std::path::Path::new(val).exists() {
         let contents = std::fs::read_to_string(val)
@@ -372,21 +304,6 @@ impl AppState {
         }
     }
 
-    /// Periodically evicts entries from the in-memory maps that would otherwise
-    /// grow without bound for the lifetime of the process.
-    ///
-    /// Three maps needed this and had no sweep, while every comparable map in
-    /// the codebase already did (`lichess_oauth`'s PKCE store, the lobby-invite
-    /// store, the presence map, the P2P relay state) — so this was an omission
-    /// rather than a policy:
-    ///
-    /// * `siws_nonces` — inserted on every unauthenticated `/auth/siws-challenge`
-    ///   call and removed only when that exact nonce is later verified. Expiry
-    ///   was checked but never collected, making it an unauthenticated
-    ///   memory-exhaustion vector.
-    /// * `er_write_locks` — one entry per `game_id` ever seen, kept forever.
-    /// * `active_global_sessions` — sessions whose on-chain delegation has
-    ///   already expired stay usable in memory indefinitely.
     pub fn spawn_state_sweeps(state: AppState) {
         const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
 
@@ -434,8 +351,6 @@ impl AppState {
         });
     }
 
-    /// Initialize gossip service with VPS node ID (called after P2P node starts)
-    /// Note: node_id is a string representation of the iroh endpoint ID
     pub async fn init_gossip(&self, vps_node_id: String) {
         // Create new gossip service with VPS node ID
         // The node_id is stored as string since iroh crate may not be available in all contexts
@@ -453,10 +368,6 @@ impl AppState {
     }
 }
 
-/// Builds the Axum router with all signing service routes.
-///
-/// Uses per-feature router functions merged together for clear separation of concerns.
-/// Note: tournament routes are mounted in build_app_router to avoid duplication.
 pub fn build_router(state: AppState) -> Router<AppState> {
     let base = Router::new().with_state(state.clone());
     base

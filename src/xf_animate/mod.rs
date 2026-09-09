@@ -1,10 +1,3 @@
-//! XF Animate — mini chess showcase rendered inside the LEARN box on the main menu.
-//!
-//! The plugin is strictly scoped to [`GameState::MainMenu`]. All spawned entities
-//! carry `DespawnOnExit(MainMenu)` and every system is gated behind
-//! `run_if(in_state(MainMenu))` so nothing from this module runs, allocates, or
-//! ticks while the actual game is being played.
-
 use bevy::prelude::*;
 
 use crate::core::GameState;
@@ -19,7 +12,6 @@ pub mod viewport;
 pub use sequence::SequencePlayback;
 pub use viewport::LearnViewportRect;
 
-/// Bevy plugin for the menu-only mini showcase.
 pub struct XfAnimatePlugin;
 
 impl Plugin for XfAnimatePlugin {

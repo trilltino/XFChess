@@ -7,14 +7,12 @@ use crate::multiplayer::traits::{MessageReader, MessageWriter};
 use crate::multiplayer::types::NetworkEvent;
 use bevy::prelude::*;
 
-/// Resource to track if we've successfully synced the initial board state
 #[derive(Resource, Default)]
 pub struct SpectatorSyncStatus {
     pub initialized: bool,
     pub last_move_uci: Option<String>,
 }
 
-/// Plugin to handle high-fidelity board synchronization for spectators
 pub struct SpectateSyncPlugin;
 
 impl Plugin for SpectateSyncPlugin {
@@ -24,12 +22,10 @@ impl Plugin for SpectateSyncPlugin {
     }
 }
 
-/// Run condition check for spectator mode
 pub fn is_spectator(game_mode: Res<GameMode>) -> bool {
     *game_mode == GameMode::Spectator
 }
 
-/// Main system that listens for spectator broadcasts and updates the visual board
 pub fn sync_spectator_board(
     mut network_events: MessageReader<NetworkEvent>,
     mut move_events: MessageWriter<NetworkMoveEvent>,

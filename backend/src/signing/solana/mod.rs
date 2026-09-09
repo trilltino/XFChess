@@ -1,14 +1,3 @@
-//! Solana instruction builders and RPC helpers for the XFChess program.
-//!
-//! This module provides functions to build Solana instructions for:
-//! - Recording chess moves on the Execution Rollup
-//! - Undelegating games (committing ER state back to devnet)
-//! - Finalizing games (setting winner, paying out escrow)
-//! - Verifying player profiles (KYC)
-//!
-//! Also provides RPC client helpers for signing and submitting transactions
-//! to both devnet and the MagicBlock Execution Rollup.
-
 pub mod debug;
 pub mod game_account;
 pub mod game_participants;
@@ -44,24 +33,14 @@ pub use transactions::{
 };
 pub use tx_guard::validate_cosignable_tx;
 
-/// PDA seed for game accounts
 pub const GAME_SEED: &[u8] = b"game";
-/// PDA seed for move log accounts
 pub const MOVE_LOG_SEED: &[u8] = b"move_log";
-/// PDA seed for session delegation accounts
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
-/// PDA seed for player profile accounts
 pub const PROFILE_SEED: &[u8] = b"profile";
-/// PDA seed for wager escrow accounts
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
-/// PDA seed for tournament accounts
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";
-/// PDA seed for the single global platform treasury vault
 pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
-/// MagicBlock magic context account (ER-only)
 pub const MAGIC_CONTEXT_PUBKEY: &str = "MagicContext1111111111111111111111111111111";
-/// MagicBlock magic program (ER-only)
 pub const MAGIC_PROGRAM_PUBKEY: &str = "Magic11111111111111111111111111111111111111";
-/// MagicBlock delegation program (same ID the game client uses)
 pub const DELEGATION_PROGRAM_ID: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";

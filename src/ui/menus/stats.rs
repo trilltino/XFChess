@@ -1,7 +1,3 @@
-//! Platform statistics display in-game
-//!
-//! Fetches and displays global player/game counts from the VPS backend.
-
 use bevy::prelude::*;
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
@@ -48,7 +44,6 @@ impl Plugin for StatsPlugin {
     }
 }
 
-/// Dispatch a background thread to fetch stats (no blocking on game thread)
 fn fetch_stats_system(
     mut stats: ResMut<PlatformStats>,
     channel: Res<StatsFetchChannel>,

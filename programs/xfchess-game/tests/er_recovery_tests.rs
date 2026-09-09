@@ -1,16 +1,3 @@
-//! Tests for the ER-unavailability forced-recovery path added in
-//! `delegation_ix::force_recovery` / `governance_ix::recover_stuck_delegation`.
-//!
-//! `request_force_undelegate` / `force_undelegate_after_timeout` CPI into the
-//! real MagicBlock delegation program, so their happy paths need a live ER
-//! and aren't covered here — see docs/runbooks/magicblock-lifecycle-devnet.md.
-//! What's covered in-process: the account-validation guards that reject
-//! before any CPI runs (mirroring `er_delegation_tests.rs`'s existing
-//! pattern), and the full `recover_stuck_delegation` payout path, which is
-//! pure program logic with no external CPI.
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use anchor_lang::{AnchorDeserialize, Discriminator, InstructionData, ToAccountMetas};
@@ -39,9 +26,6 @@ fn treasury_vault_pda() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[b"treasury_vault"], &xfchess_game::ID)
 }
 
-/// A `Game` PDA wiped to zero bytes, as `force_undelegate_after_timeout`
-/// leaves it — owned by the program, holding only its zero-data
-/// rent-exempt minimum (`Rent::minimum_balance(0)` on mainnet/devnet).
 fn wiped_game_account() -> Account {
     Account {
         lamports: 890_880,
@@ -130,8 +114,6 @@ fn force_undelegate_after_timeout_ix(
     }
 }
 
-/// Load the real dispute authority keypair from the gitignored keyfile.
-/// Returns None (test skips the signing path) when it isn't present (e.g. CI).
 fn dispute_authority_keypair() -> Option<Keypair> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -140,9 +122,6 @@ fn dispute_authority_keypair() -> Option<Keypair> {
     read_keypair_file(path).ok()
 }
 
-/// Decode an anchor `emit!`ed event of type `T` out of a transaction's
-/// program logs (format: `Program data: <base64(discriminator || borsh)>`).
-/// Returns `None` if no log line decodes to `T`'s discriminator.
 fn find_event<T: AnchorDeserialize + Discriminator>(logs: &[String]) -> Option<T> {
     use base64::Engine;
     for log in logs {
@@ -233,11 +212,6 @@ async fn recover_stuck_delegation_splits_escrow_and_sweeps_game_rent() {
     );
 }
 
-/// docs/PRE_MAINNET_E2E_PLAN.md §1.5 gap 1: before the `StuckDelegationRecovered`
-/// event was added, there was no on-chain audit trail at all for this
-/// instruction — grepping the handler for `emit!` returned nothing. This
-/// asserts the event actually fires, with the correct game/authority/split
-/// fields, on a successful recovery.
 #[tokio::test]
 #[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/PRE_MAINNET_E2E_PLAN.md §1.5/§6.1"]
 async fn recover_stuck_delegation_emits_audit_event() {

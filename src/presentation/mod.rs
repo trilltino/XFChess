@@ -1,4 +1,3 @@
-//! Presentation component entry point
 pub mod audio;
 
 use audio::AudioPresentationPlugin;

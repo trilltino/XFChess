@@ -1,11 +1,5 @@
-//! Tournament events for Bevy event system.
-//!
-//! These events are emitted by the TournamentClient when gossip messages
-//! are received, allowing UI systems to react to tournament updates.
-
 use bevy::prelude::*;
 
-/// Event emitted when a new round starts
 #[derive(Message, Event, Debug, Clone)]
 pub struct RoundStarted {
     pub tournament_id: u64,
@@ -14,7 +8,6 @@ pub struct RoundStarted {
     pub my_pairing: Option<MyPairing>,
 }
 
-/// Event emitted when a match result is recorded
 #[derive(Message, Event, Debug, Clone)]
 pub struct ResultRecorded {
     pub tournament_id: u64,
@@ -23,7 +16,6 @@ pub struct ResultRecorded {
     pub result: MatchResult,
 }
 
-/// Event emitted when tournament standings are updated
 #[derive(Message, Event, Debug, Clone)]
 pub struct StandingsUpdated {
     pub tournament_id: u64,
@@ -31,7 +23,6 @@ pub struct StandingsUpdated {
     pub my_rank: Option<u16>,
 }
 
-/// Event emitted when player joins a tournament
 #[derive(Message, Event, Debug, Clone)]
 pub struct TournamentJoined {
     pub tournament_id: u64,
@@ -40,13 +31,11 @@ pub struct TournamentJoined {
     pub topic_url: String,
 }
 
-/// Event emitted when player leaves a tournament
 #[derive(Message, Event, Debug, Clone)]
 pub struct TournamentLeft {
     pub tournament_id: u64,
 }
 
-/// Event emitted when tournament is completed
 #[derive(Message, Event, Debug, Clone)]
 pub struct TournamentCompleted {
     pub tournament_id: u64,
@@ -54,7 +43,6 @@ pub struct TournamentCompleted {
     pub final_standings: Vec<StandingsEntry>,
 }
 
-/// Pairing information for a match
 #[derive(Debug, Clone)]
 pub struct PairingInfo {
     pub board: u16,
@@ -62,7 +50,6 @@ pub struct PairingInfo {
     pub black: String,
 }
 
-/// Player's specific pairing information
 #[derive(Debug, Clone)]
 pub struct MyPairing {
     pub round: u8,
@@ -71,21 +58,18 @@ pub struct MyPairing {
     pub color: PlayerColor,
 }
 
-/// Player color assignment
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerColor {
     White,
     Black,
 }
 
-/// Match result
 #[derive(Debug, Clone)]
 pub enum MatchResult {
     Win { winner: String },
     Draw,
 }
 
-/// Standings entry
 #[derive(Debug, Clone)]
 pub struct StandingsEntry {
     pub player_id: String,
@@ -94,7 +78,6 @@ pub struct StandingsEntry {
     pub tiebreak: Option<f64>,
 }
 
-/// Plugin that registers all tournament events
 pub struct TournamentEventsPlugin;
 
 impl Plugin for TournamentEventsPlugin {

@@ -1,8 +1,3 @@
-//! Anti-cheat routes.
-//!
-//! GET  /anticheat/verdict/:game_id  — query the verdict for a finished game
-//! GET  /anticheat/stats/:pubkey     — query rolling stats for a player
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -20,7 +15,6 @@ pub fn anticheat_routes() -> Router<AppState> {
         .route("/anticheat/stats/{pubkey}", get(get_player_stats))
 }
 
-/// GET /anticheat/verdict/:game_id
 pub async fn get_verdict(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
@@ -88,7 +82,6 @@ pub async fn get_verdict(
     }
 }
 
-/// GET /anticheat/stats/:pubkey
 pub async fn get_player_stats(
     State(state): State<AppState>,
     Path(pubkey): Path<String>,

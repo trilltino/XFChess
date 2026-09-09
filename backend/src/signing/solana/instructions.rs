@@ -1,5 +1,3 @@
-//! Solana instruction builders for XFChess program instructions.
-
 use sha2::{Digest, Sha256};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -16,10 +14,6 @@ const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
 const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";
 
-/// Computes the Anchor discriminator for a given instruction name.
-/// `pub(crate)` so `tx_guard` can derive the same discriminators this module's
-/// builders emit — an allow-list that computed them independently could drift
-/// from the instructions actually being built.
 pub(crate) fn anchor_discriminator(name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
     hasher.update(format!("global:{}", name));
@@ -28,16 +22,12 @@ pub(crate) fn anchor_discriminator(name: &str) -> [u8; 8] {
         .expect("SHA256 hash should be at least 8 bytes")
 }
 
-/// Borsh-encodes a string (length prefix + bytes).
 fn borsh_string(s: &str) -> Vec<u8> {
     let mut v = (s.len() as u32).to_le_bytes().to_vec();
     v.extend_from_slice(s.as_bytes());
     v
 }
 
-/// Builds a `record_move` instruction for the Execution Rollup.
-///
-/// Records a chess move on the ER with optional signature for replay protection.
 pub fn record_move_ix(
     program_id: &Pubkey,
     session_pubkey: &Pubkey,
@@ -92,12 +82,6 @@ pub fn record_move_ix(
     })
 }
 
-/// Same as `record_move_ix`, but targets `global_record_move` — for games
-/// created via `global_create_game`/`global_join_game`, which never get a
-/// per-game `SessionDelegation` account (that's what makes their create/join
-/// popup-free), so `record_move` fails on-chain for them. Account order
-/// matches `GlobalRecordMove`
-/// (`programs/xfchess-game/src/moves_ix/global_record.rs`) exactly.
 pub fn global_record_move_ix(
     program_id: &Pubkey,
     session_pubkey: &Pubkey,
@@ -145,23 +129,6 @@ pub fn global_record_move_ix(
     })
 }
 
-/// Builds a `delegate_game` instruction, moving a game PDA from devnet to the
-/// Ephemeral Rollup so moves can be recorded there sub-second.
-///
-/// Account order matches the on-chain `DelegateGameCtx`
-/// (`programs/xfchess-game/src/delegation_ix/delegate.rs`) exactly — Anchor
-/// resolves `Accounts` positionally. `payer` funds the delegation
-/// bookkeeping accounts (buffer/delegation_record/delegation_metadata) and
-/// can be any funded signer (the caller's fee-payer pool, typically);
-/// `fee_payer` must equal `game.fee_payer` on-chain — the session key that
-/// was already set there during `create_game`/`join_game`.
-///
-/// Lets the VPS submit this on the caller's behalf with **zero wallet
-/// popup**, since it holds the per-game session key already — mirrors
-/// `undelegate_game_ix`'s existing "no payer identity check" trust model in
-/// reverse direction. See `src/multiplayer/rollup/magicblock.rs`'s
-/// `create_delegation_instruction` for the client-side equivalent (used when
-/// the caller signs with a locally-held global session key instead).
 pub fn delegate_game_ix(
     program_id: &Pubkey,
     game_id: u64,
@@ -215,19 +182,6 @@ pub fn delegate_game_ix(
     })
 }
 
-/// Builds a `request_force_undelegate` instruction — starts the non-admin,
-/// owner-program-authorized forced-undelegation countdown
-/// (`DEFAULT_UNDELEGATION_REQUEST_TIMEOUT_SLOTS`, ~60min) for a `Game` PDA
-/// whose ER validator has gone unreachable. See MAGICBLOCK.md's
-/// "Failure Mode: ER Unavailability" section and
-/// `programs/xfchess-game/src/delegation_ix/force_recovery.rs`.
-///
-/// `payer` must be the exact keypair that originally funded this game's
-/// `delegate_game` call — the delegation program checks it against the
-/// on-chain `delegation_metadata.rent_payer`. Callers that don't know which
-/// fee-payer-pool entry that was should try each pool key in turn (a wrong
-/// `payer` just fails the CPI harmlessly; see
-/// `settlement_worker::request_force_undelegate_for_stale_game`).
 pub fn request_force_undelegate_ix(
     program_id: &Pubkey,
     game_id: u64,
@@ -273,16 +227,6 @@ pub fn request_force_undelegate_ix(
     })
 }
 
-/// Builds a `force_undelegate_after_timeout` instruction — completes a
-/// forced undelegation once `request_force_undelegate`'s ~60min window has
-/// elapsed. **Data-loss warning:** this wipes the `Game` PDA to zero bytes
-/// (see the on-chain handler's doc comment for why); follow up with
-/// `recover_stuck_delegation_ix` to release the escrow. `payer` must be the
-/// same key passed to `request_force_undelegate_ix`.
-///
-/// `commit_reimbursement` only matters if the validator left a pending
-/// commit behind; pass `payer` again as a placeholder when none is known
-/// (the common case — see the on-chain handler).
 pub fn force_undelegate_after_timeout_ix(
     program_id: &Pubkey,
     game_id: u64,
@@ -337,12 +281,6 @@ pub fn force_undelegate_after_timeout_ix(
     })
 }
 
-/// Builds a `recover_stuck_delegation` instruction — releases wager escrow
-/// from a `Game` PDA left wiped by `force_undelegate_after_timeout`.
-/// `white`/`black` must be attested from off-chain records (the game's own
-/// `create_game`/`join_game` history) since the wiped account no longer
-/// holds them; `dispute_authority` must sign. See
-/// `programs/xfchess-game/src/governance_ix/recover_stuck_delegation.rs`.
 pub fn recover_stuck_delegation_ix(
     program_id: &Pubkey,
     game_id: u64,
@@ -373,9 +311,6 @@ pub fn recover_stuck_delegation_ix(
     }
 }
 
-/// Builds an `undelegate_game` instruction for the ER.
-///
-/// Commits the ER game state back to devnet and releases the delegated account.
 pub fn undelegate_game_ix(
     program_id: &Pubkey,
     session_pubkey: &Pubkey,
@@ -404,15 +339,6 @@ pub fn undelegate_game_ix(
     })
 }
 
-/// Builds a `schedule_time_check` instruction for the ER.
-///
-/// Registers a recurring crank task that auto-forfeits whichever player's
-/// clock has expired. Must be submitted through the Ephemeral Rollup, signed
-/// by the same payer used to delegate the game. `task_id` is always
-/// `game_id`, matching `cancel_time_check_ix` and the on-chain crank's
-/// idempotent forfeit check. MagicBlock requires a positive iteration count,
-/// so the maximum positive signed value is used as the effectively-until-
-/// cancelled schedule.
 pub fn schedule_time_check_ix(
     program_id: &Pubkey,
     payer: &Pubkey,
@@ -445,13 +371,6 @@ pub fn schedule_time_check_ix(
     })
 }
 
-/// Builds a `cancel_time_check` instruction for the ER.
-///
-/// Stops the recurring crank task registered by `schedule_time_check_ix`.
-/// Must be signed by the same payer that scheduled it — MagicBlock requires
-/// the cancelling authority to match the original task authority. Call this
-/// alongside `undelegate_game_ix` so a finished game doesn't leave a dangling
-/// task behind.
 pub fn cancel_time_check_ix(
     program_id: &Pubkey,
     payer: &Pubkey,
@@ -476,12 +395,6 @@ pub fn cancel_time_check_ix(
     })
 }
 
-/// Builds a `finalize_game` instruction for devnet.
-///
-/// Pays out or refunds the wager escrow for a terminal game and updates ELO
-/// for finished games.
-///
-/// `fee_payer` is the ephemeral rollups relayer pubkey that gets reimbursed from escrow.
 pub fn finalize_game_ix(
     program_id: &Pubkey,
     game_id: u64,
@@ -517,13 +430,6 @@ pub fn finalize_game_ix(
     }
 }
 
-/// Builds a `link_external_elo` instruction for devnet.
-///
-/// Links a verified Lichess account to a player profile. Account order
-/// mirrors `LinkExternalElo` in the program: player_profile,
-/// player (readonly), lichess_username_record (the uniqueness lock — see
-/// `LichessUsernameRecord`'s doc comment), link_authority (signer, also the
-/// payer for that record's first creation), system_program.
 pub fn link_external_elo_ix(
     program_id: &Pubkey,
     link_authority: &Pubkey,
@@ -557,9 +463,6 @@ pub fn link_external_elo_ix(
     }
 }
 
-/// Builds a `verify_profile` instruction for devnet.
-///
-/// Marks a player as KYC-verified on-chain.
 pub fn verify_profile_ix(program_id: &Pubkey, admin: &Pubkey, player: &Pubkey) -> Instruction {
     let player_profile_pda =
         Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], program_id).0;
@@ -577,13 +480,6 @@ pub fn verify_profile_ix(program_id: &Pubkey, admin: &Pubkey, player: &Pubkey) -
     }
 }
 
-/// Builds a `withdraw_treasury` instruction.
-///
-/// Moves `amount` lamports from the system-owned platform treasury vault
-/// (seeds `[b"treasury_vault"]`) to `destination`. Must be signed by
-/// `authority`, which the program constrains to `treasury_authority::ID`.
-/// Account order mirrors `WithdrawTreasury` in the program:
-/// treasury_vault, authority (signer), destination, system_program.
 pub fn withdraw_treasury_ix(
     program_id: &Pubkey,
     authority: &Pubkey,
@@ -607,9 +503,6 @@ pub fn withdraw_treasury_ix(
     }
 }
 
-/// Builds a `leave_tournament` instruction for devnet.
-///
-/// Removes a player from the tournament and triggers a refund.
 pub fn leave_tournament_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -665,7 +558,6 @@ pub fn leave_tournament_ix(
     }
 }
 
-/// Builds an `initialize_tournament` instruction for devnet.
 pub fn initialize_tournament_ix(
     program_id: &Pubkey,
     admin: &Pubkey,
@@ -753,8 +645,6 @@ pub fn initialize_tournament_ix(
     }
 }
 
-/// Builds an `initialize_tournament_escrow` instruction.
-/// Must be called after `initialize_tournament` and before `register_player`.
 pub fn initialize_escrow_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -785,11 +675,6 @@ pub fn initialize_escrow_ix(
     }
 }
 
-/// Builds the correct `initialize_shards` instruction variant based on `max_players`.
-///
-/// - ≤ 64  → `initialize_shards_small`  (1 shard PDA)
-/// - ≤ 128 → `initialize_shards_medium` (2 shard PDAs)
-/// - 256   → `initialize_shards_large`  (4 shard PDAs)
 pub fn initialize_shards_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -858,8 +743,6 @@ pub fn initialize_shards_ix(
     }
 }
 
-/// Number of TournamentPlayersShard PDAs that exist for a tournament size.
-/// Must mirror `shards::required_shards` in the on-chain program.
 pub fn required_shards(max_players: u16) -> u8 {
     match max_players {
         0..=64 => 1,
@@ -868,16 +751,6 @@ pub fn required_shards(max_players: u16) -> u8 {
     }
 }
 
-/// Computes a match's (round, next_match_for_winner, next_match_slot) in the
-/// linear single-elimination layout used by the store and the on-chain program:
-/// round-1 matches occupy indices 0..P/2, each later round follows, and the
-/// final is the last index (`total_matches - 1`).
-///
-/// This is the single source of truth for that layout — `TournamentStore::
-/// generate_bracket` (`signing/storage/tournament.rs`) calls this same
-/// function for every match rather than recomputing the topology itself, so
-/// the off-chain store and the on-chain `initialize_match` instructions it
-/// builds here can't drift apart.
 pub fn bracket_position(max_players: u16, match_index: u16) -> (u8, Option<u16>, u8) {
     let total_matches = max_players.saturating_sub(1);
     let mut round_start = 0u16;
@@ -897,12 +770,6 @@ pub fn bracket_position(max_players: u16, match_index: u16) -> (u8, Option<u16>,
     (round, next, (pos_in_round % 2) as u8)
 }
 
-/// Builds a `start_tournament` instruction.
-/// Locks registration, seeds players for bracket generation, and sweeps the
-/// entry-fee deposits from the tournament escrow to `host_treasury` (operator
-/// revenue — the guaranteed prize stays locked in escrow).
-/// Shard PDAs that don't exist for this tournament size are passed as the
-/// program ID (Anchor's `None` marker for optional accounts).
 pub fn start_tournament_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -960,17 +827,6 @@ pub fn start_tournament_ix(
     }
 }
 
-/// Builds a `cancel_tournament` instruction.
-/// Halts a Registration- or Active-phase tournament: refunds entry fees to
-/// `players` (from escrow during Registration, from `host_treasury` if the
-/// tournament already started and swept fees there) and returns the
-/// guaranteed SOL prize to the operator. `players` must be passed in the
-/// same order they were registered on-chain — the handler matches each
-/// remaining account positionally against the shard-recorded player list.
-/// Shard PDAs absent for this tournament size are passed as the program ID
-/// (Anchor's `None` marker), matching `start_tournament_ix`. USDC prize
-/// accounts are also passed as the program ID — this builder only supports
-/// SOL-only tournaments, matching `initialize_tournament_ix`'s default.
 pub fn cancel_tournament_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1042,10 +898,6 @@ pub fn cancel_tournament_ix(
     }
 }
 
-/// Builds a `fund_sol_prize` instruction.
-/// Locks the guaranteed SOL prize in the tournament escrow PDA. Must be sent
-/// before the first player registers — the program rejects it afterwards, and
-/// rejects registrations on paid tournaments until a prize is funded.
 pub fn fund_sol_prize_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1078,11 +930,6 @@ pub fn fund_sol_prize_ix(
     }
 }
 
-/// Builds the player-signed `register_player` instruction.
-///
-/// Anchor's optional accounts are always represented in the account list. An
-/// absent shard uses the program ID sentinel, matching the benchmark builder
-/// and Anchor's `Option<Account<...>>` deserialization.
 pub fn register_player_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1143,7 +990,6 @@ pub fn register_player_ix(
     }
 }
 
-/// Builds the permissionless Swiss round-advance crank instruction.
 pub fn advance_round_ix(program_id: &Pubkey, tournament_id: u64, cranker: &Pubkey) -> Instruction {
     let tournament_pda =
         Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
@@ -1160,7 +1006,6 @@ pub fn advance_round_ix(program_id: &Pubkey, tournament_id: u64, cranker: &Pubke
     }
 }
 
-/// Builds the permissionless Swiss completion crank instruction.
 pub fn complete_swiss_tournament_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1204,8 +1049,6 @@ pub fn complete_swiss_tournament_ix(
     }
 }
 
-/// Builds the player-signed `record_swiss_result` instruction.
-/// `result_variant`: 0 = win, 1 = loss, 2 = draw.
 pub fn record_swiss_result_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1258,12 +1101,6 @@ pub fn record_swiss_result_ix(
     }
 }
 
-/// Builds a `distribute_tournament_prizes` instruction.
-///
-/// Push-based payout: pays every unclaimed place its SOL share directly, so
-/// winners never have to sign a claim. `winners` are passed as writable
-/// remaining accounts; the program only pays wallets that match the places
-/// recorded on the Tournament account.
 pub fn distribute_tournament_prizes_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1296,9 +1133,6 @@ pub fn distribute_tournament_prizes_ix(
     }
 }
 
-/// Builds an `initialize_match` instruction for a single bracket slot.
-/// `round`: 0-indexed. `next_match_for_winner`: None for the final.
-/// `next_match_slot`: 0 = white side, 1 = black side in the next match.
 pub fn initialize_match_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1370,8 +1204,6 @@ pub fn initialize_match_ix(
     }
 }
 
-/// Builds a `record_match_result` instruction (VPS-signed).
-/// Resolves the on-chain `TournamentMatch` PDA and advances the bracket.
 pub fn record_result_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1411,9 +1243,6 @@ pub fn record_result_ix(
     }
 }
 
-/// Builds an `advance_winner` instruction (VPS-signed).
-/// Copies the completed source match's winner into their slot in the target
-/// match so the next round can start.
 pub fn advance_winner_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1454,9 +1283,6 @@ pub fn advance_winner_ix(
     }
 }
 
-/// Builds a `claim_tournament_prize` instruction (player-signed).
-/// Pulls the claimant's share from the SOL escrow PDA. The program validates
-/// that the claimant matches a finishing position and prevents double-claim.
 pub fn claim_prize_ix(program_id: &Pubkey, tournament_id: u64, claimant: &Pubkey) -> Instruction {
     let tournament_pda =
         Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)

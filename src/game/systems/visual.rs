@@ -4,8 +4,6 @@ use crate::rendering::pieces::{Piece, PIECE_ON_BOARD_Y};
 use crate::rendering::utils::{Square, SquareMaterials};
 use bevy::prelude::*;
 
-/// Advance the turn immediately in the Execution set (before AI systems run)
-/// so the AI sees the new turn in the same frame the player moved.
 pub fn flush_pending_turn(
     mut pending_turn: ResMut<PendingTurnAdvance>,
     mut current_turn: ResMut<CurrentTurn>,
@@ -30,30 +28,12 @@ pub fn flush_pending_turn(
     }
 }
 
-/// Marker component for selected piece borders
 #[derive(Component)]
 pub struct SelectedBorder;
 
-/// Marker component for legal move hints (3D)
 #[derive(Component)]
 pub struct MoveHint;
 
-/// System to visually highlight possible moves and selected square
-///
-/// Updates square materials to provide visual feedback for:
-/// - **Selected piece**: Highlights the source square
-/// - **Valid moves**: Highlights all legal destination squares
-/// - **Restoration**: Restores original colors for unselected squares
-///
-/// # Execution Order
-///
-/// Runs in `GameSystems::Visual` set, after all game logic systems.
-/// This ensures highlights reflect the current selection state.
-///
-/// # Performance
-///
-/// Iterates over all squares each frame. Consider using change detection
-/// or event-based updates if this becomes a bottleneck.
 pub fn highlight_possible_moves(
     selection: Res<Selection>,
     square_materials: Res<SquareMaterials>,
@@ -103,16 +83,6 @@ pub fn highlight_possible_moves(
     }
 }
 
-/// System to animate piece movement with a smooth arc.
-///
-/// Each frame, increments `PieceMoveAnimation::elapsed` and interpolates
-/// the piece's world position between `start` and `end`:
-/// - X/Z slide uses smooth-step easing (slow→fast→slow).
-/// - Y uses a parabolic arc peaking at the midpoint for a natural lift.
-///
-/// The component is removed once `elapsed >= duration`, at which point the
-/// piece snaps exactly to `end`.  Pieces without an active animation are
-/// kept in sync with their `Piece` logical position each frame.
 pub fn animate_piece_movement(
     time: Res<Time>,
     mut commands: Commands,
@@ -155,14 +125,6 @@ pub fn animate_piece_movement(
     }
 }
 
-/// System to animate captured pieces with a parabolic arc, spin, and scale-to-zero.
-///
-/// # Animation phases (all simultaneous over the `FadingCapture` timer's duration, 0.75 s)
-///
-/// - **Arc**: piece rises to `arc_height` at t=0.5, then falls back toward the board.
-///   Uses a parabolic curve: `y_offset = arc_height * 4t(1-t)`.
-/// - **Spin**: piece rotates `spin_radians` around its `spin_axis` using smooth-step t.
-/// - **Scale**: piece shrinks to zero using smooth-step easing.
 pub fn animate_capture_fade(
     time: Res<Time>,
     mut commands: Commands,
@@ -199,10 +161,6 @@ pub fn animate_capture_fade(
     }
 }
 
-/// Setup global scene elements (ambient light)
-///
-/// These elements persist across all game states and provide
-/// a base visual environment.
 pub fn setup_global_scene(mut commands: Commands) {
     // Match the menu board's ambient (GlobalAmbientLight brightness 95) so the
     // in-game board isn't washed out / over-bright.
@@ -213,14 +171,9 @@ pub fn setup_global_scene(mut commands: Commands) {
     });
 }
 
-/// Marker for the board's camera-following fill light (the "headlamp") that
-/// keeps pieces evenly lit from the viewer's side as the camera orbits.
 #[derive(Component)]
 pub(crate) struct CameraFollowLight;
 
-/// Setup game scene when entering InGame state
-///
-/// Spawns the game camera, lighting, and chess board.
 pub fn setup_game_scene(
     mut commands: Commands,
     view_mode: Res<crate::game::view_mode::ViewMode>,
@@ -279,13 +232,6 @@ pub fn setup_game_scene(
     // Note: Ambient light is set globally in setup_global_scene (Startup)
 }
 
-/// Keeps the board fill light at the viewer's position so pieces are lit evenly
-/// from the camera's side no matter how the player orbits or zooms. The overhead
-/// "Angel Light" and the ambient stay camera-independent; this is the moving fill.
-///
-/// Follows the dedicated board camera (`crate::game::systems::camera::BoardCamera`)
-/// rather than the persistent/UI camera, since orbit/zoom now live on the board
-/// camera during gameplay.
 pub fn update_board_fill_light(
     cam_q: Query<
         &Transform,

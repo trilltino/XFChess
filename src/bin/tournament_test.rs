@@ -2,12 +2,6 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 #![allow(unused_variables)]
-//! tournament_test — Full 4-player tournament simulation
-//!
-//! Simulates a complete single-elimination tournament on Solana devnet,
-//! including profile creation, registration, match play, and result recording.
-//!
-//! Usage: cargo run --features solana --bin tournament_test
 
 use clap::Parser;
 use solana_client::rpc_client::RpcClient;
@@ -28,7 +22,6 @@ const ENTRY_FEE_LAMPORTS: u64 = 1_000_000; // 0.001 SOL
 #[derive(Parser)]
 #[command(name = "tournament_test")]
 struct Args {
-    /// Path to admin keypair (default: keys/fee-payer.json)
     #[arg(long, default_value = "keys/fee-payer.json")]
     keypair: String,
 }

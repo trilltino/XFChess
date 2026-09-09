@@ -1,22 +1,15 @@
-//! Mini 8x8 board (green/white) rendered on [`MINI_LAYER`].
-
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use super::viewport::MINI_LAYER;
 use crate::core::{DespawnOnExit, GameState};
 
-/// Size of one square in mini-world units.
 pub const SQUARE_SIZE: f32 = 1.0;
-/// Offset used so the 8x8 board is centred around world origin.
 pub const BOARD_HALF: f32 = 4.0;
 
 #[derive(Component)]
 pub struct MiniSquare;
 
-/// Convert `(file, rank)` with `a1 = (0, 0)` to a world translation.
-/// Files increase along +X, ranks increase along -Z (so rank 0 is closest to
-/// a camera sitting on +Z, i.e. white's side).
 pub fn square_world(file: u8, rank: u8) -> Vec3 {
     Vec3::new(
         file as f32 * SQUARE_SIZE - BOARD_HALF + SQUARE_SIZE * 0.5,

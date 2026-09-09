@@ -1,6 +1,3 @@
-//! Instruction to lock registration and seed players for bracket generation.
-//! Match accounts are created separately via initialize_match instructions.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -17,44 +14,36 @@ pub struct StartTournament<'info> {
         constraint = tournament.authority == authority.key() @ GameErrorCode::NotTournamentAuthority
     )]
     pub tournament: Account<'info, Tournament>,
-    /// TournamentPlayersShard 0 always present (all tournament sizes)
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Account<'info, TournamentPlayersShard>,
-    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
-    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Option<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Option<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         mut,
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
-    /// CHECK: Tournament escrow PDA — entry-fee deposits are swept from here to
-    /// host_treasury once the tournament actually starts.
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// CHECK: Operator treasury — receives the swept entry fees (operator revenue).
     #[account(
         mut,
         constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess
@@ -65,8 +54,6 @@ pub struct StartTournament<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Sorts players by ELO descending and records seed order.
-/// Backend uses this to generate matches via separate initialize_match calls.
 pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
     require!(

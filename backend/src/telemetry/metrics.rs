@@ -1,18 +1,7 @@
-//! Prometheus-compatible metrics for XFChess backend
-//!
-//! Tracks HTTP performance, Solana transactions/RPC, and fee-payer health.
-//! `AppState.metrics: Arc<Metrics>` is shared everywhere, so every field uses
-//! interior mutability (a lock around the map only for inserting a new key,
-//! atomics for the counts themselves) — recording never needs `&mut self`.
-
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
-/// Upper bounds (inclusive, milliseconds) of the fixed duration-histogram
-/// buckets shared by HTTP and Solana RPC/transaction timings. Prometheus
-/// histograms are cumulative ("le" = less-or-equal); the `+Inf` bucket is
-/// implicit and equals the total count.
 const DURATION_BUCKETS_MS: [f64; 9] = [5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0];
 
 #[derive(Debug)]
@@ -43,8 +32,6 @@ impl DurationHistogram {
         self.count.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Appends this histogram's series (bucket/sum/count lines) to `out`,
-    /// under Prometheus metric name `name` with the given label set.
     fn write_prometheus(&self, out: &mut String, name: &str, labels: &str) {
         let total = self.count.load(Ordering::Relaxed);
         for (i, bound) in DURATION_BUCKETS_MS.iter().enumerate() {
@@ -62,9 +49,6 @@ impl DurationHistogram {
     }
 }
 
-/// Increments the `AtomicU64` counter at `key` in `map`, inserting it first if
-/// this is the first time this key has been recorded. Read-locked in the
-/// common (key-already-exists) case; only takes the write lock to insert.
 fn bump<K: std::hash::Hash + Eq + Clone>(map: &RwLock<HashMap<K, AtomicU64>>, key: &K) {
     if let Some(counter) = map.read().unwrap().get(key) {
         counter.fetch_add(1, Ordering::Relaxed);
@@ -77,8 +61,6 @@ fn bump<K: std::hash::Hash + Eq + Clone>(map: &RwLock<HashMap<K, AtomicU64>>, ke
         .fetch_add(1, Ordering::Relaxed);
 }
 
-/// Records `duration_ms` into the histogram at `key` in `map`, inserting a
-/// fresh histogram first if this is the first observation for that key.
 fn observe<K: std::hash::Hash + Eq + Clone>(
     map: &RwLock<HashMap<K, DurationHistogram>>,
     key: &K,
@@ -95,7 +77,6 @@ fn observe<K: std::hash::Hash + Eq + Clone>(
         .record(duration_ms);
 }
 
-/// Core metrics collection. Shared as `Arc<Metrics>` — all methods take `&self`.
 #[derive(Debug, Default)]
 pub struct Metrics {
     // API metrics
@@ -121,7 +102,6 @@ impl Metrics {
         Self::default()
     }
 
-    /// Record an HTTP request (endpoint = "METHOD /path").
     pub fn record_http_request(&self, endpoint: &str, status: u16, duration_ms: f64) {
         bump(&self.http_requests_total, &(endpoint.to_string(), status));
         observe(
@@ -131,7 +111,6 @@ impl Metrics {
         );
     }
 
-    /// Record a Solana RPC call (e.g. `getSlot`, `getMultipleAccounts`).
     pub fn record_solana_rpc_call(&self, method: &str, success: bool, latency_ms: f64) {
         let status = if success { "success" } else { "error" };
         bump(
@@ -141,12 +120,10 @@ impl Metrics {
         observe(&self.solana_rpc_latency_ms, &method.to_string(), latency_ms);
     }
 
-    /// Record transaction submission (fired before confirmation is known).
     pub fn record_transaction_submitted(&self, chain_type: &str) {
         bump(&self.transactions_submitted_total, &chain_type.to_string());
     }
 
-    /// Record transaction confirmation.
     pub fn record_transaction_confirmed(&self, chain_type: &str, confirmation_time_ms: f64) {
         bump(&self.transactions_confirmed_total, &chain_type.to_string());
         observe(
@@ -156,8 +133,6 @@ impl Metrics {
         );
     }
 
-    /// Record transaction failure, classified by `error_type` (see
-    /// `signing::solana::telemetry::TxErrorCategory`).
     pub fn record_transaction_failed(&self, chain_type: &str, error_type: &str) {
         bump(
             &self.transactions_failed_total,
@@ -165,8 +140,6 @@ impl Metrics {
         );
     }
 
-    /// Update fee payer balance (called from the `/health/detailed` fee-payer
-    /// check, keyed by fee-payer pool index).
     pub fn update_feepayer_balance(&self, key_index: usize, lamports: u64) {
         if let Some(gauge) = self
             .feepayer_balance_lamports
@@ -185,9 +158,6 @@ impl Metrics {
             .store(lamports, Ordering::Relaxed);
     }
 
-    /// Current confirmed-transaction count for `chain_type` ("solana"/"er").
-    /// Used by `GET /admin/metrics/summary` — a plain JSON read of the same
-    /// data `/metrics` exports, for the admin panel's KPI tile.
     pub fn transactions_confirmed(&self, chain_type: &str) -> u64 {
         self.transactions_confirmed_total
             .read()
@@ -197,7 +167,6 @@ impl Metrics {
             .unwrap_or(0)
     }
 
-    /// Current fee-payer balance gauge for `key_index` (see `update_feepayer_balance`).
     pub fn feepayer_balance(&self, key_index: usize) -> u64 {
         self.feepayer_balance_lamports
             .read()
@@ -207,7 +176,6 @@ impl Metrics {
             .unwrap_or(0)
     }
 
-    /// Export metrics in Prometheus text format.
     pub fn export_prometheus_format(&self) -> String {
         let mut output = String::new();
 

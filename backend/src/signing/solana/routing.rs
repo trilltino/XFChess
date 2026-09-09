@@ -1,32 +1,7 @@
-//! Exhaustive instruction -> settlement-layer classification.
-//!
-//! `MAGICBLOCK.md`'s boundary invariant — "ER hot-path instructions write
-//! only delegated accounts; instructions that write escrow, treasury,
-//! profile, or player lamports must reject delegated games" — used to be
-//! enforced only by each call site in `routes/main.rs` / `tasks/
-//! settlement_worker.rs` independently picking `config.solana_rpc_url` or
-//! `config.magic_router_rpc_url` by hand. That worked because every call
-//! site happened to be correct, not because anything checked it —
-//! `magicblock::routing::GAME_WRITES_ONLY_ROUTING_INVARIANT` on the program
-//! side was (and still is) a doc-only comment, not a runtime check.
-//!
-//! `Instr`/`layer_of` turns the per-call-site choice into one exhaustive
-//! match: adding a new Game-lifecycle instruction without classifying it
-//! here is a compile error (no wildcard arm), not a silently-wrong RPC
-//! endpoint discovered in production.
-//!
-//! Scope: only instructions that touch the delegatable `Game` PDA across its
-//! lifecycle. Routes with no relationship to delegation (tournaments, ELO,
-//! blinks, identity, admin) keep picking `solana_rpc_url` directly — routing
-//! them through this enum would be generality for a case that doesn't exist,
-//! since they never touch an account that could be ER-owned.
-
 use super::rpc::make_rpc;
 use crate::signing::config::SigningConfig;
 use solana_client::rpc_client::RpcClient;
 
-/// Every backend-submitted instruction that participates in the
-/// delegate/undelegate lifecycle boundary documented in `MAGICBLOCK.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Instr {
     CreateGame,
@@ -43,18 +18,12 @@ pub enum Instr {
     RecoverStuckDelegation,
 }
 
-/// Which cluster an instruction must be submitted to. XFChess's own
-/// invariant (see module docs) is that every instruction here is entirely
-/// ER-hot-path or entirely base-layer, never both — so a per-instruction
-/// classification is sufficient; no per-transaction account inspection is
-/// needed unless that invariant ever stops holding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layer {
     Base,
     Er,
 }
 
-/// Classifies `instr`. No wildcard arm on purpose — see module docs.
 pub fn layer_of(instr: Instr) -> Layer {
     match instr {
         Instr::CreateGame
@@ -72,9 +41,6 @@ pub fn layer_of(instr: Instr) -> Layer {
     }
 }
 
-/// Builds an RPC client for `instr`'s classified layer — the single point
-/// every Game-lifecycle handler should go through instead of picking
-/// `config.solana_rpc_url` / `config.magic_router_rpc_url` by hand.
 pub fn rpc_for(config: &SigningConfig, instr: Instr) -> RpcClient {
     let url = rpc_url_for(config, instr);
     match layer_of(instr) {
@@ -89,9 +55,6 @@ pub fn rpc_for(config: &SigningConfig, instr: Instr) -> RpcClient {
     }
 }
 
-/// Same as [`rpc_for`] but returns the URL string rather than a constructed
-/// client — for call sites that build the client on a `spawn_blocking`
-/// thread and only need the URL to move across it.
 pub fn rpc_url_for(config: &SigningConfig, instr: Instr) -> String {
     match layer_of(instr) {
         Layer::Base => config.solana_rpc_url.clone(),
@@ -174,8 +137,6 @@ mod tests {
         assert_eq!(rpc_url_for(&cfg, Instr::RecordMove), "https://er.example");
     }
 
-    /// Minimal `SigningConfig` for the struct-update-syntax test above —
-    /// only the RPC fields matter here, everything else is a throwaway.
     fn test_config() -> SigningConfig {
         SigningConfig {
             port: 0,

@@ -1,11 +1,9 @@
-//! Tests for environment-based configuration resolution.
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::env;
 
-    /// Test get_backend_url with SIGNING_SERVICE_URL set
     #[test]
     fn test_get_backend_url_with_signing_service() {
         env::set_var("SIGNING_SERVICE_URL", "https://signing.example.com");
@@ -17,7 +15,6 @@ mod tests {
         env::remove_var("SIGNING_SERVICE_URL");
     }
 
-    /// Test get_backend_url with BACKEND_URL set (fallback)
     #[test]
     fn test_get_backend_url_with_backend_url() {
         env::remove_var("SIGNING_SERVICE_URL");
@@ -29,7 +26,6 @@ mod tests {
         env::remove_var("BACKEND_URL");
     }
 
-    /// Test get_backend_url with no environment variables (default)
     #[test]
     fn test_get_backend_url_default() {
         env::remove_var("SIGNING_SERVICE_URL");
@@ -39,7 +35,6 @@ mod tests {
         assert_eq!(url, "http://127.0.0.1:8090");
     }
 
-    /// Test get_backend_url with both variables set (SIGNING_SERVICE_URL takes priority)
     #[test]
     fn test_get_backend_url_priority() {
         env::set_var("SIGNING_SERVICE_URL", "https://signing.example.com");
@@ -52,7 +47,6 @@ mod tests {
         env::remove_var("BACKEND_URL");
     }
 
-    /// Test get_admin_api_key when set
     #[test]
     fn test_get_admin_api_key_set() {
         env::set_var("ADMIN_API_KEY", "test-api-key-123");
@@ -63,7 +57,6 @@ mod tests {
         env::remove_var("ADMIN_API_KEY");
     }
 
-    /// Test get_admin_api_key when not set
     #[test]
     fn test_get_admin_api_key_not_set() {
         env::remove_var("ADMIN_API_KEY");
@@ -72,7 +65,6 @@ mod tests {
         assert_eq!(key, None);
     }
 
-    /// Test get_wallet_port with custom port
     #[test]
     fn test_get_wallet_port_custom() {
         env::set_var("XFCHESS_WALLET_PORT", "9000");
@@ -83,7 +75,6 @@ mod tests {
         env::remove_var("XFCHESS_WALLET_PORT");
     }
 
-    /// Test get_wallet_port with invalid port (fallback to default)
     #[test]
     fn test_get_wallet_port_invalid() {
         env::set_var("XFCHESS_WALLET_PORT", "invalid");
@@ -94,7 +85,6 @@ mod tests {
         env::remove_var("XFCHESS_WALLET_PORT");
     }
 
-    /// Test get_wallet_port with no environment variable (default)
     #[test]
     fn test_get_wallet_port_default() {
         env::remove_var("XFCHESS_WALLET_PORT");
@@ -103,7 +93,6 @@ mod tests {
         assert_eq!(port, 7454);
     }
 
-    /// Test is_development with NODE_ENV set to development
     #[test]
     fn test_is_development_true() {
         env::set_var("NODE_ENV", "development");
@@ -114,7 +103,6 @@ mod tests {
         env::remove_var("NODE_ENV");
     }
 
-    /// Test is_development with NODE_ENV set to production
     #[test]
     fn test_is_development_false() {
         env::set_var("NODE_ENV", "production");
@@ -125,7 +113,6 @@ mod tests {
         env::remove_var("NODE_ENV");
     }
 
-    /// Test is_development with no NODE_ENV (depends on debug_assertions)
     #[test]
     fn test_is_development_no_env() {
         env::remove_var("NODE_ENV");
@@ -138,7 +125,6 @@ mod tests {
         assert_eq!(is_dev, is_dev); // Tautology but verifies type
     }
 
-    /// Test get_log_level with custom level
     #[test]
     fn test_get_log_level_custom() {
         env::set_var("RUST_LOG", "debug");
@@ -149,7 +135,6 @@ mod tests {
         env::remove_var("RUST_LOG");
     }
 
-    /// Test get_log_level with no environment variable (default)
     #[test]
     fn test_get_log_level_default() {
         env::remove_var("RUST_LOG");

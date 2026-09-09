@@ -1,11 +1,3 @@
-//! Modal popups owned by the main menu.
-//!
-//! Renders the two purely local-state popups reached from the website-style
-//! main menu: the AI setup modal (strength / time-control / side picker that
-//! immediately starts a Vs-Computer game) and the controls cheat-sheet opened
-//! from the navbar. Both take the bare resources they need so they can be
-//! called without the full `MainMenuUIContext`.
-
 use super::*;
 use crate::core::{GameMode as CoreGameMode, GameState};
 use crate::game::ai::GameMode;
@@ -14,10 +6,6 @@ use bevy::prelude::NextState;
 use bevy_egui::egui;
 use tracing::info;
 
-/// Render AI setup modal with strength and side selection.
-///
-/// Clicking a side button applies the current strength + time-control and
-/// transitions the game into [`GameState::InGame`] as a single-player AI match.
 pub(super) fn render_ai_setup_modal(
     ctx: &egui::Context,
     competitive: &mut CompetitiveMenuState,
@@ -267,7 +255,6 @@ pub(super) fn render_ai_setup_modal(
         });
 }
 
-/// Render the controls / keybindings popup reached from the navbar.
 pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut CompetitiveMenuState) {
     egui::Window::new("Controls")
         .collapsible(false)
@@ -333,7 +320,6 @@ pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut Compe
         });
 }
 
-/// PGN input modal — paste a PGN string and load it into the replay player.
 pub(super) fn render_pgn_input_modal(
     ctx: &egui::Context,
     competitive: &mut CompetitiveMenuState,

@@ -1,14 +1,3 @@
-//! Friend requests and contacts — ported from braid-reborn/server/src/chat/friends/.
-//!
-//! Primary identity key is the **Iroh node ID** (always available).
-//! Solana pubkey is an optional second identifier that links into the ELO system.
-//! Friends persist across wallet rotations because the social graph is node-ID anchored.
-//!
-//! This is a separate, SQLite-backed social graph from the on-chain
-//! `Friendship` PDA (`programs/xfchess-game/src/state/friendship.rs`), which
-//! is wallet-pubkey-anchored and gates on-chain game/session permissions. The
-//! two are not synced with each other.
-
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -16,7 +5,6 @@ use sqlx::SqlitePool;
 use tracing::info;
 use uuid::Uuid;
 
-/// Lifecycle of a friend request.
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(rename_all = "snake_case")]
 pub enum RequestStatus {
@@ -25,7 +13,6 @@ pub enum RequestStatus {
     Rejected,
 }
 
-/// A pending or resolved friend request between two Iroh node IDs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FriendRequest {
     pub id: String,
@@ -40,7 +27,6 @@ pub struct FriendRequest {
     pub responded_at: Option<DateTime<Utc>>,
 }
 
-/// An accepted friend, from the owning node's point of view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Contact {
     pub id: String,
@@ -54,18 +40,15 @@ pub struct Contact {
     pub created_at: DateTime<Utc>,
 }
 
-/// SQLite-backed store for friend requests and contacts.
 pub struct FriendManager {
     pool: SqlitePool,
 }
 
 impl FriendManager {
-    /// Wraps an existing pool; call `init` once before use.
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
-    /// Create tables if they don't exist yet (idempotent — called at startup).
     pub async fn init(&self) -> Result<()> {
         sqlx::query(
             r#"
@@ -109,8 +92,6 @@ impl FriendManager {
         Ok(())
     }
 
-    /// Send a friend request from `from_node_id` to the recipient identified
-    /// by either `to_node_id` or `to_pubkey` (at least one must be set).
     pub async fn send_request(
         &self,
         from_node_id: String,
@@ -173,7 +154,6 @@ impl FriendManager {
         Ok(req)
     }
 
-    /// Pending requests addressed to `node_id` or `pubkey`, newest first.
     pub async fn get_pending_requests(
         &self,
         node_id: &str,
@@ -216,8 +196,6 @@ impl FriendManager {
             .collect())
     }
 
-    /// Accepts or rejects a pending request; on accept, creates the
-    /// bidirectional `contacts` rows for both parties.
     pub async fn respond_to_request(
         &self,
         request_id: &str,
@@ -287,9 +265,6 @@ impl FriendManager {
         Ok(())
     }
 
-    /// All contacts for `owner_node_id`, alphabetical by display name.
-    /// `is_online`/`last_seen` are always defaulted here — presence is
-    /// layered in separately by `social::presence`.
     pub async fn get_contacts(&self, owner_node_id: &str) -> Result<Vec<Contact>> {
         let rows: Vec<(String, String, Option<String>, String, Option<i64>, String)> =
             sqlx::query_as(

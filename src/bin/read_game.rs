@@ -8,7 +8,6 @@ use std::str::FromStr;
 const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 const RPC_URL: &str = "https://api.devnet.solana.com";
 const ER_RPC_URL: &str = "https://devnet-eu.magicblock.app/";
-/// MagicBlock Delegation Program — owns delegated accounts on L1
 const DELEGATION_PROGRAM: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
 
 #[derive(BorshDeserialize, Debug)]

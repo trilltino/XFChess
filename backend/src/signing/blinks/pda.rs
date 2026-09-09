@@ -1,53 +1,32 @@
-//! PDA calculation for Solana Blinks tournament registration.
-//!
-//! This module provides functions to derive all required PDAs for the
-//! RegisterPlayer instruction, ensuring exact match with the smart contract
-//! to avoid transaction failures.
-
 use anyhow::Result;
 use solana_sdk::pubkey::Pubkey;
 
 use super::{PROFILE_SEED, TOURNAMENT_ESCROW_SEED, TOURNAMENT_SEED, TOURNAMENT_USDC_PRIZE_SEED};
 
-/// Derives the tournament PDA address.
-///
-/// Seeds: ["tournament", tournament_id_le_bytes]
 pub fn derive_tournament_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
     let seeds = &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()];
     let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
     Ok(pda)
 }
 
-/// Derives the tournament escrow PDA address.
-///
-/// Seeds: ["tournament_escrow", tournament_id_le_bytes]
 pub fn derive_escrow_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
     let seeds = &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()];
     let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
     Ok(pda)
 }
 
-/// Derives the USDC prize escrow PDA address.
-///
-/// Seeds: ["t_usdc_prize", tournament_id_le_bytes]
 pub fn derive_usdc_prize_escrow_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
     let seeds = &[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()];
     let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
     Ok(pda)
 }
 
-/// Derives the player profile PDA address.
-///
-/// Seeds: ["profile", wallet_pubkey_bytes]
 pub fn derive_player_profile_pda(wallet_pubkey: &Pubkey, program_id: &Pubkey) -> Result<Pubkey> {
     let seeds = &[PROFILE_SEED, wallet_pubkey.as_ref()];
     let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
     Ok(pda)
 }
 
-/// Derives a `TournamentPlayersShard` PDA address.
-///
-/// Seeds: ["tourney_players", shard_index_byte, tournament_id_le_bytes]
 pub fn derive_shard_pda(
     shard_index: u8,
     tournament_id: u64,
@@ -62,9 +41,6 @@ pub fn derive_shard_pda(
     Ok(pda)
 }
 
-/// Derives a `TournamentMatch` PDA address.
-///
-/// Seeds: ["t_match", tournament_id_le_bytes, match_index_le_bytes]
 pub fn derive_match_pda(
     tournament_id: u64,
     match_index: u16,

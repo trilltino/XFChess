@@ -1,12 +1,6 @@
-//! Solana state types for xfchess-game program
-//!
-//! Private Borsh-compatible mirrors of `xfchess_game` enums used by the
-//! legacy `solana::multiplayer` ECS code. Not re-exported publicly.
-
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_sdk::pubkey::Pubkey;
 
-/// Game status enum - mirrors xfchess_game::state::GameStatus
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GameStatus {
     WaitingForOpponent,
@@ -15,7 +9,6 @@ pub enum GameStatus {
     Expired,
 }
 
-/// Game result enum - mirrors xfchess_game::state::GameResult
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GameResult {
     None,

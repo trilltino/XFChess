@@ -1,37 +1,21 @@
-//! Replaying a finished tournament game.
-//!
-//! The Finished tab's Replay button can't load a game inline — the PGN has to
-//! be fetched, and the tournament browser runs inside an egui closure. So the
-//! button parks a request here, a background task fetches, and
-//! [`poll_pgn_replay_fetch`] hands the result to the *same* replay player the
-//! PGN-paste modal drives ([`ParsedPgnGameResource`] + `CoreGameMode::PgnReplay`).
-//!
-//! A tournament game therefore replays through exactly one code path, shared
-//! with every other replay in the app.
-
 use bevy::prelude::*;
 use tracing::{info, warn};
 
 use crate::core::states::GameState;
 use crate::game::replay::ParsedPgnGameResource;
 
-/// An in-flight PGN fetch for a game the viewer asked to replay.
 pub struct PendingPgnReplay {
     pub rx: crossbeam_channel::Receiver<Result<String, String>>,
-    /// Display names, used for the PGN tags when the fetched PGN has none.
     pub white: String,
     pub black: String,
 }
 
-/// Holds the single in-flight replay request, if any.
 #[derive(Resource, Default)]
 pub struct PgnReplayFetch {
     pub pending: Option<PendingPgnReplay>,
-    /// Surfaced in the browser when a replay could not be loaded.
     pub error: Option<String>,
 }
 
-/// Completes a replay request: parse the PGN and enter the replay player.
 pub fn poll_pgn_replay_fetch(
     mut fetch: ResMut<PgnReplayFetch>,
     mut commands: Commands,

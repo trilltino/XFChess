@@ -1,68 +1,3 @@
-//! Durable, ordered game event log over Braid-HTTP 209 — replaces both the
-//! old poll-based `p2p_relay` mailbox and `chat.rs`'s ephemeral,
-//! restart-losing `ChatRelayState`.
-//!
-//! Routes:
-//!   GET  /game/:id/moves — Braid-209 subscription; new subscribers get the
-//!                          full persisted move/resign/draw history replayed
-//!                          as individual chunks, then live updates.
-//!   PUT  /game/:id/moves — publish a move-stream event (any `ChessMessage`
-//!                          variant except `Chat`/`Clock`/`EngineAnalysis`).
-//!   GET  /game/:id/chat  — same shape, now backed by real persistence
-//!                          instead of an in-memory-only broadcast channel.
-//!   PUT  /game/:id/chat  — publish a chat message.
-//!
-//! ## Why this doesn't use `xfchess_braid_server::ResourceHub`
-//!
-//! `ResourceHub`/`AppendLog` is a generic ordered-list resource store, but
-//! it wraps every update as an RFC 6902 JSON-Patch document (`[{"op":"add",
-//! "path":"/-","value":entry}]`) and its subscribe-time snapshot is a single
-//! chunk whose body is the *array* of every existing entry. The existing
-//! client, `braid_chess::ChessSubscriber` (shared with the chat/clock/engine
-//! streams), only ever parses a chunk body as one bare `ChessMessage` — it
-//! has no JSON-Patch unwrapping and no bulk-array handling. Nothing
-//! previously subscribed to an `AppendLog` through `ChessSubscriber`, so
-//! this mismatch was never exercised until this module. Rather than modify
-//! `ChessSubscriber` (shared with three other streams) or fight the
-//! abstraction, this module keeps its own `broadcast::Sender<BraidUpdate>`
-//! map — the same wire shape `chat.rs` always used and that the client
-//! already decodes correctly — and adds SQLite persistence, which the old
-//! chat relay never had.
-//!
-//! ## Two different "version" concepts — don't conflate them
-//!
-//! [`xfchess_braid_server::resource::protocol::Version`] is a `u64` used
-//! for the wire-protocol `Version`/`Parents` chunk headers here (the
-//! `game_event_log.seq` column) — it answers "did this arrive after that."
-//!
-//! `content_version`/`content_parent` (on [`GameEventReq`] and
-//! [`GameLogState::put_event`]) are [`braid_chess::version_hash`] SHA-256
-//! hex strings — the *causal* identity of a move (same content as
-//! `CausalChainState::head_version` on the P2P side, and the same shape of
-//! check as `parent_nonce` in the Solana program's `RecordMove`
-//! instruction). They answer "is this move a valid continuation of the
-//! position it claims to follow," and are what [`GameLogState::put_event`]
-//! validates against the log's current head before accepting a write — the
-//! third independent layer (P2P gossip, this backend log, on-chain)
-//! enforcing the same causal-chain invariant.
-//!
-//! ## Persistence
-//!
-//! Every accepted event is written to the `game_event_log` SQLite table
-//! (`backend/migrations/027_game_event_log.sql`) *before* being broadcast —
-//! so a subscriber can never observe an event that a crash immediately
-//! afterward would then lose. History is read fresh from SQLite on every
-//! subscribe (no in-memory cache to go stale) — cheap enough since this
-//! isn't a hot path.
-//!
-//! ## Design note
-//!
-//! The core persistence/broadcast/causal-check logic lives on
-//! [`GameLogState`] itself and only depends on a `SqlitePool` — not on the
-//! full `AppState` — so it's directly unit-testable (see the `tests`
-//! module). The axum handlers below are thin: extract state, check auth,
-//! delegate.
-
 use axum::{
     body::Body,
     extract::{Path, State},
@@ -88,32 +23,15 @@ const BROADCAST_CAP: usize = 64;
 const HEARTBEAT_SECS: u64 = 20;
 const MAX_CHAT_LEN: usize = 500;
 
-/// Genesis parent value for a game's first event — matches the P2P causal
-/// chain's convention (`CausalChainState`/`systems.rs`) so the same string
-/// means the same thing ("no prior event") on both the P2P and backend log.
 const GENESIS_PARENT: &str = "0";
 
-/// Why a `PUT` was rejected before it reached persistence.
 #[derive(Debug)]
 pub enum PutEventError {
-    /// `content_parent` didn't match the log's current head for this game —
-    /// the sender's view of the chain is stale. Mirrors the on-chain
-    /// `parent_nonce` mismatch and the P2P equivocation check.
-    ParentMismatch {
-        expected: String,
-    },
-    /// The poster isn't one of this game's two registered participants —
-    /// they hold a valid platform session, just not for this `game_id`.
-    /// Formally: `specs/BraidChain.tla`'s Finding 4
-    /// (`OnlyParticipantsAccepted`, `AuthCheck` switch).
+    ParentMismatch { expected: String },
     NotAParticipant,
     Db(sqlx::Error),
 }
 
-/// Move-stream kinds that require the poster to be a registered
-/// participant of the game. `session_info` is how the roster gets
-/// populated in the first place (checking it against itself would
-/// deadlock); `chat`/`clock`/`engine_analysis` aren't gameplay actions.
 fn requires_participant_check(kind: &str) -> bool {
     matches!(
         kind,
@@ -121,41 +39,12 @@ fn requires_participant_check(kind: &str) -> bool {
     )
 }
 
-/// Backend-side state for the durable game event log: the SQLite pool it
-/// persists through, one live broadcast channel per `game_id`/stream pair
-/// (created lazily, on first subscribe or publish), and a per-game
-/// participant roster.
 pub struct GameLogState {
     pool: sqlx::SqlitePool,
     channels: RwLock<HashMap<String, broadcast::Sender<BraidUpdate>>>,
-    /// game_id → up to two wallet pubkey strings verified as authorized for
-    /// this game — a cache, not a trust source. For a wagered game, an
-    /// entry only lands here after independently matching the on-chain
-    /// `Game` account's `white`/`black` (`participants`, below) — see
-    /// `check_participant`. For a casual game (no on-chain `Game` account),
-    /// this remains the original first-two-`SessionInfo`-seen bootstrap —
-    /// a known, lower-severity, documented gap (no money at stake), tracked
-    /// separately (`docs/plans/networking-hardening-plan.md`'s Phase D).
     roster: RwLock<HashMap<String, Vec<String>>>,
     session_roster: RwLock<HashMap<String, HashMap<String, String>>>,
-    /// On-chain-verified `(white, black)` lookups, cached. `None` in tests
-    /// / anywhere a live RPC client isn't available — falls back to the
-    /// original SessionInfo-only bootstrap behavior for every game in that
-    /// case, matching this module's pre-Phase-B behavior exactly.
     participants: Option<crate::signing::solana::game_participants::GameParticipantsCache>,
-    /// game_id → `(host_node_id, joiner_node_id)`, populated by
-    /// `p2p_relay::routes::accept_join` once a game's JOIN_ACK handshake —
-    /// cryptographically signed since Phase A
-    /// (`docs/plans/networking-hardening-plan.md`) — completes.
-    ///
-    /// Phase D: the casual-game (no wallet, no on-chain `Game` account)
-    /// counterpart to `participants` above. Without this, a casual game's
-    /// roster had no ground truth at all to check a claim against — purely
-    /// first-two-`SessionInfo`/move-senders-seen, so any node_id that got a
-    /// message in before the real players occupied a trusted slot. A
-    /// direct-connection game (never announced to the lobby, so never goes
-    /// through `accept_join`) has no entry here — falls back to the
-    /// original first-two-seen trust, same as before Phase D existed.
     casual_identities: RwLock<HashMap<String, (String, String)>>,
 }
 
@@ -174,11 +63,6 @@ impl GameLogState {
         }
     }
 
-    /// Records a JOIN_ACK-verified node-id pair for `game_id` — called once
-    /// by `p2p_relay::routes::accept_join` per game, before that game's
-    /// `ActiveGame` lobby record becomes eligible for TTL eviction (Braid,
-    /// not `p2p_relay`, carries moves/chat now, so a wagered-or-casual match
-    /// in progress generates no further lobby traffic to keep it alive).
     pub async fn register_casual_identities(
         &self,
         game_id: &str,
@@ -210,9 +94,6 @@ impl GameLogState {
             .clone()
     }
 
-    /// Persisted history for a stream, oldest first, decoded as raw
-    /// `ChessMessage` JSON values (each individually shaped exactly like a
-    /// live update body — no wrapping).
     async fn load_history(&self, game_id: &str, stream: &str) -> Vec<serde_json::Value> {
         let rows: Vec<(String, String)> = sqlx::query_as(
             "SELECT kind, payload_json FROM game_event_log WHERE game_id = ? ORDER BY seq ASC",
@@ -228,13 +109,6 @@ impl GameLogState {
             .collect()
     }
 
-    /// Subscribe: returns persisted history (oldest first) plus a live
-    /// receiver for everything published from this point on. There is a
-    /// narrow window in which an event published between reading history
-    /// and registering the receiver could appear in neither — acceptable
-    /// for the same reason a fresh full-FEN resync already covers gaps at
-    /// the P2P layer; not acceptable to leave silently undocumented, so:
-    /// this is the one known gap in this module's exactly-once guarantee.
     pub async fn subscribe(
         &self,
         game_id: &str,
@@ -246,18 +120,10 @@ impl GameLogState {
         (history, rx)
     }
 
-    /// Current JSON snapshot without subscribing (plain GET fallback).
     pub async fn snapshot(&self, game_id: &str, stream: &str) -> serde_json::Value {
         serde_json::Value::Array(self.load_history(game_id, stream).await)
     }
 
-    /// Validate the poster is a registered participant (for gameplay
-    /// kinds) and causal continuity against the log's current head,
-    /// persist, then broadcast to live subscribers. Returns the assigned
-    /// `seq` on success. Assumes the caller has already authenticated the
-    /// sender (`auth_ok`) — this additionally verifies they're authorized
-    /// for *this* `game_id` specifically, which `auth_ok` alone does not
-    /// (Finding 4, `specs/BraidChain.tla`).
     pub async fn put_event(
         &self,
         game_id: &str,
@@ -372,17 +238,6 @@ impl GameLogState {
         Ok(next_seq)
     }
 
-    /// Verify `player_pubkey` is authorized to act in `game_id`.
-    ///
-    /// Phase B fix (`docs/plans/networking-hardening-plan.md`): for a real
-    /// on-chain (wagered) game, checks — and caches — against the `Game`
-    /// account's `white`/`black` directly instead of trusting whoever
-    /// claimed a roster slot first. This is what actually closes the race:
-    /// a forged `SessionInfo` simply won't match on-chain truth, so it's
-    /// rejected outright rather than winning a timing race. For a casual
-    /// game (no on-chain `Game` account — `game_id` doesn't resolve, or no
-    /// `participants` cache is configured at all), falls back to the
-    /// original first-two-`SessionInfo`-seen roster, unchanged.
     async fn check_participant(
         &self,
         game_id: &str,
@@ -438,13 +293,6 @@ impl GameLogState {
         }
     }
 
-    /// Called for every accepted `SessionInfo` post — this is how the
-    /// roster gets populated in the first place. Crucially does **not**
-    /// blindly trust the claim the way the pre-Phase-B code did: a forged
-    /// claim for a real on-chain (wagered) game is checked and discarded,
-    /// not added. The `SessionInfo` PUT itself always still succeeds either
-    /// way (posting isn't gated the way gameplay actions are) — this only
-    /// controls whether the claim gets *trusted* afterward.
     async fn learn_session_info_claim(
         &self,
         game_id: &str,
@@ -478,10 +326,6 @@ impl GameLogState {
         }
     }
 
-    /// Checks `player_pubkey` against whichever source of ground truth is
-    /// available for `game_id`: the on-chain `Game` account first (Phase B,
-    /// wagered games), then the JOIN_ACK-verified casual-identity pair
-    /// (Phase D, casual games) if the former found nothing to check against.
     async fn verify_claim(
         &self,
         game_id: &str,
@@ -497,10 +341,6 @@ impl GameLogState {
         }
     }
 
-    /// Phase D counterpart to `on_chain_check`: checks `player_pubkey`
-    /// (an Iroh node_id string for a casual game — see `check_participant`)
-    /// against the JOIN_ACK-verified pair `register_casual_identities`
-    /// recorded for `game_id`, if any.
     async fn casual_identity_check(&self, game_id: &str, player_pubkey: &str) -> OnChainCheck {
         let map = self.casual_identities.read().await;
         let Some((host, joiner)) = map.get(game_id) else {
@@ -521,8 +361,6 @@ impl GameLogState {
         }
     }
 
-    /// Checks `player_pubkey` against `game_id`'s on-chain `Game` account,
-    /// if one exists and a participants cache is configured.
     async fn on_chain_check(
         &self,
         game_id: &str,
@@ -561,12 +399,8 @@ impl GameLogState {
 }
 
 enum OnChainCheck {
-    /// No on-chain data available: no participants cache configured, or
-    /// `game_id` doesn't resolve to a real `Game` account (casual game).
     Unavailable,
-    /// This wallet is `white` or `black` for this game, on-chain.
     Verified,
-    /// A real on-chain game exists and this wallet is neither.
     Mismatch,
 }
 
@@ -596,24 +430,11 @@ fn kind_of(msg: &ChessMessage) -> &'static str {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GameEventReq {
-    /// Who is claiming to publish this event. **Not always a Solana pubkey**
-    /// despite the wire name: for a wagered game it is the wallet pubkey
-    /// (checked against on-chain `Game.white`/`black`), but for a casual game
-    /// it is an Iroh node-id string (checked against the JOIN_ACK-verified
-    /// pair). `check_participant` handles both; `auth_ok` only treats it as a
-    /// wallet when it parses as one.
     #[serde(rename = "player_pubkey")]
     pub sender_identity: String,
-    /// Session pubkey returned by global-session/activate — proves the
-    /// caller owns this wallet (same check chat.rs used to do).
-    ///
-    /// Currently always empty: no client populates it (see `auth_ok`).
     pub session_token: String,
     pub message: ChessMessage,
-    /// `braid_chess::version_hash(..)` computed client-side for this event.
     pub content_version: String,
-    /// The sender's last known head version for this game (`"0"` for the
-    /// first event ever sent).
     pub content_parent: String,
 }
 
@@ -632,21 +453,11 @@ struct ParticipantsResp {
     black: String,
 }
 
-/// Body of a `409 CONFLICT` from either PUT route: the stream head the
-/// rejected event should have named as its `content_parent`. Consumed by
-/// the client's `braid_transport::publish` retry.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ParentMismatchResp {
     pub expected_parent: String,
 }
 
-/// Phase C (`docs/plans/networking-hardening-plan.md`): lets the client seed
-/// its own P2P/gossip roster (`CausalChainState::verified_wallets`) from the
-/// same on-chain truth `check_participant` already verifies claims against
-/// server-side (Phase B) — closing the roster-building race on the gossip
-/// side too, not just this backend's Braid log. 404 for a casual game (no
-/// on-chain `Game` account) or a malformed `game_id`; the client falls back
-/// to its original trust-first bootstrap in that case.
 async fn get_participants(State(state): State<AppState>, Path(game_id): Path<String>) -> Response {
     let Ok(gid) = game_id.parse::<u64>() else {
         return StatusCode::NOT_FOUND.into_response();
@@ -796,14 +607,6 @@ fn wants_subscribe(headers: &HeaderMap) -> bool {
 
 // ── Shared PUT (publish) path ────────────────────────────────────────────────
 
-/// SQLITE_BUSY / SQLITE_BUSY_SNAPSHOT (code 517) under concurrent access.
-/// The pool's `busy_timeout` PRAGMA (`infrastructure/database.rs`) already
-/// waits out ordinary lock contention, but that does not cover a WAL read
-/// snapshot going stale mid-transaction — busy_timeout makes SQLite wait
-/// longer for the *same* transaction to acquire a lock, but a stale
-/// snapshot never becomes valid no matter how long it waits. The only fix
-/// is a fresh `BEGIN` (a new snapshot), which is why this is retried at the
-/// handler level, not inside `put_event`'s own transaction.
 fn is_db_locked(e: &sqlx::Error) -> bool {
     e.as_database_error()
         .map(|d| d.message().to_lowercase().contains("database is locked"))
@@ -903,17 +706,6 @@ async fn put_event_handler(
     }
 }
 
-/// Casual (non-wagered) online games have no Solana wallet at all — the old
-/// `p2p_relay` this replaced only ever matched on a claimed Iroh node-id
-/// string, no wallet required. Requiring a wallet session unconditionally
-/// here would 401 every casual-game move. So: `player_pubkey` that parses as
-/// a real Solana pubkey must have a matching active session (this is the
-/// wagered-game path, and it's real auth — strictly more than the old relay
-/// had, which trusted the claimed identity outright); anything else is
-/// treated as a casual/non-wallet identity and passes through, matching the
-/// old relay's trust model exactly (not a new hole, not a regression).
-/// Same fail-open-when-not-applicable shape as `require_relay_or_jwt`
-/// (`infrastructure/auth_middleware.rs`) — see that function's doc comment.
 async fn auth_ok(state: &AppState, req: &GameEventReq) -> bool {
     use solana_sdk::signer::Signer as _;
     use std::str::FromStr;
@@ -1050,10 +842,6 @@ mod tests {
         assert_eq!(seq, 2);
     }
 
-    /// Simulates a backend restart: persist two moves via one
-    /// `GameLogState`, drop it, then construct a fresh one sharing only the
-    /// SQLite pool and confirm the full history comes back — the property
-    /// this migration exists to add (the old relay/chat state had none).
     #[tokio::test]
     async fn move_history_survives_a_simulated_restart() {
         let pool = migrated_pool().await;
@@ -1111,11 +899,6 @@ mod tests {
         assert_eq!(chat_snapshot.as_array().unwrap().len(), 1);
     }
 
-    /// The actual wire-format guarantee this module exists to provide:
-    /// every chunk body (history replay AND live) must decode as a bare
-    /// `ChessMessage` — exactly what `ChessSubscriber::decode_update`
-    /// parses. Regression test for the ResourceHub/AppendLog incompatibility
-    /// this module was rewritten to avoid.
     #[tokio::test]
     async fn every_broadcast_body_decodes_as_a_bare_chess_message() {
         let pool = migrated_pool().await;
@@ -1143,9 +926,6 @@ mod tests {
         assert!(matches!(decoded_history, ChessMessage::Move(_)));
     }
 
-    /// Finding 4 (`specs/BraidChain.tla`, `OnlyParticipantsAccepted`): a
-    /// player who is registered for a DIFFERENT game must not be able to
-    /// PUT a move into this one, even with an otherwise-valid causal chain.
     #[tokio::test]
     async fn non_participant_cannot_put_a_move() {
         let pool = migrated_pool().await;
@@ -1201,13 +981,6 @@ mod tests {
         assert_eq!(seq, 3);
     }
 
-    /// The actual vulnerability Phase B closes: a forged `SessionInfo` that
-    /// WINS the arrival-order race (lands before either real player's) must
-    /// still be rejected once there's on-chain-verified truth to check it
-    /// against — unlike `non_participant_cannot_put_a_move` above, where
-    /// mallory is caught only because alice/bob's SessionInfo already beat
-    /// her to the (pre-Phase-B) roster. Here mallory goes FIRST, and it
-    /// still doesn't matter.
     #[tokio::test]
     async fn on_chain_verified_roster_beats_a_forged_first_claim() {
         let pool = migrated_pool().await;
@@ -1311,13 +1084,6 @@ mod tests {
         assert_eq!(seq, 3);
     }
 
-    /// Phase D (`docs/plans/networking-hardening-plan.md`): once
-    /// `register_casual_identities` has recorded the real (JOIN_ACK-
-    /// verified) node-id pair for a casual game — mirroring what
-    /// `accept_join` does — a third node_id claiming to be a participant is
-    /// rejected outright, even if it PUTs before either real player does.
-    /// This is the casual-game counterpart to
-    /// `on_chain_verified_roster_beats_a_forged_first_claim`.
     #[tokio::test]
     async fn casual_identity_check_beats_a_forged_first_claim() {
         let pool = migrated_pool().await;
@@ -1352,11 +1118,6 @@ mod tests {
         assert_eq!(seq, 1);
     }
 
-    /// A game_id that never went through `accept_join` (direct-connection
-    /// mode, which never announces to the lobby at all — see
-    /// `render_p2p_joiner_waiting_screen`'s doc comment, client-side) has no
-    /// casual-identity entry — must fall back to the original
-    /// first-two-seen trust, unchanged, not start rejecting everyone.
     #[tokio::test]
     async fn no_casual_identity_entry_falls_back_to_trust_first() {
         let pool = migrated_pool().await;
@@ -1378,12 +1139,6 @@ mod tests {
         assert_eq!(seq, 1);
     }
 
-    /// The shape the client's re-chain retry depends on: a rejected event
-    /// must report the head it *should* have named. Both players write to one
-    /// shared moves stream, so a publisher genuinely cannot compute this
-    /// itself — without it, the client can only give up, which is what made
-    /// the durable transport silently stop replicating after the first
-    /// player's first event.
     #[tokio::test]
     async fn parent_mismatch_reports_the_head_to_re_chain_onto() {
         let pool = migrated_pool().await;
@@ -1424,9 +1179,6 @@ mod tests {
         assert_eq!(seq, 2, "black's move must now be persisted");
     }
 
-    /// Both players post a `SessionInfo` at game start. The second one used
-    /// to claim genesis as its parent and be rejected, which wedged the whole
-    /// moves stream of every wagered game before move one.
     #[tokio::test]
     async fn both_players_session_info_can_land_in_sequence() {
         let pool = migrated_pool().await;
@@ -1468,9 +1220,6 @@ mod tests {
         assert_eq!(seq, 3);
     }
 
-    /// Casual (no-wallet) games never post SessionInfo, so the roster for
-    /// that game_id stays empty — the participant check must not block
-    /// them (mirrors the P2P roster's identical bootstrap behavior).
     #[tokio::test]
     async fn empty_roster_does_not_block_casual_games() {
         let pool = migrated_pool().await;

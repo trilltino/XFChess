@@ -1,11 +1,3 @@
-//! Identity, profile, KYC, and wallet-linking endpoints on the VPS.
-//!
-//! Exposes helpers to:
-//! - Fetch player profiles (ELO, country, username).
-//! - Register encrypted identity / KYC data into the VPS vault.
-//! - Register a wallet + username and link wallets to email accounts.
-//! - Query the user's verification status and gate wagered-play entry.
-
 use serde::{Deserialize, Serialize};
 
 use super::client::{client, vps_base};
@@ -56,7 +48,6 @@ pub struct LinkWalletReq {
     pub timestamp: u64,
 }
 
-/// Fetch player profile details (ELO, country, username) from VPS.
 pub fn fetch_player_profile(pubkey: &str) -> Result<PlayerProfile, String> {
     let resp = client()?
         .get(format!("{}/player/{}", vps_base(), pubkey))
@@ -69,7 +60,6 @@ pub fn fetch_player_profile(pubkey: &str) -> Result<PlayerProfile, String> {
         .map_err(|e| format!("vps fetch_player_profile parse: {e}"))
 }
 
-/// Register user identity and KYC data securely in the VPS vault.
 pub fn register_identity(payload: &IdentityPayload) -> Result<(), String> {
     let response = client()?
         .post(format!("{}/identity/register", vps_base()))
@@ -86,7 +76,6 @@ pub fn register_identity(payload: &IdentityPayload) -> Result<(), String> {
     Ok(())
 }
 
-/// Register a wallet with a username in the backend.
 pub fn register_wallet(req: &RegisterReq) -> Result<(), String> {
     let response = client()?
         .post(format!("{}/api/auth/register", vps_base()))
@@ -103,7 +92,6 @@ pub fn register_wallet(req: &RegisterReq) -> Result<(), String> {
     Ok(())
 }
 
-/// Link a wallet to an email-based account.
 pub fn link_wallet(req: &LinkWalletReq) -> Result<(), String> {
     let response = client()?
         .post(format!("{}/api/auth/link-wallet", vps_base()))
@@ -120,10 +108,6 @@ pub fn link_wallet(req: &LinkWalletReq) -> Result<(), String> {
     Ok(())
 }
 
-/// Fetch verification status for a wallet.
-///
-/// Returns defaults on network error so callers can decide whether to block
-/// hard or degrade gracefully.
 pub fn get_user_status(wallet_pubkey: &str) -> Result<UserStatus, String> {
     let resp = client()?
         .get(format!("{}/api/user/status/{}", vps_base(), wallet_pubkey))
@@ -136,16 +120,12 @@ pub fn get_user_status(wallet_pubkey: &str) -> Result<UserStatus, String> {
         .map_err(|e| format!("vps get_user_status parse: {e}"))
 }
 
-/// Async wrapper around `get_user_status` — spawns the blocking call on a
-/// dedicated thread so it can be awaited from a tokio task.
 pub async fn get_user_status_async(wallet_pubkey: String) -> Result<UserStatus, String> {
     tokio::task::spawn_blocking(move || get_user_status(&wallet_pubkey))
         .await
         .map_err(|e| format!("vps get_user_status_async join: {e}"))?
 }
 
-/// Gate wagered-play entry: returns `Ok(())` when the wallet may enter a
-/// wagered match or cash tournament, otherwise a human-readable reason.
 pub fn require_wager_eligibility(wallet_pubkey: &str) -> Result<(), String> {
     let status = get_user_status(wallet_pubkey)?;
     if status.can_wager {

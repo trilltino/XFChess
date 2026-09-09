@@ -1,14 +1,3 @@
-//! Middleware and Service Abstractions for HTTP/3 Clients
-//!
-//! This `middleware` module provides traits and utilities for building composable,
-//! dynamic HTTP services and middleware for use with `IrohH3Client`.
-//!
-//! ## Overview
-//!
-//! - `Service`: Basic request → response async handler.
-//! - `Middleware`: Wraps a `Service` and can modify requests or responses.
-//! - `Pipeline`: A dynamic boxed service used inside `IrohH3Client`.
-
 pub mod cookie_jar;
 pub mod follow_redirects;
 pub mod retry_failures;
@@ -22,28 +11,15 @@ use std::sync::Arc;
 
 use crate::{body::Body, error::Error};
 
-/// A generic HTTP service trait.
-///
-/// Services receive an HTTP request and produce a future resolving to an HTTP response or an error.
-/// This is similar to Tower's `Service` trait, but simplified for `&self` usage and dynamic composition.
 #[automock]
 pub trait Service: Send + Sync {
-    /// Handles a request asynchronously.
-    ///
-    /// # Parameters
-    /// - `request`: The HTTP request to handle.
-    ///
-    /// # Returns
-    /// A future resolving to either a response or an error.
     fn handle(
         &self,
         request: Request<Body>,
     ) -> impl Future<Output = Result<Response<Body>, Error>> + Send;
 }
 
-/// A middleware trait for HTTP services.
 pub trait Middleware: Send + Sync {
-    /// Handles a request, potentially delegating to the next service in the chain.
     fn handle(
         &self,
         request: Request<Body>,
@@ -51,12 +27,6 @@ pub trait Middleware: Send + Sync {
     ) -> impl Future<Output = Result<Response<Body>, Error>> + Send;
 }
 
-/// Allows combining middleware and a service into a single service.
-///
-/// `(mw, svc).handle(req)` means:
-/// - The middleware receives the request first
-/// - It may inspect/modify the request
-/// - It delegates to the service
 impl<M, S> Service for (&M, &S)
 where
     M: Middleware,
@@ -70,13 +40,6 @@ where
     }
 }
 
-/// Implements left-to-right middleware composition:
-///
-/// `(mw1, mw2)` means:
-///
-/// ```text
-/// request → mw1 → mw2 → next
-/// ```
 impl<M1, M2> Middleware for (M1, M2)
 where
     M1: Middleware,
@@ -97,13 +60,11 @@ where
 
 type ServiceFuture = BoxFuture<'static, Result<Response<Body>, Error>>;
 
-/// A dynamic, thread-safe service pipeline.
 pub struct Pipeline {
     inner: Box<dyn Fn(Request<Body>) -> ServiceFuture + Send + Sync>,
 }
 
 impl Pipeline {
-    /// Creates a new `Pipeline` from any service implementing `Service`.
     pub fn new(service: impl Service + 'static) -> Self {
         let arc = Arc::new(service);
         Self {
@@ -114,12 +75,6 @@ impl Pipeline {
         }
     }
 
-    /// Creates a new `Pipeline` from a middleware + service pair.
-    ///
-    /// This constructs a dynamic service pipeline where the given `middleware`
-    /// wraps the provided `service`. All requests sent through the resulting
-    /// `Pipeline` will first pass through the middleware before reaching the
-    /// underlying service.
     pub fn with_middleware(
         middleware: impl Middleware + 'static,
         service: impl Service + 'static,

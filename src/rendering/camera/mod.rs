@@ -1,9 +1,4 @@
-//! Camera module
-//!
-//! Manages camera setup and configuration.
-
 pub mod camera_director;
-/// TempleOS orthographic isometric camera — dev builds only.
 #[cfg(feature = "templeos")]
 pub mod camera_templeos;
 

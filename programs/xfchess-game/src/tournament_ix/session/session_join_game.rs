@@ -1,8 +1,3 @@
-//! Session-signed variant of `join_game` for tournament play.
-//!
-//! Uses the tournament-scoped session key to co-sign joining a game,
-//! drawing funds from the delegation PDA vault for cross-border fees and wagers.
-
 use crate::account_ix::session_guards;
 use crate::common::escrow::debit_program_pda;
 use crate::constants::*;
@@ -19,26 +14,21 @@ pub struct SessionJoinGame<'info> {
     )]
     pub tournament: Box<Account<'info, Tournament>>,
 
-    /// TournamentPlayersShard 0 always present (all tournament sizes).
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Box<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
-    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
@@ -59,7 +49,6 @@ pub struct SessionJoinGame<'info> {
     )]
     pub session_delegation: Box<Account<'info, TournamentSessionDelegation>>,
 
-    /// Session key signer (hot key, not the player wallet).
     pub session_signer: Signer<'info>,
 
     #[account(
@@ -70,21 +59,17 @@ pub struct SessionJoinGame<'info> {
                 || tournament_players_shard_3.as_ref().is_some_and(|s| s.players.iter().any(|p| *p == player.key()))
         } @ XfchessGameError::UnauthorizedAccess,
     )]
-    /// CHECK: Verified against tournament player list and delegation PDA.
     pub player: UncheckedAccount<'info>,
 
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: Box<Account<'info, Game>>,
 
-    /// CHECK: PDA for escrowing SOL.
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
 
-    /// White player profile for cross-border fee calculation.
     #[account(seeds = [PROFILE_SEED, game.white.as_ref()], bump)]
     pub white_profile: Box<Account<'info, PlayerProfile>>,
 
-    /// Black player profile (the joining player).
     #[account(seeds = [PROFILE_SEED, player.key().as_ref()], bump)]
     pub player_profile: Box<Account<'info, PlayerProfile>>,
 

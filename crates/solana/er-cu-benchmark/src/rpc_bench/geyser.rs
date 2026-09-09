@@ -1,17 +1,3 @@
-//! Geyser (Yellowstone gRPC) connectivity probe — feature-gated behind `geyser`.
-//!
-//! Validates the headline architectural unlock: that Triton can *push* on-chain
-//! updates over gRPC instead of you polling. We subscribe to slot updates and
-//! report time-to-first-message and the streamed message rate. If this works,
-//! `settlement_worker` can move from 30s polling to push-on-commit.
-//!
-//! NOTE: the Yellowstone client/proto API shifts between versions and tracks the
-//! Agave/Solana release. If `cargo build --features geyser` fails to resolve or
-//! compile, bump `yellowstone-grpc-client`/`yellowstone-grpc-proto` in Cargo.toml
-//! to the version matching your Triton cluster. Geyser may also be gated to higher
-//! Triton tiers — an `Unauthenticated`/`PermissionDenied` here means "not on this
-//! plan", which is itself a useful answer.
-
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -24,8 +10,6 @@ use yellowstone_grpc_proto::geyser::{
 
 use super::redact_url;
 
-/// Connect to `endpoint`, subscribe to slot updates, and observe the stream for
-/// up to `window` seconds (stopping early after `max_messages`).
 pub async fn run(
     endpoint: &str,
     x_token: Option<String>,

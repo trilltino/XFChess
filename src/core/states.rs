@@ -1,35 +1,24 @@
-//! Game state system for XFChess.
-
 use bevy::prelude::*;
 // use bevy::ecs::event::EventReader; // EventReader is in prelude
 
-/// Primary game state controlling major application modes.
 #[derive(Clone, Copy, Resource, PartialEq, Eq, Hash, Debug, Default, States, Reflect)]
 pub enum GameState {
-    /// Main menu state (starting state)
     #[default]
     MainMenu,
 
-    /// Active gameplay state
     InGame,
 
-    /// Paused game state
     Paused,
 
-    /// Game over state
     GameOver,
 
-    /// Multiplayer Lobby Menu
     MultiplayerMenu,
 
-    /// Matching state (Connecting/Handshake)
     Matching,
 
-    /// Settings screen
     Settings,
 }
 
-/// Define an enum for game modes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Resource, Reflect)]
 pub enum GameMode {
     SinglePlayer,
@@ -46,45 +35,33 @@ impl Default for GameMode {
     }
 }
 
-/// Component marking entities to be despawned when exiting a specific state.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DespawnOnExit<T>(pub T)
 where
     T: States + Copy;
 
-/// Sub-state for menu navigation.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, SubStates, Reflect)]
 #[source(GameState = GameState::MainMenu)]
 pub enum MenuState {
-    /// Main menu screen (default)
     Main,
 
-    /// Game mode selection screen
     ModeSelect,
 
-    /// Braid Multiplayer Lobby
     BraidLobby,
 
-    /// Lobby type selection (Regular vs Solana Wager)
     LobbySelection,
 
-    /// Solana Multiplayer Lobby
     #[cfg(feature = "solana")]
     SolanaLobby,
 
-    /// Profile creation / username selection
     ProfileCreation,
 
-    /// Credits/about screen
     About,
 
-    /// Tournament browser
     Tournaments,
 
-    /// P2P Hosting Configuration
     HostConfig,
 
-    /// P2P Waiting Lobby
     P2PWaiting,
 }
 
@@ -94,7 +71,6 @@ impl Default for MenuState {
     }
 }
 
-/// Computed state active during any menu screen.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct InMenus;
 
@@ -109,7 +85,6 @@ impl ComputedStates for InMenus {
     }
 }
 
-/// Computed state active during gameplay (including pause).
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct InGameplay;
 
@@ -124,15 +99,10 @@ impl ComputedStates for InGameplay {
     }
 }
 
-/// Run condition: true while in any gameplay state (InGame, Paused, GameOver).
-///
-/// Use this for systems that must keep ticking across the `InGame → GameOver`
-/// boundary.
 pub fn in_gameplay(state: Res<State<GameState>>) -> bool {
     InGameplay::compute(*state.get()).is_some()
 }
 
-/// Resource tracking which menu the player navigated from.
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
 #[reflect(Resource)]
 pub struct PreviousState {
@@ -147,12 +117,10 @@ impl Default for PreviousState {
     }
 }
 
-/// Debug helper for logging state transitions.
 pub fn debug_current_gamestate(state: Res<State<GameState>>) {
     debug!("[DEBUG] Current State: {:?}", state.get());
 }
 
-/// Timer resource for state logging system.
 #[derive(Resource, Deref, DerefMut)]
 pub struct StateLoggerTimer(pub Timer);
 
@@ -162,7 +130,6 @@ impl Default for StateLoggerTimer {
     }
 }
 
-/// System that logs the current game state every 15 seconds.
 pub fn log_game_state_system(
     state: Res<State<GameState>>,
     menu_state: Option<Res<State<MenuState>>>,
@@ -203,7 +170,6 @@ pub fn log_game_state_system(
     }
 }
 
-/// Validate if a state transition is allowed.
 fn is_valid_state_transition(from: GameState, to: GameState) -> bool {
     match (from, to) {
         // MainMenu can transition to InGame
@@ -232,7 +198,6 @@ fn is_valid_state_transition(from: GameState, to: GameState) -> bool {
     }
 }
 
-/// System to validate and log state transitions.
 pub fn validate_and_log_state_transitions(
     mut transition_events: MessageReader<StateTransitionEvent<GameState>>,
 ) {

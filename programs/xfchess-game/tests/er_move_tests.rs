@@ -1,12 +1,3 @@
-//! Ephemeral-Rollups move-path suite.
-//!
-//! Exercises `record_move` — the instruction that runs on the ER while a game
-//! is delegated — across its happy path and every guard: replay nonce, causal
-//! parent-nonce, turn enforcement, move legality, session expiry, and on-chain
-//! game-end detection (checkmate). Runs in-process; no live ER required.
-//!
-//! Prereq: build the program first — `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use common::*;

@@ -1,9 +1,3 @@
-//! Session-signed variant of `create_game` using a global persistent session key.
-//!
-//! The session key (hot key stored on VPS/client) co-signs game creation;
-//! wager funds are drawn from the [`GlobalSessionDelegation`] vault.
-//! The player wallet never has to sign — zero popup per game.
-
 use crate::account_ix::session_guards;
 use crate::common::escrow::debit_program_pda;
 use crate::constants::{GAME_SEED, MAX_WAGER_AMOUNT, MIN_WAGER_LAMPORTS, WAGER_ESCROW_SEED};
@@ -15,9 +9,6 @@ use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::solana_program::system_instruction;
 use anchor_lang::Discriminator;
 
-/// Accounts for session-signed game creation. Rent and wager are paid from
-/// the `session_delegation` vault, not the player's own wallet — `player`
-/// itself never has to sign.
 #[derive(Accounts)]
 #[instruction(game_id: u64, wager_amount: u64, match_type: MatchType, platform_fee: u64, base_time_seconds: u64, increment_seconds: u16)]
 pub struct GlobalCreateGame<'info> {
@@ -30,33 +21,19 @@ pub struct GlobalCreateGame<'info> {
     )]
     pub session_delegation: Account<'info, GlobalSessionDelegation>,
 
-    /// Hot key that signs on behalf of the player.
     pub session_signer: Signer<'info>,
 
-    /// CHECK: Verified against session_delegation.player.
     pub player: UncheckedAccount<'info>,
 
-    /// CHECK: Created manually in the handler (see the account-creation block
-    /// there) instead of via Anchor's `init` constraint. `init, payer = X`
-    /// requires `X` to be a real transaction `Signer` — it CPIs into
-    /// `system_program::create_account` without ever supplying seeds for the
-    /// payer side, so a PDA payer like `session_delegation` fails on-chain
-    /// with "signer privilege escalated". Funding this account from a PDA
-    /// vault requires `invoke_signed` with the payer's own seeds, which only
-    /// the handler body can provide.
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: UncheckedAccount<'info>,
 
-    /// CHECK: PDA for escrowing SOL wager.
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }
 
-/// Validates the session is live and has budget/games remaining, draws the
-/// wager from the session delegation vault into escrow, decrements
-/// `games_remaining`, and initializes the game via `common::init_game_fields`.
 pub fn handler(
     ctx: Context<GlobalCreateGame>,
     game_id: u64,

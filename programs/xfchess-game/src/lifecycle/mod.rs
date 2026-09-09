@@ -1,5 +1,3 @@
-//! Plain Rust lifecycle logic shared by Anchor instruction adapters.
-
 pub mod clock;
 pub mod guards;
 pub mod settlement;

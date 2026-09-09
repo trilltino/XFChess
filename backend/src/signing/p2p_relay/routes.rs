@@ -1,5 +1,3 @@
-//! HTTP route handlers for P2P relay.
-
 use axum::{
     extract::{Json, Query, State},
     http::StatusCode,
@@ -18,7 +16,6 @@ use super::types::{
     PollMessagesResponse, SendMessageRequest, LOBBY_TTL_SECS,
 };
 
-/// Optional filter / sort parameters for GET /p2p/games
 #[derive(Debug, Default, Deserialize)]
 pub struct LobbyFilter {
     pub time_min: Option<u32>,
@@ -27,11 +24,9 @@ pub struct LobbyFilter {
     pub stake_max: Option<f64>,
     pub elo_min: Option<u16>,
     pub elo_max: Option<u16>,
-    /// "elo_asc" | "elo_desc" | "stake_asc" | "stake_desc" | "time_asc" | "newest"
     pub sort: Option<String>,
 }
 
-/// Creates the P2P relay router
 pub fn p2p_routes() -> Router<AppState> {
     Router::new()
         .route("/p2p/announce", post(announce_game))
@@ -45,7 +40,6 @@ pub fn p2p_routes() -> Router<AppState> {
         .route("/region", get(get_region))
 }
 
-/// Announce a new P2P game
 pub async fn announce_game(
     State(state): State<AppState>,
     Json(req): Json<AnnounceGameRequest>,
@@ -106,7 +100,6 @@ pub async fn announce_game(
     Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
 
-/// List all open P2P games (supports optional filter/sort query params)
 pub async fn list_games(
     State(state): State<AppState>,
     Query(filter): Query<LobbyFilter>,
@@ -188,7 +181,6 @@ pub async fn list_games(
     Ok(AxumJson(listings))
 }
 
-/// Request to join a P2P game
 pub async fn join_game(
     State(state): State<AppState>,
     Json(req): Json<JoinGameRequest>,
@@ -254,14 +246,6 @@ pub async fn join_game(
     }))
 }
 
-/// Host accepts the join request and starts the game.
-///
-/// Also records the now-signed (Phase A) JOIN_ACK's node-id pair into
-/// `game_log`'s casual-identity map (Phase D,
-/// `docs/plans/networking-hardening-plan.md`) — this `ActiveGame` record
-/// itself now goes quiet (no further relay traffic) once Braid takes over
-/// move/chat sync for the match, so it's no longer a durable place to have
-/// looked this up from once the 90s inactivity sweep evicts it mid-game.
 pub async fn accept_join(
     State(state): State<AppState>,
     Json(req): Json<AcceptJoinReq>,
@@ -303,7 +287,6 @@ pub async fn accept_join(
     Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
 
-/// Leave a P2P game
 pub async fn leave_game(
     State(state): State<AppState>,
     Json(req): Json<LeaveGameRequest>,
@@ -329,16 +312,6 @@ pub async fn leave_game(
     Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
 
-/// Send a message in a P2P game
-/// Verify that `req.signature` is a valid Ed25519 signature by
-/// `req.from_node_id`'s own key over `"{game_id}:{from_node_id}:{message}"`
-/// — proof the sender actually controls the claimed (public, broadcast)
-/// node_id, not just an assertion of it. Iroh node_ids are raw Ed25519
-/// public keys in the same base58 format Solana pubkeys use, so
-/// `solana_sdk::signature::Signature::verify` (already used for wallet-sig
-/// auth elsewhere, e.g. `routes/auth.rs`) works unchanged here — no new
-/// crypto dependency needed. Mirrors the client's `p2p_message_signable`
-/// (`src/multiplayer/network/vps/p2p.rs`) exactly.
 fn verify_p2p_message_signature(req: &SendMessageRequest) -> bool {
     use solana_sdk::{pubkey::Pubkey, signature::Signature};
     use std::str::FromStr;
@@ -390,7 +363,6 @@ pub async fn send_message(
     Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
 
-/// Poll for new messages in a P2P game
 pub async fn poll_messages(
     State(state): State<AppState>,
     Json(req): Json<PollMessagesRequest>,
@@ -425,7 +397,6 @@ pub async fn poll_messages(
     }))
 }
 
-/// Host heartbeat — refreshes last_activity so the 5-min cleanup doesn't evict a live lobby.
 pub async fn heartbeat_game(
     State(state): State<AppState>,
     Json(req): Json<HeartbeatRequest>,
@@ -445,7 +416,6 @@ pub async fn heartbeat_game(
     Ok(AxumJson(AnnounceGameResponse { success: false }))
 }
 
-/// GET /region — returns the backend's configured region tag
 pub async fn get_region() -> AxumJson<serde_json::Value> {
     let region = std::env::var("XFCHESS_REGION").unwrap_or_else(|_| "unknown".to_string());
     let label = match region.as_str() {
@@ -492,9 +462,6 @@ mod tests {
         assert!(verify_p2p_message_signature(&req));
     }
 
-    /// The actual vulnerability this fix closes: someone who knows a real
-    /// player's (public, broadcast) node_id but does not hold their private
-    /// key cannot forge a message claiming to be them.
     #[test]
     fn forged_claimed_identity_is_rejected() {
         let attacker = Keypair::new();

@@ -1,15 +1,9 @@
-//! Pawn Promotion UI
-//!
-//! Displays a dialog when a pawn reaches the end of the board,
-//! allowing the player to choose which piece to promote to.
-
 use crate::game::resources::{PendingPromotion, PromotionSelected};
 use crate::rendering::pieces::PieceType;
 use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-/// System to display the pawn promotion selection UI
 pub fn promotion_ui_system(
     mut contexts: EguiContexts,
     pending_promotion: Res<PendingPromotion>,

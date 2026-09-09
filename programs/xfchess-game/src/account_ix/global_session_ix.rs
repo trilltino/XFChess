@@ -1,33 +1,14 @@
-//! Instructions: `authorize_global_session` and `revoke_global_session`.
-//!
-//! `authorize_global_session` creates (or re-creates) a
-//! [`GlobalSessionDelegation`] PDA for `player`. After this call the session
-//! key may co-sign `global_create_game` and `global_join_game` without a
-//! wallet popup — for up to `DEFAULT_GAMES` games, within `spending_limit`
-//! lamports, and until `expires_at`.
-//!
-//! `revoke_global_session` disables the key immediately (sets `enabled =
-//! false` and `expires_at` to now). The PDA stays on-chain so the player can
-//! call `authorize_global_session` again to refresh it.
-
 use crate::errors::XfchessGameError;
 use crate::state::GlobalSessionDelegation;
 use anchor_lang::prelude::*;
 
-/// Arguments for `authorize_global_session`.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
 pub struct AuthorizeGlobalSessionArgs {
-    /// Hot key allowed to co-sign game instructions.
     pub session_key: Pubkey,
-    /// Session lifetime in seconds. `None` → [`GlobalSessionDelegation::DEFAULT_DURATION`].
     pub duration_secs: Option<i64>,
-    /// Total spending cap in lamports. `None` → [`GlobalSessionDelegation::DEFAULT_SPENDING_LIMIT`].
     pub spending_limit: Option<u64>,
-    /// Per-game wager cap in lamports. `None` → [`GlobalSessionDelegation::DEFAULT_MAX_WAGER`].
     pub max_wager: Option<u64>,
-    /// Number of games this session covers. `None` → [`GlobalSessionDelegation::DEFAULT_GAMES`].
     pub games: Option<u16>,
-    /// SOL deposited into the delegation vault for gasless game funding.
     pub deposit_lamports: u64,
 }
 
@@ -102,10 +83,6 @@ pub fn handler_revoke_global_session(ctx: Context<RevokeGlobalSessionCtx>) -> Re
     Ok(())
 }
 
-/// Return the unspent balance of the (program-owned) delegation vault to the
-/// player, keeping the account rent-exempt so the delegation can be re-used.
-/// Without this, lamports deposited via `authorize_global_session` beyond what
-/// was wagered would be stranded.
 pub fn handler_withdraw_global_session(ctx: Context<WithdrawGlobalSessionCtx>) -> Result<()> {
     let delegation_info = ctx.accounts.session_delegation.to_account_info();
     let player_info = ctx.accounts.player.to_account_info();

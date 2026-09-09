@@ -1,15 +1,3 @@
-//! Wallet-first authentication for XFChess.
-//!
-//! The Solana wallet IS the identity — no passwords required.
-//! All endpoints verify a cryptographic signature over `"xfchess:<action>:<timestamp>"`
-//! to prove wallet ownership before issuing a JWT.
-//!
-//! # Endpoints
-//! - `POST /auth/register`           — Create account (wallet + username + optional email)
-//! - `POST /auth/login`              — Login with wallet signature → JWT
-//! - `GET  /auth/check-username/:u`  — Check username availability
-//! - `POST /auth/delete`             — GDPR right-to-erasure (wallet signature required)
-
 use crate::signing::solana;
 use crate::signing::AppState;
 use axum::{
@@ -25,18 +13,9 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
 
-/// Maximum age (seconds) a signed `timestamp` may have before the signature is
-/// rejected. Without this bound a captured signature is replayable forever,
-/// which is an account-takeover primitive for `login`/`register`/`delete`.
 const AUTH_SIG_MAX_AGE_SECS: u64 = 300; // 5 minutes
-/// Allowance for the client's clock running ahead of the server.
 const AUTH_SIG_FUTURE_SKEW_SECS: u64 = 60;
 
-/// Verifies a wallet signature over `"xfchess:<action>:<timestamp>"`.
-///
-/// The `timestamp` must be recent (within [`AUTH_SIG_MAX_AGE_SECS`]) to defeat
-/// replay of an old, legitimately-signed message. Returns `Err` with an
-/// appropriate HTTP status on failure.
 fn verify_wallet_sig(
     wallet: &str,
     signature: &str,
@@ -79,9 +58,6 @@ fn verify_wallet_sig(
     Ok(pk)
 }
 
-/// Authenticates a Bearer JWT request: verifies the token signature/expiry and
-/// checks it against the per-subject revocation cut-off. Returns the wallet
-/// (the `sub` claim) on success.
 pub(crate) async fn authed_wallet(
     state: &AppState,
     headers: &axum::http::HeaderMap,
@@ -112,18 +88,6 @@ pub(crate) async fn authed_wallet(
     Ok(claims.sub)
 }
 
-/// Authenticates the caller via `authed_wallet`, then requires that identity
-/// to exactly match `claimed_wallet` — the shared chokepoint for "this route
-/// acts on behalf of exactly one wallet, no relaying, no exceptions" (KYC
-/// submission, Lichess linking). This is a strictly narrower check than
-/// `record_move`'s participant-aware relay logic (`routes::main::record_move`
-/// — a game's host legitimately submits moves for BOTH players, so that one
-/// stays a bespoke on-chain-participation check, not this). Before this
-/// helper existed, `submit_kyc` and `init_oauth` each hand-rolled the same
-/// six lines independently — exactly the kind of per-route reinvention that
-/// let `record_move`'s equivalent check regress unnoticed earlier in this
-/// project's history. New routes with this "caller == the one wallet this
-/// acts on" shape should call this instead of rewriting it again.
 pub(crate) async fn require_caller_owns_wallet(
     state: &AppState,
     headers: &axum::http::HeaderMap,
@@ -141,7 +105,6 @@ pub(crate) async fn require_caller_owns_wallet(
     Ok(wallet)
 }
 
-/// Creates the authentication router.
 pub fn auth_routes() -> Router<AppState> {
     Router::new()
         .route("/logout", post(logout))
@@ -170,55 +133,19 @@ pub fn auth_routes() -> Router<AppState> {
 
 // ── Privy social login ─────────────────────────────────────────────────────────
 
-/// Maximum social identities created per hour across the instance before new
-/// signups are refused. Social signup is ~free, so this is a cheap Sybil brake;
-/// the real gate on wagering remains KYC + CACF (see `me`'s `can_wager`).
 const SOCIAL_SIGNUP_HOURLY_CAP: i64 = 200;
 
-/// POST /auth/privy-login — authenticate a Google/email user whose Solana
-/// wallet was created by Privy.
-///
-/// Body: `{ privy_token, wallet, signature, timestamp, username? }`
-///
-/// # Why both a wallet signature and a Privy token
-///
-/// The **wallet signature is the authority**, exactly as for Phantom: it proves
-/// control of the keypair that owns every on-chain asset and PDA. The Privy
-/// token is corroborating evidence that binds a social credential to that
-/// wallet, so we can (a) offer "sign in with Google" on the next visit and
-/// (b) enforce one-account-per-email.
-///
-/// Consequence worth stating plainly: a stolen Privy token alone authenticates
-/// nobody, because it cannot produce the signature. And a wallet signature alone
-/// still works through the ordinary `/auth/login` route — this endpoint adds a
-/// credential binding, it does not replace anything.
 #[derive(Deserialize)]
 struct PrivyLoginReq {
     privy_token: String,
     wallet: String,
     signature: String,
     timestamp: u64,
-    /// Desired handle on first signup. Defaults to a pubkey prefix, matching
-    /// the wallet-ui and website register paths.
     username: Option<String>,
-    /// Email from the user's Privy linked accounts, when they have one.
-    ///
-    /// Not read from the access token: Privy's standard claims carry only the
-    /// DID (`sub`), not contact details. This is therefore client-asserted, and
-    /// is used ONLY for the D3 one-account-per-email guard and for display — it
-    /// never authenticates anything. Spoofing it can at worst lock the spoofer
-    /// out of their own signup by colliding with someone else's address; it
-    /// cannot grant access to that other account, since the wallet signature
-    /// still has to match.
     email: Option<String>,
-    /// Which Privy method was used: `google`, `email`, … Display/analytics only.
-    /// Constrained to a short allowlist below so an arbitrary client string
-    /// never lands in the database.
     login_method: Option<String>,
 }
 
-/// Login methods we record. Anything else is stored as `unknown` rather than
-/// trusted verbatim — this column is client-asserted.
 const KNOWN_LOGIN_METHODS: &[&str] = &["google", "email", "apple", "discord", "github", "twitter"];
 
 async fn privy_login(
@@ -384,9 +311,6 @@ pub struct AuthResp {
 
 // ── Register ───────────────────────────────────────────────────────────────────
 
-/// POST /auth/register — Create a new account.
-/// Body: `{ wallet, signature, timestamp, username, email? }`
-/// The signature must cover `"xfchess:register:<timestamp>"`.
 #[derive(Deserialize)]
 struct RegisterReq {
     wallet: String,
@@ -433,9 +357,6 @@ async fn register(
 
 // ── Login ──────────────────────────────────────────────────────────────────────
 
-/// POST /auth/login — Authenticate with wallet signature → JWT.
-/// Body: `{ wallet, signature, timestamp }`
-/// The signature must cover `"xfchess:login:<timestamp>"`.
 #[derive(Deserialize)]
 pub struct LoginReq {
     pub wallet: String,
@@ -644,33 +565,17 @@ struct MeResp {
     username: String,
     email: Option<String>,
     kyc_status: String,
-    /// True when a real Solana wallet pubkey is linked (not an email-only account).
     wallet_linked: bool,
-    /// True when the account has a linked wallet, an approved KYC record in the
-    /// vault, and CACF compliance for their jurisdiction.
     can_wager: bool,
-    /// True when the wallet has an initialised on-chain PlayerProfile PDA.
     has_onchain_profile: bool,
-    /// ELO from the VPS backend (0 = unranked).
     elo: u32,
-    /// ISO 3166-1 alpha-2 country from VPS record (empty if not set).
     country: String,
-    /// Lichess blitz rating (0 = not linked / no games). Shown as a second,
-    /// clearly-labeled stat alongside `elo` — never merged.
     lichess_blitz: u32,
     lichess_verified: bool,
-    /// Social providers bound to this wallet, e.g. `["google"]`. Empty for a
-    /// wallet-only (Phantom/Solflare) account.
     login_methods: Vec<String>,
-    /// True when this wallet is a Privy-created embedded wallet.
-    ///
-    /// **UI only** — it drives "back up your wallet" nudges and the
-    /// un-backed-up balance cap. It must never influence `can_wager`: a social
-    /// user is a first-class wallet user (plan D2).
     is_embedded_wallet: bool,
 }
 
-/// GET /auth/me — validates Bearer JWT and returns caller profile.
 async fn me(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -765,8 +670,6 @@ struct AddEmailReq {
     email: String,
 }
 
-/// POST /auth/add-email — attaches an email to an existing wallet account.
-/// Requires a valid Bearer JWT.
 async fn add_email(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -796,19 +699,6 @@ async fn add_email(
 
 // ── POST /auth/sync-profile ────────────────────────────────────────────────────
 
-/// Minimal mirror of the on-chain PlayerProfile used only for borsh decoding.
-/// Field order and widths MUST match
-/// `programs/xfchess-game/src/state/player_profile.rs` exactly up to the last
-/// field declared here — borsh is positional, so one wrong width silently
-/// shifts everything after it.
-///
-/// Decoded leniently (see `fetch_onchain_profile`), so declaring *fewer*
-/// trailing fields than the on-chain struct is safe: the tail is just left
-/// unread alongside Anchor's `#[max_len]` padding. Declaring more is also
-/// tolerated as long as the account still has padding to read them out of —
-/// a deployed program lagging behind this file (devnet accounts are 265 bytes,
-/// i.e. pre-`elo_bullet`) yields `0.0`/zero for the extra fields rather than
-/// an error. Don't read a field here that the deployed program may not have.
 #[derive(borsh::BorshDeserialize)]
 struct ProfileOnChain {
     pub _authority: [u8; 32],
@@ -850,11 +740,6 @@ struct ProfileOnChain {
     pub _elo_rapid: f64,
 }
 
-/// Fetches and borsh-decodes the caller's on-chain `PlayerProfile`, or
-/// `None` if the account doesn't exist yet — a normal state for a wallet
-/// that hasn't wagered/initialized on-chain yet, not an error. Shared by
-/// `sync_profile` and `set_username`'s on-chain-precedence guard (see the
-/// latter's doc comment for why both need the same read).
 async fn fetch_onchain_profile(
     state: &AppState,
     wallet: &str,
@@ -913,16 +798,6 @@ async fn fetch_onchain_profile(
     Ok(Some(profile))
 }
 
-/// POST /auth/sync-profile — reads the caller's on-chain PlayerProfile PDA
-/// and returns its status. This is the single source of truth wallet-ui and
-/// the game client should both route on: whether an on-chain profile exists
-/// at all, whether a username has been chosen, and whether the account is
-/// KYC-verified (`is_verified`). "No profile yet" / "no username yet" are
-/// normal states for a new wallet, not errors — this always returns 200
-/// (barring a genuine auth/RPC failure) so callers can branch on the fields
-/// instead of on HTTP status. Requires a valid Bearer JWT. Safe to retry —
-/// idempotent; also mirrors the username into SQLite as a side effect once
-/// one is set on-chain.
 async fn sync_profile(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -966,16 +841,10 @@ async fn sync_profile(
 
 // ── POST /auth/init-profile-tx ────────────────────────────────────────────────
 
-/// Builds an unsigned `initProfile` transaction and returns it as base64.
-/// The client signs with their wallet then broadcasts via Solana RPC.
-///
-/// Anchor instruction discriminator: sha256("global:init_profile")[0..8]
-/// = [0xd2, 0xa2, 0xd4, 0x5f, 0x5f, 0xba, 0x59, 0x77]
 #[derive(Deserialize)]
 struct InitProfileTxReq {
     username: String,
     country: String,
-    /// Unix timestamp (seconds). Must be ≥ 18 years before now.
     date_of_birth: i64,
 }
 
@@ -1096,22 +965,6 @@ struct InitProfileSponsoredResp {
     profile_pda: String,
 }
 
-/// POST /auth/init-profile-sponsored-tx
-///
-/// Same as `init_profile_tx`, except XFChess pays the on-chain rent for the
-/// player's *first* profile — removes the "need SOL before you can go
-/// on-chain at all" problem. Gated on: (1) KYC submitted, (2) never
-/// sponsored before for this account.
-///
-/// `InitProfile`'s `create_account` CPIs debit `player`, not whichever
-/// account happens to be the transaction's fee payer — so merely paying the
-/// tx fee wouldn't actually cover the meaningful cost (account rent). This
-/// prepends a `system_instruction::transfer` from the backend fee payer to
-/// the player for exactly the rent both PDAs need, so the existing,
-/// unmodified `init_profile` instruction can then debit *that* balance from
-/// the player as it always does — no program change required. Returns a
-/// transaction partially signed by the backend (as fee payer); the player
-/// still signs before broadcasting via `/auth/broadcast-tx`.
 async fn init_profile_sponsored_tx(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -1270,11 +1123,8 @@ async fn init_profile_sponsored_tx(
 
 // ── POST /auth/broadcast-tx ───────────────────────────────────────────────────
 
-/// Broadcast a signed and serialised transaction (bincode base64) to Solana.
-/// Returns the transaction signature on success.
 #[derive(Deserialize)]
 struct BroadcastTxReq {
-    /// Base64-encoded bincode-serialised signed Transaction.
     tx_b64: String,
 }
 
@@ -1328,19 +1178,6 @@ struct SetUsernameReq {
     username: String,
 }
 
-/// PATCH /auth/username — updates the display username in SQLite for the
-/// JWT's wallet. Checks availability then writes. Does not touch the
-/// on-chain account, which is exactly the problem once one exists:
-/// `resolveExistingUsername` (wallet-ui) and this web app's `ProfileStep`
-/// both prefer the on-chain `PlayerProfile.username` once `username_set` is
-/// true, so an off-chain-only rename at that point would silently apply to
-/// a field neither surface ever displays again — the player sees "success"
-/// here while nothing anywhere actually shows the new name. Once the
-/// on-chain username is set, a rename must go through the on-chain path
-/// (re-submit `init_profile`/`init-profile-sponsored-tx` with the new name,
-/// which the player signs) instead. Before that point — the common case,
-/// since on-chain profile init is deferred to the player's first wager —
-/// this off-chain path is the only one that exists and works as before.
 async fn set_username(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -1385,10 +1222,6 @@ async fn set_username(
 
 // ── POST /auth/logout ──────────────────────────────────────────────────────────
 
-/// POST /auth/logout — revokes every JWT previously issued to the caller.
-/// Requires a valid Bearer JWT. After this, the presented token (and any other
-/// outstanding token for the same wallet) is rejected until the user logs in
-/// again, giving JWTs a server-side kill switch.
 async fn logout(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -1433,9 +1266,6 @@ async fn check_wallet(
 
 // ── GDPR delete ────────────────────────────────────────────────────────────────
 
-/// POST /auth/delete — GDPR right-to-erasure.
-/// Body: `{ wallet, signature, timestamp, reason? }`
-/// The signature must cover `"xfchess:delete:<timestamp>"`.
 #[derive(Deserialize)]
 struct DeleteReq {
     wallet: String,
@@ -1503,7 +1333,6 @@ struct SiwsVerifyReq {
     nonce: String,
 }
 
-/// POST /auth/siws-challenge — issues a one-time nonce for the wallet to sign.
 async fn siws_challenge(
     State(state): State<AppState>,
     Json(req): Json<SiwsChallengeReq>,
@@ -1532,7 +1361,6 @@ async fn siws_challenge(
     Ok(Json(serde_json::json!({ "nonce": nonce })))
 }
 
-/// POST /auth/siws-verify — verifies the signed nonce and returns a JWT.
 async fn siws_verify(
     State(state): State<AppState>,
     Json(req): Json<SiwsVerifyReq>,
@@ -1616,19 +1444,8 @@ mod profile_decode_tests {
     use base64::Engine as _;
     use borsh::BorshDeserialize;
 
-    /// A real devnet `PlayerProfile` account (PDA
-    /// `2rnL1R63FndwkN8UcybiiwVqMCuR2vTirGZU48NH7bzT`, username "val"),
-    /// captured verbatim via `getAccountInfo`. Anchor allocates
-    /// `8 + PlayerProfile::INIT_SPACE` — the *max* length of every
-    /// `#[max_len]` string — but borsh writes only the actual string bytes,
-    /// so every real account carries trailing zero padding.
     const REAL_PROFILE_B64: &str = "UuJjV6SCtVAsepYl9NwToT6BbL/CZ8gRg2700PZfdsZA9JatrWSSmQIAAABHQgIAAAABAAAAAAAAAAMAAAAAAAAAAEz9QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlriBagAAAAAAAAAAAAAAAIDUTj4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAHZhbAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
-    /// Regression: `try_from_slice` rejects *any* leftover bytes, so decoding
-    /// a real profile with it fails with "Not all bytes read" — which
-    /// `sync_profile` surfaced as a blanket 422 for every wallet that had an
-    /// on-chain profile. Anchor's own `try_deserialize` reads the fields it
-    /// needs and ignores the padding; the backend mirror must do the same.
     #[test]
     fn decodes_a_real_padded_devnet_profile() {
         let data = STANDARD.decode(REAL_PROFILE_B64).unwrap();

@@ -1,40 +1,12 @@
-//! Typed board coordinate to replace raw `(u8, u8)` tuples.
-//!
-//! `BoardPos` encodes a chess square as `(file, rank)` where:
-//! - `file` = 0-7 (a-h)
-//! - `rank` = 0-7 (1-8)
-//!
-//! Using a named struct instead of a bare tuple prevents the common
-//! mistake of swapping file and rank.
-//!
-//! # World-space mapping
-//!
-//! Bevy world coordinates: X = file, Z = rank (Y is up).
-//!
-//! # Reference
-//!
-//! - <https://en.wikipedia.org/wiki/Algebraic_notation_(chess)>
-//! - <https://stackoverflow.com/questions/16523> (SQL-style indexing pitfalls)
-
 use bevy::prelude::*;
 
-/// A typed chess board position.
-///
-/// Prevents the file/rank swap bugs that plague raw `(u8, u8)` tuples.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Reflect)]
 pub struct BoardPos {
-    /// File (column): 0 = a, 7 = h
     pub file: u8,
-    /// Rank (row): 0 = rank 1, 7 = rank 8
     pub rank: u8,
 }
 
 impl BoardPos {
-    /// Create a new board position.
-    ///
-    /// # Panics (debug only)
-    ///
-    /// Debug-asserts that file and rank are in 0..8.
     #[inline]
     pub const fn new(file: u8, rank: u8) -> Self {
         debug_assert!(file < 8, "file must be 0-7");
@@ -42,36 +14,30 @@ impl BoardPos {
         Self { file, rank }
     }
 
-    /// Convert to a `(file, rank)` tuple for interop with legacy code.
     #[inline]
     pub const fn as_tuple(self) -> (u8, u8) {
         (self.file, self.rank)
     }
 
-    /// Build from a `(file, rank)` tuple.
     #[inline]
     pub const fn from_tuple(t: (u8, u8)) -> Self {
         Self::new(t.0, t.1)
     }
 
-    /// File character ('a'–'h').
     #[inline]
     pub const fn file_char(self) -> char {
         (b'a' + self.file) as char
     }
 
-    /// Rank number (1–8) as displayed on a chess board.
     #[inline]
     pub const fn rank_display(self) -> u8 {
         self.rank + 1
     }
 
-    /// UCI square string, e.g. `"e4"`.
     pub fn to_uci(self) -> String {
         format!("{}{}", self.file_char(), self.rank_display())
     }
 
-    /// Parse a UCI square string (e.g. `"e4"`) into a `BoardPos`.
     pub fn from_uci(s: &str) -> Option<Self> {
         let bytes = s.as_bytes();
         if bytes.len() < 2 {
@@ -86,13 +52,11 @@ impl BoardPos {
         }
     }
 
-    /// Flat index in a 64-element array (rank-major: `rank * 8 + file`).
     #[inline]
     pub const fn index(self) -> usize {
         (self.rank as usize) * 8 + self.file as usize
     }
 
-    /// Reconstruct from a flat index.
     #[inline]
     pub const fn from_index(idx: usize) -> Self {
         Self {
@@ -101,15 +65,11 @@ impl BoardPos {
         }
     }
 
-    /// World-space X coordinate (file maps to X).
-    /// Files are mirrored (7 - file) so that from the White-side camera (at -Z looking +Z,
-    /// whose right vector is -X), a-file appears on screen-left and h-file on screen-right.
     #[inline]
     pub fn world_x(self) -> f32 {
         7.0 - self.file as f32
     }
 
-    /// World-space Z coordinate (rank maps to Z).
     #[inline]
     pub fn world_z(self) -> f32 {
         self.rank as f32
@@ -123,7 +83,6 @@ impl std::fmt::Display for BoardPos {
 }
 
 impl From<(u8, u8)> for BoardPos {
-    /// Convert `(file, rank)` tuple to `BoardPos`.
     fn from(t: (u8, u8)) -> Self {
         Self::new(t.0, t.1)
     }

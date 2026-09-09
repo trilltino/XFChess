@@ -51,7 +51,6 @@ impl Plugin for MultiplayerMenuPlugin {
     }
 }
 
-/// System parameter to handle multiplayer menu interactions
 #[derive(SystemParam)]
 pub struct MultiplayerMenu<'w> {
     game_states: ResMut<'w, NextState<GameState>>,
@@ -337,7 +336,6 @@ pub fn multiplayer_menu_system(
         });
 }
 
-/// Initiates gossip-based matchmaking to find opponents
 fn initiate_gossip_matchmaking(_menu: &mut MultiplayerMenu, state: &mut MultiplayerMenuState) {
     state.is_searching = true;
     state.status_text = "Searching for opponents via gossip protocol...".to_string();
@@ -345,7 +343,6 @@ fn initiate_gossip_matchmaking(_menu: &mut MultiplayerMenu, state: &mut Multipla
     // TODO: Implement actual gossip matchmaking logic
 }
 
-/// Connects to a specific opponent via Braid URI
 fn connect_via_braid_uri(menu: &mut MultiplayerMenu, state: &mut MultiplayerMenuState) {
     if state.braid_uri_input.is_empty() {
         state.error_message = Some("Please enter a Braid URI".to_string());

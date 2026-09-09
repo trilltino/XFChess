@@ -1,10 +1,3 @@
-//! In-game notification / popup system.
-//!
-//! Add a `GamePopup` to the `GamePopupQueue` resource from any system and it
-//! will be rendered as a floating toast in the bottom-right corner while the
-//! player is in-game. Popups auto-dismiss after a configurable timeout and
-//! can carry an optional copy-to-clipboard string and an optional URL button.
-
 use bevy::prelude::*;
 use bevy_egui::egui;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
@@ -13,25 +6,16 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
 // Data types
 // ---------------------------------------------------------------------------
 
-/// A single popup entry.
 #[derive(Debug, Clone)]
 pub struct GamePopup {
     pub title: String,
     pub message: String,
-    /// Text that the "Copy" button will put on the clipboard (e.g. a pubkey).
     pub copy_text: Option<String>,
-    /// URL opened in the system browser when the "Open" button is clicked.
     pub url: Option<String>,
-    /// Display label for the URL button (defaults to "Open").
     pub url_label: Option<String>,
-    /// How many seconds the popup stays visible before auto-dismissing.
-    /// Set to `f32::INFINITY` to keep it until manually dismissed.
     pub lifetime: f32,
-    /// Remaining time (decremented each frame; private — set by the queue).
     pub(crate) remaining: f32,
-    /// Whether the user clicked the X to dismiss early.
     pub(crate) dismissed: bool,
-    /// When this popup was created — used for fade-in / fade-out.
     pub(crate) created_at: std::time::Instant,
 }
 
@@ -74,7 +58,6 @@ impl GamePopup {
 // Queue resource
 // ---------------------------------------------------------------------------
 
-/// Global queue — push popups here from any system.
 #[derive(Resource, Default)]
 pub struct GamePopupQueue {
     pub entries: Vec<GamePopup>,
@@ -90,7 +73,6 @@ impl GamePopupQueue {
 // Systems
 // ---------------------------------------------------------------------------
 
-/// Tick lifetimes and remove expired / dismissed popups.
 fn tick_popups(mut queue: ResMut<GamePopupQueue>, time: Res<Time>) {
     let dt = time.delta_secs();
     for p in &mut queue.entries {
@@ -101,8 +83,6 @@ fn tick_popups(mut queue: ResMut<GamePopupQueue>, time: Res<Time>) {
     queue.entries.retain(|p| !p.dismissed && p.remaining > 0.0);
 }
 
-/// Render all active popups as egui windows stacked bottom-right.
-/// Styled to match the "XFChess Alpha" welcome dialog with fade-in/fade-out.
 fn render_popups(
     mut queue: ResMut<GamePopupQueue>,
     mut contexts: EguiContexts,

@@ -1,5 +1,3 @@
-//! Backend telemetry, metrics, middleware, and structured logging.
-
 pub mod logging;
 pub mod metrics;
 pub mod middleware;

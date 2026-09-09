@@ -1,15 +1,3 @@
-//! Resource module unit tests
-//!
-//! This test module validates the behavior of all game resources including:
-//! - Turn tracking and move number incrementing
-//! - Game phase transitions
-//! - Move history management
-//! - Fischer increment timer logic
-//!
-//! These are pure data structure tests that verify resource state management
-//! without requiring the full ECS system. This allows quick, focused testing
-//! of game state logic independently from Bevy's scheduling and system execution.
-
 use super::*;
 use crate::game::components::{GamePhase, MoveRecord};
 use crate::rendering::pieces::PieceColor;
@@ -20,12 +8,6 @@ use crate::rendering::pieces::PieceColor;
 
 #[test]
 fn test_current_turn_default() {
-    //! Tests that CurrentTurn initializes correctly
-    //!
-    //! In chess, white always moves first. The default turn state should
-    //! reflect this starting condition with move_number starting at 1.
-    //! This ensures games begin in the correct state without manual setup.
-
     let turn = CurrentTurn::default();
 
     assert_eq!(turn.color, PieceColor::White, "White should move first");
@@ -34,13 +16,6 @@ fn test_current_turn_default() {
 
 #[test]
 fn test_turn_switch_white_to_black() {
-    //! Tests switching from white's turn to black's turn
-    //!
-    //! When white completes a move, the turn switches to black but the
-    //! move number should NOT increment yet. In chess notation, a "move"
-    //! consists of both white and black's turns (e.g., "1. e4 e5" is move 1).
-    //! The move number only increments when black completes their turn.
-
     let mut turn = CurrentTurn::default();
     turn.switch();
 
@@ -53,12 +28,6 @@ fn test_turn_switch_white_to_black() {
 
 #[test]
 fn test_turn_switch_black_to_white() {
-    //! Tests switching from black's turn back to white's turn
-    //!
-    //! When black completes a move, the turn switches back to white AND
-    //! the move number increments. This test verifies the asymmetric behavior
-    //! of move number incrementing (only on black->white transitions).
-
     let mut turn = CurrentTurn {
         color: PieceColor::Black,
         move_number: 1,
@@ -74,13 +43,6 @@ fn test_turn_switch_black_to_white() {
 
 #[test]
 fn test_multiple_turn_switches() {
-    //! Tests multiple consecutive turn switches
-    //!
-    //! Validates that the turn switching logic correctly alternates between
-    //! players and increments move numbers at the right times over multiple
-    //! turns. This ensures the state machine behaves correctly throughout
-    //! a full game sequence.
-
     let mut turn = CurrentTurn::default();
 
     // Move 1: White to Black
@@ -110,12 +72,6 @@ fn test_multiple_turn_switches() {
 
 #[test]
 fn test_game_phase_default() {
-    //! Tests that CurrentGamePhase initializes to Playing state
-    //!
-    //! Games start in the Playing phase. This default ensures that systems
-    //! which check the game phase will behave correctly from the start without
-    //! requiring explicit initialization code.
-
     let phase = CurrentGamePhase::default();
     assert_eq!(
         phase.0,
@@ -126,13 +82,6 @@ fn test_game_phase_default() {
 
 #[test]
 fn test_game_phase_transitions() {
-    //! Tests game phase state transitions
-    //!
-    //! Validates that the CurrentGamePhase resource can hold different
-    //! game states (Playing, Checkmate, Stalemate). This is a simple
-    //! data holder test, but ensures the type system allows all valid
-    //! phase values.
-
     let mut phase = CurrentGamePhase::default();
 
     phase.0 = GamePhase::Setup;
@@ -157,12 +106,6 @@ fn test_game_phase_transitions() {
 
 #[test]
 fn test_move_history_default() {
-    //! Tests that MoveHistory initializes as empty
-    //!
-    //! A new game should have no move history. This test validates that
-    //! the default state is correct and all query methods return appropriate
-    //! values for an empty history.
-
     let history = MoveHistory::default();
 
     assert_eq!(history.len(), 0, "New history should have length 0");
@@ -171,12 +114,6 @@ fn test_move_history_default() {
 
 #[test]
 fn test_move_history_add_move() {
-    //! Tests adding moves to the history
-    //!
-    //! Validates that the add_move method correctly appends moves to the
-    //! internal vector and updates all derived state (length, emptiness, etc.).
-    //! This is the core functionality for tracking game progression.
-
     let mut history = MoveHistory::default();
 
     let move1 = MoveRecord {
@@ -202,12 +139,6 @@ fn test_move_history_add_move() {
 
 #[test]
 fn test_move_history_multiple_moves() {
-    //! Tests adding multiple moves to the history
-    //!
-    //! Validates that the history correctly maintains move order and that
-    //! last_move() always returns the most recent move. This is critical
-    //! for features like undo, move replay, and game notation export.
-
     let mut history = MoveHistory::default();
 
     let move1 = MoveRecord {
@@ -259,12 +190,6 @@ fn test_move_history_multiple_moves() {
 
 #[test]
 fn test_move_history_with_capture() {
-    //! Tests recording a move with a capture
-    //!
-    //! Validates that the history correctly stores captured piece information.
-    //! This is important for move undo functionality (to restore captured pieces)
-    //! and for game notation generation (captures are notated differently).
-
     let mut history = MoveHistory::default();
 
     let move_with_capture = MoveRecord {
@@ -295,12 +220,6 @@ fn test_move_history_with_capture() {
 
 #[test]
 fn test_game_timer_default() {
-    //! Tests that GameTimer initializes with standard 10-minute time control
-    //!
-    //! The default timer configuration is 10 minutes per player with no
-    //! Fischer increment and the timer not running. This is a common
-    //! casual time control and serves as a sensible default for new games.
-
     let timer = GameTimer::default();
 
     assert_eq!(
@@ -317,13 +236,6 @@ fn test_game_timer_default() {
 
 #[test]
 fn test_fischer_increment_white() {
-    //! Tests Fischer increment application for white player
-    //!
-    //! Fischer increment adds time to the player who just moved. This prevents
-    //! games from always ending in time scrambles and rewards fast play.
-    //! When white completes a move with a 5-second increment, they should
-    //! receive 5 additional seconds.
-
     let mut timer = GameTimer {
         white_time_left: 100.0,
         black_time_left: 100.0,
@@ -342,12 +254,6 @@ fn test_fischer_increment_white() {
 
 #[test]
 fn test_fischer_increment_black() {
-    //! Tests Fischer increment application for black player
-    //!
-    //! Same as the white increment test, but validates the symmetric behavior
-    //! for the black player. Ensures the color matching logic works correctly
-    //! in both branches.
-
     let mut timer = GameTimer {
         white_time_left: 100.0,
         black_time_left: 100.0,
@@ -366,12 +272,6 @@ fn test_fischer_increment_black() {
 
 #[test]
 fn test_fischer_increment_zero() {
-    //! Tests that zero increment does not modify times
-    //!
-    //! When increment is set to 0 (sudden death time control), applying
-    //! the increment should be a no-op. This test ensures we don't add
-    //! 0.0 or cause floating-point issues when increment is disabled.
-
     let mut timer = GameTimer {
         white_time_left: 100.0,
         black_time_left: 100.0,
@@ -393,12 +293,6 @@ fn test_fischer_increment_zero() {
 
 #[test]
 fn test_multiple_increments() {
-    //! Tests multiple consecutive increment applications
-    //!
-    //! Simulates a sequence of moves where both players receive increments.
-    //! Validates that increments stack correctly and don't interfere with
-    //! each other. This is important for ensuring timer accuracy over long games.
-
     let mut timer = GameTimer {
         white_time_left: 100.0,
         black_time_left: 100.0,
@@ -425,12 +319,6 @@ fn test_multiple_increments() {
 
 #[test]
 fn test_custom_time_control() {
-    //! Tests creating a timer with custom time control settings
-    //!
-    //! Validates that the GameTimer can be constructed with arbitrary
-    //! time controls. This test uses a 3-minute blitz game with 2-second
-    //! increment (3+2), a common online chess format.
-
     let timer = GameTimer {
         white_time_left: 180.0, // 3 minutes
         black_time_left: 180.0,

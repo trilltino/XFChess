@@ -1,9 +1,5 @@
-//! Account structure mapping unique usernames back to player profiles.
-
 use anchor_lang::prelude::*;
 
-/// UsernameRecord PDA ensures username uniqueness across all players
-/// Seeds: [b"username", username.as_bytes()]
 #[account]
 pub struct UsernameRecord {
     pub owner: Pubkey,   // Player who owns this username
@@ -14,10 +10,6 @@ impl UsernameRecord {
     pub const LEN: usize = 8 + 32 + 8; // Discriminator + Pubkey + i64
 }
 
-/// Validates username format according to rules:
-/// - Length: 3-20 characters
-/// - Characters: A-Z, a-z, 0-9, underscore, hyphen
-/// - Not reserved (admin, system, support, official, etc.)
 pub fn validate_username(username: &str) -> Result<()> {
     // Check length
     let len = username.len();

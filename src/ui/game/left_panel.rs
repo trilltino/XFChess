@@ -1,24 +1,11 @@
-//! Left sidebar for the in-game screen: game type / rated badge / time
-//! control, both players' ELO, and (online games only) inline chat anchored
-//! lower in the panel, below the match-info card.
-//!
-//! Mirrors the right sidebar's top-opponent / bottom-local-player convention
-//! (`crate::ui::game::game_ui::render_game_right_panel`) so the two columns
-//! read as one consistent layout, lichess-style.
-
 use crate::core::GameMode;
 use crate::rendering::pieces::PieceColor;
 use crate::ui::game::game_ui::resolve_player_names;
 use crate::ui::styles::*;
 use bevy_egui::egui;
 
-/// Fixed height of the chat card — anchored lower in the panel, below the
-/// match-info card, rather than growing to fill all remaining space.
 const CHAT_CARD_HEIGHT: f32 = 280.0;
 
-/// Renders the left panel's contents. Called from `game_status_ui` inside an
-/// `egui::SidePanel::left`, declared before the central board panel so the
-/// board correctly reserves space for it.
 pub fn render_game_left_panel(
     ui: &mut egui::Ui,
     params: &mut crate::ui::system_params::game_ui::GameUIParams,
@@ -76,10 +63,6 @@ pub fn render_game_left_panel(
     }
 }
 
-/// Match-info card: "MATCH" pill, big Rated/Casual headline, a divider, then
-/// three stat rows (time control, opponent rating, your rating). Player
-/// identity itself (name/avatar/clock) lives in the center player bars above
-/// and below the board — see `crate::ui::game::player_bar`.
 fn render_match_info_card(
     ui: &mut egui::Ui,
     params: &mut crate::ui::system_params::game_ui::GameUIParams,

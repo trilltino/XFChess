@@ -1,12 +1,9 @@
-//! Enhanced crash reporter for XFChess client
-
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::panic;
 use std::path::Path;
 use std::time::SystemTime;
 
-/// Set up enhanced panic hook
 pub fn setup_enhanced_panic_hook() {
     panic::set_hook(Box::new(|info| {
         let timestamp = SystemTime::now()
@@ -70,12 +67,6 @@ pub fn setup_enhanced_panic_hook() {
     }));
 }
 
-/// Append a *recovered* (non-fatal) error to the crash log.
-///
-/// Used by the Bevy 0.19 fallback error handler: when a panic inside a system,
-/// command or observer is caught and the app keeps running, we still want a
-/// breadcrumb on disk. Unlike [`setup_enhanced_panic_hook`], this appends rather
-/// than truncating and never tears down the process.
 pub fn record_recovered_error(source: &str, error: &dyn std::fmt::Display) {
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)

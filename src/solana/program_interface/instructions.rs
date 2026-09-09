@@ -1,10 +1,3 @@
-//! Solana instruction builders
-//!
-//! Anchor-compatible instruction builders that mirror the on-chain
-//! `xfchess-game` program accounts and instruction arguments.
-//!
-//! Reference: programs/xfchess-game/src/lib.rs
-
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use solana_sdk::{
@@ -14,10 +7,8 @@ use solana_sdk::{
 #[allow(deprecated)]
 use solana_system_interface::program as system_program;
 
-/// Deployed program ID (must match `declare_id!` in xfchess-game).
 pub const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
-/// PDA seeds — kept in sync with `programs/xfchess-game/src/constants.rs`.
 pub const GAME_SEED: &[u8] = b"game";
 pub const MOVE_LOG_SEED: &[u8] = b"move_log";
 pub const PROFILE_SEED: &[u8] = b"profile";
@@ -32,8 +23,6 @@ pub const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
 pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";
 pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
-/// Number of TournamentPlayersShard PDAs that exist for a tournament size.
-/// Must mirror `shards::required_shards` in the on-chain program.
 pub fn required_shards(max_players: u16) -> u8 {
     match max_players {
         0..=64 => 1,
@@ -42,9 +31,6 @@ pub fn required_shards(max_players: u16) -> u8 {
     }
 }
 
-/// Computes a match's (round, next_match_for_winner, next_match_slot) in the
-/// linear single-elimination layout used on-chain: round-1 matches occupy
-/// indices 0..P/2, each later round follows, the final is the last index.
 pub fn bracket_position(max_players: u16, match_index: u16) -> (u8, Option<u16>, u8) {
     let total_matches = max_players.saturating_sub(1);
     let mut round_start = 0u16;
@@ -64,8 +50,6 @@ pub fn bracket_position(max_players: u16, match_index: u16) -> (u8, Option<u16>,
     (round, next, (pos_in_round % 2) as u8)
 }
 
-/// AccountMeta for an optional shard: the real PDA when the shard exists for
-/// this tournament size, otherwise the program ID (Anchor's `None` marker).
 fn shard_meta(program_id: &Pubkey, tournament_id: u64, idx: u8, max_players: u16) -> AccountMeta {
     if idx < required_shards(max_players) {
         let pda = Pubkey::find_program_address(
@@ -83,7 +67,6 @@ fn shard_meta(program_id: &Pubkey, tournament_id: u64, idx: u8, max_players: u16
     }
 }
 
-/// Compute the 8-byte Anchor discriminator for `global:<fn_name>`.
 fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
     hasher.update(format!("global:{}", fn_name).as_bytes());
@@ -93,7 +76,6 @@ fn anchor_discriminator(fn_name: &str) -> [u8; 8] {
     disc
 }
 
-/// Encode a Borsh-style `String` (u32 length prefix + utf-8 bytes).
 fn borsh_string(s: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(4 + s.len());
     buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
@@ -105,16 +87,6 @@ fn borsh_string(s: &str) -> Vec<u8> {
 // create_game
 // ---------------------------------------------------------------------------
 
-/// Build a `create_game` instruction.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn create_game(ctx, game_id: u64, wager_amount: u64, match_type: MatchType, platform_fee: u64, base_time_seconds: u64, increment_seconds: u16)
-/// ```
-///
-/// `match_type` encoding: Free=0, Ranked=1, Wager=2.
-/// `fee_payer` is the VPS session key — must co-sign the transaction.
-/// `platform_fee` is the universal platform fee in lamports (calculated by backend from live SOL/GBP rate).
 pub fn create_game_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -159,15 +131,6 @@ pub fn create_game_ix(
 // join_game
 // ---------------------------------------------------------------------------
 
-/// Build a `join_game` instruction.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn join_game(ctx, game_id: u64)
-/// ```
-///
-/// `white_player` is the pubkey stored in `game.white` (read from chain before calling).
-/// `fee_payer` must match `game.fee_payer` (the VPS session key set during create_game).
 pub fn join_game_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -206,18 +169,6 @@ pub fn join_game_ix(
 // cancel_game
 // ---------------------------------------------------------------------------
 
-/// Build a `cancel_game` instruction — refunds the escrowed wager to
-/// `white`/`black` and marks the game cancelled.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn cancel_game(ctx, game_id: u64)
-/// ```
-///
-/// `player` (the caller, wallet-signed) must be `white` or `black`.
-/// `white`/`black` should be read from the on-chain `Game` account — pass
-/// `Pubkey::default()` for `black` if the game has no joiner yet; the program
-/// only validates/refunds `black_authority` when `game.black != default()`.
 pub fn cancel_game_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -251,15 +202,6 @@ pub fn cancel_game_ix(
 // record_move
 // ---------------------------------------------------------------------------
 
-/// Build a `record_move` instruction.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn record_move(ctx, game_id: u64, move_uci: [u8; 5], next_board: [u8; 68], nonce: u64, signature: Option<Vec<u8>>, parent_nonce: Option<u64>)
-/// ```
-///
-/// `annotation`, `move_time`, and `prev_hash` are client-side metadata used
-/// for local hash-chaining and display; they are **not** sent on-chain.
 pub fn record_move_ix(
     program_id: Pubkey,
     session_key: Pubkey,
@@ -312,19 +254,6 @@ pub fn record_move_ix(
 // finalize_game
 // ---------------------------------------------------------------------------
 
-/// Build a `finalize_game` instruction.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn finalize_game(ctx, game_id: u64, result: GameResult)
-/// ```
-///
-/// `result` encoding (Anchor enum):
-///   0 → `GameResult::None`
-///   1 + 32-byte pubkey → `GameResult::Winner(Pubkey)`
-///   2 → `GameResult::Draw`
-///
-/// `fee_payer` is the ephemeral rollups relayer pubkey
 pub fn finalize_game_ix(
     program_id: Pubkey,
     game_id: u64,
@@ -366,17 +295,6 @@ pub fn finalize_game_ix(
 // offer_draw / accept_draw
 // ---------------------------------------------------------------------------
 
-/// Build an `offer_draw` instruction. Records the offer on-chain; does not
-/// end the game — the opponent must submit `accept_draw_ix` to finalize it.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn offer_draw(ctx, game_id: u64)
-/// ```
-///
-/// Accounts (order matches `OfferDraw`):
-///   0. game    (mut, seeds=["game", game_id])
-///   1. player  (signer) — must be white or black
 pub fn offer_draw_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Result<Instruction> {
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
@@ -394,19 +312,6 @@ pub fn offer_draw_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Result
     })
 }
 
-/// Build an `accept_draw` instruction. Ends the game as a draw — `player`
-/// must be the opponent of whoever called `offer_draw_ix`. Settlement (pot
-/// split, ELO, stats) happens afterward through the existing
-/// `finalize_game_ix` path, same as every other terminal result.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn accept_draw(ctx, game_id: u64)
-/// ```
-///
-/// Accounts (order matches `AcceptDraw`):
-///   0. game    (mut, seeds=["game", game_id])
-///   1. player  (signer) — must be white or black, and not the offerer
 pub fn accept_draw_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Result<Instruction> {
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
@@ -424,21 +329,6 @@ pub fn accept_draw_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Resul
     })
 }
 
-/// Build a `claim_timeout` instruction. Permissionless — `caller` need not be
-/// a player in the game (mirrors on-chain `ClaimTimeout`, which only checks
-/// `caller` as a signer, not against `game.white`/`game.black`). Awards
-/// victory to whichever side didn't go silent; errors on-chain with
-/// `TimeoutNotExpired` if the inactivity window
-/// (`lifecycle::clock::inactivity_window_seconds`) hasn't actually elapsed.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn claim_timeout(ctx, game_id: u64)
-/// ```
-///
-/// Accounts (order matches `ClaimTimeout`):
-///   0. game    (mut, seeds=["game", game_id])
-///   1. caller  (signer) — need not be a player in the game
 pub fn claim_timeout_ix(program_id: Pubkey, game_id: u64, caller: Pubkey) -> Result<Instruction> {
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
@@ -460,18 +350,6 @@ pub fn claim_timeout_ix(program_id: Pubkey, game_id: u64, caller: Pubkey) -> Res
 // authorize_session_key
 // ---------------------------------------------------------------------------
 
-/// Build an `authorize_session_key` instruction.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn authorize_session_key(ctx, game_id: u64, session_pubkey: Pubkey)
-/// ```
-///
-/// Accounts (order matches `AuthorizeSessionCtx`):
-///   0. game                (mut, seeds=["game", game_id])
-///   1. session_delegation  (init, seeds=["session_delegation", game_id, player])
-///   2. player              (mut, signer)
-///   3. system_program
 pub fn authorize_session_key_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -508,21 +386,6 @@ pub fn authorize_session_key_ix(
     })
 }
 
-/// Build an `init_profile` instruction.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn init_profile(ctx)
-/// ```
-///
-/// Must be called once per player before `finalize_game` (which reads both
-/// `white_profile` and `black_profile`). Safe to skip if the PDA already exists.
-///
-/// Accounts:
-///   0. player_profile  (init, seeds=["profile", player])
-///   1. player          (mut, signer)
-///   2. system_program
-/// Build an `init_profile` instruction.
 pub fn init_profile_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -553,17 +416,6 @@ pub fn init_profile_ix(
     })
 }
 
-/// Build a `verify_profile` instruction.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn verify_profile(ctx)
-/// ```
-///
-/// Accounts:
-///   0. player_profile  (mut, seeds=["profile", player])
-///   1. admin           (mut, signer)
-///   2. player          (pubkey only)
 pub fn verify_profile_ix(program_id: Pubkey, admin: Pubkey, player: Pubkey) -> Result<Instruction> {
     let player_profile_pda =
         Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], &program_id).0;
@@ -581,19 +433,6 @@ pub fn verify_profile_ix(program_id: Pubkey, admin: Pubkey, player: Pubkey) -> R
     })
 }
 
-/// Build a `set_username` instruction.
-///
-/// On-chain signature:
-/// ```ignore
-/// pub fn set_username(ctx, username: String)
-/// ```
-///
-/// Accounts:
-///   0. player_profile  (mut, seeds=["profile", player])
-///   1. username_record (init, seeds=["username", username.as_bytes()])
-///   2. player          (mut, signer)
-///   3. authority       (must match profile.authority)
-///   4. system_program
 pub fn set_username_ix(program_id: Pubkey, player: Pubkey, username: &str) -> Result<Instruction> {
     let player_profile_pda =
         Pubkey::find_program_address(&[PROFILE_SEED, player.as_ref()], &program_id).0;
@@ -617,13 +456,6 @@ pub fn set_username_ix(program_id: Pubkey, player: Pubkey, username: &str) -> Re
     })
 }
 
-/// Build an `initialize_tournament` instruction.
-/// Build an `initialize_tournament` instruction (single-elimination, SOL-only).
-///
-/// `authority` must be the program's `vps_authority`. Defaults: open ELO range,
-/// `min_players = max_players`, competitive prize split by size, no platform
-/// fee, no USDC prize. Follow with `initialize_escrow_ix` and
-/// `initialize_shards_ix` before registrations.
 #[allow(clippy::too_many_arguments)]
 pub fn initialize_tournament_ix(
     program_id: Pubkey,
@@ -694,8 +526,6 @@ pub fn initialize_tournament_ix(
     })
 }
 
-/// Build an `initialize_tournament_escrow` instruction.
-/// Must be called after `initialize_tournament` and before `register_player`.
 pub fn initialize_escrow_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -727,8 +557,6 @@ pub fn initialize_escrow_ix(
     })
 }
 
-/// Build the size-appropriate `initialize_shards_*` instruction.
-/// ≤64 players → 1 shard, ≤128 → 2 shards, 256 → 4 shards.
 pub fn initialize_shards_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -777,8 +605,6 @@ pub fn initialize_shards_ix(
     })
 }
 
-/// Build a `fund_sol_prize` instruction. Locks the guaranteed SOL prize in
-/// escrow; required before any registration when `entry_fee > 0`.
 pub fn fund_sol_prize_ix(
     program_id: Pubkey,
     operator: Pubkey,
@@ -812,10 +638,6 @@ pub fn fund_sol_prize_ix(
     })
 }
 
-/// Build a `register_player` instruction.
-///
-/// `host_treasury` must equal `tournament.host_treasury`. Shards that don't
-/// exist for `max_players` are passed as the program ID (Anchor `None`).
 pub fn register_player_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -872,9 +694,6 @@ pub fn register_player_ix(
     })
 }
 
-/// Build a `start_tournament` instruction.
-/// Locks registration, seeds players by ELO, and sweeps entry-fee deposits
-/// from escrow to `host_treasury`.
 pub fn start_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -924,11 +743,6 @@ pub fn start_tournament_ix(
     })
 }
 
-/// Build an `initialize_match` instruction for one bracket slot.
-/// Use `bracket_position(max_players, match_index)` for round/next/slot.
-/// Round-1 matches must be initialized with their players (record_match_result
-/// rejects matches whose player slots are empty); later rounds pass None and
-/// are filled by `advance_winner`.
 #[allow(clippy::too_many_arguments)]
 pub fn initialize_match_ix(
     program_id: Pubkey,
@@ -990,7 +804,6 @@ pub fn initialize_match_ix(
     })
 }
 
-/// Build a `record_match_result` instruction (tournament-authority signed).
 pub fn record_match_result_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -1032,8 +845,6 @@ pub fn record_match_result_ix(
     })
 }
 
-/// Build a `record_swiss_result` instruction (player-signed).
-/// `result` encoding: 0 = Win (for `player`), 1 = Loss, 2 = Draw.
 #[allow(clippy::too_many_arguments)]
 pub fn record_swiss_result_ix(
     program_id: Pubkey,
@@ -1084,8 +895,6 @@ pub fn record_swiss_result_ix(
     })
 }
 
-/// Build an `advance_winner` instruction: copies the completed source match's
-/// winner into their slot in the target match.
 pub fn advance_winner_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -1128,8 +937,6 @@ pub fn advance_winner_ix(
     })
 }
 
-/// Build a `leave_tournament` instruction. The entry-fee deposit is refunded
-/// from the tournament escrow PDA; the player is the only signer.
 pub fn leave_tournament_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -1177,7 +984,6 @@ pub fn leave_tournament_ix(
     })
 }
 
-/// Re-export program ID for convenience.
 pub fn get_program_id() -> Result<Pubkey> {
     PROGRAM_ID
         .parse()
@@ -1190,7 +996,6 @@ pub fn get_program_id() -> Result<Pubkey> {
 // PDA is addressed by the two wallets in canonical (sorted) order, so both sides
 // derive the same account. Callers pass any two wallets; we sort them here.
 
-/// Sort two wallets into canonical (lo, hi) order and derive the Friendship PDA.
 fn friendship_pair(a: Pubkey, b: Pubkey, program_id: &Pubkey) -> (Pubkey, Pubkey, Pubkey) {
     let (lo, hi) = if a < b { (a, b) } else { (b, a) };
     let pda =
@@ -1198,7 +1003,6 @@ fn friendship_pair(a: Pubkey, b: Pubkey, program_id: &Pubkey) -> (Pubkey, Pubkey
     (lo, hi, pda)
 }
 
-/// `send_friend_request` — `requester` asks to friend `other`.
 pub fn send_friend_request_ix(
     program_id: Pubkey,
     requester: Pubkey,
@@ -1218,7 +1022,6 @@ pub fn send_friend_request_ix(
     })
 }
 
-/// `accept_friend_request` — `addressee` accepts a pending request from `other`.
 pub fn accept_friend_request_ix(
     program_id: Pubkey,
     addressee: Pubkey,
@@ -1237,7 +1040,6 @@ pub fn accept_friend_request_ix(
     })
 }
 
-/// `close_friendship` — decline / cancel / remove; `signer` (either party) closes the edge.
 pub fn close_friendship_ix(
     program_id: Pubkey,
     signer: Pubkey,
@@ -1256,7 +1058,6 @@ pub fn close_friendship_ix(
     })
 }
 
-/// `block_user` — `signer` (either party) marks an existing edge as blocked.
 pub fn block_user_ix(program_id: Pubkey, signer: Pubkey, other: Pubkey) -> Result<Instruction> {
     let (lo, hi, friendship) = friendship_pair(signer, other, &program_id);
     Ok(Instruction {

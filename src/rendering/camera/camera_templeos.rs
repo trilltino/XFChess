@@ -1,8 +1,3 @@
-//! TempleOS camera setup
-//!
-//! Provides an isometric orthographic camera view for the TempleOS chess board mode.
-//! The camera uses orthographic projection to create a true 2D isometric view.
-
 use crate::core::states::GameMode;
 use crate::core::{DespawnOnExit, GameState};
 use crate::game::resources::{CurrentTurn, Players};
@@ -11,21 +6,14 @@ use crate::game::view_mode::ViewMode;
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 
-/// Marker component for TempleOS camera
 #[derive(Component)]
 pub struct TempleOSCamera;
 
-/// Component to store the initial look-at offset for maintaining isometric angle
 #[derive(Component)]
 pub struct TempleOSCameraLookAt {
     pub offset: Vec3,
 }
 
-/// Setup TempleOS camera with isometric orthographic view
-///
-/// Uses orthographic projection to eliminate perspective distortion and create
-/// a true 2D isometric view. The camera is positioned at an isometric angle
-/// looking at the center of the board (3.5, 0.0, 3.5).
 pub fn setup_templeos_camera(
     mut commands: Commands,
     view_mode: Res<ViewMode>,
@@ -89,10 +77,6 @@ pub fn setup_templeos_camera(
     );
 }
 
-/// System to handle WASD camera movement for TempleOS mode
-///
-/// Allows panning the camera around the board using WASD keys.
-/// Movement is smooth and maintains the isometric viewing angle.
 pub fn templeos_camera_movement_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,

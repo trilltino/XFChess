@@ -1,17 +1,3 @@
-//! Auto-settlement worker — makes wager payout fully automatic.
-//!
-//! Every tick it scans active game sessions, reads each Game PDA from chain,
-//! and drives finished games to settlement without any client action:
-//!
-//! * result committed on devnet  → submit `finalize_game` (pays the escrow out)
-//! * game still delegated to ER  → if the ER copy shows a finished game,
-//!   submit `undelegate_game` so finalize can run on the next tick
-//! * game settled / closed       → mark the session inactive
-//!
-//! This is the safety net behind the `/game/finalize` HTTP endpoint: if the
-//! client crashes or disconnects after the result was committed on-chain, the
-//! winner is still paid.
-
 use crate::db::repository::GameRepository;
 use crate::signing::anticheat_enqueue::{enqueue_game_analysis, FinalizedGame};
 use crate::signing::solana::{self, GAME_SEED};
@@ -26,23 +12,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
-/// How often the worker scans active sessions.
 const SETTLEMENT_TICK: Duration = Duration::from_secs(30);
 
-/// A delegated game with no on-chain activity for longer than this is
-/// flagged as possibly stuck (see `SETTLEMENT_STALE_DELEGATED_GAUGE`).
-/// Generous on purpose — normal games settle in minutes, so this is chosen
-/// to comfortably clear any real game's `base_time_seconds` + increment
-/// budget while still catching a genuinely stalled ER delegation within a
-/// reasonable ops window.
 const STALE_DELEGATION_SECS: i64 = 20 * 60;
 
-/// An active, wagered game that's still not delegated to the ER after this
-/// long almost certainly means the client-side delegation attempt (see
-/// `src/multiplayer/rollup/bridge.rs::handle_game_start_delegation`) failed
-/// or never ran — a normal create/join → delegate handshake takes seconds,
-/// not minutes. Shorter than `STALE_DELEGATION_SECS`: there's no ER-liveness
-/// excuse for this case, since nothing has been sent to the ER yet.
 const STALE_UNDELEGATED_SECS: i64 = 5 * 60;
 
 // GameStatus / GameResult borsh tags now live with the shared decoder, so the
@@ -52,32 +25,18 @@ use crate::signing::solana::game_account::{
     STATUS_FINISHED, STATUS_SETTLED,
 };
 
-/// Decodes the on-chain `Game` account.
-///
-/// This used to be a bespoke offset walk that skipped `halfmove_clock`, reading
-/// everything from `created_at` onward two bytes early — including
-/// `is_delegated`, the flag the tick below branches on to decide whether a game
-/// must be undelegated before it can be finalized. It now delegates to the one
-/// shared decoder, which is pinned against the program's own offset test.
 fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
     crate::signing::solana::game_account::parse(data)
 }
 
-/// `getMultipleAccounts` accepts at most this many pubkeys per call.
 const RPC_BATCH_SIZE: usize = 100;
 
-/// Result of one slot in a batched account fetch.
 enum Fetched {
-    /// The RPC chunk failed — state unknown, retry next tick.
     Unknown,
-    /// Account does not exist (closed: finalize already reclaimed the rent).
     Missing,
     Found(solana_sdk::account::Account),
 }
 
-/// Fetches many accounts in `RPC_BATCH_SIZE` chunks on one blocking thread.
-/// A failed chunk degrades to `Unknown` for its games instead of failing the
-/// whole tick. The returned vec is aligned with `pdas`.
 async fn fetch_accounts_batched(
     rpc_url: String,
     pdas: Vec<Pubkey>,
@@ -117,7 +76,6 @@ async fn fetch_accounts_batched(
     .unwrap_or_default()
 }
 
-/// Spawns the background settlement loop.
 pub fn spawn_settlement_worker(state: Arc<AppState>) {
     tokio::spawn(async move {
         info!(
@@ -161,12 +119,6 @@ pub fn spawn_settlement_worker(state: Arc<AppState>) {
     });
 }
 
-/// Reconciles durable active-session rows before the periodic recovery loop.
-///
-/// A session row can survive a backend restart even after its on-chain account
-/// was closed by settlement. Only terminal or missing accounts are safe to
-/// deactivate here; live, delegated, malformed, or unknown accounts remain in
-/// the worker's queue for the normal recovery logic.
 async fn reconcile_startup_sessions(state: &Arc<AppState>) -> Result<u64, String> {
     let game_ids = state.store.list_active_game_ids().await;
     if game_ids.is_empty() {
@@ -207,9 +159,6 @@ async fn reconcile_startup_sessions(state: &Arc<AppState>) -> Result<u64, String
     Ok(deactivated)
 }
 
-/// One scan pass: batch-fetch every active game's devnet account, settle what
-/// can be settled, then batch-check the ER copies of delegated games.
-/// Returns the number of games scanned.
 async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
     let game_ids = state.store.list_active_game_ids().await;
     if game_ids.is_empty() {
@@ -378,7 +327,6 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
     Ok(game_ids.len() as u64)
 }
 
-/// Submits `undelegate_game` on the ER so the finished game returns to devnet.
 async fn undelegate_from_er(
     state: &Arc<AppState>,
     game_id: u64,
@@ -475,15 +423,6 @@ async fn undelegate_from_er(
     Ok(())
 }
 
-/// Attempts to redelegate a game whose devnet copy is active, wagered, and
-/// still not delegated well past the time a normal create/join → delegate
-/// handshake should take. Reuses the exact instruction and signer pair the
-/// `/game/delegate` HTTP handler uses (`delegate_game` in
-/// `signing/routes/main.rs`) — the session key this worker already holds
-/// for the game (`entry.keypair()`) is the same `fee_payer` the on-chain
-/// handler checks against `game.fee_payer`. On success, also (re)registers
-/// the time-check crank exactly like that handler does, since a game that
-/// skipped delegation also skipped crank scheduling.
 async fn redelegate_stale_game(state: &Arc<AppState>, game_id: u64, program_id: &Pubkey) {
     let Some(entry) = state.store.get(game_id).await else {
         warn!(
@@ -559,21 +498,6 @@ async fn redelegate_stale_game(state: &Arc<AppState>, game_id: u64, program_id: 
     }
 }
 
-/// Attempts `request_force_undelegate` for a game whose delegation looks
-/// stuck — starts the delegation program's ~60min countdown, after which
-/// `force_undelegate_after_timeout` can recover it without the ER at all
-/// (see `governance_ix::recover_stuck_delegation` for the escrow release
-/// that follows). Runs on base RPC directly, **not** the Magic Router: the
-/// whole point is to act without depending on the (possibly dead) ER, and
-/// Magic Router would otherwise see `game` owned by the delegation program
-/// and try to route this to the ER itself. Calling this again once a
-/// request already exists is a harmless on-chain no-op, so re-firing on a
-/// later tick (e.g. after a restart) is safe.
-///
-/// Tries each fee-payer-pool key in turn since the worker doesn't track
-/// which one funded this specific game's original `delegate_game` call — a
-/// wrong key just fails the CPI's `delegation_metadata.rent_payer` check
-/// harmlessly, so this is safe to attempt speculatively.
 async fn request_force_undelegate_for_stale_game(
     state: &Arc<AppState>,
     game_id: u64,
@@ -626,19 +550,11 @@ async fn request_force_undelegate_for_stale_game(
     );
 }
 
-/// `UndelegationRequest`'s on-chain layout (see `dlp_api::state::undelegation_request`):
-/// 8-byte discriminator, 32-byte `delegated_account`, 8-byte `expires_at_slot` (LE u64).
 fn parse_undelegation_request_expiry(data: &[u8]) -> Option<u64> {
     let o = 8 + 32;
     Some(u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?))
 }
 
-/// If a `request_force_undelegate` was issued for this game and its ~60min
-/// window has elapsed, completes the recovery with `force_undelegate_after_timeout`
-/// — no ER involvement needed — and then immediately releases the escrow via
-/// `recover_stuck_delegation` using `white`/`black` captured from the last
-/// on-chain read before the wipe. No-ops quietly if no request exists yet,
-/// or if it hasn't expired yet.
 async fn force_undelegate_if_request_expired(
     state: &Arc<AppState>,
     game_id: u64,
@@ -735,19 +651,6 @@ async fn force_undelegate_if_request_expired(
     );
 }
 
-/// Completes the ER-unavailability escape hatch by releasing the wager
-/// escrow (`governance_ix::recover_stuck_delegation`) right after
-/// `force_undelegate_after_timeout` wipes the `Game` PDA — see
-/// `programs/xfchess-game/src/governance_ix/recover_stuck_delegation.rs` for
-/// why `white`/`black` must be supplied rather than read back on-chain.
-///
-/// Uses the same `DISPUTE_AUTHORITY_KEYPAIR` env var and instruction as the
-/// manual `POST /admin/dispute/recover_stuck_delegation` route — this just
-/// removes the human from the common-case path. If the env var isn't set,
-/// or the on-chain call itself fails (e.g. escrow already drained by a
-/// concurrent manual call), falls back to the pre-automation behavior:
-/// logs it and increments `FORCE_UNDELEGATED_AWAITING_RECOVERY_TOTAL` so the
-/// admin route remains the fallback.
 async fn auto_recover_stuck_delegation(
     state: &Arc<AppState>,
     game_id: u64,
@@ -826,8 +729,6 @@ async fn auto_recover_stuck_delegation(
     }
 }
 
-/// Submits `finalize_game`, which pays out the wager escrow on-chain, then
-/// completes the DB record and retires the session.
 async fn finalize_on_chain(
     state: &Arc<AppState>,
     game_id: u64,
@@ -1016,7 +917,6 @@ mod tests {
     // so importing it above would warn as unused in non-test builds.
     use crate::signing::solana::game_account::RESULT_WINNER;
 
-    /// Serializes a Game account exactly as Anchor/borsh lays it out.
     #[allow(clippy::too_many_arguments)]
     fn build_game_data(
         white: Pubkey,
@@ -1131,11 +1031,6 @@ mod tests {
         assert!(snap.is_delegated);
     }
 
-    /// The stale-delegation gauge (Phase 5 of the persistency roadmap) is
-    /// only as good as `updated_at` actually round-tripping through the
-    /// borsh layout — this pins that down so a future field reorder in
-    /// `state/game.rs` is caught here instead of silently breaking the
-    /// on-call signal.
     #[test]
     fn parses_updated_at_for_staleness_check() {
         let white = Pubkey::new_unique();
@@ -1159,11 +1054,6 @@ mod tests {
         assert!(now.saturating_sub(snap.updated_at) > STALE_DELEGATION_SECS);
     }
 
-    /// Pins the condition `run_tick` uses to route an active, wagered,
-    /// never-delegated game into `redelegate_stale_game` — a client-side
-    /// delegation attempt that failed or never ran (Fix D). Without this
-    /// branch such a game previously fell into the silent `_ => {}`
-    /// catch-all with no watchdog at all.
     #[test]
     fn parses_active_undelegated_wagered_game() {
         let white = Pubkey::new_unique();
@@ -1197,10 +1087,6 @@ mod tests {
         assert!(parse_game_account(&[0u8; 40]).is_none());
     }
 
-    /// Pins the `UndelegationRequest` byte layout (8-byte discriminator +
-    /// 32-byte `delegated_account` + 8-byte `expires_at_slot`) that
-    /// `force_undelegate_if_request_expired` relies on to know when the
-    /// ~60min forced-recovery window has elapsed.
     #[test]
     fn parses_undelegation_request_expiry() {
         let mut data = vec![0u8; 8]; // discriminator

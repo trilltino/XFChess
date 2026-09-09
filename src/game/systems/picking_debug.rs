@@ -1,7 +1,3 @@
-//! Picking debug system
-//!
-//! Provides comprehensive debugging for pointer interactions and picking events.
-
 use crate::core::GameState;
 use crate::game::resources::Selection;
 use crate::rendering::pieces::Piece;
@@ -120,7 +116,6 @@ fn selection_debug_ui(
     });
 }
 
-/// Debug all clicks - rate-limited to avoid console spam
 pub fn debug_all_clicks(
     mut click_reader: MessageReader<Pointer<Click>>,
     pieces: Query<(Entity, &Piece)>,
@@ -159,7 +154,6 @@ pub fn debug_all_clicks(
     }
 }
 
-/// Debug system that monitors PointerInteraction component states (rate-limited)
 pub fn debug_pointer_interactions(
     queries: PickingQueries,
     time: Res<Time>,
@@ -200,7 +194,6 @@ pub fn debug_pointer_interactions(
     }
 }
 
-/// Debug system that checks if entities have required components for picking (rate-limited)
 pub fn debug_picking_setup(
     params: PickingSetupParams,
     time: Res<Time>,
@@ -250,7 +243,6 @@ pub fn debug_picking_setup(
     }
 }
 
-/// Plugin for picking debug systems
 pub struct PickingDebugPlugin;
 
 impl Plugin for PickingDebugPlugin {

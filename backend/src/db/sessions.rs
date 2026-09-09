@@ -1,10 +1,7 @@
-//! Persistent session storage for disconnect recovery
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 
-/// Session status for reconnect handling
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SessionStatus {
     Active,
@@ -36,7 +33,6 @@ impl From<String> for SessionStatus {
     }
 }
 
-/// Active game session for persistence
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveSession {
     pub session_id: String,
@@ -52,19 +48,16 @@ pub struct ActiveSession {
     pub status: SessionStatus,
 }
 
-/// Session store for SQLite operations
 #[derive(Clone)]
 pub struct SessionStore {
     pool: SqlitePool,
 }
 
 impl SessionStore {
-    /// Create a new session store
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
-    /// Save or update a session
     pub async fn save_session(&self, session: &ActiveSession) -> Result<()> {
         let move_history_json = serde_json::to_string(&session.move_history)?;
 
@@ -94,7 +87,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Get a resumable session for a player
     pub async fn get_resumable_session(
         &self,
         player_pubkey: &str,
@@ -122,7 +114,6 @@ impl SessionStore {
         }
     }
 
-    /// Get session by game ID
     pub async fn get_session_by_game(&self, game_id: u64) -> Result<Option<ActiveSession>> {
         let row =
             sqlx::query("SELECT * FROM active_sessions WHERE game_id = ?1 AND status != 'expired'")
@@ -136,7 +127,6 @@ impl SessionStore {
         }
     }
 
-    /// Update session status
     pub async fn update_status(
         &self,
         session_id: &str,
@@ -163,13 +153,11 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Mark session as expired (cleanup)
     pub async fn expire_session(&self, session_id: &str) -> Result<()> {
         self.update_status(session_id, SessionStatus::Expired, None)
             .await
     }
 
-    /// Delete old expired sessions
     pub async fn cleanup_expired(&self, days_old: u32) -> Result<u64> {
         let cutoff = chrono::Utc::now().timestamp() - (days_old as i64 * 24 * 60 * 60);
 
@@ -183,7 +171,6 @@ impl SessionStore {
         Ok(result.rows_affected())
     }
 
-    /// Convert database row to ActiveSession
     fn row_to_session(&self, row: sqlx::sqlite::SqliteRow) -> Result<ActiveSession> {
         let move_history_json: String = row.try_get("move_history")?;
         let move_history: Vec<String> = serde_json::from_str(&move_history_json)?;

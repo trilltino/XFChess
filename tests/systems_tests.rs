@@ -1,8 +1,3 @@
-//! Integration tests for game systems
-//!
-//! These tests demonstrate how to test ECS systems by setting up a minimal App,
-//! initializing necessary resources, running the system, and verifying state changes.
-
 use bevy::prelude::*;
 use xfchess::engine::board_state::ChessEngine;
 use xfchess::game::components::{GamePhase, MoveRecord};
@@ -10,7 +5,6 @@ use xfchess::game::resources::*;
 use xfchess::game::systems::game_init::reset_game_resources;
 use xfchess::rendering::{PieceColor, PieceType};
 
-/// Test that `reset_game_resources` correctly resets all game state to defaults
 #[test]
 fn test_reset_game_resources_system() {
     let mut app = App::new();

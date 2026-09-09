@@ -1,8 +1,3 @@
-//! Smart onboarding state machine for Solana Blinks.
-//!
-//! This module manages the onboarding state for users without wallets or SOL,
-//! guiding them through wallet creation, funding, and registration.
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
@@ -10,54 +5,40 @@ use tokio::sync::RwLock;
 use super::chains::{complete_step, create_onboarding_chain, ActionChain};
 use super::core::BalanceResult;
 
-/// Onboarding state for a user.
 #[derive(Serialize, Deserialize, Clone)]
 pub enum OnboardingState {
-    /// User has no wallet
     NoWallet,
-    /// User has wallet but insufficient funds
     InsufficientFunds {
         balance_lamports: u64,
         required_lamports: u64,
     },
-    /// User is ready to register (has wallet and sufficient funds)
     ReadyToRegister,
-    /// User has completed registration
     Registered,
-    /// Validation failed with error
-    ValidationFailed { error: String },
+    ValidationFailed {
+        error: String,
+    },
 }
 
-/// Onboarding session tracking.
 #[derive(Clone)]
 pub struct OnboardingSession {
-    /// User wallet address (if known)
     pub wallet: Option<String>,
-    /// Current onboarding state
     pub state: OnboardingState,
-    /// Action chain for this user
     pub chain: Option<ActionChain>,
-    /// Tournament ID
     pub tournament_id: u64,
-    /// Session creation timestamp
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Smart onboarding state machine.
 pub struct OnboardingStateMachine {
-    /// Active onboarding sessions (keyed by wallet or session ID)
     sessions: RwLock<HashMap<String, OnboardingSession>>,
 }
 
 impl OnboardingStateMachine {
-    /// Creates a new onboarding state machine.
     pub fn new() -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Starts a new onboarding session.
     pub async fn start_session(
         &self,
         session_id: String,
@@ -91,7 +72,6 @@ impl OnboardingStateMachine {
         session
     }
 
-    /// Updates onboarding state based on wallet balance check.
     pub async fn update_with_balance(
         &self,
         session_id: &str,
@@ -112,7 +92,6 @@ impl OnboardingStateMachine {
         Ok(())
     }
 
-    /// Marks user as registered.
     pub async fn mark_registered(&self, session_id: &str) -> Result<(), String> {
         let mut sessions = self.sessions.write().await;
         let session = sessions.get_mut(session_id).ok_or("Session not found")?;
@@ -130,7 +109,6 @@ impl OnboardingStateMachine {
         Ok(())
     }
 
-    /// Marks validation as failed.
     pub async fn mark_validation_failed(
         &self,
         session_id: &str,
@@ -144,13 +122,11 @@ impl OnboardingStateMachine {
         Ok(())
     }
 
-    /// Gets the current session state.
     pub async fn get_session(&self, session_id: &str) -> Option<OnboardingSession> {
         let sessions = self.sessions.read().await;
         sessions.get(session_id).cloned()
     }
 
-    /// Gets the next action for a session.
     pub async fn get_next_action(&self, session_id: &str) -> Option<String> {
         let sessions = self.sessions.read().await;
         let session = sessions.get(session_id)?;
@@ -194,7 +170,6 @@ impl OnboardingStateMachine {
         }
     }
 
-    /// Cleans up old sessions (older than 1 hour).
     pub async fn cleanup_old_sessions(&self) {
         let mut sessions = self.sessions.write().await;
         let cutoff = chrono::Utc::now() - chrono::Duration::hours(1);
@@ -209,11 +184,9 @@ impl Default for OnboardingStateMachine {
     }
 }
 
-/// Global onboarding state machine instance.
 static ONBOARDING_MACHINE: once_cell::sync::OnceCell<OnboardingStateMachine> =
     once_cell::sync::OnceCell::new();
 
-/// Gets the global onboarding state machine instance.
 pub fn get_onboarding_machine() -> &'static OnboardingStateMachine {
     ONBOARDING_MACHINE.get_or_init(|| OnboardingStateMachine::new())
 }

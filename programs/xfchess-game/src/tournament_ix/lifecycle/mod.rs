@@ -1,7 +1,3 @@
-//! Tournament lifecycle instructions
-//!
-//! Instructions for tournament initialization, starting, cancellation, and closure.
-
 pub mod cancel;
 pub mod close_tournament;
 pub mod initialize;

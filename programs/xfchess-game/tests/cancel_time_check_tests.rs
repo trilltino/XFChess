@@ -1,14 +1,3 @@
-//! `cancel_time_check` account-constraint suite.
-//!
-//! Like `schedule_time_check`/`crank_time_check`, the happy path CPIs into
-//! MagicBlock's magic program (`CancelTask`), so it requires a live ER and is
-//! covered by the devnet runbook (`docs/ER_TESTING.md`, `docs/runbooks/
-//! magicblock-lifecycle-devnet.md`). What we *can* assert in-process is the
-//! `address =` constraint on `magic_program`, mirroring the equivalent
-//! `undelegate_game` tests in `er_delegation_tests.rs`.
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use common::*;

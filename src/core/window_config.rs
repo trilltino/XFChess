@@ -1,29 +1,14 @@
-//! Window configuration resource
-//!
-//! Centralizes window settings for the application, allowing easy configuration
-//! and modification of window properties.
-
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PresentMode, Window};
 
-/// Configuration for the primary application window
-///
-/// This resource stores window settings that can be modified before window creation
-/// or used to configure the window after creation.
 #[derive(Resource, Debug, Clone, Reflect)]
 #[reflect(Resource)]
 pub struct WindowConfig {
-    /// Window title
     pub title: String,
-    /// Window width in logical pixels
     pub width: u32,
-    /// Window height in logical pixels
     pub height: u32,
-    /// Whether the window should be resizable
     pub resizable: bool,
-    /// Whether the window should start maximized
     pub maximized: bool,
-    /// Whether the window should start in fullscreen mode
     pub fullscreen: bool,
 }
 
@@ -41,7 +26,6 @@ impl Default for WindowConfig {
 }
 
 impl WindowConfig {
-    /// Create a Bevy Window from this configuration
     pub fn to_window(&self) -> Window {
         use bevy::window::WindowResolution;
         Window {

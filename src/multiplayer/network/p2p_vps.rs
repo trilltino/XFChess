@@ -1,14 +1,3 @@
-//! P2P VPS Relay Network Module
-//!
-//! Handles P2P game hosting and joining via VPS relay instead of direct Iroh gossip.
-//! This provides reliable NAT traversal and eliminates manual Node ID sharing.
-//!
-//! Connection flow (HTTP relay only — no Iroh required):
-//!   Host: announces → waits → polls relay for JOIN_ACK → shows "opponent found"
-//!         with a Start Game button → host clicks it → sends GAME_START → starts game
-//!   Joiner: sees listing → clicks join → sends JOIN_ACK → waits for the host's
-//!           GAME_START signal → starts game
-
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
@@ -21,7 +10,6 @@ use crate::multiplayer::{vps_client, OnlineNetworkState};
 
 use crossbeam_channel::{Receiver, Sender};
 
-/// Identity info about a joiner who has connected but the game hasn't started yet.
 #[derive(Clone, Debug)]
 pub struct PendingJoinerInfo {
     pub node_id: String,
@@ -29,60 +17,33 @@ pub struct PendingJoinerInfo {
     pub elo_str: String,
 }
 
-/// Resource for P2P VPS relay state
 #[derive(Resource)]
 pub struct P2PVpsState {
-    /// Whether to use VPS relay (true) or direct Iroh (false)
     pub use_vps_relay: bool,
-    /// Last time we polled the game listing
     pub last_poll: Option<std::time::Instant>,
-    /// Cached game listings
     pub cached_games: Vec<VpsGameListing>,
-    /// Message queue for outgoing messages
     pub outgoing_queue: VecDeque<(String, String)>, // (game_id, message_json)
-    /// Poll index for messages
     pub poll_index: usize,
-    /// Channel for background VPS responses
     pub response_tx: Sender<VpsResponse>,
     pub response_rx: Receiver<VpsResponse>,
 
     // ── Host-side join detection ─────────────────────────────────────────────
-    /// The game_id we are currently hosting (set when hosting starts, cleared on cancel or join)
     pub hosting_game_id: Option<String>,
-    /// Our own node ID (base58) — used as the "from" ID when polling relay messages
     pub hosting_node_id: Option<String>,
-    /// Last time we polled the relay for joiner messages
     pub host_poll_last: Option<std::time::Instant>,
-    /// Stake amount (SOL) set when announcing a wagered game. Carried into
-    /// the JoinerDetected handler so the host can be routed to the Solana
-    /// contract creation flow before entering InGame.
     pub hosting_stake_amount: f64,
-    /// Time control chosen when hosting, carried into JoinerDetected so the host's
-    /// clock reflects the selected mode (not the default). 0 base = Unlimited.
     pub hosting_base_secs: u32,
     pub hosting_inc: u16,
-    /// Joiner who has sent JOIN_ACK but the game hasn't yet started.
-    /// Used by the waiting screen to show who is about to join.
     pub pending_joiner: Option<PendingJoinerInfo>,
 
     // ── Joiner-side game-start detection ─────────────────────────────────────
-    /// The game_id we've joined and are waiting on the host to start (set after
-    /// JOIN_ACK is sent, cleared once GAME_START arrives or we leave).
     pub joining_game_id: Option<String>,
-    /// Host's node ID for the game we're joining.
     pub joining_host_node_id: Option<String>,
-    /// Stake carried from `JoinResult` through to the GAME_START signal.
     pub joining_stake_amount: f64,
-    /// Last time we polled the relay for the host's GAME_START message.
     pub joiner_poll_last: Option<std::time::Instant>,
-    /// When we started waiting on this host — lets the waiting screen show a
-    /// "taking longer than usual" hint instead of hanging silently forever if
-    /// the host's GAME_START never arrives (e.g. their send failed after all
-    /// retries, or their client crashed after clicking Start Game).
     pub joining_since: Option<std::time::Instant>,
 }
 
-/// Build a `TimeControl` from base/increment seconds (0 base = unlimited).
 fn tc_from_secs(base_secs: u32, inc: u16) -> crate::game::time_control::TimeControl {
     if base_secs == 0 {
         crate::game::time_control::TimeControl::Unlimited
@@ -121,7 +82,6 @@ impl Default for P2PVpsState {
     }
 }
 
-/// Result of a background VPS operation
 pub enum VpsResponse {
     GameList(Vec<vps_client::P2PGameListing>),
     JoinResult {
@@ -129,25 +89,19 @@ pub enum VpsResponse {
         host_node_id: Option<String>,
         stake_amount: f64,
     },
-    /// Host received a JOIN_ACK from the joiner via backend relay
     JoinerDetected {
         game_id: String,
         joiner_node_id: String,
         joiner_display: String,
         joiner_elo: String,
     },
-    /// Joiner received the host's GAME_START signal via backend relay
     JoinerGameStart {
         game_id: String,
-        /// The host's real display name, carried in the GAME_START payload
-        /// (`"GAME_START:1|{name}"`) — empty if an older/legacy host sent no
-        /// name (falls back to a generic label downstream).
         host_display_name: String,
     },
     Error(String),
 }
 
-/// Game listing from VPS
 #[derive(Debug, Clone)]
 pub struct VpsGameListing {
     pub game_id: String,
@@ -166,7 +120,6 @@ pub struct VpsGameListing {
     pub is_private: bool,
 }
 
-/// Plugin for P2P VPS relay
 pub struct P2PVpsPlugin;
 
 impl Plugin for P2PVpsPlugin {
@@ -192,17 +145,6 @@ impl Plugin for P2PVpsPlugin {
     }
 }
 
-/// Best-effort notification to the backend relay that we're leaving, fired
-/// when the app is shutting down (window closed, or the in-menu Exit
-/// confirmation — see `AppExit` usage in `states/main_menu/new_menu.rs`).
-///
-/// Without this, a hosted-but-abandoned lobby only disappears once the
-/// backend's stale-lobby sweep evicts it (`LOBBY_TTL_SECS` in
-/// `backend/src/signing/p2p_relay/types.rs`), which meant a player closing
-/// the app mid-lobby left a "ghost" entry in other players' Join Lobby list
-/// that looked live (fresh TTL) but had no one actually behind it. Uses
-/// [`vps_client::p2p_leave_game_fast`] (a short 2s timeout) so an unreachable
-/// backend can't hang app shutdown.
 fn cleanup_p2p_lobby_on_exit(
     mut exit_events: MessageReader<AppExit>,
     vps_state: Res<P2PVpsState>,
@@ -241,15 +183,6 @@ fn cleanup_p2p_lobby_on_exit(
     }
 }
 
-/// Retires this game's relay listing the moment either player actually
-/// reaches Game Over (checkmate, resignation, timeout, draw) — not just on
-/// an explicit "Leave Lobby" click or app exit (the only two paths that
-/// called `p2p_leave_game`/`_fast` before this). Without this, `list_games`
-/// (backend/src/signing/p2p_relay/routes.rs) keeps a finished game listed as
-/// `InProgress`/full for as long as the client keeps heartbeating it — which
-/// is exactly as long as the player sits on the Game Over screen or hangs
-/// around the main menu afterward — showing up in other players' Browse
-/// Games list as a live, full game that's actually long over.
 fn cleanup_p2p_lobby_on_game_over(
     vps_state: Res<P2PVpsState>,
     network_state: Option<Res<OnlineNetworkState>>,
@@ -283,7 +216,6 @@ fn cleanup_p2p_lobby_on_game_over(
     }
 }
 
-/// Sync VPS relay mode with global game settings
 fn sync_vps_relay_settings(
     settings: Res<crate::core::resources::GameSettings>,
     mut vps_state: ResMut<P2PVpsState>,
@@ -301,8 +233,6 @@ fn sync_vps_relay_settings(
     }
 }
 
-/// Poll VPS for available game listings frequently enough that cancelled,
-/// filled, and newly-opened rooms do not linger in the menu.
 fn poll_vps_game_list(mut vps_state: ResMut<P2PVpsState>) {
     if !vps_state.use_vps_relay {
         return;
@@ -330,8 +260,6 @@ fn poll_vps_game_list(mut vps_state: ResMut<P2PVpsState>) {
     });
 }
 
-/// Host polls backend relay every 2 seconds looking for a JOIN_ACK from a joiner.
-/// When found, fires `VpsResponse::JoinerDetected` which starts the game on the host side.
 fn poll_for_joiner_messages(mut vps_state: ResMut<P2PVpsState>) {
     let game_id = match vps_state.hosting_game_id.clone() {
         Some(id) => id,
@@ -383,10 +311,6 @@ fn poll_for_joiner_messages(mut vps_state: ResMut<P2PVpsState>) {
     });
 }
 
-/// Joiner polls backend relay every second looking for the host's GAME_START
-/// signal. The host no longer auto-starts the game once JOIN_ACK is received
-/// (see `poll_for_joiner_messages` / `JoinerDetected`) — it waits for the host
-/// to click "Start Game", which sends this signal.
 fn poll_for_game_start_message(
     mut vps_state: ResMut<P2PVpsState>,
     network_state: Res<OnlineNetworkState>,
@@ -437,7 +361,6 @@ fn poll_for_game_start_message(
     );
 }
 
-/// Handle background VPS responses and update state
 #[allow(clippy::too_many_arguments)]
 fn handle_vps_responses(
     mut vps_state: ResMut<P2PVpsState>,
@@ -707,7 +630,6 @@ fn handle_vps_responses(
     }
 }
 
-/// Send queued messages via VPS
 fn send_vps_messages(
     mut vps_state: ResMut<P2PVpsState>,
     _p2p_state: Res<P2PConnectionState>,
@@ -737,22 +659,16 @@ fn send_vps_messages(
     }
 }
 
-/// Derives the numeric id for a game_id string — see
-/// [`crate::multiplayer::network::online_game_session::numeric_game_id`] for
-/// the canonical implementation; this is a thin re-export so existing
-/// call sites in this module don't need to change.
 pub(crate) fn parse_game_id_u64(game_id: &str) -> u64 {
     crate::multiplayer::network::online_game_session::numeric_game_id(game_id)
 }
 
-/// Queue a message to be sent via VPS
 pub fn queue_vps_message(vps_state: &mut P2PVpsState, game_id: String, message: String) {
     if vps_state.use_vps_relay {
         vps_state.outgoing_queue.push_back((game_id, message));
     }
 }
 
-/// Toggle VPS relay mode
 pub fn set_vps_relay_mode(vps_state: &mut P2PVpsState, enabled: bool) {
     vps_state.use_vps_relay = enabled;
     info!(

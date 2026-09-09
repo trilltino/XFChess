@@ -5,9 +5,6 @@ use std::collections::HashMap;
 
 const PGN_ZSTD_PREFIX: &str = "zstd:";
 
-/// Filters a game's moves to those visible on the public (delayed) feed:
-/// any move recorded at least `delay_secs` ago. With `delay_secs == 0` this is
-/// a no-op (returns every move), preserving the live feed for casual games.
 pub fn filter_visible_moves(
     moves: Vec<MoveRecord>,
     now_ts: i64,
@@ -49,7 +46,6 @@ fn decompress_pgn(raw: &str) -> String {
     raw.to_owned()
 }
 
-/// Database record for a game
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct GameRecord {
     pub id: String,
@@ -70,7 +66,6 @@ pub struct GameRecord {
     pub created_at: i64,
 }
 
-/// Database record for a move
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct MoveRecord {
     pub id: Option<i64>,
@@ -84,25 +79,17 @@ pub struct MoveRecord {
     pub timestamp: i64,
 }
 
-/// Per-game facts a spectator list needs, joined in one query.
-///
-/// See [`GameRepository::get_spectator_summaries`].
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct SpectatorGameSummary {
     pub game_id: String,
-    /// The `games` row status ("active", "completed", …).
     pub status: String,
-    /// Winner wallet, when the game has finished.
     pub winner: Option<String>,
-    /// White's wallet — needed to turn `winner` into a "1-0"/"0-1" result.
     pub player_white: Option<String>,
     pub broadcast_delay_secs: i64,
     pub move_count: i64,
-    /// Unix seconds of the most recent move; 0 when there are none.
     pub last_move_at: i64,
 }
 
-/// Lightweight move record stored by the VPS handler (no SAN/fen_before needed at record time)
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct SimpleMoveRecord {
     pub id: Option<i64>,
@@ -114,7 +101,6 @@ pub struct SimpleMoveRecord {
     pub timestamp: i64,
 }
 
-/// Repository for game database operations
 pub struct GameRepository {
     pool: SqlitePool,
 }
@@ -124,8 +110,6 @@ impl GameRepository {
         Self { pool }
     }
 
-    /// Ensures a game row exists (called on first move). Uses INSERT OR IGNORE so it
-    /// is safe to call multiple times — the first call wins.
     pub async fn upsert_game(&self, game_id: &str) -> Result<()> {
         let now = chrono::Utc::now().timestamp();
         sqlx::query(
@@ -141,8 +125,6 @@ impl GameRepository {
         Ok(())
     }
 
-    /// Finalises the game row: sets wallets, usernames, winner, sig, end_time, status.
-    /// Called from the finalize_game VPS handler after on-chain tx succeeds.
     pub async fn complete_game(
         &self,
         game_id: &str,
@@ -192,7 +174,6 @@ impl GameRepository {
         Ok(())
     }
 
-    /// Appends a single move with optional SAN. Called from record_move handler.
     pub async fn add_move_simple(
         &self,
         game_id: &str,
@@ -220,7 +201,6 @@ impl GameRepository {
         Ok(())
     }
 
-    /// Gets the next move number for a game (current max + 1).
     pub async fn get_next_move_number(&self, game_id: &str) -> Result<i64> {
         let result: Option<(i64,)> =
             sqlx::query_as("SELECT COALESCE(MAX(move_number), 0) FROM moves WHERE game_id = ?")
@@ -230,7 +210,6 @@ impl GameRepository {
         Ok(result.map(|(n,)| n + 1).unwrap_or(1))
     }
 
-    /// Looks up a username from the users_v2 table by wallet pubkey.
     pub async fn get_username(&self, wallet: &str) -> Result<String> {
         let result: (String,) =
             sqlx::query_as("SELECT username FROM users_v2 WHERE wallet = ? AND deleted_at IS NULL")
@@ -240,7 +219,6 @@ impl GameRepository {
         Ok(result.0)
     }
 
-    /// Create a new game record
     pub async fn create_game(
         &self,
         game_id: &str,
@@ -270,7 +248,6 @@ impl GameRepository {
         Ok(game)
     }
 
-    /// Get a game by ID
     pub async fn get_game(&self, game_id: &str) -> Result<Option<GameRecord>> {
         let game = sqlx::query_as::<_, GameRecord>("SELECT * FROM games WHERE id = ?")
             .bind(game_id)
@@ -280,7 +257,6 @@ impl GameRepository {
         Ok(game)
     }
 
-    /// List all games, optionally with pagination
     pub async fn list_games(
         &self,
         limit: Option<i32>,
@@ -309,7 +285,6 @@ impl GameRepository {
         Ok(games)
     }
 
-    /// Add a move to a game
     pub async fn add_move(
         &self,
         game_id: &str,
@@ -345,7 +320,6 @@ impl GameRepository {
         Ok(move_record)
     }
 
-    /// Get all moves for a game
     pub async fn get_moves(&self, game_id: &str) -> Result<Vec<MoveRecord>> {
         let moves = sqlx::query_as::<_, MoveRecord>(
             "SELECT * FROM moves WHERE game_id = ? ORDER BY move_number ASC",
@@ -357,13 +331,6 @@ impl GameRepository {
         Ok(moves)
     }
 
-    /// `fen_after` of the highest-numbered move for `game_id`, if any.
-    ///
-    /// `record_move` needs only this one value to replay-validate the next
-    /// move. It used to call `get_moves` and scan the whole history, so the
-    /// per-move cost grew with the game's length — O(n^2) row materializations
-    /// over a full game. The `idx_moves_game` index on `(game_id, move_number)`
-    /// turns this into a single index lookup.
     pub async fn get_last_fen(&self, game_id: &str) -> Result<Option<String>> {
         let row = sqlx::query_as::<_, (Option<String>,)>(
             "SELECT fen_after FROM moves WHERE game_id = ? ORDER BY move_number DESC LIMIT 1",
@@ -375,13 +342,6 @@ impl GameRepository {
         Ok(row.and_then(|(fen,)| fen))
     }
 
-    /// Everything a spectator list needs to know about one game, without
-    /// pulling its moves.
-    ///
-    /// `move_count` is the honest "is anything happening here" signal: a
-    /// tournament match record flips to `Active` when the orchestrator creates
-    /// the game *account*, which says nothing about whether either player ever
-    /// connected. Zero moves means an empty board and nothing to watch.
     pub async fn get_spectator_summaries(
         &self,
         game_ids: &[String],
@@ -426,7 +386,6 @@ impl GameRepository {
             .collect())
     }
 
-    /// Reads the per-game broadcast delay (0 = live). Missing row → 0.
     pub async fn get_broadcast_delay(&self, game_id: &str) -> i64 {
         sqlx::query_as::<_, (i64,)>("SELECT broadcast_delay_secs FROM games WHERE id = ?")
             .bind(game_id)
@@ -438,8 +397,6 @@ impl GameRepository {
             .unwrap_or(0)
     }
 
-    /// Sets a game's broadcast delay, creating the row if it doesn't exist yet
-    /// (tournament games are stamped before the first move is recorded).
     pub async fn set_broadcast_delay(&self, game_id: &str, secs: i64) -> Result<()> {
         let now = chrono::Utc::now().timestamp();
         sqlx::query(
@@ -456,16 +413,12 @@ impl GameRepository {
         Ok(())
     }
 
-    /// Public spectator view: moves at least `broadcast_delay_secs` old, so a
-    /// live stream can't be used to ghost. For delay = 0 this returns all moves
-    /// (today's behavior). `now_ts` is the current unix time in seconds.
     pub async fn get_moves_visible(&self, game_id: &str, now_ts: i64) -> Result<Vec<MoveRecord>> {
         let delay = self.get_broadcast_delay(game_id).await;
         let moves = self.get_moves(game_id).await?;
         Ok(filter_visible_moves(moves, now_ts, delay))
     }
 
-    /// Update game status and winner
     pub async fn end_game(
         &self,
         game_id: &str,
@@ -496,7 +449,6 @@ impl GameRepository {
         Ok(game)
     }
 
-    /// Get game statistics
     pub async fn get_stats(&self) -> Result<GameStats> {
         let total_games: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
             .fetch_one(&self.pool)
@@ -524,7 +476,6 @@ impl GameRepository {
         })
     }
 
-    /// Get all games for a specific player wallet (as white or black)
     pub async fn get_games_by_player(&self, wallet: &str, limit: i32) -> Result<Vec<GameRecord>> {
         let games = sqlx::query_as::<_, GameRecord>(
             "SELECT * FROM games WHERE player_white = ? OR player_black = ? ORDER BY start_time DESC LIMIT ?"
@@ -537,7 +488,6 @@ impl GameRepository {
         Ok(games)
     }
 
-    /// Get all games for a specific player username (as white or black)
     pub async fn get_games_by_username(
         &self,
         username: &str,
@@ -554,7 +504,6 @@ impl GameRepository {
         Ok(games)
     }
 
-    /// Batch insert moves for performance
     pub async fn batch_add_moves(&self, moves: &[NewMove]) -> Result<()> {
         if moves.is_empty() {
             return Ok(());
@@ -585,7 +534,6 @@ impl GameRepository {
         Ok(())
     }
 
-    /// Gets all completed but not yet archived games
     pub async fn get_unarchived_games(&self, limit: i32) -> Result<Vec<GameRecord>> {
         let games = sqlx::query_as::<_, GameRecord>(
             "SELECT * FROM games WHERE status = 'completed' AND archived_at IS NULL ORDER BY end_time ASC LIMIT ?"
@@ -596,7 +544,6 @@ impl GameRepository {
         Ok(games)
     }
 
-    /// Store pre-assembled PGN text for a game (zstd-compressed, ~3-5× smaller).
     pub async fn set_pgn_text(&self, game_id: &str, pgn: &str) -> Result<()> {
         let stored = compress_pgn(pgn);
         sqlx::query("UPDATE games SET pgn_text = ? WHERE id = ?")
@@ -607,7 +554,6 @@ impl GameRepository {
         Ok(())
     }
 
-    /// Retrieve stored PGN text for a game (decompresses zstd if needed).
     pub async fn get_pgn_text(&self, game_id: &str) -> Result<Option<String>> {
         let result: Option<(String,)> = sqlx::query_as("SELECT pgn_text FROM games WHERE id = ?")
             .bind(game_id)
@@ -616,7 +562,6 @@ impl GameRepository {
         Ok(result.map(|(raw,)| decompress_pgn(&raw)))
     }
 
-    /// Marks a game as archived at the given timestamp
     pub async fn mark_as_archived(&self, game_id: &str, timestamp: i64) -> Result<()> {
         sqlx::query("UPDATE games SET archived_at = ? WHERE id = ?")
             .bind(timestamp)
@@ -626,7 +571,6 @@ impl GameRepository {
         Ok(())
     }
 
-    /// Lists all active game sessions
     pub async fn list_active_sessions(&self) -> Result<Vec<serde_json::Value>> {
         let rows: Vec<sqlx::sqlite::SqliteRow> =
             sqlx::query("SELECT * FROM active_sessions WHERE status = 'active'")
@@ -649,7 +593,6 @@ impl GameRepository {
     }
 }
 
-/// Statistics about games
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameStats {
     pub total_games: i64,
@@ -658,7 +601,6 @@ pub struct GameStats {
     pub total_moves: i64,
 }
 
-/// Database record for a dispute
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct DisputeRecord {
     pub game_id: i64,
@@ -675,7 +617,6 @@ pub struct DisputeRecord {
     pub resolved_at: Option<i64>,
 }
 
-/// Repository for dispute database operations
 pub struct DisputeRepository {
     pool: SqlitePool,
 }
@@ -733,7 +674,6 @@ impl DisputeRepository {
     }
 }
 
-/// A persisted player ban (migration 023).
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct BanRecord {
     pub wallet: String,
@@ -743,10 +683,6 @@ pub struct BanRecord {
     pub expires_at: Option<i64>,
 }
 
-/// Repository for persisted, enforced player bans. Replaces the old
-/// process-local `HashMap` in admin.rs, which nothing outside that file ever
-/// read — bans didn't survive a restart and never blocked login,
-/// matchmaking, or tournament registration.
 pub struct BanRepository {
     pool: SqlitePool,
 }
@@ -778,7 +714,6 @@ impl BanRepository {
         Ok(())
     }
 
-    /// True if `wallet` has a ban row that hasn't expired (no `expires_at` = permanent).
     pub async fn is_banned(&self, wallet: &str) -> Result<bool> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -801,7 +736,6 @@ impl BanRepository {
     }
 }
 
-/// A flagged game + optional reviewer assignment (migration 024).
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct FlaggedGameRecord {
     pub game_id: i64,
@@ -810,9 +744,6 @@ pub struct FlaggedGameRecord {
     pub assigned_to: Option<String>,
 }
 
-/// Repository for the anti-cheat flag/reviewer-assignment queue (Dashboard's
-/// MODERATION tab). Replaces the old process-local `FLAGGED_GAMES` /
-/// `DISPUTE_ASSIGNMENTS` HashMaps in admin.rs, which reset on every restart.
 pub struct FlaggedGameRepository {
     pool: SqlitePool,
 }
@@ -838,8 +769,6 @@ impl FlaggedGameRepository {
         Ok(())
     }
 
-    /// Assigns a reviewer, auto-flagging the game first if it wasn't already
-    /// (an admin can assign themselves to a game before anyone's flagged it).
     pub async fn assign(&self, game_id: i64, reviewer: &str) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -865,7 +794,6 @@ impl FlaggedGameRepository {
     }
 }
 
-/// New move for batch insertion
 #[derive(Debug, Clone)]
 pub struct NewMove {
     pub game_id: String,

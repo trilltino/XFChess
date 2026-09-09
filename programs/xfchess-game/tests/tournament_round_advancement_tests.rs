@@ -1,15 +1,3 @@
-//! Integration tests for permissionless Swiss round advancement.
-//!
-//! Runs the real compiled program (`target/deploy/xfchess_game.so`) in-process
-//! via `solana-program-test`, seeding a small (2-player, 1-round) Swiss
-//! tournament directly. Proves the actual persistency property: a round can
-//! advance using only the two players' own signatures on `record_swiss_result`
-//! plus an `advance_round` crank from an arbitrary third party — no
-//! tournament-authority signer, no backend process, involved at all.
-//!
-//! Build the `.so` first with:
-//!   cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml
-
 use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
 use solana_program_test::{
     BanksClientError, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
@@ -61,8 +49,6 @@ fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> Account {
     }
 }
 
-/// A 2-player, 1-round Swiss tournament, already `Active` with round 0 in
-/// progress and both players registered in shard 0.
 fn tournament(white: Pubkey, bump: u8) -> Tournament {
     Tournament {
         tournament_id: TOURNAMENT_ID,
@@ -198,11 +184,6 @@ fn advance_round_ix(cranker: Pubkey) -> Instruction {
     }
 }
 
-/// Fetches a fresh blockhash before every send (rather than reusing
-/// `ctx.last_blockhash`) — this test sends several transactions back to
-/// back, and an identical instruction/signer set on a stale blockhash would
-/// produce an identical signature, which the bank treats as "already
-/// processed" and silently no-ops instead of re-executing the handler.
 async fn send(
     ctx: &mut ProgramTestContext,
     ix: Instruction,
@@ -251,9 +232,6 @@ async fn fetch_tournament(ctx: &mut ProgramTestContext) -> Tournament {
     Tournament::try_deserialize(&mut &acc.data[..]).unwrap()
 }
 
-/// The property this whole feature exists for: with only the two players'
-/// own signatures (no tournament authority, no backend process) the round
-/// can be recorded and advanced by a completely unrelated third-party cranker.
 #[tokio::test]
 async fn round_advances_from_player_signatures_and_a_third_party_crank() {
     let white = Keypair::new();

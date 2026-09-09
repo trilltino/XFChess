@@ -1,8 +1,3 @@
-//! Session-signed variant of `join_game` using a global persistent session key.
-//!
-//! The session key co-signs the join; wager funds come from the
-//! [`GlobalSessionDelegation`] vault — no wallet popup for the joiner.
-
 use crate::account_ix::session_guards;
 use crate::common::escrow::debit_program_pda;
 use crate::constants::{GAME_SEED, JOIN_GAME_COST, PROFILE_SEED, WAGER_ESCROW_SEED};
@@ -10,8 +5,6 @@ use crate::errors::GameErrorCode;
 use crate::state::{Game, GameStatus, GameType, GlobalSessionDelegation, PlayerProfile};
 use anchor_lang::prelude::*;
 
-/// Accounts for session-signed joining. `white_profile` is read for
-/// cross-border fee context, same as the plain `JoinGame` path.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct GlobalJoinGame<'info> {
@@ -24,10 +17,8 @@ pub struct GlobalJoinGame<'info> {
     )]
     pub session_delegation: Account<'info, GlobalSessionDelegation>,
 
-    /// Hot key that signs on behalf of the player.
     pub session_signer: Signer<'info>,
 
-    /// CHECK: Verified against session_delegation.player.
     pub player: UncheckedAccount<'info>,
 
     #[account(
@@ -43,16 +34,12 @@ pub struct GlobalJoinGame<'info> {
     #[account(seeds = [PROFILE_SEED, game.white.as_ref()], bump)]
     pub white_profile: Account<'info, PlayerProfile>,
 
-    /// CHECK: PDA for escrowing SOL wager.
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }
 
-/// Validates the session and game state, draws the wager from the session
-/// delegation vault into escrow (SOL wagers only), decrements
-/// `games_remaining`, and activates the game with the player as black.
 pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let session = &ctx.accounts.session_delegation;

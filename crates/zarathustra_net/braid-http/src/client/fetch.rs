@@ -1,5 +1,3 @@
-//! Main Braid HTTP client implementation.
-
 use crate::client::config::ClientConfig;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::client::native_network::NativeNetwork;
@@ -10,7 +8,6 @@ use crate::traits::BraidNetwork;
 use crate::types::{BraidRequest, BraidResponse};
 use std::sync::Arc;
 
-/// The main Braid HTTP client
 #[derive(Clone)]
 pub struct BraidClient {
     #[cfg(not(target_arch = "wasm32"))]
@@ -18,7 +15,6 @@ pub struct BraidClient {
     #[cfg(target_arch = "wasm32")]
     pub network: Arc<WasmNetwork>,
     pub config: Arc<ClientConfig>,
-    /// Active multiplexers by origin.
     #[cfg(not(target_arch = "wasm32"))]
     pub multiplexers: Arc<
         tokio::sync::Mutex<
@@ -141,16 +137,6 @@ impl BraidClient {
         self.fetch_with_retries(url, request).await
     }
 
-    /// Open a subscription to `url`.
-    ///
-    /// Liveness is configured from the server's `Heartbeats` response header: if
-    /// the server declares an interval, the returned [`Subscription`] fails with
-    /// [`BraidError::Timeout`](crate::BraidError::Timeout) when the server goes
-    /// quiet for longer than that. A server that declares nothing gets no
-    /// deadline, because silence and death are then indistinguishable.
-    ///
-    /// For a subscription that reconnects on its own, use
-    /// [`ReliableChannel`](crate::ReliableChannel).
     pub async fn subscribe(
         &self,
         url: &str,

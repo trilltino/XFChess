@@ -1,7 +1,3 @@
-//! Tournament match management instructions
-//!
-//! Instructions for match initialization, result recording, and Swiss system results.
-
 pub mod advance_round;
 pub mod complete_swiss;
 pub mod guards;

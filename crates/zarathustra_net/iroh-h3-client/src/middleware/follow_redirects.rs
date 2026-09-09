@@ -1,9 +1,3 @@
-//! FollowRedirects middleware for IrohH3Client
-//!
-//! Automatically follows HTTP redirects up to a configured limit.
-//! - 301, 302, 303 → method changed to GET, body dropped
-//! - 307, 308 → same method, body is cloned if possible
-
 use std::ops::ControlFlow;
 
 use crate::{
@@ -14,14 +8,11 @@ use crate::{
 use http::{Request, Response, StatusCode, request::Parts};
 use tracing::{debug, instrument, warn};
 
-/// Middleware that automatically follows HTTP redirects.
 pub struct FollowRedirects {
-    /// Maximum number of redirects to follow before returning an error.
     pub max_redirects: usize,
 }
 
 impl FollowRedirects {
-    /// Construct the middleware
     pub fn new(max_redirects: usize) -> Self {
         Self { max_redirects }
     }
@@ -79,9 +70,6 @@ impl FollowRedirects {
             .map_err(|e| Error::Other(format!("Invalid relative redirect URI: {e}")))
     }
 
-    /// Perform a single redirect step.
-    ///
-    /// This is where you want per-redirect spans.
     #[instrument(
         skip(self, parts, body_slot, redirects, next),
         fields(

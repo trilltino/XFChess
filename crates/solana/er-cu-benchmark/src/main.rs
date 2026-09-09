@@ -1,5 +1,3 @@
-//! ER CU Benchmark CLI runner
-
 use clap::{Parser, ValueEnum};
 use er_cu_benchmark::{
     base_client,
@@ -62,13 +60,7 @@ enum TestMode {
     Swiss,
     SingleElim,
     All,
-    /// Proves MagicBlock's scheduler autonomously fires `crank_time_check`
-    /// (~1-2 real minutes; costs a small amount of devnet SOL).
     CrankDrill,
-    /// Exercises the full ER-unavailability recovery chain against the real
-    /// delegation program (~60-70 real minutes - the delegation program's
-    /// own timeout, not simulated; needs keys/dispute_authority.json). Not
-    /// included in `--mode all`.
     RecoveryDrill,
 }
 
@@ -209,8 +201,6 @@ async fn run_1v1_test(
     Ok(())
 }
 
-/// Runs `recovery_drill::run_crank_liveness_drill` - see its doc comment.
-/// Never called by `--mode all`; opt-in only via `--mode crank-drill`.
 async fn run_crank_drill(
     master: &solana_sdk::signature::Keypair,
     program_id: Pubkey,
@@ -241,10 +231,6 @@ async fn run_crank_drill(
     Ok(())
 }
 
-/// Runs `recovery_drill::run_stuck_delegation_drill` - see its doc comment.
-/// Never called by `--mode all`; opt-in only via `--mode recovery-drill`.
-/// Takes ~60-70 real minutes (the delegation program's own undelegation
-/// timeout) and needs `keys/dispute_authority.json` to exist.
 async fn run_recovery_drill(
     master: &solana_sdk::signature::Keypair,
     program_id: Pubkey,

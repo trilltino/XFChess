@@ -1,9 +1,6 @@
-//! Utilities for starting and inspecting the local ngrok tunnel.
-
 use std::process::Command;
 use tracing::{error, info, warn};
 
-/// Starts an ngrok tunnel for the signing server.
 pub fn start_ngrok_tunnel(port: u16) -> Result<String, String> {
     info!("[Ngrok] Starting tunnel for port {}", port);
 
@@ -39,7 +36,6 @@ pub fn start_ngrok_tunnel(port: u16) -> Result<String, String> {
     }
 }
 
-/// Returns the current ngrok tunnel URL, when available.
 pub fn get_ngrok_url() -> Option<String> {
     None
 }

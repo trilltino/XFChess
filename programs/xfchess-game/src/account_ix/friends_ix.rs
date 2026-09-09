@@ -1,15 +1,3 @@
-//! Solana Friends — on-chain friendship lifecycle.
-//!
-//! One [`Friendship`] PDA per undirected pair, seeds:
-//!   `["friendship", party_a, party_b]`  where `party_a < party_b` (canonical).
-//! The client passes the two parties already sorted; the handler enforces the
-//! ordering (which also rules out self-friendship). Either party may be the
-//! signing `requester`; the other becomes the `addressee`.
-//!
-//! These instructions are intentionally small and may be co-signed by the
-//! player's global session key so adding/accepting a friend costs no wallet
-//! popup (see `account_ix/global_session_ix.rs`).
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -27,9 +15,7 @@ pub struct SendFriendRequest<'info> {
         bump
     )]
     pub friendship: Account<'info, Friendship>,
-    /// CHECK: lower-ordered party pubkey (canonical seed); validated in handler.
     pub party_a: AccountInfo<'info>,
-    /// CHECK: higher-ordered party pubkey (canonical seed); validated in handler.
     pub party_b: AccountInfo<'info>,
     #[account(mut)]
     pub requester: Signer<'info>,
@@ -70,9 +56,7 @@ pub struct AcceptFriendRequest<'info> {
         bump = friendship.bump,
     )]
     pub friendship: Account<'info, Friendship>,
-    /// CHECK: canonical seed.
     pub party_a: AccountInfo<'info>,
-    /// CHECK: canonical seed.
     pub party_b: AccountInfo<'info>,
     pub addressee: Signer<'info>,
 }
@@ -103,16 +87,12 @@ pub struct CloseFriendship<'info> {
         close = signer,
     )]
     pub friendship: Account<'info, Friendship>,
-    /// CHECK: canonical seed.
     pub party_a: AccountInfo<'info>,
-    /// CHECK: canonical seed.
     pub party_b: AccountInfo<'info>,
     #[account(mut)]
     pub signer: Signer<'info>,
 }
 
-/// Declines a pending request, cancels one's own request, or removes an
-/// accepted friend — all by closing the edge and refunding rent to the signer.
 pub fn close_friendship(ctx: Context<CloseFriendship>) -> Result<()> {
     let f = &ctx.accounts.friendship;
     let s = ctx.accounts.signer.key();
@@ -133,14 +113,11 @@ pub struct BlockUser<'info> {
         bump = friendship.bump,
     )]
     pub friendship: Account<'info, Friendship>,
-    /// CHECK: canonical seed.
     pub party_a: AccountInfo<'info>,
-    /// CHECK: canonical seed.
     pub party_b: AccountInfo<'info>,
     pub signer: Signer<'info>,
 }
 
-/// Marks an existing edge as `Blocked`. Either party may block.
 pub fn block_user(ctx: Context<BlockUser>) -> Result<()> {
     let s = ctx.accounts.signer.key();
     let f = &mut ctx.accounts.friendship;

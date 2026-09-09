@@ -1,21 +1,13 @@
-//! Tournament data store for managing 8-128 player single-elimination tournaments.
-//!
-//! This module provides SQLite-backed storage for tournament records,
-//! including player registration, bracket management, and match results.
-//! Supports power-of-2 player counts: 8, 16, 32, 64, 128.
-
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 
-/// Tournament format - single elimination or Swiss
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TournamentFormat {
     SingleElimination,
     Swiss { rounds: u8 },
 }
 
-/// Swiss-specific storage data
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SwissStorageData {
     pub current_round: u8,
@@ -23,174 +15,100 @@ pub struct SwissStorageData {
     pub rounds: Vec<swiss_pairing::SwissRound>,
     pub results: Vec<(u8, u16, swiss_pairing::MatchResult)>,
     pub standings: Vec<swiss_pairing::StandingsEntry>,
-    /// Unix timestamp (seconds) when the current round must end. None = no deadline set.
     #[serde(default)]
     pub round_deadline_at: Option<i64>,
-    /// Player IDs marked absent for the current round
     #[serde(default)]
     pub absent_players: Vec<String>,
-    /// Player IDs permanently withdrawn from the tournament
     #[serde(default)]
     pub withdrawn_players: Vec<String>,
-    /// Player pairs that must not be matched
     #[serde(default)]
     pub forbidden_pairs: Vec<(String, String)>,
-    /// Manual pairings to apply in the next round (cleared after start_round)
     #[serde(default)]
     pub manual_pairings_next_round: Vec<swiss_pairing::ManualPairing>,
 }
 
-/// Tournament lifecycle status.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TournamentStatus {
-    /// Registration phase - players can join
     Registration,
-    /// Tournament in progress - matches being played
     Active,
-    /// Tournament completed - winner determined
     Completed,
-    /// Tournament cancelled
     Cancelled,
 }
 
-/// Individual match status within a tournament.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MatchStatus {
-    /// Match not yet started
     Pending,
-    /// Match currently in progress
     Active,
-    /// Match completed
     Completed,
 }
 
-/// Source of match result determination.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ResultSource {
-    /// Result recorded on-chain via Solana
     OnChain,
-    /// Result submitted by backend oracle
     Oracle,
-    /// Player forfeit (no-show)
     Forfeit,
-    /// Players agreed to draw
     DrawAgreed,
 }
 
-/// Individual tournament match data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TournamentMatch {
-    /// Match index (0 to total_matches-1)
     pub match_index: u16,
-    /// Round number (0 = first round, 1 = second round, etc.)
     pub round: u8,
-    /// White player's wallet pubkey
     pub player_white: Option<String>,
-    /// Black player's wallet pubkey
     pub player_black: Option<String>,
-    /// Winner's wallet pubkey
     pub winner: Option<String>,
-    /// Associated Solana game ID
     pub game_id: Option<u64>,
-    /// Current match status
     pub status: MatchStatus,
-    /// Source of result determination
     pub result_source: Option<ResultSource>,
-    /// Next match index for the winner (None for final)
     pub next_match_for_winner: Option<u16>,
-    /// Slot in next match (0 = white, 1 = black)
     pub next_match_slot: u8,
 }
 
-/// Complete tournament record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TournamentRecord {
-    /// Unique tournament identifier
     pub tournament_id: u64,
-    /// Tournament display name
     pub name: String,
-    /// Entry fee per player (in lamports)
     pub entry_fee_lamports: u64,
-    /// Platform fee per player (in lamports)
     pub platform_fee_lamports: u64,
-    /// Total prize pool (sum of entry fees)
     pub prize_pool: u64,
-    /// Maximum players (8, 16, 32, 64, 128, 256)
     pub max_players: u16,
-    /// Current tournament status
     pub status: TournamentStatus,
-    /// Tournament format
     pub format: TournamentFormat,
-    /// Registered player wallet pubkeys
     pub players: Vec<String>,
-    /// Player ELO ratings (parallel to players vec)
     pub player_elos: Vec<u32>,
-    /// Map from wallet pubkey to P2P node ID
     pub node_ids: HashMap<String, String>,
-    /// All matches in the tournament (size = max_players - 1)
     pub matches: Vec<Option<TournamentMatch>>,
-    /// Tournament winner (1st place)
     pub winner: Option<String>,
-    /// Second place
     pub second_place: Option<String>,
-    /// Third place
     pub third_place: Option<String>,
-    /// Fourth place
     pub fourth_place: Option<String>,
-    /// Fifth place
     pub fifth_place: Option<String>,
-    /// Sixth place
     pub sixth_place: Option<String>,
-    /// Seventh place
     pub seventh_place: Option<String>,
-    /// Eighth place
     pub eighth_place: Option<String>,
-    /// Ninth place
     pub ninth_place: Option<String>,
-    /// Tenth place
     pub tenth_place: Option<String>,
-    /// Prize distribution [1st-10th%] in basis points (10000 = 100%)
     pub prize_shares: [u16; 10],
-    /// Swiss-specific data (None for single-elimination)
     pub swiss_data: Option<SwissStorageData>,
-    /// Minimum ELO rating for players (optional)
     pub elo_min: Option<u32>,
-    /// Maximum ELO rating for players (optional)
     pub elo_max: Option<u32>,
-    /// Minimum players required to start tournament (optional)
     pub min_players: Option<u16>,
-    /// Unix timestamp when tournament was created
     pub created_at: i64,
-    /// Unix timestamp when tournament is scheduled to open for play (None = open immediately)
     pub scheduled_at: Option<i64>,
-    /// Unix timestamp when tournament started
     pub started_at: Option<i64>,
-    /// Unix timestamp when tournament completed
     pub completed_at: Option<i64>,
-    /// Whether all entrants must have completed CACF KYC before joining
     #[serde(default)]
     pub kyc_required: bool,
-    /// Optional argon2 hash of join password (if private). When `Some`, `/join` must supply matching password.
     pub password_hash: Option<String>,
-    /// True once the on-chain prize distribution crank has paid the winners.
     #[serde(default)]
     pub prizes_distributed: bool,
-    /// True once an admin has explicitly approved release for a prize pool
-    /// above `PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS` — see
-    /// `tasks::tournament_scheduler::spawn_prize_distributor`. Pools at or
-    /// below the threshold distribute automatically and never need this;
-    /// irrelevant (and never checked) once `prizes_distributed` is true.
     #[serde(default)]
     pub prize_release_approved: bool,
-    /// Public spectator broadcast delay in seconds (0 = live). Stamped onto
-    /// each match's game row so the public feed can't be used to ghost.
     #[serde(default)]
     pub broadcast_delay_secs: u32,
 }
 
 impl TournamentRecord {
-    /// Creates a new tournament record.
-    /// Default: 8 players, winner-take-all (10000 bps = 100%), single elimination
     pub fn new(tournament_id: u64, name: &str, entry_fee_lamports: u64) -> Self {
         Self {
             tournament_id,
@@ -232,7 +150,6 @@ impl TournamentRecord {
         }
     }
 
-    /// Creates a tournament with custom configuration.
     pub fn with_config(
         tournament_id: u64,
         name: String,
@@ -288,13 +205,10 @@ impl TournamentRecord {
         }
     }
 
-    /// Checks if the tournament is full.
     pub fn is_full(&self) -> bool {
         self.players.len() >= self.max_players as usize
     }
 
-    /// Lowest round that still has an unfinished match — i.e. the round
-    /// currently being played. `None` once every match is complete.
     pub fn current_round(&self) -> Option<u8> {
         self.matches
             .iter()
@@ -304,9 +218,6 @@ impl TournamentRecord {
             .min()
     }
 
-    /// How many matches in `round` are still unfinished. This is what a
-    /// waiting player is actually blocked on, and lets the waiting-room UI say
-    /// "3 matches left in round 2" instead of spinning indefinitely.
     pub fn matches_remaining_in_round(&self, round: u8) -> usize {
         self.matches
             .iter()
@@ -315,7 +226,6 @@ impl TournamentRecord {
             .count()
     }
 
-    /// Total rounds in the bracket (single-elim: ceil(log2(players))).
     pub fn total_rounds(&self) -> u8 {
         match self.format {
             TournamentFormat::Swiss { rounds } => rounds,
@@ -330,7 +240,6 @@ impl TournamentRecord {
         }
     }
 
-    /// The player's most recently finished match, as (round, won, opponent).
     fn last_finished_match(&self, player: &str) -> Option<(u8, bool, String)> {
         self.matches
             .iter()
@@ -352,7 +261,6 @@ impl TournamentRecord {
             })
     }
 
-    /// Finishing position (1-based) if the player placed, else `None`.
     fn placing_for(&self, player: &str) -> Option<u8> {
         let places = [
             &self.winner,
@@ -372,18 +280,6 @@ impl TournamentRecord {
             .map(|i| (i + 1) as u8)
     }
 
-    /// Everything the game client needs to render a player's position in this
-    /// tournament, in one shot.
-    ///
-    /// This exists because `match_for_player` alone is ambiguous: it returns
-    /// `None` both when a player has no match *and* when their next match
-    /// exists but its opponent slot is still empty (the `?` on the opponent
-    /// lookup). The client therefore couldn't tell "you won, your next
-    /// opponent is still playing" from "you aren't in this tournament", and
-    /// showed nothing in either case — leaving a player who'd just won
-    /// stranded on the menu with no indication the tournament was still live.
-    ///
-    /// See docs/plans/tournament-end-to-end-fix-plan.md §4.
     pub fn player_status(&self, player: &str) -> PlayerTournamentStatus {
         let registered = self.players.iter().any(|p| p == player);
         let current_round = self.current_round();
@@ -474,32 +370,18 @@ impl TournamentRecord {
         status
     }
 
-    /// Returns the index of the final match.
     pub fn final_match_index(&self) -> usize {
         self.matches.len() - 1
     }
 
-    /// Returns the index of the first semifinal.
-    /// For 8 players: match 4 (semifinal 1 of 2)
-    /// For 16 players: match 12 (semifinal 1 of 2)
     pub fn semifinal1_index(&self) -> usize {
         self.final_match_index().saturating_sub(2)
     }
 
-    /// Returns the index of the second semifinal.
-    /// For 8 players: match 5 (semifinal 2 of 2)
-    /// For 16 players: match 13 (semifinal 2 of 2)
     pub fn semifinal2_index(&self) -> usize {
         self.final_match_index().saturating_sub(1)
     }
 
-    /// Finds the match assignment for a specific player.
-    ///
-    /// # Arguments
-    /// * `player` - The player's wallet pubkey
-    ///
-    /// # Returns
-    /// Match assignment if the player has an active match, None otherwise
     pub fn match_for_player(&self, player: &str) -> Option<MatchAssignment> {
         if matches!(self.format, TournamentFormat::Swiss { .. }) {
             return self.swiss_match_for_player(player);
@@ -535,7 +417,6 @@ impl TournamentRecord {
         None
     }
 
-    /// Swiss-aware match lookup for the player's current pairing or bye.
     fn swiss_match_for_player(&self, player: &str) -> Option<MatchAssignment> {
         let swiss = self.swiss_data.as_ref()?;
         let round = swiss.rounds.last()?;
@@ -581,14 +462,6 @@ impl TournamentRecord {
         })
     }
 
-    /// Generates a complete single-elimination bracket.
-    /// Call after tournament is started (players seeded by ELO).
-    ///
-    /// Match topology (round, next_match_for_winner, next_match_slot) comes
-    /// from [`crate::signing::solana::bracket_position`] — the single source
-    /// of truth for this linear bracket layout, shared with the on-chain
-    /// `initialize_match` instruction builder so the store's view of the
-    /// bracket and the on-chain match graph can never diverge.
     pub fn generate_bracket(&mut self) {
         let player_count = self.players.len();
         if player_count < 2 {
@@ -632,7 +505,6 @@ impl TournamentRecord {
             .collect();
     }
 
-    /// Calculates prize payout for a given placement.
     pub fn calculate_prize(&self, place: u8) -> u64 {
         let share_bps = match place {
             1 => self.prize_shares[0],
@@ -650,39 +522,24 @@ impl TournamentRecord {
     }
 }
 
-/// Where a player stands in a tournament right now. Drives the client's
-/// tournament UI state machine — see
-/// docs/plans/tournament-end-to-end-fix-plan.md §4.1.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum PlayerState {
-    /// Not on this tournament's roster.
     NotRegistered,
-    /// On the roster; tournament hasn't started.
     Registered,
-    /// Seated in a match, both players known, game ID assigned — enter it.
     MatchReady,
-    /// Seated with both players known, waiting on the scheduler to stamp a
-    /// game ID. Transient.
     AwaitingGameId,
-    /// Advanced, but the next opponent is still being decided.
     AwaitingOpponent,
-    /// Knocked out.
     Eliminated,
-    /// Won the whole thing.
     Champion,
-    /// Tournament was cancelled.
     Cancelled,
 }
 
-/// What a waiting player is blocked on, so the UI can be specific rather than
-/// showing an open-ended spinner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockedBy {
     pub round: u8,
     pub matches_remaining: usize,
 }
 
-/// The player's most recently finished match.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LastMatchResult {
     pub round: u8,
@@ -690,48 +547,33 @@ pub struct LastMatchResult {
     pub opponent: String,
 }
 
-/// One-shot snapshot of a player's tournament position.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerTournamentStatus {
     pub state: PlayerState,
     pub registered: bool,
     pub tournament_status: TournamentStatus,
-    /// Round currently being played; `None` once all matches are done.
     pub round: Option<u8>,
     pub total_rounds: u8,
-    /// The player's current match, when they have a playable one.
     pub r#match: Option<MatchAssignment>,
     pub blocked_by: Option<BlockedBy>,
     pub last_result: Option<LastMatchResult>,
-    /// Finishing position, 1-based, once known.
     pub placing: Option<u8>,
     pub prize_lamports: Option<u64>,
 }
 
-/// Match assignment result for a player.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchAssignment {
-    /// Match index (0 to total_matches-1)
     pub match_index: u16,
-    /// Swiss round number when applicable.
     pub round: Option<u8>,
-    /// Swiss board number when applicable.
     pub board: Option<u16>,
-    /// Associated Solana game ID
     pub game_id: Option<u64>,
-    /// Opponent's wallet pubkey
     pub opponent_pubkey: String,
-    /// Opponent's P2P node ID
     pub opponent_node_id: Option<String>,
-    /// Your color ("white" or "black")
     pub your_color: String,
-    /// Current match status
     pub status: MatchStatus,
-    /// True when the player received a Swiss bye this round.
     pub is_bye: bool,
 }
 
-/// SQLite-backed tournament store.
 #[derive(Clone)]
 pub struct TournamentStore {
     pool: SqlitePool,
@@ -759,9 +601,6 @@ pub struct TournamentTransaction {
 }
 
 impl TournamentStore {
-    /// Creates a new TournamentStore with the provided pool.
-    ///
-    /// Creates the tournaments table if it doesn't exist.
     pub async fn new(pool: SqlitePool) -> Self {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS tournaments (
@@ -885,7 +724,6 @@ impl TournamentStore {
         .collect()
     }
 
-    /// Stores a tournament record.
     pub async fn create(&self, record: TournamentRecord) {
         let data = serde_json::to_string(&record).unwrap_or_default();
         let now = chrono::Utc::now().timestamp();
@@ -898,7 +736,6 @@ impl TournamentStore {
             .ok();
     }
 
-    /// Retrieves a tournament by ID.
     pub async fn get(&self, id: u64) -> Option<TournamentRecord> {
         let row = sqlx::query("SELECT data FROM tournaments WHERE id = ?")
             .bind(id as i64)
@@ -908,7 +745,6 @@ impl TournamentStore {
         serde_json::from_str(&row.get::<String, _>(0)).ok()
     }
 
-    /// Lists all tournaments.
     pub async fn list(&self) -> Vec<TournamentRecord> {
         let rows = sqlx::query("SELECT data FROM tournaments")
             .fetch_all(&self.pool)
@@ -922,9 +758,6 @@ impl TournamentStore {
             .collect()
     }
 
-    /// Removes a tournament record from the store. Does not touch on-chain
-    /// state — callers must only allow this for tournaments that are
-    /// already Cancelled or Completed on-chain (nothing left to manage).
     pub async fn delete(&self, id: u64) -> bool {
         sqlx::query("DELETE FROM tournaments WHERE id = ?")
             .bind(id as i64)
@@ -934,7 +767,6 @@ impl TournamentStore {
             .unwrap_or(false)
     }
 
-    /// Updates a tournament with a closure.
     pub async fn update<F: FnOnce(&mut TournamentRecord)>(&self, id: u64, f: F) -> bool {
         if let Some(mut record) = self.get(id).await {
             f(&mut record);
@@ -952,7 +784,6 @@ impl TournamentStore {
         }
     }
 
-    /// Registers a player's P2P node ID for the tournament.
     pub async fn register_node_id(&self, id: u64, player: String, node_id: String) -> bool {
         self.update(id, |t| {
             t.node_ids.insert(player, node_id);
@@ -960,7 +791,6 @@ impl TournamentStore {
         .await
     }
 
-    /// Removes a player from the tournament and decrements the prize pool.
     pub async fn leave_tournament(&self, id: u64, player: &str) -> bool {
         self.update(id, |t| {
             if let Some(pos) = t.players.iter().position(|p| p == player) {
@@ -974,7 +804,6 @@ impl TournamentStore {
         .await
     }
 
-    /// Sets the game ID for a specific match.
     pub async fn set_match_game_id(&self, id: u64, match_index: usize, game_id: u64) -> bool {
         self.update(id, |t| {
             if let Some(m) = t.matches[match_index].as_mut() {
@@ -985,13 +814,10 @@ impl TournamentStore {
         .await
     }
 
-    /// Derives a stable game namespace from the tournament and match index.
-    /// Tournament IDs are limited to 48 bits so the 16-bit match index cannot overlap.
     pub fn deterministic_game_id(tournament_id: u64, match_index: u16) -> Option<u64> {
         (tournament_id < (1u64 << 48)).then_some((tournament_id << 16) | u64::from(match_index))
     }
 
-    /// Assigns IDs to every ready match that does not already have one.
     pub async fn assign_ready_game_ids(&self, id: u64) -> Vec<(u16, u64)> {
         let mut assigned = Vec::new();
         self.update(id, |t| {
@@ -1012,7 +838,6 @@ impl TournamentStore {
         assigned
     }
 
-    /// Records a match result and tracks placements for top 4.
     pub async fn record_result(
         &self,
         id: u64,
@@ -1071,7 +896,6 @@ impl TournamentStore {
         updated
     }
 
-    /// Update tournament status
     pub async fn update_status(&self, id: u64, status: TournamentStatus) -> bool {
         self.update(id, |t| {
             t.status = status;
@@ -1079,7 +903,6 @@ impl TournamentStore {
         .await
     }
 
-    /// Seed players by ELO rating (highest to lowest)
     pub async fn seed_players_by_elo(&self, id: u64) -> bool {
         self.update(id, |t| {
             let mut indexed: Vec<(usize, u32)> =
@@ -1099,7 +922,6 @@ impl TournamentStore {
         .await
     }
 
-    /// Generate bracket for single-elimination tournaments
     pub async fn generate_bracket(&self, id: u64) -> bool {
         self.update(id, |t| {
             if t.format != TournamentFormat::SingleElimination {
@@ -1112,7 +934,6 @@ impl TournamentStore {
         .await
     }
 
-    /// Start the tournament (generate bracket and set status)
     pub async fn start_tournament(&self, id: u64) -> Result<(), String> {
         let tournament = self.get(id).await.ok_or("Tournament not found")?;
 
@@ -1350,10 +1171,6 @@ mod player_status_tests {
         t
     }
 
-    /// The gap this whole feature exists to close: a player who wins round 1
-    /// while the other semifinal is still running must be distinguishable
-    /// from someone who was never in the tournament. Both used to surface as
-    /// `match_for_player == None`, so the client showed nothing for either.
     #[test]
     fn winner_awaiting_opponent_is_not_confused_with_a_stranger() {
         let mut t = record_with_players(1, 4);
@@ -1433,8 +1250,6 @@ mod player_status_tests {
         assert_eq!(t.player_status("P0").state, PlayerState::Cancelled);
     }
 
-    /// 16-player: a round-2 winner waits on round 2's remaining matches, and
-    /// total_rounds reflects the real bracket depth.
     #[test]
     fn sixteen_player_bracket_reports_round_progress() {
         let mut t = record_with_players(4, 16);

@@ -1,71 +1,14 @@
-//! Serializes [`Update`]s onto the Braid-HTTP wire.
-//!
-//! This is the exact inverse of [`crate::client::parser::MessageParser`], and the
-//! single place in the workspace that decides what a Braid update looks like in
-//! bytes. Servers (`xfchess-braid-server`, the backend game log) emit through
-//! here; clients parse through the parser. `tests/wire_roundtrip.rs` holds the
-//! two against each other.
-//!
-//! # Wire format
-//!
-//! A `209` response body is a sequence of updates. Each update is a block of
-//! headers, a blank line, then a payload:
-//!
-//! ```text
-//! Version: "5"\r\n
-//! Parents: "4"\r\n
-//! Content-Type: application/json\r\n
-//! Content-Length: 17\r\n
-//! \r\n
-//! {"move":"e2e4"}\r\n
-//! ```
-//!
-//! A *patched* update replaces `Content-Length` with `Patches: N` and follows the
-//! blank line with `N` patch blocks, each itself headers + blank line + content:
-//!
-//! ```text
-//! Version: "6"\r\n
-//! Patches: 1\r\n
-//! \r\n
-//! Content-Length: 4\r\n
-//! Content-Range: json .clock\r\n
-//! \r\n
-//! 1234\r\n
-//! ```
-//!
-//! `Patches: 0` is a legal update carrying no patches and **no body** — it ends at
-//! the blank line. It is distinct from a snapshot with an empty body, and the
-//! parser preserves that distinction.
-//!
-//! There are no MIME multipart boundaries anywhere in this protocol. Successive
-//! updates are separated by the trailing `\r\n` after each payload, which the
-//! parser skips on its way into the next header block.
-
 use crate::error::Result;
 use crate::protocol;
 use crate::protocol::constants::headers;
 use crate::types::{Patch, Update};
 use bytes::{Bytes, BytesMut};
 
-/// The bytes a server sends to keep an idle subscription alive.
-///
-/// A heartbeat is a bare CRLF. Because the parser skips leading newlines before
-/// every header block, it decodes to *nothing* — no [`Update`] is produced and no
-/// version is consumed. That is the whole point: a heartbeat proves the socket is
-/// alive without being mistaken for a change to the resource.
 #[must_use]
 pub fn format_heartbeat() -> Bytes {
     Bytes::from_static(b"\r\n")
 }
 
-/// Serialize one [`Update`] into its wire bytes, including the trailing separator.
-///
-/// The result is self-delimiting: concatenating the output of successive calls
-/// produces a valid `209` stream body.
-///
-/// # Errors
-///
-/// Returns an error if a patch cannot be serialized.
 pub fn format_update(update: &Update) -> Result<Bytes> {
     let mut buffer = BytesMut::new();
 
@@ -142,13 +85,6 @@ fn write_header(buffer: &mut BytesMut, key: &str, value: &str) {
     buffer.extend_from_slice(b"\r\n");
 }
 
-/// Write a header name in canonical `Title-Case` form.
-///
-/// [`http::HeaderName`] is lowercase by contract, but the reference implementation
-/// emits `Version:` / `Content-Length:`, and that is what a human — or
-/// `view.braid.org` — reads off the wire. HTTP header names are case-insensitive,
-/// so this is presentation only; deriving it here keeps one list of header names
-/// rather than two that can drift.
 fn write_canonical_name(buffer: &mut BytesMut, key: &str) {
     let mut at_word_start = true;
     for byte in key.bytes() {
@@ -161,12 +97,10 @@ fn write_canonical_name(buffer: &mut BytesMut, key: &str) {
     }
 }
 
-/// The blank line closing a header block.
 fn end_headers(buffer: &mut BytesMut) {
     buffer.extend_from_slice(b"\r\n");
 }
 
-/// The separator after a payload, which the parser skips before the next block.
 fn end_payload(buffer: &mut BytesMut) {
     buffer.extend_from_slice(b"\r\n");
 }

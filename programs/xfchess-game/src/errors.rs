@@ -1,10 +1,5 @@
-//! Custom error codes and definitions used across the program.
-
 use anchor_lang::prelude::*;
 
-/// All on-chain errors the program can return.
-/// Anchor maps each variant to a u32 error code starting at 6000.
-/// The `#[msg]` text is what clients (and logs) see.
 #[error_code]
 pub enum GameErrorCode {
     // ── Game lifecycle ─────────────────────────────────────────────────────────

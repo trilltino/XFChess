@@ -1,15 +1,4 @@
 #![cfg(feature = "solana")]
-//! Real on-chain tournament test — runs a head-to-head (2-player) tournament
-//! on Solana devnet by default, exercising the smallest bracket end-to-end:
-//! initialize → escrow → shard → prize → register ×2 → start → the single
-//! final match → champion recorded on-chain.
-//!
-//! The admin keypair must be the program's `vps_authority`
-//! (keys/program-authority.json). Players are ephemeral keypairs funded from
-//! the admin wallet.
-//!
-//! Usage:
-//!   cargo run --bin tournament_real_test --features solana -- [--players 2|4|8|...]
 
 use xfchess::solana::program_interface::tournament_e2e::{load_keypair, run_tournament};
 

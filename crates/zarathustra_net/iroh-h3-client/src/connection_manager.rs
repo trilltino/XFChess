@@ -142,10 +142,6 @@ impl ConnectionManager {
         self.sender_cache.remove(&peer_id);
     }
 
-    /// Sends an HTTP body over the given request stream.
-    ///
-    /// Consumes all frames emitted by the provided [`Body`] and transmits them
-    /// as HTTP/3 DATA or TRAILERS frames.
     #[instrument(skip(stream, body))]
     async fn send_body(
         stream: &mut RequestStream<BidiStream<Bytes>, Bytes>,
@@ -215,13 +211,6 @@ impl Service for ConnectionManager {
     }
 }
 
-/// Extracts the [`EndpointId`] from the authority component of a URI.
-///
-/// # Errors
-///
-/// Returns:
-/// - [`Error::MissingAuthority`] if the URI lacks an authority.
-/// - [`Error::BadPeerId`] if the authority is not a valid [`EndpointId`].
 #[instrument]
 pub(crate) fn peer_id(uri: &Uri) -> Result<EndpointId, Error> {
     let authority = uri

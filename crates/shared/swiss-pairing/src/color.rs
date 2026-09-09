@@ -1,18 +1,11 @@
-//! Color-preference rules for Swiss pairing: tracks each player's white/black
-//! balance and enforces the FIDE 3-in-a-row and balance constraints when
-//! assigning colors for a pairing.
-
 use crate::{Color, SwissPlayer};
 
-/// Calculate color balance for a player
-/// Returns: positive = needs white, negative = needs black, 0 = balanced
 pub fn calculate_balance(history: &[Color]) -> i8 {
     let whites = history.iter().filter(|c| **c == Color::White).count() as i8;
     let blacks = history.iter().filter(|c| **c == Color::Black).count() as i8;
     blacks - whites
 }
 
-/// Check if a player had the same color twice in a row
 pub fn had_same_color_twice(history: &[Color]) -> bool {
     if history.len() < 2 {
         return false;
@@ -21,7 +14,6 @@ pub fn had_same_color_twice(history: &[Color]) -> bool {
     history[len - 1] == history[len - 2]
 }
 
-/// Check if assigning a color would create three in a row
 pub fn would_violate_three_in_row(history: &[Color], color: Color) -> bool {
     if history.len() < 2 {
         return false;
@@ -30,7 +22,6 @@ pub fn would_violate_three_in_row(history: &[Color], color: Color) -> bool {
     history[len - 1] == color && history[len - 2] == color
 }
 
-/// Determine if colors should be swapped based on balance and history
 pub fn should_swap_colors(
     white_balance: i8,
     black_balance: i8,
@@ -64,7 +55,6 @@ pub fn should_swap_colors(
     false
 }
 
-/// Validate that a color assignment doesn't violate tournament rules
 pub fn validate_color_assignment(players: &[SwissPlayer]) -> bool {
     for player in players {
         // Check no 3 in a row
@@ -87,7 +77,6 @@ pub fn validate_color_assignment(players: &[SwissPlayer]) -> bool {
     true
 }
 
-/// Get preferred color for a player (the one they need more)
 pub fn preferred_color(player: &SwissPlayer) -> Option<Color> {
     let balance = calculate_balance(&player.color_history);
 

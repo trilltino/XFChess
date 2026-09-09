@@ -1,12 +1,6 @@
-//! Core resources for game-wide state management
-//!
-//! These resources are used across multiple states and provide global
-//! configuration and tracking capabilities.
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Graphics quality preset
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Reflect)]
 pub enum GraphicsQuality {
     Low,
@@ -29,7 +23,6 @@ impl GraphicsQuality {
         !matches!(self, Self::Low)
     }
 
-    /// Shadow atlas resolution in texels (used for `ShadowmapSettings`).
     pub fn shadow_map_size(self) -> u32 {
         match self {
             Self::Low => 512,
@@ -49,7 +42,6 @@ impl GraphicsQuality {
     }
 }
 
-/// Dynamic orbital lighting configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Reflect)]
 pub struct DynamicLightingSettings {
     pub enabled: bool,
@@ -58,7 +50,6 @@ pub struct DynamicLightingSettings {
     pub orbital_height: f32,
     pub orbital_speed: f32,
     pub shadows_enabled: bool,
-    /// Custom colors (RGB 0-1) per light slot; falls back to defaults when empty.
     #[serde(default)]
     pub colors: Vec<[f32; 3]>,
 }
@@ -81,7 +72,6 @@ impl DynamicLightingSettings {
         bevy::prelude::Color::srgb(rgb[0], rgb[1], rgb[2])
     }
 
-    /// Max lights allowed for a given quality tier.
     pub fn quality_cap(quality: GraphicsQuality) -> u32 {
         match quality {
             GraphicsQuality::Low => 2,
@@ -106,48 +96,36 @@ impl Default for DynamicLightingSettings {
     }
 }
 
-/// Resource tracking settings that can be changed from the settings menu
 #[derive(Resource, Debug, Clone, Serialize, Deserialize, Reflect)]
 #[reflect(Resource)]
 pub struct GameSettings {
-    /// Master volume (0.0 to 1.0)
     pub master_volume: f32,
 
-    /// Whether audio is muted
     #[serde(default)]
     pub muted: bool,
 
-    /// Whether to show move hints
     pub show_hints: bool,
 
-    /// Whether to highlight last move
     pub highlight_last_move: bool,
 
-    /// Whether to use VPS relay for P2P connections
     #[serde(default = "default_true")]
     pub use_vps_relay: bool,
 
-    /// Graphics quality preset
     #[serde(default)]
     pub graphics_quality: GraphicsQuality,
 
-    /// Dynamic orbital lighting configuration
     #[serde(default)]
     pub dynamic_lighting: DynamicLightingSettings,
 
-    /// 2D board colour theme index (0=Classic, 1=Green, 2=Blue, 3=Purple, 4=Dark)
     #[serde(default)]
     pub board_theme: u8,
 
-    /// Blindfold mode — hides piece symbols on the 2D board
     #[serde(default)]
     pub blindfold: bool,
 
-    /// 2D piece set index (0=CBurnett, 1=Alpha, 2=Merida)
     #[serde(default)]
     pub piece_set: u8,
 
-    /// Show vertical centipawn eval bar (offline/AI games only)
     #[serde(default)]
     pub show_eval_bar: bool,
 }
@@ -174,29 +152,21 @@ fn default_true() -> bool {
     true
 }
 
-/// Resource for tracking game statistics
 #[derive(Resource, Debug, Clone, Default, Reflect)]
 #[reflect(Resource)]
 pub struct GameStatistics {
-    /// Total games played
     pub games_played: u32,
 
-    /// Games won as white
     pub white_wins: u32,
 
-    /// Games won as black
     pub black_wins: u32,
 
-    /// Draws
     pub draws: u32,
 
-    /// Total moves made
     pub total_moves: u32,
 
-    /// Longest game (in moves)
     pub longest_game: u32,
 
-    /// Shortest game (in moves)
     pub shortest_game: u32,
 }
 

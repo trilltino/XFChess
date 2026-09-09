@@ -1,9 +1,3 @@
-//! HTTP handlers for the matchmaking queue.
-//!
-//! All endpoints verify a wallet signature over the message
-//! `"<action>:<timestamp>"` (≤ 120s old) before mutating queue state,
-//! and use the ELO cache to stamp the player's rating onto the ticket.
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -19,29 +13,20 @@ use tracing::info;
 
 use super::state::{MatchResult, MatchmakingTicket};
 
-/// Request to join the matchmaking queue.
 #[derive(Deserialize, Serialize)]
 pub struct JoinRequest {
-    /// Player's wallet public key.
     pub pubkey: String,
-    /// Signature over `"join_matchmaking:<timestamp>"`.
     pub signature: String,
-    /// Unix timestamp for replay protection.
     pub timestamp: u64,
 }
 
-/// Request to leave the matchmaking queue.
 #[derive(Deserialize, Serialize)]
 pub struct LeaveRequest {
-    /// Player's wallet public key.
     pub pubkey: String,
-    /// Signature over `"leave_matchmaking:<timestamp>"`.
     pub signature: String,
-    /// Unix timestamp for replay protection.
     pub timestamp: u64,
 }
 
-/// Handles `POST /matchmaking/join` — adds player to matchmaking queue.
 pub async fn join(
     State(app_state): State<crate::signing::AppState>,
     Json(req): Json<JoinRequest>,
@@ -125,7 +110,6 @@ pub async fn join(
     Ok(Json(()))
 }
 
-/// Handles `GET /matchmaking/status/{pubkey}` — checks if player has a match.
 pub async fn status(
     State(app_state): State<crate::signing::AppState>,
     Path(pubkey): Path<String>,
@@ -159,7 +143,6 @@ pub async fn status(
     }
 }
 
-/// Handles `POST /matchmaking/leave` — removes player from queue.
 pub async fn leave(
     State(app_state): State<crate::signing::AppState>,
     Json(req): Json<LeaveRequest>,

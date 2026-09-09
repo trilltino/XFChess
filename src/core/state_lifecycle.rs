@@ -1,28 +1,14 @@
-//! State lifecycle debugging and monitoring
-//!
-//! Provides comprehensive logging for state transitions to debug state management issues.
-//! These systems help verify that:
-//! - States enter and exit correctly
-//! - Entities are properly cleaned up via DespawnOnExit
-//! - No entity leaks occur during state transitions
-
 use super::{DespawnOnExit, GameState, MenuState};
 use bevy::prelude::*;
 
-/// Log when entering any game state
-/// Runs on OnEnter for all states
 pub fn log_state_entry(state: Res<State<GameState>>) {
     debug!("[STATE_LIFECYCLE] ENTER: {:?}", state.get());
 }
 
-/// Log when exiting any game state
-/// Runs on OnExit for all states
 pub fn log_state_exit(state: Res<State<GameState>>) {
     debug!("[STATE_LIFECYCLE] EXIT: {:?}", state.get());
 }
 
-/// Count and log entities marked for despawn in current state
-/// This helps verify entity cleanup is properly configured
 pub fn audit_despawn_markers(
     query: Query<(Entity, Option<&Name>, &DespawnOnExit<GameState>)>,
     state: Res<State<GameState>>,
@@ -56,9 +42,6 @@ pub fn audit_despawn_markers(
     }
 }
 
-/// Create a cleanup system for a specific state
-/// This is needed because state.get() returns the NEW state during OnExit,
-/// not the state being exited. So we need separate functions for each state.
 macro_rules! create_cleanup_system {
     ($name:ident, $state:expr) => {
         pub fn $name(
@@ -131,12 +114,6 @@ pub fn cleanup_in_game(
     }
 }
 
-/// Despawns entities scoped to `InGame` (board, pieces, board camera, lights,
-/// coordinates, sky, …) once `GameOver` is actually left — whether back to
-/// `MainMenu` or into a fresh `InGame` (Play Again / Rematch / Review /
-/// Analyze). `cleanup_in_game` skips these on the `InGame -> GameOver` hop
-/// specifically so the game-over screen shows the live final position instead
-/// of a black screen; this is where that deferred cleanup finally happens.
 pub fn cleanup_gameplay_scene_on_game_over_exit(
     query: Query<(Entity, Option<&Name>, &DespawnOnExit<GameState>)>,
     mut commands: Commands,
@@ -163,8 +140,6 @@ pub fn cleanup_gameplay_scene_on_game_over_exit(
         );
     }
 }
-/// Verify picking events only occur in InGame state
-/// This catches bugs where picking systems run in wrong states
 pub fn verify_picking_scope(state: Res<State<GameState>>) {
     // This runs every frame in InGame to verify the state is correct
     // If we receive picking events outside InGame, there's a scoping bug
@@ -173,7 +148,6 @@ pub fn verify_picking_scope(state: Res<State<GameState>>) {
     }
 }
 
-/// Log menu sub-state transitions
 pub fn log_menu_state_transitions(menu_state: Option<Res<State<MenuState>>>) {
     if let Some(state) = menu_state {
         if state.is_changed() {
@@ -182,8 +156,6 @@ pub fn log_menu_state_transitions(menu_state: Option<Res<State<MenuState>>>) {
     }
 }
 
-/// Periodic full state audit
-/// Runs every 10 seconds to catch entity leaks
 #[derive(Resource, Deref, DerefMut)]
 pub struct StateAuditTimer(pub Timer);
 
@@ -193,15 +165,6 @@ impl Default for StateAuditTimer {
     }
 }
 
-/// Warns when domain entities leak across the state boundary they're scoped to —
-/// the exact signature of the bugs the state-separation plan targets:
-///   * game `Piece` entities present while NOT in gameplay (they're
-///     `DespawnOnExit(InGame)`, so they must be gone in MainMenu), and
-///   * menu `MenuBg` entities present while NOT on the main menu.
-///
-/// A hit means cleanup didn't run for that transition. Throttled to one warn per
-/// leak episode via a `Local` so it never spams. See
-/// `docs/plans/state-mode-view-separation.md`.
 pub fn audit_cross_state_leaks(
     state: Res<State<GameState>>,
     pieces: Query<(), With<crate::rendering::pieces::Piece>>,
@@ -242,7 +205,6 @@ pub fn audit_cross_state_leaks(
     }
 }
 
-/// System that periodically audits all entities for leaks
 pub fn periodic_entity_audit(
     mut timer: ResMut<StateAuditTimer>,
     time: Res<Time>,

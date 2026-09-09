@@ -1,5 +1,3 @@
-//! Error types for braid_chess.
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]

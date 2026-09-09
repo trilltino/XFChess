@@ -1,5 +1,3 @@
-//! HTTP/3 request construction and sending.
-
 use bytes::Bytes;
 #[cfg(feature = "json")]
 use futures::Stream;
@@ -14,10 +12,8 @@ use crate::body::Body;
 use crate::middleware::Service;
 use crate::{error::Error, response::Response};
 
-/// A request using [`IrohH3Client`].
 pub type ClientRequest = Request<IrohH3Client>;
 
-/// Builder for HTTP/3 requests.
 #[derive(Debug)]
 #[must_use]
 pub struct RequestBuilder<C: Service> {
@@ -73,7 +69,6 @@ impl<C: Service> RequestBuilder<C> {
         self
     }
 
-    /// Sets a UTF-8 text body and a default content type when absent.
     #[inline]
     pub fn text(self, text: impl AsRef<str>) -> Result<Request<C>, Error> {
         const MIME_TEXT: HeaderValue = HeaderValue::from_static("text/plain; charset=utf-8");
@@ -83,7 +78,6 @@ impl<C: Service> RequestBuilder<C> {
             .body(Body::bytes(body_bytes))
     }
 
-    /// Sets a binary body and a default content type when absent.
     #[inline]
     pub fn bytes(self, bytes: impl Into<Bytes>) -> Result<Request<C>, Error> {
         const MIME_BIN: HeaderValue = HeaderValue::from_static("application/octet-stream");
@@ -92,7 +86,6 @@ impl<C: Service> RequestBuilder<C> {
             .body(Body::bytes(bytes.into()))
     }
 
-    /// Sets a JSON body and a default content type when absent.
     #[cfg(feature = "json")]
     #[inline]
     pub fn json<T: Serialize>(self, data: &T) -> Result<Request<C>, Error> {
@@ -103,7 +96,6 @@ impl<C: Service> RequestBuilder<C> {
             .body(Body::bytes(Bytes::from(body)))
     }
 
-    /// Sets an NDJSON stream body and a default content type when absent.
     #[cfg(feature = "json")]
     #[inline]
     pub fn ndjson<T: Serialize>(
@@ -137,7 +129,6 @@ impl<C: Service> RequestBuilder<C> {
     }
 }
 
-/// HTTP/3 request constructed by [`RequestBuilder`].
 #[must_use]
 #[derive(Debug)]
 pub struct Request<C: Service> {

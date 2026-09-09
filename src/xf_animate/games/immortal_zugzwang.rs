@@ -1,7 +1,3 @@
-//! S+ñmisch vs Nimzowitsch, Copenhagen 1923 ÔÇö "Immortal Zugzwang Game".
-//!
-//! Coordinates: `a1 = (0, 0)`, files 0..7 = a..h, ranks 0..7 = 1..8.
-
 use super::super::sequence::{MoveKind, MoveStep};
 
 pub const IMMORTAL_ZUGZWANG: &[MoveStep] = &[

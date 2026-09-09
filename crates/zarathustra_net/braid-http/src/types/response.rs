@@ -1,11 +1,8 @@
-//! HTTP response with Braid protocol information.
-
 use crate::protocol;
 use crate::types::{ContentRange, Version};
 use bytes::Bytes;
 use std::collections::BTreeMap;
 
-/// HTTP response with Braid protocol information.
 #[derive(Clone, Debug)]
 pub struct BraidResponse {
     pub status: u16,

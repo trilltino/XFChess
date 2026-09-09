@@ -3,11 +3,6 @@ use tracing::{error, info, warn, Level};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::EnvFilter;
 
-/// Where the bridge's logs land. Release builds run with no console attached
-/// (windows_subsystem = "windows" — see main.rs), so `tracing_subscriber::fmt()`
-/// writing to stdout alone went nowhere anyone could ever read it — every
-/// "why is signing broken" report from a real install was undebuggable from
-/// the outside. Logging to a real file fixes that regardless of platform.
 pub fn log_dir() -> std::path::PathBuf {
   dirs::data_local_dir()
     .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -118,7 +113,6 @@ mod tests {
     INIT.call_once(init_logging);
   }
 
-  /// Test that logging can be initialized without panicking
   #[test]
   fn test_logging_init() {
     // This test ensures that the logging system can be initialized
@@ -130,7 +124,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test logging with custom RUST_LOG environment variable
   #[test]
   fn test_logging_init_with_custom_level() {
     env::set_var("RUST_LOG", "debug");
@@ -142,7 +135,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test logging with invalid log level (should use default)
   #[test]
   fn test_logging_init_with_invalid_level() {
     env::set_var("RUST_LOG", "invalid_level");
@@ -154,7 +146,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test window event logging function
   #[test]
   fn test_log_window_event() {
     // This test ensures that window event logging function
@@ -164,7 +155,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test window event logging without details
   #[test]
   fn test_log_window_event_no_details() {
     log_window_event("main", "hide", None);
@@ -172,7 +162,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test IPC command logging function
   #[test]
   fn test_log_ipc_command() {
     log_ipc_command("show_window", Some("tournament-admin"));
@@ -180,7 +169,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test IPC command logging without window
   #[test]
   fn test_log_ipc_command_no_window() {
     log_ipc_command("generic_command", None);
@@ -188,7 +176,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test authentication event logging function
   #[test]
   fn test_log_auth_event() {
     log_auth_event("login_success", Some("user123"));
@@ -196,7 +183,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test authentication event logging without user
   #[test]
   fn test_log_auth_event_no_user() {
     log_auth_event("logout", None);
@@ -204,7 +190,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test error logging function
   #[test]
   fn test_log_error() {
     log_error(
@@ -216,7 +201,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test error logging without details
   #[test]
   fn test_log_error_no_details() {
     log_error("ipc_handler", "Command failed", None);
@@ -224,7 +208,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test security event logging function
   #[test]
   fn test_log_security_event() {
     log_security_event(
@@ -235,7 +218,6 @@ mod tests {
     assert!(true);
   }
 
-  /// Test all logging functions work together
   #[test]
   fn test_all_logging_functions() {
     ensure_logging_init();

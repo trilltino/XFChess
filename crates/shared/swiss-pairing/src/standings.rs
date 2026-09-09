@@ -1,9 +1,5 @@
-//! Standings computation: score, Buchholz, and Sonneborn-Berger tiebreaks, and
-//! the ranking they produce for a Swiss tournament.
-
 use crate::{MatchResult, Pairing, StandingsEntry, SwissPlayer, SwissRound};
 
-/// Calculates standings using Buchholz, Sonneborn-Berger, then rating tiebreaks.
 pub fn calculate_standings(
     players: &[SwissPlayer],
     rounds: &[SwissRound],
@@ -63,7 +59,6 @@ pub fn calculate_standings(
     entries
 }
 
-/// Calculate Buchholz tiebreak (sum of opponents' scores)
 fn calculate_buchholz(
     player: &SwissPlayer,
     all_players: &[SwissPlayer],
@@ -88,8 +83,6 @@ fn calculate_buchholz(
     sum
 }
 
-/// Calculate Sonneborn-Berger tiebreak
-/// Sum of scores of opponents defeated + 0.5 * scores of opponents drawn
 fn calculate_sonneborn_berger(
     player: &SwissPlayer,
     all_players: &[SwissPlayer],
@@ -142,7 +135,6 @@ fn calculate_sonneborn_berger(
     sum
 }
 
-/// Update player scores based on results
 pub fn update_scores(players: &mut [SwissPlayer], results: &[(u8, Pairing, MatchResult)]) {
     for (_, pairing, result) in results {
         if let Some(white) = players.iter_mut().find(|p| p.id == pairing.white) {
@@ -159,7 +151,6 @@ pub fn update_scores(players: &mut [SwissPlayer], results: &[(u8, Pairing, Match
     }
 }
 
-/// Get the final ranking for a player
 pub fn get_player_rank(standings: &[StandingsEntry], player_id: &str) -> Option<u16> {
     standings
         .iter()
@@ -167,7 +158,6 @@ pub fn get_player_rank(standings: &[StandingsEntry], player_id: &str) -> Option<
         .map(|s| s.rank)
 }
 
-/// Get top N players
 pub fn get_top_players(standings: &[StandingsEntry], n: usize) -> Vec<&StandingsEntry> {
     standings.iter().take(n).collect()
 }

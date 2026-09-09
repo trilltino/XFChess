@@ -1,14 +1,8 @@
-//! Small lifecycle transition helpers used by instruction adapters.
-
 use crate::constants::{DELEGATE_COST, ER_SESSION_FEE_LAMPORTS, JOIN_GAME_COST, UNDELEGATE_COST};
 use crate::errors::GameErrorCode;
 use crate::state::{Game, GameStatus};
 use anchor_lang::prelude::*;
 
-/// Transitions a `WaitingForOpponent` game to `Active` with `joiner` as
-/// black. Used by `game_ix::join`. Note: `game_ix::global_join` performs the
-/// same transition inline rather than calling this helper — keep the two in
-/// sync if this logic changes.
 pub fn join_waiting_game(
     game: &mut Game,
     joiner: Pubkey,
@@ -33,9 +27,6 @@ pub fn join_waiting_game(
     Ok(())
 }
 
-/// Marks an active, not-yet-delegated game as delegated to the Ephemeral
-/// Rollup and records the delegation fee advance. The single writer of
-/// `is_delegated = true` — call this instead of setting the field directly.
 pub fn mark_delegated(game: &mut Game) -> Result<()> {
     require!(
         game.status == GameStatus::Active,
@@ -50,15 +41,6 @@ pub fn mark_delegated(game: &mut Game) -> Result<()> {
     Ok(())
 }
 
-/// Marks a delegated game as undelegated back to the base layer, and records
-/// the reimbursable cost of that transition. The single writer of
-/// `is_delegated = false` — call this instead of setting the field directly.
-///
-/// Accrues both `UNDELEGATE_COST` (the base-layer `undelegate_game` tx-fee
-/// advance) and `ER_SESSION_FEE_LAMPORTS` (MagicBlock's ER-side session fee,
-/// deducted from the session key off-chain and otherwise untracked) into
-/// `fees_advanced`, so `finalize_game` reimburses the platform for the real
-/// cost of every undelegate, not just create/join/delegate/record_move.
 pub fn mark_undelegated(game: &mut Game) -> Result<()> {
     require!(game.is_delegated, GameErrorCode::GameNotDelegated);
     game.fees_advanced = game

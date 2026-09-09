@@ -1,6 +1,3 @@
-//! Tournament client state, Bevy resources, and on-chain instruction dispatch
-//! for the 4-player bracket system.
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -37,8 +34,6 @@ pub struct TournamentSummary {
     pub is_private: bool,
 }
 
-/// Tabs in a tournament card: the games happening now, the ones still to
-/// come, and the ones you can replay.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum GameTab {
     #[default]
@@ -59,46 +54,24 @@ pub enum TournamentJoinStatus {
 #[derive(Resource)]
 pub struct TournamentClientState {
     pub active_tournament_id: Option<u64>,
-    /// Player slot within the tournament (0–3).
     pub my_slot: Option<usize>,
-    /// Cached list of available tournaments from VPS.
     pub available_tournaments: Vec<crate::multiplayer::network::vps::TournamentSummary>,
-    /// Status text shown in lobby / waiting screens.
     pub status_message: String,
-    /// Polling timer: seconds since last my-match poll.
     pub poll_timer: f32,
     pub join_status: TournamentJoinStatus,
-    /// Oneshot receiver for an in-flight `register_player` transaction.
     pub tx_rx: Option<oneshot::Receiver<Result<usize, String>>>,
-    /// Channel for receiving background tournament list polls. Carries the
-    /// real fetch/parse error on failure — this used to be dropped in favor
-    /// of a generic "channel closed" message, which made a real backend
-    /// outage or a schema mismatch indistinguishable from a genuinely empty
-    /// tournament list.
     pub list_rx: Option<
         crossbeam_channel::Receiver<
             Result<Vec<crate::multiplayer::network::vps::TournamentSummary>, String>,
         >,
     >,
     pub last_list_poll: Option<Instant>,
-    /// On-chain games created by the backend orchestrator across all
-    /// tournaments (bracket matches with a Solana game_id) — feeds the
-    /// per-tournament "Watch Live" list in the browser.
     pub tournament_games: Vec<crate::multiplayer::network::vps::TournamentGameListing>,
-    /// Receiver for the background tournament-games fetch.
     pub games_rx: Option<
         crossbeam_channel::Receiver<Vec<crate::multiplayer::network::vps::TournamentGameListing>>,
     >,
     pub last_games_poll: Option<Instant>,
-    /// Games of the tournament currently expanded in the browser, from
-    /// `GET /api/tournament/{id}/games`.
-    ///
-    /// Separate from `tournament_games` (the cross-tournament walk) because
-    /// this one is *rich* — backend-computed watchability, move counts,
-    /// results — and scoped to one tournament, so it can poll fast without the
-    /// per-tournament bracket fan-out.
     pub detail_games: Vec<crate::multiplayer::network::vps::TournamentGameListing>,
-    /// Which tournament `detail_games` describes.
     pub detail_games_for: Option<u64>,
     pub detail_games_rx: Option<
         crossbeam_channel::Receiver<
@@ -106,67 +79,41 @@ pub struct TournamentClientState {
         >,
     >,
     pub last_detail_poll: Option<Instant>,
-    /// Which of the Live / Upcoming / Finished tabs the expanded card shows.
     pub detail_tab: GameTab,
     pub bracket_fired_rx: Option<crossbeam_channel::Receiver<BracketFiredEvent>>,
     pub bracket_ready: bool,
     pub password_input: String,
     pub password_error: Option<String>,
-    /// Last error from tournament list poll (cleared on success).
     pub last_poll_error: Option<String>,
-    /// Set when the player finished a match and is waiting for the next round assignment.
     pub waiting_for_next_match: bool,
-    /// Result of the last completed match (e.g. "1-0", "0-1", "½-½").
     pub last_match_result: Option<String>,
-    /// Active on-chain game for the current assigned tournament match.
     pub active_game_id: Option<u64>,
-    /// Filter shown in the tournament browser (None = All).
     pub status_filter: Option<String>,
-    /// Which tournament card is currently expanded to show details.
     pub expanded_tournament_id: Option<u64>,
 
     // Waiting room
-    /// Registered players fetched from GET /api/tournament/{id}/players.
     pub registered_players: Vec<String>,
-    /// Receiver for the players poll task.
     pub players_rx: Option<crossbeam_channel::Receiver<Vec<String>>>,
-    /// Timer for polling player list (reset every 5 s).
     pub players_poll_timer: f32,
-    /// "Enter invite code" text input.
     pub private_code_input: String,
-    /// Error from private join attempt.
     pub private_code_error: Option<String>,
-    /// Receiver for private join response.
     pub private_join_rx: Option<crossbeam_channel::Receiver<Result<(), String>>>,
 
     // Tournament waiting-room chat
-    /// Chat message history: (display_name, message_text)
     pub chat_messages: Vec<(String, String)>,
-    /// Receive channel for inbound chat messages from VPS WebSocket.
     pub chat_rx: Option<crossbeam_channel::Receiver<(String, String)>>,
-    /// Current compose input.
     pub chat_input: String,
-    /// Send closure for outbound chat (sends to VPS ws endpoint).
     pub chat_tx: Option<crossbeam_channel::Sender<(String, String)>>,
 
-    /// In-flight `/my-status` poll (see `poll_my_tournament_status`).
     pub status_rx: Option<
         crossbeam_channel::Receiver<
             Result<crate::multiplayer::network::vps::MyTournamentStatus, String>,
         >,
     >,
-    /// Latest backend-reported position in the active tournament. Drives the
-    /// waiting-room / eliminated / champion panels.
     pub my_state: Option<crate::multiplayer::network::vps::PlayerState>,
-    /// Finishing position once known (1 = champion).
     pub placing: Option<u8>,
-    /// Prize owed for `placing`, in lamports.
     pub prize_lamports: Option<u64>,
 
-    /// Tournament IDs the player dismissed from the browser (e.g. a cancelled
-    /// tournament they no longer want cluttering the list). Client-side only —
-    /// `available_tournaments` is fully replaced on every poll, so this can't
-    /// live on the summary itself; re-appears if the backend ever reuses the ID.
     pub dismissed_ids: std::collections::HashSet<u64>,
 }
 
@@ -224,9 +171,6 @@ impl TournamentClientState {
         *self = Self::default();
     }
 
-    /// Start the background WebSocket chat for `tournament_id`.
-    /// Polls `/api/tournament/{id}/chat` (GET for history, POST to send).
-    /// Uses a simple long-poll pattern so no ws dependency is needed.
     pub fn start_chat(&mut self, tournament_id: u64, player_name: String) {
         if self.chat_rx.is_some() {
             return;
@@ -284,7 +228,6 @@ impl TournamentClientState {
         let _ = player_name;
     }
 
-    /// Drain inbound chat channel into `chat_messages`.
     pub fn drain_chat(&mut self) {
         if let Some(ref rx) = self.chat_rx {
             while let Ok(msg) = rx.try_recv() {
@@ -350,12 +293,6 @@ pub struct BracketFiredEvent {
     pub started_at: i64,
 }
 
-/// Spawn the real on-chain `register_player` transaction (deposits the entry
-/// fee into escrow and adds the player to their tournament shard) on a
-/// background thread. This is separate from — and should run before —
-/// `vps::confirm_join`, which only maintains the off-chain bracket/roster
-/// and never touches the chain. `password` is unused here (password gating
-/// lives entirely in the off-chain join call); kept for signature stability.
 pub fn spawn_register_tournament(
     tournament_id: u64,
     wallet_pubkey: Pubkey,
@@ -609,13 +546,6 @@ fn poll_tournament_list(
         .detach();
 }
 
-/// Polls `GET /api/tournament/{id}/games` for the tournament the viewer has
-/// expanded, every 3 seconds.
-///
-/// One request for one tournament, against the cross-tournament walk's request
-/// *per advertised tournament* — so this can afford to be three times as fresh
-/// while doing a fraction of the work. Everything the Live/Upcoming/Finished
-/// tabs need arrives already computed.
 fn poll_expanded_tournament_games(mut tournament: ResMut<TournamentClientState>) {
     if let Some(ref rx) = tournament.detail_games_rx {
         match rx.try_recv() {
@@ -673,9 +603,6 @@ fn poll_expanded_tournament_games(mut tournament: ResMut<TournamentClientState>)
         .detach();
 }
 
-/// Polls the on-chain tournament-games list (bracket matches with a Solana
-/// game_id) while the Tournaments browser is open, every 10 seconds. Feeds the
-/// per-tournament "Watch Live" list.
 fn poll_tournament_games_list(
     mut tournament: ResMut<TournamentClientState>,
     menu_state: Option<Res<State<crate::core::MenuState>>>,
@@ -743,24 +670,8 @@ fn poll_bracket_fired(mut tournament: ResMut<TournamentClientState>) {
     }
 }
 
-/// How often to ask the backend where we stand in the active tournament.
 const MY_STATUS_POLL_SECS: f32 = 3.0;
 
-/// Drives the client's tournament state from `GET /my-status`.
-///
-/// This is the producer `TournamentMatchAssignedEvent` never had. That event
-/// is consumed by `handle_tournament_match_assigned`, which does *everything*
-/// needed to actually play a tournament match — session key setup, P2P
-/// connect, ER delegation, transition to `InGame` — but nothing in the
-/// codebase ever wrote it, so the handler could never run and the client
-/// could not enter any tournament match, in any round.
-///
-/// It also drives the between-rounds UI: `waiting_for_next_match` was only
-/// ever assigned `false`, so the (fully written) waiting-room panel in
-/// `screens.rs` / `game_ui.rs` was unreachable, and a player who won round 1
-/// was dropped to the menu with no sign the tournament was still running.
-///
-/// See docs/plans/tournament-end-to-end-fix-plan.md §5 Phase 1.
 fn poll_my_tournament_status(
     time: Res<Time>,
     mut tournament: ResMut<TournamentClientState>,
@@ -810,7 +721,6 @@ fn poll_my_tournament_status(
     });
 }
 
-/// Translates a `/my-status` snapshot into client state + events.
 fn apply_my_status(
     tournament: &mut TournamentClientState,
     tournament_id: u64,
@@ -916,8 +826,6 @@ impl Plugin for TournamentClientPlugin {
     }
 }
 
-/// Item 7: When a tournament match is assigned, create/join the VPS session so
-/// the game session key is ready before the P2P handshake starts.
 fn handle_tournament_match_assigned(
     mut events: MessageReader<TournamentMatchAssignedEvent>,
     mut tournament: ResMut<TournamentClientState>,
@@ -1143,10 +1051,6 @@ fn announce_or_join_tournament_relay(
     });
 }
 
-/// Registration info needed to build `register_player_ix`, fetched from the
-/// backend rather than derived locally — `host_treasury` isn't something the
-/// client can compute (it's the VPS operator's own key, stamped onto the
-/// on-chain Tournament account at creation).
 #[derive(Deserialize)]
 struct RegistrationInfo {
     program_id: String,
@@ -1169,18 +1073,6 @@ fn fetch_registration_info(rpc_base: &str, tournament_id: u64) -> Result<Registr
         .map_err(|e| format!("parse registration-info: {e}"))
 }
 
-/// Submits the real on-chain `register_player` transaction: fetches the data
-/// needed to build it (program ID, tournament size, host treasury) from the
-/// backend, builds the instruction client-side, signs it via the Tauri
-/// wallet bridge (the same "one popup" mechanism used for wagered games —
-/// see `lobby::async_create_game`), and confirms on-chain before returning.
-/// Returns the confirmed `register_player` transaction signature. The caller
-/// must hand that signature to `vps::confirm_join`, which is what actually
-/// puts the player on the backend's roster: the backend re-reads the tx from
-/// chain and verifies the player signed a real `register_player` for this
-/// tournament before trusting it. Previously this returned a bare `Ok(0)` and
-/// dropped the signature on the floor, which left the caller with nothing to
-/// confirm with.
 pub fn register_tournament(
     tournament_id: u64,
     wallet_pubkey: Pubkey,

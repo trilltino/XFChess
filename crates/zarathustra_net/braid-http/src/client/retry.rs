@@ -1,30 +1,13 @@
-//! Retry configuration and logic for Braid HTTP client.
-
 use std::time::Duration;
 
-/// Status codes a Braid client retries, matching the reference implementation.
-///
-/// Beyond the familiar transient HTTP codes, two are Braid-specific and easy to
-/// miss:
-///
-/// * **309** — the server is redirecting the subscription; reconnect.
-/// * **432 Missing Parents** — the write named a parent version the server does
-///   not have. Retrying after re-reading the current head is exactly the right
-///   response, and it is the code our own causal-chain conflicts surface as.
 pub const RETRYABLE_STATUS: &[u16] = &[309, 408, 425, 429, 432, 502, 503, 504];
 
-/// Configuration for retry behavior.
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
-    /// Maximum number of retry attempts (None = infinite)
     pub max_retries: Option<u32>,
-    /// Initial backoff duration
     pub initial_backoff: Duration,
-    /// Maximum backoff duration
     pub max_backoff: Duration,
-    /// HTTP status codes that trigger a retry
     pub retry_on_status: Vec<u16>,
-    /// Whether to respect the `Retry-After` header
     pub respect_retry_after: bool,
 }
 
@@ -127,9 +110,6 @@ impl RetryState {
         self.decide_retry(retry_after)
     }
 
-    /// Like [`should_retry_status`](Self::should_retry_status), but also honours a
-    /// "missing parents" reason phrase from a server that reports the condition
-    /// in text without using status 432.
     pub fn should_retry_status_with_text(
         &mut self,
         status: u16,

@@ -1,27 +1,15 @@
-//! Multiplexing protocol constants and framing for Braid-HTTP.
-//!
-//! Implements the framing logic for Braid Multiplexing Protocol v1.0.
-
-/// The version of the multiplexing protocol implemented.
 pub const MULTIPLEX_VERSION: &str = "1.0";
 
-/// Header used to specify the multiplexing version.
 pub const HEADER_MULTIPLEX_VERSION: &str = "Multiplex-Version";
 
-/// Header used to specify the multiplexing ID and request ID.
 pub const HEADER_MULTIPLEX_THROUGH: &str = "Multiplex-Through";
 
-/// Braid-specific status code for "Responded via multiplexer"
 pub const STATUS_MULTIPLEX_REDIRECT: u16 = 293;
 
-/// Events in the multiplexing stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MultiplexEvent {
-    /// "start response <request_id>"
     StartResponse(String),
-    /// "<N> bytes for response <request_id>"
     Data(String, Vec<u8>),
-    /// "close response <request_id>"
     CloseResponse(String),
 }
 
@@ -37,7 +25,6 @@ impl std::fmt::Display for MultiplexEvent {
     }
 }
 
-/// State machine for parsing the multiplexing protocol.
 #[derive(Debug, Default, Clone)]
 enum ParserState {
     #[default]
@@ -48,7 +35,6 @@ enum ParserState {
     },
 }
 
-/// A parser for Braid Multiplexing Protocol streams.
 pub struct MultiplexParser {
     buffer: Vec<u8>,
     state: ParserState,
@@ -61,7 +47,6 @@ impl Default for MultiplexParser {
 }
 
 impl MultiplexParser {
-    /// Creates a new MultiplexParser.
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
@@ -69,7 +54,6 @@ impl MultiplexParser {
         }
     }
 
-    /// Feeds data into the parser and returns any complete events found.
     pub fn feed(&mut self, data: &[u8]) -> Result<Vec<MultiplexEvent>, String> {
         self.buffer.extend_from_slice(data);
         let mut events = Vec::new();

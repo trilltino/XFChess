@@ -1,42 +1,9 @@
-//! Allow-listing for caller-supplied transactions the backend co-signs.
-//!
-//! `activate_session` takes a wallet-signed setup transaction and adds the
-//! game's session-key signature before submitting it. That session key is
-//! `game.fee_payer` on-chain and holds backend funds, so "sign whatever the
-//! caller sent" is a signing oracle, not a relay: nothing stopped a crafted
-//! transaction from carrying a `SystemProgram::transfer` draining the key, or
-//! any other instruction the session key is a valid signer for.
-//!
-//! This module is the inspection step that was missing. A transaction is
-//! accepted only when *every* instruction in it targets our own program with an
-//! explicitly allow-listed Anchor discriminator, and the accounts the caller
-//! claims to be operating on are actually present. Anything else — a different
-//! program, an unlisted instruction, a mismatched game — is rejected before a
-//! signature is ever produced.
-//!
-//! Deliberately strict about which programs are tolerated. The canonical
-//! ComputeBudget program is the one exception: its instructions only tune
-//! transaction execution and cannot move funds or authorize game state.
-
 use solana_sdk::{pubkey::Pubkey, transaction::Transaction};
 
 use super::instructions::anchor_discriminator;
 
-/// Upper bound on instructions in a caller-supplied setup transaction. The real
-/// flows send exactly two (`create_game`/`join_game` + `authorize_session_key`);
-/// this bounds the work done parsing a hostile payload.
 const MAX_INSTRUCTIONS: usize = 8;
 
-/// Verifies that `tx` contains only allow-listed instructions against
-/// `program_id`, and that every pubkey in `required_accounts` appears in its
-/// account list.
-///
-/// `allowed` holds Anchor instruction *names* (e.g. `"create_game"`); their
-/// discriminators are derived the same way the instruction builders derive
-/// theirs, so the two can never drift apart.
-///
-/// Returns a human-readable reason on rejection — these surface to the player's
-/// error UI, so they say what was wrong rather than just "forbidden".
 pub fn validate_cosignable_tx(
     tx: &Transaction,
     program_id: &Pubkey,
@@ -187,8 +154,6 @@ mod tests {
         .expect("compute budget metadata must not block setup activation");
     }
 
-    /// The whole point of the guard: a lamport transfer smuggled into the setup
-    /// bundle would otherwise be signed by the session key, draining it.
     #[test]
     fn rejects_a_smuggled_system_transfer() {
         let program_id = program();
@@ -218,8 +183,6 @@ mod tests {
         assert!(err.contains("not one of"), "unexpected reason: {err}");
     }
 
-    /// Binds the transaction to the `game_id` in the request body, so a caller
-    /// cannot have game A's session key sign a setup transaction for game B.
     #[test]
     fn rejects_a_transaction_for_a_different_game() {
         let program_id = program();

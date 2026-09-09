@@ -11,13 +11,9 @@ pub struct MoveMadeEvent {
     pub promotion: Option<PieceType>,
     pub remote: bool,
     pub game_id: Option<u64>,
-    /// FEN string of the board position *after* this move was applied.
     pub next_fen: String,
 }
 
-/// Emitted by `handle_network_moves` after a remote move has been applied to the
-/// chess engine. Used by `feed_remote_moves_to_rollup` to record opponent moves
-/// on-chain without a frame-delay FEN race.
 #[derive(Message, Debug, Clone)]
 pub struct RemoteMoveApplied {
     pub uci: String,
@@ -41,10 +37,7 @@ pub struct NetworkMoveEvent {
     pub from: (u8, u8),
     pub to: (u8, u8),
     pub promotion: Option<char>,
-    /// FEN the remote reported after applying this move; compared against local
-    /// computation to detect board desync.
     pub expected_fen: Option<String>,
-    /// Version reserved by the Braid ingress path until board application succeeds.
     #[serde(default)]
     pub dedup_version: Option<String>,
 }
@@ -58,7 +51,6 @@ pub struct ResignEvent {
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
 pub struct DrawOfferEvent {
     pub player: String,
-    /// true = this offer was received from the remote opponent over the network
     pub remote: bool,
 }
 

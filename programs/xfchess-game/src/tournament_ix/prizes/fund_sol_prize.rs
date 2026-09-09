@@ -1,10 +1,3 @@
-//! Instruction for the operator to lock a guaranteed SOL prize pool in escrow.
-//!
-//! Must be called before any player registers: the guaranteed amount is written
-//! once into `tournament.prize_pool` and can never be increased or decreased
-//! while the tournament lives. This keeps the prize provably independent of how
-//! many players enter — entry fees are operator revenue, never prize money.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -19,14 +12,12 @@ pub struct FundSolPrize<'info> {
         bump = tournament.bump
     )]
     pub tournament: Account<'info, Tournament>,
-    /// CHECK: Tournament escrow PDA — holds the guaranteed SOL prize.
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// Operator funding the guaranteed prize.
     #[account(mut)]
     pub operator: Signer<'info>,
     pub system_program: Program<'info, System>,

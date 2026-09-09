@@ -1,8 +1,3 @@
-//! HTTP route handlers for Solana Blinks API.
-//!
-//! This module provides Axum route handlers for the Blinks endpoints
-//! following the Solana Action specification.
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -27,7 +22,6 @@ use crate::signing::{
 };
 use serde::Deserialize;
 
-/// Creates the Blinks API router.
 pub fn blinks_routes() -> Router<AppState> {
     Router::new()
         .route("/tournament/{id}", get(get_tournament_action))
@@ -64,9 +58,6 @@ struct ConfirmRegistrationRequest {
     signature: String,
 }
 
-/// GET /api/actions/tournament/:id
-///
-/// Returns Action metadata for a tournament.
 async fn get_tournament_action(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -78,9 +69,6 @@ async fn get_tournament_action(
     Ok(Json(metadata))
 }
 
-/// POST /api/actions/tournament/:id/register
-///
-/// Builds a registration transaction for the player.
 async fn register_transaction(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -114,9 +102,6 @@ async fn register_transaction(
     Ok(Json(tx_response))
 }
 
-/// GET /api/actions/tournament/:id/check-balance?wallet=<pubkey>
-///
-/// Checks if a wallet has sufficient SOL balance for registration.
 async fn check_balance(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -136,9 +121,6 @@ async fn check_balance(
     Ok(Json(balance))
 }
 
-/// POST /api/actions/tournament/:id/validate
-///
-/// Validates a player for tournament registration (anti-cheat checks).
 async fn validate_registration_endpoint(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -179,9 +161,6 @@ async fn validate_registration_endpoint(
     Ok(Json(validation))
 }
 
-/// GET /api/actions/tournament/:id/chain/registration
-///
-/// Returns the registration action chain for users with existing wallets and SOL.
 async fn get_registration_chain(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -207,9 +186,6 @@ async fn get_registration_chain(
     Ok(Json(chain))
 }
 
-/// GET /api/actions/tournament/:id/chain/onboarding
-///
-/// Returns the onboarding action chain for users without wallets or SOL.
 async fn get_onboarding_chain(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -229,10 +205,6 @@ async fn get_onboarding_chain(
     Ok(Json(chain))
 }
 
-/// GET /api/actions/tournament/:id/claim-prize?wallet=<pubkey>
-///
-/// Returns Action metadata for prize claiming.
-/// Only valid when the tournament is Completed and the wallet is a prize finisher.
 async fn get_claim_prize_action(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -273,9 +245,6 @@ async fn get_claim_prize_action(
     }))
 }
 
-/// POST /api/actions/tournament/:id/claim-prize
-///
-/// Builds a `claim_tournament_prize` transaction for the winner to sign.
 async fn claim_prize_transaction(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -311,10 +280,6 @@ async fn claim_prize_transaction(
     Ok(Json(tx_response))
 }
 
-/// POST /api/actions/admin/tournament/:id/start
-///
-/// Fires `start_tournament` + `initialize_match × N` on-chain.
-/// Requires X-API-Key header (enforced upstream by admin middleware).
 async fn start_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -360,11 +325,6 @@ async fn start_tournament(
     ))
 }
 
-/// POST /api/actions/tournament/:id/register/confirm
-///
-/// Called by the client after broadcasting the registration transaction.
-/// Polls RPC for confirmation (up to 60 s), then adds the player to the
-/// in-memory tournament store.
 async fn confirm_registration(
     Path(id): Path<u64>,
     State(state): State<AppState>,

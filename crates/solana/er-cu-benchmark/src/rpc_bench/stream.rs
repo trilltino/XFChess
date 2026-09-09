@@ -1,11 +1,3 @@
-//! WebSocket pubsub streaming probe (Windows-friendly alternative to the gRPC
-//! Geyser probe — no protobuf toolchain required).
-//!
-//! Subscribes to slot notifications over the endpoint's WebSocket pubsub and
-//! reports time-to-first-message and stream rate. Like the Geyser probe, this
-//! validates that `settlement_worker` could move from 30s polling to push-on-event
-//! — just over standard pubsub instead of Yellowstone gRPC.
-
 use std::time::{Duration, Instant};
 
 use solana_client::nonblocking::pubsub_client::PubsubClient;
@@ -13,7 +5,6 @@ use tokio_stream::StreamExt;
 
 use super::redact_url;
 
-/// Convert an http(s) RPC URL to its ws(s) pubsub form (same host + token path).
 pub fn to_ws(url: &str) -> String {
     if let Some(rest) = url.strip_prefix("https://") {
         format!("wss://{rest}")
@@ -24,8 +15,6 @@ pub fn to_ws(url: &str) -> String {
     }
 }
 
-/// Connect to the pubsub WS, subscribe to slots, observe up to `window` seconds
-/// (stopping early after `max_messages`).
 pub async fn run(ws_url: &str, max_messages: usize, window_secs: u64) -> anyhow::Result<()> {
     println!("\n╔══════════════════════════════════════════════════════════╗");
     println!("║  WEBSOCKET PUBSUB STREAM PROBE                              ║");

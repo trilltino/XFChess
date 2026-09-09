@@ -1,21 +1,3 @@
-//! Full Braid-HTTP publisher for chess game move streams.
-//!
-//! [`ChessPublisher`] uses `braid-http`'s `BraidClient` to PUT chess events
-//! to Braid resource endpoints with proper `Version` and `Parents` headers.
-//!
-//! # Example
-//!
-//! ```rust,no_run
-//! use braid_chess::{ChessPublisher, MovePayload};
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     let mut pub_ = ChessPublisher::new("http://localhost:3000", "ABCD42").unwrap();
-//!     let payload = MovePayload::from_uci("e2e4", "fen...", 1, "alice");
-//!     pub_.publish_move(&payload).await.unwrap();
-//! }
-//! ```
-
 use crate::error::BraidChessError;
 use crate::message::{ChatPayload, ChessMessage, ClockState, EngineHint, MovePayload};
 use crate::patch::version_hash;
@@ -24,19 +6,14 @@ use braid_http::types::{BraidRequest, Version};
 use braid_http::BraidClient;
 use tracing::{debug, info};
 
-/// Publishes chess game events to Braid-HTTP resource endpoints.
 pub struct ChessPublisher {
     client: BraidClient,
     base_url: String,
     game_id: String,
-    /// Current head version (used as `Parents` for next PUT).
     current_version: Version,
 }
 
 impl ChessPublisher {
-    /// Create a publisher for the given game.
-    ///
-    /// `base_url` e.g. `"http://localhost:3000"`.
     pub fn new(
         base_url: impl Into<String>,
         game_id: impl Into<String>,
@@ -50,19 +27,16 @@ impl ChessPublisher {
         })
     }
 
-    /// Override the current version (e.g. after reconnecting and re-syncing).
     pub fn set_version(&mut self, v: impl Into<String>) {
         self.current_version = Version::new(v);
     }
 
-    /// Current head version.
     pub fn version(&self) -> &Version {
         &self.current_version
     }
 
     // ─── Public API ──────────────────────────────────────────────────────────
 
-    /// PUT a chess move onto the moves sub-resource.
     pub async fn publish_move(&mut self, payload: &MovePayload) -> Result<(), BraidChessError> {
         let new_version = Version::new(version_hash(&payload.fen_after, payload.move_number));
         let msg = ChessMessage::Move(payload.clone());
@@ -70,7 +44,6 @@ impl ChessPublisher {
             .await
     }
 
-    /// PUT a resign event onto the moves sub-resource.
     pub async fn publish_resign(&mut self, player: &str) -> Result<(), BraidChessError> {
         let new_version = Version::new(version_hash(player, 0));
         let msg = ChessMessage::Resign {
@@ -80,7 +53,6 @@ impl ChessPublisher {
             .await
     }
 
-    /// PUT a draw offer onto the moves sub-resource.
     pub async fn publish_offer_draw(&mut self, player: &str) -> Result<(), BraidChessError> {
         let new_version = Version::new(version_hash(&format!("draw:{}", player), 0));
         let msg = ChessMessage::OfferDraw {
@@ -90,7 +62,6 @@ impl ChessPublisher {
             .await
     }
 
-    /// PUT a chat message onto the chat sub-resource.
     pub async fn publish_chat(
         &mut self,
         player: &str,
@@ -108,10 +79,6 @@ impl ChessPublisher {
             .await
     }
 
-    /// PUT a clock state snapshot onto the clock sub-resource.
-    ///
-    /// Called after each move so spectators and reconnecting players see live
-    /// time data without waiting for the next move.
     pub async fn publish_clock(&mut self, state: &ClockState) -> Result<(), BraidChessError> {
         let new_version = Version::new(version_hash(
             &format!("clock:{}:{}", state.white_ms, state.black_ms),
@@ -122,7 +89,6 @@ impl ChessPublisher {
             .await
     }
 
-    /// PUT a Stockfish engine hint onto the engine sub-resource.
     pub async fn publish_engine_hint(&mut self, hint: EngineHint) -> Result<(), BraidChessError> {
         let new_version = Version::new(version_hash(&hint.best_move, hint.depth as u32));
         let msg = ChessMessage::EngineAnalysis(hint);

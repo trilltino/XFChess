@@ -1,15 +1,3 @@
-//! A live subscription to a Braid resource, with heartbeat liveness.
-//!
-//! [`Subscription`] is a [`Stream`] of [`Update`]s. When the server declares a
-//! heartbeat interval, the subscription also enforces a deadline: if nothing at
-//! all arrives — not an update, not a heartbeat — within
-//! `1.2 × interval + 3 s`, the stream yields [`BraidError::Timeout`].
-//!
-//! That deadline is the only way a client learns a subscription has died. A TCP
-//! connection that is silently black-holed produces no error and no EOF; without
-//! a liveness check it simply never delivers again. For a chess game that means a
-//! player watching a board that has quietly stopped updating.
-
 use crate::error::{BraidError, Result};
 use crate::types::Update;
 use futures::Stream;
@@ -17,12 +5,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-/// How long to wait for *something* before declaring a subscription dead,
-/// given the server's declared heartbeat interval.
-///
-/// The 1.2× slack absorbs jitter and the flat 3 s absorbs a slow hop; both come
-/// from the reference implementation. Too tight and healthy games reconnect for
-/// no reason; too loose and a dead board goes unnoticed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HeartbeatConfig {
     pub interval: Duration,
@@ -43,10 +25,6 @@ impl HeartbeatConfig {
         Self::new(Duration::from_secs_f64(secs))
     }
 
-    /// Parse a `Heartbeats` header value (`"20"` or `"20s"`).
-    ///
-    /// A non-positive or unparseable interval yields `None`: no promise was made,
-    /// so no deadline should be enforced.
     #[must_use]
     pub fn from_header(value: &str) -> Option<Self> {
         let v = value.trim();
@@ -58,26 +36,14 @@ impl HeartbeatConfig {
     }
 }
 
-/// A live stream of updates from one subscription.
-///
-/// Yields `Err(`[`BraidError::Timeout`]`)` when the liveness deadline passes, and
-/// `None` when the underlying connection closes.
 pub struct Subscription {
-    /// Boxed because `async_channel::Receiver` is a `Stream` but not `Unpin`;
-    /// pinning it once here is cheaper and safer than re-pinning per poll.
     updates: Pin<Box<async_channel::Receiver<Result<Update>>>>,
     heartbeat: Option<HeartbeatConfig>,
-    /// Armed only when a heartbeat config is present; re-armed on every arrival.
-    ///
-    /// Native only: `WasmNetwork::subscribe` does not open subscriptions, so
-    /// there is nothing on wasm for a deadline to guard.
     #[cfg(not(target_arch = "wasm32"))]
     deadline: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
 impl Subscription {
-    /// A subscription with no liveness deadline — it ends only when the
-    /// connection does.
     #[must_use]
     pub fn new(updates: async_channel::Receiver<Result<Update>>) -> Self {
         Self {
@@ -88,8 +54,6 @@ impl Subscription {
         }
     }
 
-    /// A subscription that fails with [`BraidError::Timeout`] if the server goes
-    /// quiet for longer than `config.timeout`.
     #[must_use]
     pub fn with_heartbeat(
         updates: async_channel::Receiver<Result<Update>>,
@@ -98,7 +62,6 @@ impl Subscription {
         Self::new(updates).heartbeat(Some(config))
     }
 
-    /// Attach a liveness deadline, or clear it with `None`.
     #[must_use]
     pub fn heartbeat(mut self, config: Option<HeartbeatConfig>) -> Self {
         self.heartbeat = config;
@@ -109,21 +72,15 @@ impl Subscription {
         self
     }
 
-    /// The liveness settings in force, if any.
     #[must_use]
     pub fn heartbeat_config(&self) -> Option<HeartbeatConfig> {
         self.heartbeat
     }
 
-    /// The next update, or `None` when the subscription ends.
-    ///
-    /// Equivalent to `StreamExt::next`, kept as an inherent method because it is
-    /// what nearly every caller wants and it avoids a trait import at each site.
     pub async fn next(&mut self) -> Option<Result<Update>> {
         futures::StreamExt::next(self).await
     }
 
-    /// Re-arm the liveness deadline after activity.
     fn touch(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         if let (Some(config), Some(deadline)) = (self.heartbeat, self.deadline.as_mut()) {

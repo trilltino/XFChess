@@ -1,37 +1,3 @@
-//! # NDJSON Streaming Parser
-//!
-//! This module provides [`NdjsonStream`], a [`futures::Stream`] of values
-//! obtained from parsing newline-delimited JSON (NDJSON) received through an
-//! HTTP response body. NDJSON is commonly used by streaming APIs that emit a
-//! large or unbounded sequence of independent JSON objects, one per line.
-//!
-//! `NdjsonStream<T>` reconstructs each `\n`-terminated JSON line from the raw
-//! byte frames provided by the HTTP body, even when a single line spans
-//! multiple frames or when a frame contains multiple NDJSON objects. Each
-//! complete line is deserialized into a value of type `T` using `serde_json`
-//! and yielded as soon as available.
-//!
-//! This is ideal for streaming analytics endpoints, real-time logs, and
-//! long-running model inference endpoints that produce many JSON objects
-//! incrementally instead of a single aggregate response.
-//!
-//! ## Characteristics
-//!
-//! - Handles arbitrary chunking and frame boundaries.
-//! - Reassembles complete `\n`-terminated lines.
-//! - Deserializes each line using [`serde_json::from_slice`].
-//! - Emits values as soon as they are complete (no buffering the whole body).
-//! - Propagates both HTTP body errors and JSON parsing errors.
-//!
-//! ## Requirements
-//!
-//! - Each JSON object **must** fit on a single line ending with `\n`.
-//! - Partial final lines without `\n` at EOF are **silently discarded**
-//!   (standard NDJSON behavior).
-//!
-//! For streaming formats other than NDJSON (e.g., SSE), use the corresponding
-//! modules in this crate.
-
 use std::{
     collections::VecDeque,
     pin::{Pin, pin},
@@ -48,44 +14,15 @@ use tracing::instrument;
 
 use crate::{error::Error, response::Response};
 
-/// A streaming **NDJSON (newline-delimited JSON)** parser.
-///
-/// This parser accepts a byte stream (typically an HTTP response body),
-/// reconstructs `\n`-terminated lines across arbitrary frame boundaries,
-/// and deserializes each line into a strongly typed value `T` using
-/// `serde_json`.
-///
-/// ## How it works
-///
-/// - Bytes accumulate in an internal buffer until a newline is encountered.
-/// - The bytes of that line are copied into a scratch buffer.
-/// - The line is parsed as JSON into `T`.
-/// - The result is pushed into an internal queue.
-/// - [`poll_next`](futures::Stream::poll_next) returns items from this queue.
-///
-/// ## Type Parameter
-///
-/// `T` must implement [`serde::de::DeserializeOwned`].
 pub struct NdjsonStream<T> {
-    /// The underlying HTTP body stream producing `Bytes` frames.
     body: BoxBody<Bytes, Error>,
 
-    /// Accumulates incoming bytes until one or more newline-terminated lines
-    /// can be extracted.
     buffer: VecDeque<u8>,
 
-    /// A scratch buffer reused for constructing a single NDJSON line before
-    /// attempting JSON deserialization.
     line_buf: Vec<u8>,
 
-    /// A FIFO queue of parsed results waiting to be yielded to the caller.
-    ///
-    /// Multiple JSON objects may be parsed from a single frame, and parsing
-    /// produces results synchronously, whereas the `Stream` interface yields
-    /// items one at a time. This queue decouples these behaviors.
     queue: VecDeque<Result<T, Error>>,
 
-    /// Marker for the generic type.
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -93,9 +30,6 @@ impl<T> NdjsonStream<T>
 where
     T: DeserializeOwned,
 {
-    /// Creates a new NDJSON stream from an HTTP response.
-    ///
-    /// The response body is consumed as a stream of `Bytes` frames.
     pub fn new(response: Response) -> Self {
         Self {
             body: response.body.into_stream(),
@@ -106,9 +40,6 @@ where
         }
     }
 
-    /// Constructs an `NdjsonStream` from any arbitrary byte-producing stream.
-    ///
-    /// This is intended for testing and avoids needing a full `Response`.
     #[cfg(test)]
     pub(crate) fn from_stream<S>(stream: S) -> Self
     where
@@ -129,11 +60,6 @@ where
         }
     }
 
-    /// Appends raw bytes from a frame, extracts any completed NDJSON lines,
-    /// and attempts to deserialize them into values of type `T`.
-    ///
-    /// Deserialization results (both `Ok` and `Err`) are pushed into
-    /// [`queue`](Self::queue) for later consumption by the stream interface.
     fn append_frame(&mut self, mut frame: impl Buf) {
         let old_len = self.buffer.len();
 
@@ -189,16 +115,6 @@ where
     }
 }
 
-/// Marks `NdjsonStream<T>` as `Unpin` regardless of whether `T` is `Unpin`.
-///
-/// This is safe because `NdjsonStream` does not store any pinned projections
-/// of values of type `T`, nor does it move any internal futures or self-referential
-/// structures that depend on pinning. The type `T` is only ever created as an
-/// owned value inside the `queue` and is never borrowed across `.poll_next()`.
-///
-/// By implementing `Unpin` unconditionally, an `NdjsonStream<T>` can be moved
-/// freely after being pinned, and can be used with combinators or executors
-/// that require `Unpin`, even for types `T` that are not themselves `Unpin`.
 impl<T> Unpin for NdjsonStream<T> {}
 
 impl<T> Stream for NdjsonStream<T>
@@ -206,12 +122,6 @@ where
     T: DeserializeOwned,
 {
     type Item = Result<T, Error>;
-
-    /// Attempts to produce the next parsed NDJSON value.
-    ///
-    /// If previously parsed values are waiting in the internal queue, they
-    /// are returned immediately. Otherwise, the underlying HTTP body is
-    /// polled for more data, which may produce zero or more new parsed items.
 
     #[instrument(skip(self, cx))]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

@@ -1,10 +1,3 @@
-//! Shared helpers for the Ephemeral-Rollups test suites.
-//!
-//! These run the *real* compiled program (`target/deploy/xfchess_game.so`)
-//! in-process via `solana-program-test`. We craft account state directly
-//! (a delegated, active game + a session delegation) so we can exercise the
-//! `record_move` path exactly as it runs on the ER — without needing a live
-//! Ephemeral Rollup validator. See `docs/ER_TESTING.md`.
 #![allow(dead_code)]
 
 use anchor_lang::{AccountDeserialize, AccountSerialize, InstructionData, Space, ToAccountMetas};
@@ -21,11 +14,8 @@ use xfchess_game::state::{
     Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile, SessionDelegation,
 };
 
-/// Filename (without extension) of the built program `.so`.
 pub const PROGRAM: &str = "xfchess_game";
 
-/// Canonical MagicBlock magic-program / magic-context addresses (verified to
-/// equal `magicblock-magic-program-api`'s declared IDs in 0.3.1 and 0.8.8).
 pub const MAGIC_PROGRAM: &str = "Magic11111111111111111111111111111111111111";
 pub const MAGIC_CONTEXT: &str = "MagicContext1111111111111111111111111111111";
 
@@ -48,7 +38,6 @@ pub fn sd_pda(game_id: u64, player: &Pubkey) -> (Pubkey, u8) {
     )
 }
 
-/// Pack a 4-char (optionally 5-byte, last = promotion) UCI move into `[u8; 5]`.
 pub fn uci(s: &str) -> [u8; 5] {
     let mut a = [0u8; 5];
     for (i, b) in s.bytes().enumerate() {
@@ -65,25 +54,16 @@ pub fn board_from_fen(fen: &str) -> [u8; 68] {
     CompactBoard::from_fen(fen).to_bytes()
 }
 
-/// Compute the next board EXACTLY as the on-chain program does (same
-/// `validate_and_apply` → `to_compact_board` path), so the test oracle can
-/// never diverge from the on-chain validator.
 pub fn apply(board: &[u8; 68], mv: &[u8; 5]) -> [u8; 68] {
     let mut g = CompactBoard::from_bytes(board).to_on_chain_game();
     chess_logic_on_chain::validate_and_apply(&mut g, mv).expect("test move must be legal");
     g.to_compact_board().to_bytes()
 }
 
-/// Anchor custom-error number for a `GameErrorCode` variant (offset 6000).
 pub fn ec(e: xfchess_game::errors::GameErrorCode) -> u32 {
     6000 + e as u32
 }
 
-/// Serialize an anchor account and pad to its full on-chain allocation
-/// (`8 + INIT_SPACE`). Padding matters: e.g. `GameResult` grows from 1 byte
-/// (`None`) to 33 (`Winner(Pubkey)`) when a game finishes, so an exact-size
-/// account would fail to re-serialize (AccountDidNotSerialize) on checkmate —
-/// exactly as a too-small real account would.
 pub fn program_account<T: AccountSerialize>(value: &T, space: usize) -> Account {
     let mut data = Vec::with_capacity(space);
     value.try_serialize(&mut data).unwrap();
@@ -99,7 +79,6 @@ pub fn program_account<T: AccountSerialize>(value: &T, space: usize) -> Account 
     }
 }
 
-/// Build a delegated, active `Game` account ready for `record_move`.
 #[allow(clippy::too_many_arguments)]
 pub fn game_account(
     game_id: u64,
@@ -175,7 +154,6 @@ pub fn system_account(lamports: u64) -> Account {
     }
 }
 
-/// Build a `SessionDelegation` linking `session_key` → `player` for a game.
 pub fn session_account(
     game_id: u64,
     player: Pubkey,
@@ -196,7 +174,6 @@ pub fn session_account(
     (pda, program_account(&sd, 8 + SessionDelegation::INIT_SPACE))
 }
 
-/// Start `solana-program-test` with the built `.so` and the given pre-seeded accounts.
 pub async fn start(accounts: Vec<(Pubkey, Account)>) -> ProgramTestContext {
     std::env::set_var(
         "SBF_OUT_DIR",
@@ -209,7 +186,6 @@ pub async fn start(accounts: Vec<(Pubkey, Account)>) -> ProgramTestContext {
     pt.start_with_context().await
 }
 
-/// `record_move` instruction built from anchor's generated client types.
 pub fn record_move_ix(
     game_id: u64,
     player_wallet: &Pubkey,
@@ -241,8 +217,6 @@ pub fn record_move_ix(
     }
 }
 
-/// `undelegate_game` instruction with caller-chosen magic accounts (for
-/// constraint negative-testing).
 pub fn undelegate_ix(
     game_id: u64,
     payer: Pubkey,
@@ -264,9 +238,6 @@ pub fn undelegate_ix(
     }
 }
 
-/// `process_undelegation` instruction — the ER-infra callback that restores a
-/// delegated account. `buffer` is caller-chosen here so tests can exercise the
-/// canonical-buffer-PDA rejection (see `magicblock::delegation::undelegate_buffer_pda`).
 pub fn process_undelegation_ix(
     game_id: u64,
     payer: Pubkey,
@@ -303,8 +274,6 @@ pub fn resign_ix(game_id: u64, player: Pubkey) -> Instruction {
     }
 }
 
-/// `cancel_time_check` instruction with a caller-chosen `magic_program` (for
-/// constraint negative-testing, mirroring `undelegate_ix`).
 pub fn cancel_time_check_ix(
     game_id: u64,
     payer: Pubkey,
@@ -342,7 +311,6 @@ pub fn claim_timeout_ix(game_id: u64, caller: Pubkey) -> Instruction {
     }
 }
 
-/// Send one instruction, fee-paid + signed by the test payer plus `extra` signers.
 pub async fn send(
     ctx: &mut ProgramTestContext,
     ix: Instruction,
@@ -368,7 +336,6 @@ fn transaction_error(e: BanksClientError) -> TransactionError {
     }
 }
 
-/// Extract the program custom-error code from a transaction error.
 pub fn custom_code(err: &TransactionError) -> Option<u32> {
     match err {
         TransactionError::InstructionError(_, InstructionError::Custom(c)) => Some(*c),
@@ -376,7 +343,6 @@ pub fn custom_code(err: &TransactionError) -> Option<u32> {
     }
 }
 
-/// Read back a `Game` account from the bank.
 pub async fn fetch_game(ctx: &mut ProgramTestContext, game_id: u64) -> Game {
     let acc = ctx
         .banks_client
@@ -387,7 +353,6 @@ pub async fn fetch_game(ctx: &mut ProgramTestContext, game_id: u64) -> Game {
     Game::try_deserialize(&mut &acc.data[..]).unwrap()
 }
 
-/// Read back a `PlayerProfile` account from the bank.
 pub async fn fetch_profile(ctx: &mut ProgramTestContext, player: &Pubkey) -> PlayerProfile {
     let acc = ctx
         .banks_client

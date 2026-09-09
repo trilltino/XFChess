@@ -1,9 +1,5 @@
-//! Core state structure defining an active or historical game's properties.
-
 use anchor_lang::prelude::*;
 
-/// The core on-chain game account. One PDA per game_id.
-/// Seeds: [b"game", game_id.to_le_bytes()]
 #[account]
 #[derive(InitSpace)]
 pub struct Game {
@@ -32,18 +28,9 @@ pub struct Game {
     pub is_delegated: bool,     // True once delegate_game is called; false after undelegate
     pub tournament_id: Option<u64>,
     pub nonce: u64, // Counter for replay protection
-    /// Set by `offer_draw` to the offering player's pubkey; cleared once the
-    /// game reaches a terminal status. `accept_draw` requires this to be
-    /// `Some(the_other_player)`. Appended at the end of the struct (not
-    /// alongside related fields) so existing byte offsets — e.g. the pinned
-    /// `wager_amount_offset_is_212` test and the client's hand-parsed offset
-    /// in `src/multiplayer/solana/lobby.rs` — don't shift.
     pub draw_offered_by: Option<Pubkey>,
 }
 
-/// Short-lived delegation allowing a VPS session key to submit moves on behalf
-/// of a player without requiring a wallet popup each time.
-/// Seeds: [b"session_delegation", game_id.to_le_bytes(), player_pubkey]
 #[account]
 #[derive(InitSpace)]
 pub struct SessionDelegation {
@@ -56,7 +43,6 @@ pub struct SessionDelegation {
     pub bump: u8,
 }
 
-/// Lifecycle state of a game.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum GameStatus {
     Pending,
@@ -82,7 +68,6 @@ pub enum GamePhase {
     Disputed,
 }
 
-/// Outcome recorded when a game is finalised.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum GameResult {
     None,           // Game not yet finished
@@ -90,13 +75,11 @@ pub enum GameResult {
     Draw,           // Agreed or stalemate draw
 }
 
-/// Match variant — always player vs player; AI games are handled off-chain.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]
 pub enum GameType {
     PvP,
 }
 
-/// Match type determines fee structure and ELO impact.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum MatchType {
     Free,
@@ -104,9 +87,6 @@ pub enum MatchType {
 }
 
 impl Game {
-    /// Derives the finer-grained `GamePhase` from `(status, is_delegated)`.
-    /// Fails on combinations that shouldn't be reachable (e.g. delegated
-    /// while `WaitingForOpponent`) — used by `lifecycle::guards::require_phase`.
     pub fn phase(&self) -> Result<GamePhase> {
         match (self.status, self.is_delegated) {
             (GameStatus::WaitingForOpponent, false) => Ok(GamePhase::WaitingBase),
@@ -126,11 +106,6 @@ impl Game {
 mod tests {
     use super::*;
 
-    /// Pins the byte offset of `wager_amount` within the Borsh-serialized
-    /// account (excluding the 8-byte Anchor discriminator, which callers must
-    /// add themselves). `src/multiplayer/solana/lobby.rs` on the client hand-
-    /// parses this offset instead of depending on this crate — if this test
-    /// ever fails, that client-side offset needs to move too.
     #[test]
     fn wager_amount_offset_is_212() {
         let mut g = game(GameStatus::WaitingForOpponent, false);

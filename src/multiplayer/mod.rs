@@ -1,5 +1,3 @@
-//! Multiplayer networking, VPS relay, and Solana integration.
-
 use bevy::prelude::*;
 use tokio::runtime::Runtime;
 
@@ -24,8 +22,6 @@ pub mod ui;
 #[cfg(feature = "solana")]
 pub mod wager_state;
 
-/// Compatibility alias: the VPS HTTP client lives at `network::vps`. Older call
-/// sites import it as `multiplayer::vps_client`.
 pub mod vps_client {
     pub use super::network::vps::*;
 }
@@ -41,8 +37,6 @@ pub use types::*;
 #[derive(Resource)]
 pub struct TokioRuntime(pub Runtime);
 
-/// Root plugin for all multiplayer functionality.
-/// Orchestrates sub-plugins and registers core networking systems.
 pub struct MultiplayerPlugin;
 
 impl Plugin for MultiplayerPlugin {

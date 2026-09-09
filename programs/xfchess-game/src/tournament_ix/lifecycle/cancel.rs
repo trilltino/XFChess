@@ -1,12 +1,3 @@
-//! Instruction for safely halting a tournament and refunding entry fees.
-//!
-//! Refund source depends on phase: during Registration the entry-fee deposits
-//! still sit in the escrow PDA, so players are refunded from escrow; once Active
-//! the fees were swept to host_treasury at start, so refunds come from there
-//! (host_treasury must sign). The operator-funded guaranteed prize (SOL and/or
-//! USDC) is returned to the operator. This is also the min_players path: if
-//! start_tournament would fail with MinPlayersNotReached, call this instead.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
@@ -23,60 +14,46 @@ pub struct CancelTournament<'info> {
         constraint = tournament.authority == authority.key() @ GameErrorCode::NotTournamentAuthority
     )]
     pub tournament: Account<'info, Tournament>,
-    /// TournamentPlayersShard 0 always present (all tournament sizes)
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_0: Box<Account<'info, TournamentPlayersShard>>,
-    /// TournamentPlayersShard 1 — present for >64-player tournaments only.
-    /// Pass the program ID in its place for smaller tournaments.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[1u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_1: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// TournamentPlayersShard 2 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[2u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_2: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// TournamentPlayersShard 3 — present for 256-player tournaments only.
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[3u8], &tournament_id.to_le_bytes()],
         bump
     )]
     pub tournament_players_shard_3: Option<Box<Account<'info, TournamentPlayersShard>>>,
-    /// CHECK: USDC prize escrow PDA — the authority of the token account.
     #[account(
         seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub usdc_prize_escrow_authority: UncheckedAccount<'info>,
-    /// USDC prize escrow token account (only used if usdc_prize_mint is Some).
     #[account(
         mut,
         associated_token::mint = usdc_mint,
         associated_token::authority = usdc_prize_escrow_authority,
     )]
     pub usdc_prize_escrow: Option<Account<'info, TokenAccount>>,
-    /// Operator's USDC ATA — receives returned USDC (only used if usdc_prize_mint is Some).
     #[account(mut)]
     pub operator_usdc_ata: Option<Account<'info, TokenAccount>>,
-    /// The USDC mint account (only used if usdc_prize_mint is Some).
     pub usdc_mint: Option<Account<'info, token::Mint>>,
-    /// CHECK: Tournament escrow PDA — holds the guaranteed SOL prize and, during
-    /// Registration, the entry-fee deposits.
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// Host treasury wallet — must sign to authorize SOL refunds for Active-phase
-    /// cancellations (fees were already swept there at start). Also receives the
-    /// returned SOL prize guarantee.
     #[account(
         mut,
         constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess

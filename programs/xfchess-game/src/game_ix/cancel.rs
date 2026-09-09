@@ -1,36 +1,24 @@
-//! Instruction to cancel a game and return escrowed wagers to both players.
-
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-/// Accounts for cancelling a game: an open lobby, a not-yet-started active
-/// game, or a stalled active game (24h+ inactive). `black_authority` is only
-/// validated when black has actually joined.
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct CancelGame<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
-    /// CHECK: Escrow PDA validated by seeds in constraint
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: UncheckedAccount<'info>,
-    /// The player initiating the cancel — must be white or black.
     #[account(mut)]
     pub player: Signer<'info>,
-    /// CHECK: White player's wallet — must match game.white for accurate refund routing
     #[account(mut, constraint = white_authority.key() == game.white @ GameErrorCode::NotInGame)]
     pub white_authority: UncheckedAccount<'info>,
-    /// CHECK: Black player's wallet — only validated when black has joined
     #[account(mut)]
     pub black_authority: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
-/// Cancels the game (creator-only while waiting; either player once active
-/// with zero moves; either player after 24h of inactivity mid-game) and
-/// refunds each joined player's escrowed wager.
 pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let player = ctx.accounts.player.key();

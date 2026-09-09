@@ -1,39 +1,24 @@
-//! Typed chess game messages carried over Braid-HTTP.
-//!
-//! Each [`ChessMessage`] variant represents a distinct game event.
-//! Messages are serialised as JSON and used as the body of Braid PUT requests.
-
 use serde::{Deserialize, Serialize};
 
-/// Top-level enum for all chess game events.
-///
-/// Serialised with a `"type"` discriminant field for easy JSON parsing on the client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChessMessage {
-    /// A piece was moved.
     Move(MovePayload),
-    /// A player resigned.
-    Resign { player: String },
-    /// A player offered a draw.
-    OfferDraw { player: String },
-    /// A player accepted a draw offer.
-    AcceptDraw { player: String },
-    /// A player declined a draw offer.
-    DeclineDraw { player: String },
-    /// Clock state broadcast.
+    Resign {
+        player: String,
+    },
+    OfferDraw {
+        player: String,
+    },
+    AcceptDraw {
+        player: String,
+    },
+    DeclineDraw {
+        player: String,
+    },
     Clock(ClockState),
-    /// Stockfish analysis hint (streamed per depth increment).
     EngineAnalysis(EngineHint),
-    /// In-game pre-game or mid-game chat message.
     Chat(ChatPayload),
-    /// Session-key handshake: announces which on-chain session key signs a
-    /// player's moves for this game. Gossip-only historically, which was a
-    /// real, reproduced bug (gossip can silently drop this before the P2P
-    /// link establishes, leaving both sides stuck on "opponent pubkey
-    /// unavailable" forever) — carried on the moves stream (not a dedicated
-    /// stream) since it's small and this avoids adding a new `ChessStream`
-    /// variant for a message this infrequent.
     SessionInfo {
         player_pubkey: String,
         session_pubkey: String,
@@ -42,38 +27,25 @@ pub enum ChessMessage {
     },
 }
 
-/// A single chat message from a player.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatPayload {
-    /// Display name or peer ID of the sender.
     pub player: String,
-    /// UTF-8 chat text (max 500 chars enforced by the backend relay).
     pub text: String,
-    /// Unix timestamp in milliseconds when the message was sent.
     pub timestamp_ms: u64,
 }
 
-/// Payload for a chess move event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MovePayload {
-    /// Source square in algebraic notation (e.g. `"e2"`).
     pub from: String,
-    /// Destination square in algebraic notation (e.g. `"e4"`).
     pub to: String,
-    /// Promotion piece, if any (`'q'`, `'r'`, `'b'`, `'n'`).
     pub promotion: Option<char>,
-    /// Full UCI notation (e.g. `"e2e4"` or `"e7e8q"`).
     pub uci: String,
-    /// Complete FEN string after this move was applied.
     pub fen_after: String,
-    /// 1-indexed move number (increments after Black's move).
     pub move_number: u32,
-    /// Player who made this move (username or peer ID).
     pub player: String,
 }
 
 impl MovePayload {
-    /// Build a [`MovePayload`] from a UCI string and the resulting FEN.
     pub fn from_uci(
         uci: impl Into<String>,
         fen_after: impl Into<String>,
@@ -96,29 +68,19 @@ impl MovePayload {
     }
 }
 
-/// Clock state update.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClockState {
-    /// White's remaining time in milliseconds.
     pub white_ms: u64,
-    /// Black's remaining time in milliseconds.
     pub black_ms: u64,
-    /// Timestamp (ms since Unix epoch) when this snapshot was taken.
     pub timestamp_ms: u64,
 }
 
-/// Stockfish engine analysis hint, streamed per depth increment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineHint {
-    /// Search depth that produced this hint.
     pub depth: u8,
-    /// Evaluation score in centipawns (positive = good for the side to move).
     pub score_cp: i32,
-    /// Mate-in-N, if a forced mate was found.
     pub mate_in: Option<i32>,
-    /// Principal variation – sequence of best moves in UCI notation.
     pub pv: Vec<String>,
-    /// Best move in UCI notation.
     pub best_move: String,
 }
 

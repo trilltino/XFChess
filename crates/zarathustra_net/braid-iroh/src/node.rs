@@ -1,9 +1,3 @@
-//! BraidIrohNode — the main entry point for a Braid-over-Iroh peer.
-//!
-//! Orchestrates an iroh `Endpoint`, a gossip `Gossip` instance, and the
-//! Braid protocol handler. This is the type you create to participate
-//! in the P2P Braid network.
-
 use braid_core::Update;
 
 use iroh::{endpoint::presets, protocol::Router, Endpoint, EndpointAddr, EndpointId, SecretKey};
@@ -16,17 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-/// Cap on stored `Update`s kept per resource URL — without this a
-/// long-running node accumulates every move/patch ever PUT to a resource
-/// for its whole process lifetime. Oldest entries are dropped first; a
-/// client whose `since_version` cursor points past the retained tail just
-/// gets a full resync (see `get_updates_since`), which is the expected,
-/// self-healing fallback for that case already.
 const MAX_UPDATES_PER_RESOURCE: usize = 500;
 
-/// How often the debounced persistence flush runs when `data_dir` is set.
-/// Writes are coalesced instead of cloning + serializing the *entire*
-/// resource map on every single `put()`.
 const PERSIST_FLUSH_INTERVAL: Duration = Duration::from_secs(10);
 
 use crate::discovery::{DiscoveryConfig, MockDiscoveryMap};
@@ -34,35 +19,22 @@ use crate::discovery::{DiscoveryConfig, MockDiscoveryMap};
 use crate::protocol::{self, BraidAppState};
 use crate::subscription::SubscriptionManager;
 
-/// ALPN protocol identifier for Braid-over-H3.
-/// Peers negotiate this during the QUIC handshake.
 pub const BRAID_H3_ALPN: &[u8] = b"braid-h3/0";
 
-/// Configuration for spawning a BraidIrohNode.
 #[derive(Clone)]
 pub struct BraidIrohConfig {
-    /// Discovery configuration.
     pub discovery: DiscoveryConfig,
 
-    /// Optional pre-generated secret key for a stable identity.
-    /// If `None`, a random identity is generated.
     pub secret_key: Option<SecretKey>,
 
-    /// Optional directory for durable resource persistence.
-    /// When set, every `put()` is written to `<data_dir>/resources.json`
-    /// and the store is reloaded from disk on startup.
     pub data_dir: Option<PathBuf>,
 
-    /// Optional configuration for the TCP proxy bridge.
     pub proxy_config: Option<ProxyConfig>,
 }
 
-/// Configuration for the TCP proxy bridge.
 #[derive(Clone)]
 pub struct ProxyConfig {
-    /// Local address to listen on (e.g. 127.0.0.1:8080).
     pub listen_addr: std::net::SocketAddr,
-    /// Default peer ID to forward requests to.
     pub default_peer: EndpointId,
 }
 
@@ -77,8 +49,6 @@ impl Default for BraidIrohConfig {
     }
 }
 
-/// Load the persisted resource map from `data_dir/resources.json`.
-/// Returns an empty map if the file doesn't exist or is corrupt.
 async fn load_resources(data_dir: &Path) -> HashMap<String, Vec<Update>> {
     let path = data_dir.join("resources.json");
     match tokio::fs::read_to_string(&path).await {
@@ -87,8 +57,6 @@ async fn load_resources(data_dir: &Path) -> HashMap<String, Vec<Update>> {
     }
 }
 
-/// Flush the full resource map to `data_dir/resources.json` atomically
-/// (write to a temp file then rename).
 async fn save_resources(data_dir: &Path, map: &HashMap<String, Vec<Update>>) {
     let path = data_dir.join("resources.json");
     let tmp = data_dir.join("resources.json.tmp");
@@ -100,28 +68,17 @@ async fn save_resources(data_dir: &Path, map: &HashMap<String, Vec<Update>>) {
     }
 }
 
-/// A Braid-capable P2P peer. Holds the iroh endpoint, gossip, and
-/// subscription state. Create one per peer identity.
 pub struct BraidIrohNode {
     endpoint: Endpoint,
     #[allow(dead_code)]
     router: Router,
     subscription_mgr: Arc<SubscriptionManager>,
     resources: Arc<RwLock<HashMap<String, Vec<Update>>>>,
-    /// Optional directory for durable persistence of the resource store.
     data_dir: Option<PathBuf>,
-    /// Set on every write since the last persistence flush; the debounced
-    /// flush task clears it after writing. Avoids a full-map clone + disk
-    /// write on every single `put()`.
     dirty: Arc<AtomicBool>,
 }
 
 impl BraidIrohNode {
-    /// Spawn a new Braid-over-Iroh node.
-    ///
-    /// This sets up the iroh endpoint, starts the gossip protocol,
-    /// mounts the Braid-HTTP Axum routes via `IrohAxum`, and begins
-    /// accepting incoming connections.
     pub async fn spawn(config: BraidIrohConfig) -> anyhow::Result<Self> {
         // 1. Build the iroh endpoint with discovery + Braid ALPN
         let mut builder = Endpoint::builder(presets::N0).alpns(vec![
@@ -233,18 +190,14 @@ impl BraidIrohNode {
         })
     }
 
-    /// This node's public identity (EndpointId / NodeId).
     pub fn node_id(&self) -> EndpointId {
         self.endpoint.id()
     }
 
-    /// Full address info for this node (id + addresses + relay).
     pub async fn node_addr(&self) -> anyhow::Result<EndpointAddr> {
         Ok(self.endpoint.addr())
     }
 
-    /// Subscribe to a resource URL on the gossip network.
-    /// Returns a receiver stream of gossip events for this resource.
     pub async fn subscribe(
         &self,
         url: &str,
@@ -261,8 +214,6 @@ impl BraidIrohNode {
         Ok(receiver)
     }
 
-    /// PUT a Braid Update to a resource. Stores it locally and broadcasts
-    /// to all gossip subscribers.
     pub async fn put(&self, url: &str, update: Update) -> anyhow::Result<()> {
         // Normalize the URL for consistent storage (using same logic as SubscriptionManager)
         let normalized = crate::subscription::SubscriptionManager::normalize_url(url);
@@ -298,7 +249,6 @@ impl BraidIrohNode {
         Ok(())
     }
 
-    /// Store an update locally without broadcasting (for received gossip).
     pub async fn store_update(&self, url: &str, update: Update) {
         let mut guard = self.resources.write().await;
         let history = guard.entry(url.to_string()).or_insert_with(Vec::new);
@@ -312,7 +262,6 @@ impl BraidIrohNode {
         }
     }
 
-    /// GET the latest state of a resource from local storage.
     #[allow(dead_code)]
     pub async fn get(&self, url: &str) -> Option<Update> {
         self.resources
@@ -322,7 +271,6 @@ impl BraidIrohNode {
             .and_then(|h| h.last().cloned())
     }
 
-    /// GET a specific version of a resource.
     pub async fn get_version(&self, url: &str, version_id: &str) -> Option<Update> {
         self.resources.read().await.get(url).and_then(|history| {
             history
@@ -332,7 +280,6 @@ impl BraidIrohNode {
         })
     }
 
-    /// GET all version IDs for a resource (latest last).
     pub async fn get_history(&self, url: &str) -> Vec<String> {
         if let Some(history) = self.resources.read().await.get(url) {
             history
@@ -350,7 +297,6 @@ impl BraidIrohNode {
         }
     }
 
-    /// GET all stored Updates for a resource URL, in order (oldest first).
     pub async fn get_updates(&self, url: &str) -> Vec<Update> {
         let normalized = SubscriptionManager::normalize_url(url);
         self.resources
@@ -361,12 +307,6 @@ impl BraidIrohNode {
             .unwrap_or_default()
     }
 
-    /// GET all Updates for a resource that were stored after `since_version`.
-    ///
-    /// Walks the stored history and returns everything following the first
-    /// entry whose primary version string matches `since_version`.  If
-    /// `since_version` is not found, the full history is returned so the
-    /// caller always ends up in a consistent state.
     pub async fn get_updates_since(&self, url: &str, since_version: &str) -> Vec<Update> {
         let normalized = SubscriptionManager::normalize_url(url);
         let guard = self.resources.read().await;
@@ -385,25 +325,21 @@ impl BraidIrohNode {
         }
     }
 
-    /// Shut down the node gracefully.
     #[allow(dead_code)]
     pub async fn shutdown(self) -> anyhow::Result<()> {
         self.router.shutdown().await?;
         Ok(())
     }
 
-    /// Access the subscription manager (for advanced usage).
     #[allow(dead_code)]
     pub fn subscriptions(&self) -> &Arc<SubscriptionManager> {
         &self.subscription_mgr
     }
 
-    /// Access the iroh endpoint (for advanced usage).
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
 
-    /// Join additional peers to an existing gossip topic.
     pub async fn join_peers(&self, url: &str, peers: Vec<EndpointId>) -> anyhow::Result<()> {
         tracing::debug!(url, peer_count = peers.len(), peers = ?peers, "joining peers to topic");
         self.subscription_mgr.join_peers(url, peers).await

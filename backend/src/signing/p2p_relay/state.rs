@@ -1,5 +1,3 @@
-//! State management for P2P relay.
-
 use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -8,10 +6,8 @@ use tokio::time;
 
 use super::types::{ActiveGame, LOBBY_TTL_SECS};
 
-/// Shared state for P2P relay
 pub type P2PRelayState = Arc<RwLock<HashMap<String, ActiveGame>>>;
 
-/// Creates the relay state and spawns cleanup task
 pub fn create_relay_state() -> P2PRelayState {
     let state: P2PRelayState = Arc::new(RwLock::new(HashMap::new()));
 
@@ -29,7 +25,6 @@ pub fn create_relay_state() -> P2PRelayState {
     state
 }
 
-/// Removes stale games (no activity for `LOBBY_TTL_SECS`)
 fn cleanup_stale_games(state: &P2PRelayState) {
     use super::types::GameStatus;
 

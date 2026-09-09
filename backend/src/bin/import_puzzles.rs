@@ -1,20 +1,3 @@
-//! One-off importer for the Lichess open puzzle database (docs/PUZZLES.md §4).
-//!
-//! Usage:
-//!   DATABASE_URL=sqlite://backend.db \
-//!     cargo run --bin import_puzzles -- ./lichess_db_puzzle.csv[.zst] \
-//!       [--max-dev N] [--min-rating N] [--max-rating N]
-//!
-//! Streams the Lichess puzzle CSV into the `puzzles` table (migration 018).
-//! Idempotent: INSERT OR REPLACE on the primary key. Accepts either a plain
-//! `.csv` or a zstd-compressed `.csv.zst` (decompressed on the fly via the
-//! `zstd` crate that the backend already depends on).
-//!
-//! Lichess CSV columns:
-//!   0 PuzzleId  1 FEN  2 Moves  3 Rating  4 RatingDeviation
-//!   5 Popularity  6 NbPlays  7 Themes  8 GameUrl  9 OpeningTags
-//! We store only id, fen, line(=Moves), rating, rating_dev, themes.
-
 use std::fs::File;
 use std::io::{BufReader, Read};
 

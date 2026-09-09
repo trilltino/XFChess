@@ -1,9 +1,3 @@
-//! P2P relay endpoints on the VPS.
-//!
-//! The VPS acts as a discovery + message-relay for direct P2P games:
-//! hosts `announce` open games, players `list`/`join`, either side can
-//! `send`/`poll` messages, and `leave` cancels a hosted game.
-
 use serde::{Deserialize, Serialize};
 
 use super::client::{client, vps_base};
@@ -30,7 +24,6 @@ struct P2PJoinReq<'a> {
     password: Option<String>,
 }
 
-/// Optional filter for listing games
 #[derive(Default, Serialize)]
 pub struct P2PListFilter {
     pub time_min: Option<u32>,
@@ -39,7 +32,6 @@ pub struct P2PListFilter {
     pub stake_max: Option<f64>,
     pub elo_min: Option<u16>,
     pub elo_max: Option<u16>,
-    /// "elo_asc"|"elo_desc"|"stake_asc"|"stake_desc"|"time_asc"|"newest"
     pub sort: Option<String>,
 }
 
@@ -48,18 +40,9 @@ struct P2PMessageReq<'a> {
     game_id: String,
     from_node_id: &'a str,
     message: &'a str,
-    /// Ed25519 signature over `"{game_id}:{from_node_id}:{message}"`,
-    /// proving the sender actually controls `from_node_id`'s private key
-    /// rather than just claiming the (public, broadcast) node_id string.
-    /// See `backend/src/signing/p2p_relay/routes.rs::send_message`'s
-    /// verification and `NetworkMessage::sign`/`verify`
-    /// (`src/multiplayer/network/protocol.rs`) for the identical pattern
-    /// this mirrors.
     signature: Vec<u8>,
 }
 
-/// Build the exact byte sequence `p2p_send_message`'s signature covers, so
-/// the backend can reconstruct and verify it identically.
 fn p2p_message_signable(game_id: &str, from_node_id: &str, message: &str) -> Vec<u8> {
     format!("{game_id}:{from_node_id}:{message}").into_bytes()
 }
@@ -111,7 +94,6 @@ struct P2PPollResp {
     next_index: usize,
 }
 
-/// Announce a P2P game to the VPS relay.
 pub fn p2p_announce_game(
     game_id: String,
     host_node_id: &str,
@@ -139,7 +121,6 @@ pub fn p2p_announce_game(
     )
 }
 
-/// Announce a password-protected P2P game.
 pub fn p2p_announce_game_with_password(
     game_id: String,
     host_node_id: &str,
@@ -210,12 +191,10 @@ fn p2p_announce_game_private(
     Ok(())
 }
 
-/// List available P2P games from VPS relay (no filter).
 pub fn p2p_list_games() -> Result<Vec<P2PGameListing>, String> {
     p2p_list_games_filtered(&P2PListFilter::default())
 }
 
-/// List available P2P games with optional filter / sort.
 pub fn p2p_list_games_filtered(filter: &P2PListFilter) -> Result<Vec<P2PGameListing>, String> {
     let base = vps_base();
     tracing::trace!("[P2P] polling games from {}", base);
@@ -259,12 +238,10 @@ pub fn p2p_list_games_filtered(filter: &P2PListFilter) -> Result<Vec<P2PGameList
         .map_err(|e| format!("vps p2p_list_games parse: {e}"))
 }
 
-/// Join a P2P game via VPS relay. Returns the host node ID on success.
 pub fn p2p_join_game(game_id: String, joiner_node_id: &str) -> Result<Option<String>, String> {
     p2p_join_game_with_password(game_id, joiner_node_id, None)
 }
 
-/// Join a password-protected P2P game.
 pub fn p2p_join_game_with_password(
     game_id: String,
     joiner_node_id: &str,
@@ -297,7 +274,6 @@ pub fn p2p_join_game_with_password(
     }
 }
 
-/// Send a P2P message via VPS relay.
 pub fn p2p_send_message(
     game_id: String,
     from_node_id: &str,
@@ -343,7 +319,6 @@ pub fn p2p_send_message(
     Ok(())
 }
 
-/// Poll for P2P messages from VPS relay. Returns `(messages, next_index)`.
 pub fn p2p_poll_messages(
     game_id: String,
     node_id: &str,
@@ -374,7 +349,6 @@ pub fn p2p_poll_messages(
     Ok((result.messages, result.next_index))
 }
 
-/// Send a heartbeat so the lobby doesn't expire on the backend while the host is waiting.
 pub fn p2p_heartbeat(game_id: String, host_node_id: &str) -> Result<(), String> {
     let base = vps_base();
     let resp = client()?
@@ -389,10 +363,6 @@ pub fn p2p_heartbeat(game_id: String, host_node_id: &str) -> Result<(), String> 
     Ok(())
 }
 
-/// Host confirms the game has actually started (called once GAME_START is
-/// sent, see `start_p2p_host_game` in `states/main_menu/screens.rs`). Flips
-/// the relay's listing status from Connecting to InProgress so the game
-/// shows up correctly to anything reading the listing's status field.
 pub fn p2p_accept_join(game_id: String, host_node_id: &str) -> Result<(), String> {
     let resp = client()?
         .post(format!("{}/p2p/accept", vps_base()))
@@ -406,7 +376,6 @@ pub fn p2p_accept_join(game_id: String, host_node_id: &str) -> Result<(), String
     Ok(())
 }
 
-/// Leave or cancel a P2P game on the VPS relay.
 pub fn p2p_leave_game(game_id: String, node_id: &str) -> Result<(), String> {
     let resp = client()?
         .post(format!("{}/p2p/leave", vps_base()))
@@ -423,10 +392,6 @@ pub fn p2p_leave_game(game_id: String, node_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Same as [`p2p_leave_game`] but with a short (2s) timeout instead of the
-/// shared client's 120s default. Used from the app-exit cleanup hook, where
-/// we're trying to notify the relay before the process actually terminates —
-/// a slow/unreachable backend must not hang shutdown for two minutes.
 pub fn p2p_leave_game_fast(game_id: String, node_id: &str) -> Result<(), String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))

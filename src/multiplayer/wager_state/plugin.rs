@@ -4,7 +4,6 @@ use bevy::prelude::*;
 use super::state::WagerState;
 use super::ui::wager_ui_system;
 
-/// Plugin for wager integration
 pub struct WagerPlugin;
 
 impl Plugin for WagerPlugin {
@@ -15,7 +14,6 @@ impl Plugin for WagerPlugin {
     }
 }
 
-/// Initialize wager state from CLI config
 fn initialize_wager_state(config: Res<GameConfig>, mut wager_state: ResMut<WagerState>) {
     *wager_state = WagerState::from_config(&config);
 

@@ -1,7 +1,6 @@
 use crate::config::AcConfig;
 use crate::types::Complexity;
 
-/// Classify a position by how much choice the player had.
 pub fn classify(top1_cp: i32, top2_cp: i32, cfg: &AcConfig) -> Complexity {
     let delta = (top1_cp - top2_cp).abs();
     if delta < cfg.forced_delta_cp {

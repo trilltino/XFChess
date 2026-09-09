@@ -1,18 +1,3 @@
-//! Proves `finalize_game` actually mutates `PlayerProfile.elo_rating` (and the
-//! surrounding win/loss/streak bookkeeping) correctly when run through the
-//! real compiled program — not just that the pure K=32 formula in
-//! `elo::glicko2::calculate_elo_update` is right in isolation.
-//!
-//! Before this file: `game_settlement_tests.rs` and
-//! `global_session_settlement_tests.rs` already exercise `finalize_game`
-//! through the same `ProgramTest` harness, but only assert on escrow
-//! payout/fee-payer behavior — neither ever reads back `elo_rating`, `wins`,
-//! `losses`, `win_streak`, or `ranked_games`. `calculate_elo_update`'s own
-//! unit tests prove the math; nothing before this proved the instruction
-//! actually applies that math to the right accounts.
-//!
-//! Prereq: `cargo build-sbf` (see docs/ER_TESTING.md).
-
 mod common;
 
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
@@ -26,10 +11,6 @@ fn treasury_vault_pda() -> Pubkey {
     Pubkey::find_program_address(&[b"treasury_vault"], &xfchess_game::ID).0
 }
 
-/// A profile seeded at a specific rating, rather than the zeroed
-/// `Default::default()` other settlement tests use — needed so the ELO
-/// change is actually observable and comparable against
-/// `calculate_elo_update`'s own output.
 fn rated_profile_account(
     authority: Pubkey,
     elo_rating: f64,
@@ -92,12 +73,6 @@ fn settlement_game_account(
     (pda, program_account(&game, 8 + Game::INIT_SPACE))
 }
 
-/// `common::send` reuses `ctx.last_blockhash` as-is; an identical instruction
-/// sent again on the same blockhash produces a byte-identical transaction
-/// signature, which `banks_client` silently dedupes as "already processed"
-/// instead of re-executing the handler — so a naive replay test would pass
-/// for the wrong reason (never actually hitting the closed account). Refresh
-/// the blockhash first so the replay is a genuinely distinct transaction.
 async fn send_as_distinct_tx(
     ctx: &mut solana_program_test::ProgramTestContext,
     ix: Instruction,
@@ -137,10 +112,6 @@ fn finalize_game_ix(game_id: u64, white: Pubkey, black: Pubkey, fee_payer: Pubke
     }
 }
 
-/// `finalize_game`'s standard funded fixture: game + both profiles + escrow
-/// (zero wager, since these tests are isolating the ELO/stats side, not the
-/// payout math already covered elsewhere) + treasury/fee-payer/authority
-/// system accounts.
 #[allow(clippy::too_many_arguments)]
 async fn start_with_profiles(
     game_id: u64,
@@ -289,10 +260,6 @@ async fn finalize_game_applies_elo_update_for_a_draw() {
     assert_eq!(black_profile.win_streak, 0);
 }
 
-/// `settlement.rs`'s `if match_type != MatchType::Free` gate must keep
-/// `elo_rating`/`ranked_games` untouched for a Free (unwagered) game, even
-/// though `games_played`/`wins`/`losses` still increment for every game
-/// regardless of match type.
 #[tokio::test]
 async fn finalize_game_does_not_change_elo_for_a_free_match() {
     let white = Pubkey::new_unique();
@@ -341,11 +308,6 @@ async fn finalize_game_does_not_change_elo_for_a_free_match() {
     assert_eq!(black_profile.games_played, 1);
 }
 
-/// The `Game` account has `close = fee_payer`, so a second `finalize_game`
-/// for the same `game_id` can't execute at all — the account is gone. This
-/// pins that as the mechanism that makes "one settled game -> exactly one
-/// ELO mutation" hold, by proving the second call fails outright rather than
-/// silently re-applying the K=32 update.
 #[tokio::test]
 async fn finalize_game_cannot_be_replayed_to_double_apply_elo() {
     let white = Pubkey::new_unique();

@@ -1,8 +1,3 @@
-//! Registry and fan-out hub for live Braid resources.
-//!
-//! Each write is sent to local HTTP subscribers and, when configured, the
-//! optional gossip sink.
-
 use crate::resource::{
     protocol::BraidUpdate,
     store::{AppendLog, PatchedDoc},
@@ -21,11 +16,8 @@ enum ResourceEntry {
     Log(AppendLog),
 }
 
-/// Receives each published update for another transport such as P2P gossip.
-/// The callback must return quickly because writes invoke it synchronously.
 pub type GossipSink = Arc<dyn Fn(&str, &BraidUpdate) + Send + Sync>;
 
-/// Shared registry of live resources and subscriber channels.
 #[derive(Clone, Default)]
 pub struct ResourceHub {
     inner: Arc<RwLock<HashMap<String, ResourceEntry>>>,
@@ -37,13 +29,10 @@ impl ResourceHub {
         Self::default()
     }
 
-    /// Install the sink that mirrors every published update onto a second
-    /// transport. Replaces any previously installed sink.
     pub fn set_gossip_sink(&self, sink: GossipSink) {
         *self.gossip_sink.write() = Some(sink);
     }
 
-    /// Hand one published update to the gossip sink, if one is installed.
     fn fan_out(&self, path: &str, update: &BraidUpdate) {
         let sink = self.gossip_sink.read().clone();
         if let Some(sink) = sink {
@@ -51,7 +40,6 @@ impl ResourceHub {
         }
     }
 
-    /// Registers a patched document with an initial JSON value.
     pub fn register_doc(&self, path: impl Into<String>, initial: Value) {
         let path = path.into();
         debug!("[braid-hub] register_doc {}", path);
@@ -60,7 +48,6 @@ impl ResourceHub {
             .insert(path, ResourceEntry::Doc(PatchedDoc::new(initial)));
     }
 
-    /// Registers an empty append log, replacing any existing resource.
     pub fn register_log(&self, path: impl Into<String>) {
         let path = path.into();
         debug!("[braid-hub] register_log {}", path);
@@ -69,7 +56,6 @@ impl ResourceHub {
             .insert(path, ResourceEntry::Log(AppendLog::new()));
     }
 
-    /// Registers an append log only when `path` is absent.
     pub fn ensure_log(&self, path: &str) -> bool {
         if self.inner.read().contains_key(path) {
             return false;
@@ -78,12 +64,10 @@ impl ResourceHub {
         true
     }
 
-    /// Returns whether a resource is registered at `path`.
     pub fn has(&self, path: &str) -> bool {
         self.inner.read().contains_key(path)
     }
 
-    /// Returns the current JSON state of a resource.
     pub async fn current_json(&self, path: &str) -> Option<Value> {
         let entry = self.inner.read().get(path)?.clone();
         Some(match entry {
@@ -92,7 +76,6 @@ impl ResourceHub {
         })
     }
 
-    /// Returns the current snapshot and a live update receiver.
     pub async fn subscribe(
         &self,
         path: &str,
@@ -104,7 +87,6 @@ impl ResourceHub {
         })
     }
 
-    /// Applies a JSON Patch to a patched document.
     pub fn patch(&self, path: &str, patch: Patch) {
         if let Some(ResourceEntry::Doc(doc)) = self.inner.read().get(path).cloned() {
             match doc.apply(patch) {
@@ -114,7 +96,6 @@ impl ResourceHub {
         }
     }
 
-    /// Replaces a patched document and broadcasts the new snapshot.
     pub fn replace(&self, path: &str, new_doc: Value) {
         if let Some(ResourceEntry::Doc(doc)) = self.inner.read().get(path).cloned() {
             let update = doc.replace(new_doc);
@@ -122,7 +103,6 @@ impl ResourceHub {
         }
     }
 
-    /// Appends an entry to an append log.
     pub fn append(&self, path: &str, entry: Value) {
         if let Some(ResourceEntry::Log(log)) = self.inner.read().get(path).cloned() {
             let update = log.append(entry);
@@ -130,7 +110,6 @@ impl ResourceHub {
         }
     }
 
-    /// Ensures the standard resources for a tournament exist.
     pub fn ensure_tournament(&self, tournament_id: u64) {
         let tid = tournament_id;
         let docs = [
@@ -155,7 +134,6 @@ impl ResourceHub {
         }
     }
 
-    /// Ensures the pairings resource for a round exists.
     pub fn ensure_pairings(&self, tournament_id: u64, round: u8) {
         let path = format!("tournament/{}/pairings/{}", tournament_id, round);
         if !self.inner.read().contains_key(&path) {

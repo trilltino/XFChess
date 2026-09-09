@@ -1,46 +1,13 @@
-//! Privy access-token verification.
-//!
-//! Privy issues **ES256** JWTs signed with keys published at a public,
-//! unauthenticated JWKS endpoint. Verifying them therefore needs no Privy SDK
-//! and no app secret — `jsonwebtoken` (already a dependency) handles ES256, and
-//! the JWKS is a plain GET.
-//!
-//! ```text
-//! GET https://auth.privy.io/api/v1/apps/{app_id}/jwks.json
-//! ```
-//!
-//! # Design notes
-//!
-//! - **`kid` selection is mandatory.** The live endpoint returns *two* EC P-256
-//!   keys (verified 2026-08-23), because Privy rotates. Taking `keys[0]` would
-//!   verify correctly right up until the day it silently didn't.
-//! - **Fail closed.** If the JWKS cannot be fetched or the `kid` is unknown,
-//!   verification fails. There is no unverified fallback path, by design: the
-//!   token is what proves the caller controls the social account.
-//! - **`aud` is a set, not a value.** One app ID today, but the plan's §10
-//!   splits web and desktop into separate Privy apps at the mainnet cutover.
-//!   Accepting a set from the start makes that a config change instead of a code
-//!   change.
-//! - This token is **corroborating evidence, never the sole authority**. Every
-//!   route that consumes it also requires a wallet signature over
-//!   `xfchess:<action>:<ts>` (see `verify_wallet_sig`), so a stolen Privy token
-//!   on its own cannot authenticate anyone.
-//!
-//! See docs/plans/social-login-embedded-wallet-plan.md §9.2.
-
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
-/// How long a fetched JWKS is reused before being refetched.
 const JWKS_CACHE_TTL: Duration = Duration::from_secs(3600);
 
-/// Guards against a pathological/hostile JWKS response.
 const JWKS_MAX_KEYS: usize = 16;
 
-/// Privy's token issuer claim — constant across all apps.
 const PRIVY_ISSUER: &str = "privy.io";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -59,32 +26,23 @@ pub struct Jwks {
     pub keys: Vec<Jwk>,
 }
 
-/// Claims XFChess cares about from a Privy access token.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PrivyClaims {
-    /// Privy DID, e.g. `did:privy:clx…`. This is the credential subject.
     pub sub: String,
-    /// Always `privy.io`.
     pub iss: String,
-    /// The Privy app ID this token was minted for.
     pub aud: String,
     pub exp: i64,
     #[serde(default)]
     pub iat: i64,
-    /// Privy session id.
     #[serde(default)]
     pub sid: Option<String>,
 }
 
 #[derive(Debug)]
 pub enum PrivyError {
-    /// JWKS could not be fetched or parsed. Fail closed.
     Jwks(String),
-    /// Token header/format is unusable.
     Malformed(String),
-    /// Signature, `exp`, `iss` or `aud` did not check out.
     Invalid(String),
-    /// Privy is not configured on this deployment.
     NotConfigured,
 }
 
@@ -99,10 +57,6 @@ impl std::fmt::Display for PrivyError {
     }
 }
 
-/// Splits the configured `PRIVY_APP_ID` value into accepted `aud` values.
-///
-/// Pure so it is testable without mutating process env — these tests otherwise
-/// race each other, since Rust runs them in parallel threads of one process.
 fn parse_app_ids(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(|s| s.trim().to_string())
@@ -110,20 +64,14 @@ fn parse_app_ids(raw: &str) -> Vec<String> {
         .collect()
 }
 
-/// Comma-separated list of accepted Privy app IDs (the `aud` claim).
 pub fn app_ids() -> Vec<String> {
     parse_app_ids(&std::env::var("PRIVY_APP_ID").unwrap_or_default())
 }
 
-/// Whether social login is configured. When false every Privy route should
-/// behave as if it does not exist — this is the server-side half of the
-/// `VITE_PRIVY_APP_ID` kill switch.
 pub fn is_configured() -> bool {
     !app_ids().is_empty()
 }
 
-/// JWKS URL for an app, given an optional explicit override. Pure — see
-/// `parse_app_ids` for why.
 fn jwks_url_for(app_id: &str, override_url: Option<&str>) -> String {
     match override_url.map(str::trim).filter(|s| !s.is_empty()) {
         Some(url) => url.to_string(),
@@ -131,8 +79,6 @@ fn jwks_url_for(app_id: &str, override_url: Option<&str>) -> String {
     }
 }
 
-/// JWKS URL for an app. Overridable via `PRIVY_JWKS_URL` (single-app setups and
-/// tests); otherwise derived from the app ID.
 fn jwks_url(app_id: &str) -> String {
     jwks_url_for(app_id, std::env::var("PRIVY_JWKS_URL").ok().as_deref())
 }
@@ -177,9 +123,6 @@ async fn fetch_jwks(app_id: &str) -> Result<Jwks, PrivyError> {
     Ok(jwks)
 }
 
-/// Returns a cached JWKS, refetching when stale. `force_refresh` bypasses the
-/// cache — used exactly once per verification when a `kid` is unknown, so a key
-/// rotation resolves on the next request instead of after a full TTL of 401s.
 async fn get_jwks(app_id: &str, force_refresh: bool) -> Result<Jwks, PrivyError> {
     let mut guard = cache().lock().await;
 
@@ -207,11 +150,6 @@ fn decoding_key(jwk: &Jwk) -> Result<DecodingKey, PrivyError> {
         .map_err(|e| PrivyError::Invalid(format!("bad EC key material: {e}")))
 }
 
-/// Verifies a Privy access token and returns its claims.
-///
-/// Checks, in order: token is well-formed; `kid` matches a published key
-/// (refetching once on a miss); ES256 signature is valid; `exp` is in the
-/// future; `iss` is `privy.io`; `aud` is one of the configured app IDs.
 pub async fn verify_access_token(token: &str) -> Result<PrivyClaims, PrivyError> {
     let app_ids = app_ids();
     let primary = app_ids.first().ok_or(PrivyError::NotConfigured)?;
@@ -303,8 +241,6 @@ mod tests {
         );
     }
 
-    /// The real app's URL, so a refactor that breaks the path shape is caught
-    /// here rather than by a 404 in production.
     #[test]
     fn jwks_url_matches_the_configured_app() {
         assert_eq!(
@@ -326,8 +262,6 @@ mod tests {
         assert!(decoding_key(&jwk).is_err());
     }
 
-    /// The live endpoint returns two keys; this is the regression guard for the
-    /// "just take keys[0]" shortcut.
     #[test]
     fn parses_a_two_key_privy_jwks() {
         let raw = r#"{"keys":[

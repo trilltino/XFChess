@@ -1,9 +1,3 @@
-//! Anti-cheat validation for Solana Blinks tournament registration.
-//!
-//! This module provides IP-based pattern detection, rate limiting,
-//! and other security checks to prevent bot attacks and sybil attacks
-//! on tournaments.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,22 +5,15 @@ use std::time::{Duration, Instant};
 use once_cell::sync::OnceCell;
 use tokio::sync::RwLock;
 
-/// IP-based pattern detection for anti-cheat.
 pub struct IpPatternDetector {
-    /// Tracks registration attempts per IP
     registrations_per_ip: Arc<RwLock<HashMap<String, u32>>>,
-    /// Tracks rapid registration attempts per IP (rate limiting)
     rate_limit_tracker: Arc<RwLock<HashMap<String, Vec<Instant>>>>,
-    /// Maximum registrations allowed per IP
     max_registrations_per_ip: u32,
-    /// Rate limit window duration
     rate_limit_window: Duration,
-    /// Maximum registrations within rate limit window
     max_registrations_per_window: u32,
 }
 
 impl IpPatternDetector {
-    /// Creates a new IP pattern detector.
     pub fn new() -> Self {
         Self {
             registrations_per_ip: Arc::new(RwLock::new(HashMap::new())),
@@ -37,9 +24,6 @@ impl IpPatternDetector {
         }
     }
 
-    /// Checks if an IP address has suspicious registration patterns.
-    ///
-    /// Returns an error message if patterns are detected, None if clean.
     pub async fn check_ip_patterns(&self, ip_address: &str, _tournament_id: u64) -> Option<String> {
         // Check total registrations per IP
         {
@@ -85,7 +69,6 @@ impl IpPatternDetector {
         None
     }
 
-    /// Clears rate limit tracking for a specific IP (for testing).
     #[cfg(test)]
     pub async fn clear_ip(&self, ip_address: &str) {
         let mut tracker = self.rate_limit_tracker.write().await;
@@ -102,17 +85,12 @@ impl Default for IpPatternDetector {
     }
 }
 
-/// Global IP pattern detector instance.
 static IP_DETECTOR: OnceCell<IpPatternDetector> = OnceCell::new();
 
-/// Gets the global IP pattern detector instance.
 pub fn get_ip_detector() -> &'static IpPatternDetector {
     IP_DETECTOR.get_or_init(|| IpPatternDetector::new())
 }
 
-/// Checks IP patterns using the global detector.
-///
-/// This is a convenience function that uses the singleton instance.
 pub async fn check_ip_patterns(ip_address: &str, _tournament_id: u64) -> Option<String> {
     get_ip_detector()
         .check_ip_patterns(ip_address, _tournament_id)

@@ -8,7 +8,6 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 const ALPN: &[u8] = b"iroh+h3";
 
-/// RemoteId extraction
 #[cfg_attr(not(target_family = "wasm"), tokio::test)]
 #[wasm_bindgen_test]
 async fn remote_id_extraction() {
