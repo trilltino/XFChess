@@ -2,29 +2,26 @@ use anchor_lang::prelude::*;
 
 #[account]
 pub struct UsernameRecord {
-    pub owner: Pubkey,   // Player who owns this username
-    pub created_at: i64, // Timestamp when username was claimed
+    pub owner: Pubkey,
+    pub created_at: i64,
 }
 
 impl UsernameRecord {
-    pub const LEN: usize = 8 + 32 + 8; // Discriminator + Pubkey + i64
+    pub const LEN: usize = 8 + 32 + 8;
 }
 
 pub fn validate_username(username: &str) -> Result<()> {
-    // Check length
     let len = username.len();
     require!(
         len >= 3 && len <= 20,
         crate::errors::GameErrorCode::InvalidLength
     );
 
-    // Check valid characters
     for ch in username.chars() {
         let valid = ch.is_ascii_alphanumeric() || ch == '_' || ch == '-';
         require!(valid, crate::errors::GameErrorCode::InvalidCharacters);
     }
 
-    // Check reserved names (case-insensitive)
     let lower = username.to_lowercase();
     let reserved = [
         "admin",
@@ -47,7 +44,3 @@ pub fn validate_username(username: &str) -> Result<()> {
 
     Ok(())
 }
-
-// Username-specific error variants are consolidated into `GameErrorCode` in
-// `errors.rs` so Anchor's IDL builder does not find multiple #[error_code]
-// enums across the crate.

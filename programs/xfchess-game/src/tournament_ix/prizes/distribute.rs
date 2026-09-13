@@ -1,6 +1,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::lifecycle::initialize_escrow::TournamentEscrow;
 use crate::tournament_ix::prizes::ledger;
 use anchor_lang::prelude::*;
 
@@ -18,7 +19,7 @@ pub struct DistributeTournamentPrizes<'info> {
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
-    pub escrow_pda: UncheckedAccount<'info>,
+    pub escrow_pda: Account<'info, TournamentEscrow>,
     pub cranker: Signer<'info>,
 }
 
@@ -33,18 +34,50 @@ pub fn handler<'info>(
         GameErrorCode::TournamentNotCompleted
     );
     require!(tournament.prize_pool > 0, GameErrorCode::NoPrizeToClaim);
-    // Vesting payouts need per-claim schedule math — keep those pull-based.
     require!(
         tournament.payout_type == PayoutType::LumpSum,
         GameErrorCode::NoPrizeToClaim
     );
 
     let places = ledger::places(tournament);
+    let expected_wallets: Vec<Pubkey> = places
+        .iter()
+        .enumerate()
+        .filter_map(|(i, place)| {
+            if tournament.prize_shares[i] > 0
+                && tournament.prizes_claimed & ledger::place_bit(i).ok()? == 0
+            {
+                *place
+            } else {
+                None
+            }
+        })
+        .collect();
+    require!(
+        ctx.remaining_accounts.len() == expected_wallets.len(),
+        GameErrorCode::InvalidRemainingAccounts
+    );
 
-    // The escrow account must stay rent-exempt until close_tournament reclaims it.
-    let rent_min = Rent::get()?.minimum_balance(ctx.accounts.escrow_pda.data_len());
+    let mut seen_wallets = Vec::with_capacity(ctx.remaining_accounts.len());
+    for (account, expected_key) in ctx.remaining_accounts.iter().zip(expected_wallets.iter()) {
+        require_keys_eq!(
+            account.key(),
+            *expected_key,
+            GameErrorCode::InvalidRemainingAccounts
+        );
+        require!(
+            account.is_writable && account.owner == &system_program::ID,
+            GameErrorCode::InvalidRemainingAccounts
+        );
+        require!(
+            !seen_wallets.iter().any(|key| key == expected_key),
+            GameErrorCode::InvalidRemainingAccounts
+        );
+        seen_wallets.push(*expected_key);
+    }
 
-    let mut paid = 0u8;
+    let mut paid = 0usize;
+    let mut wallet_index = 0usize;
     for (i, place) in places.iter().enumerate() {
         let Some(winner_key) = place else { continue };
         let share_bps = tournament.prize_shares[i];
@@ -55,27 +88,25 @@ pub fn handler<'info>(
         if tournament.prizes_claimed & place_bit != 0 {
             continue;
         }
-        let Some(wallet) = ctx
-            .remaining_accounts
-            .iter()
-            .find(|a| a.key() == *winner_key)
-        else {
-            continue;
-        };
+        let wallet = &ctx.remaining_accounts[wallet_index];
+        wallet_index += 1;
+        require_keys_eq!(
+            wallet.key(),
+            *winner_key,
+            GameErrorCode::InvalidRemainingAccounts
+        );
 
         let prize = ledger::prize_amount(tournament.prize_pool, share_bps)?;
         if prize == 0 {
             continue;
         }
 
-        let escrow_lamports = ctx.accounts.escrow_pda.lamports();
-        require!(
-            escrow_lamports.saturating_sub(prize) >= rent_min,
-            GameErrorCode::InsufficientPrizeFunds
-        );
-
-        **ctx.accounts.escrow_pda.try_borrow_mut_lamports()? -= prize;
-        **wallet.try_borrow_mut_lamports()? += prize;
+        crate::common::escrow::debit_program_pda(
+            &ctx.accounts.escrow_pda.to_account_info(),
+            wallet,
+            prize,
+        )
+        .map_err(|_| GameErrorCode::InsufficientPrizeFunds)?;
 
         tournament.prizes_claimed |= place_bit;
         paid += 1;

@@ -8,7 +8,7 @@ Program ID (localnet + devnet): `8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU`.
 
 The trust root for staked play: the backend builds unsigned transactions against this
 program, clients sign them, and moves are validated on-chain by
-[`chess-logic-on-chain`](../../crates/solana/chess-logic-on-chain/) (`move-validation`
+[`chess-logic-on-chain`](src/chess_logic_on_chain.rs) (`move-validation`
 feature). During a game the `Game` PDA is delegated to the ER for sub-second
 `record_move`, then committed back for settlement — see [MAGICBLOCK.md](../../MAGICBLOCK.md)
 and [docs/architecture/xfchess-game-crate.md](../../docs/architecture/xfchess-game-crate.md).

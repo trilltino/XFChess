@@ -25,23 +25,20 @@ pub struct SetUsername<'info> {
     #[account(mut)]
     pub player: Signer<'info>,
 
-    pub authority: AccountInfo<'info>,
+    pub authority: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }
 
 pub fn handler(ctx: Context<SetUsername>, username: String) -> Result<()> {
-    // Validate username format
     validate_username(&username)?;
 
     let profile = &mut ctx.accounts.player_profile;
     let record = &mut ctx.accounts.username_record;
 
-    // Initialize username record
     record.owner = ctx.accounts.player.key();
     record.created_at = Clock::get()?.unix_timestamp;
 
-    // Set username on profile
     profile.username = username;
     profile.username_set = true;
 

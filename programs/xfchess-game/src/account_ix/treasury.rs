@@ -30,8 +30,6 @@ pub fn handler(ctx: Context<WithdrawTreasury>, amount: u64) -> Result<()> {
     require!(amount > 0, GameErrorCode::InvalidArgument);
 
     let vault = &ctx.accounts.treasury_vault;
-    // Keep the vault rent-exempt so partial withdrawals don't garbage-collect it
-    // while fees are still accumulating between claims.
     let rent_min = Rent::get()?.minimum_balance(vault.data_len());
     let remaining = vault
         .lamports()
@@ -39,8 +37,6 @@ pub fn handler(ctx: Context<WithdrawTreasury>, amount: u64) -> Result<()> {
         .ok_or(GameErrorCode::InsufficientFunds)?;
     require!(remaining >= rent_min, GameErrorCode::InsufficientFunds);
 
-    // treasury_vault is System-owned, so lamports must leave via a signed CPI
-    // transfer — same mechanism as pay_from_game_escrow for the wager escrow.
     let bump = ctx.bumps.treasury_vault;
     let signer: &[&[&[u8]]] = &[&[TREASURY_VAULT_SEED, &[bump]]];
     system_program::transfer(

@@ -37,13 +37,6 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
     let escrow_balance = ctx.accounts.escrow_pda.lamports();
     let pot = escrow::pot(wager_amount)?;
 
-    // wager_amount == 0 always means MatchType::Free (every Free-match
-    // construction site sets both together — see game_ix/common.rs,
-    // lifecycle/guards.rs, lifecycle/terminal.rs, governance_ix/resolution.rs).
-    // This gate is what makes Free games a pure backend-eaten operating cost
-    // with no treasury clawback: there's no pot, so `fees_advanced` (including
-    // the ER session/undelegate fees accrued in mark_undelegated) is simply
-    // never reimbursed — the account just closes with that data discarded.
     if wager_amount > 0 && wager_token.is_none() && escrow_balance >= pot {
         let sp = &ctx.accounts.system_program;
         let escrow = &ctx.accounts.escrow_pda;
@@ -114,12 +107,6 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
                 escrow::pay_from_game_escrow(sp, escrow, dest, remaining, game_id, bump)?;
             }
             GameResult::Draw => {
-                // `remaining / 2` alone drops the odd lamport when `remaining`
-                // is odd — that lamport then sits in escrow_pda below its
-                // rent-exempt minimum, which the runtime unconditionally
-                // rejects (`InsufficientFundsForRent`), hard-blocking
-                // finalize forever. split_draw_remaining always accounts for
-                // every lamport.
                 let (white_share, black_share) = split_draw_remaining(remaining);
                 escrow::require_rent_exempt_after(
                     ctx.accounts.white_authority.as_ref(),

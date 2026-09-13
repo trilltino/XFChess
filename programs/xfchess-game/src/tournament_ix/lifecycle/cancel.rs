@@ -1,8 +1,9 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::lifecycle::initialize_escrow::TournamentEscrow;
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Token, TokenAccount, TransferChecked};
 
 #[derive(Accounts)]
 #[instruction(tournament_id: u64)]
@@ -13,7 +14,7 @@ pub struct CancelTournament<'info> {
         bump = tournament.bump,
         constraint = tournament.authority == authority.key() @ GameErrorCode::NotTournamentAuthority
     )]
-    pub tournament: Account<'info, Tournament>,
+    pub tournament: Box<Account<'info, Tournament>>,
     #[account(
         seeds = [TOURNAMENT_PLAYERS_SEED, &[0u8], &tournament_id.to_le_bytes()],
         bump
@@ -44,16 +45,16 @@ pub struct CancelTournament<'info> {
         associated_token::mint = usdc_mint,
         associated_token::authority = usdc_prize_escrow_authority,
     )]
-    pub usdc_prize_escrow: Option<Account<'info, TokenAccount>>,
+    pub usdc_prize_escrow: Option<Box<Account<'info, TokenAccount>>>,
     #[account(mut)]
-    pub operator_usdc_ata: Option<Account<'info, TokenAccount>>,
-    pub usdc_mint: Option<Account<'info, token::Mint>>,
+    pub operator_usdc_ata: Option<Box<Account<'info, TokenAccount>>>,
+    pub usdc_mint: Option<Box<Account<'info, token::Mint>>>,
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
-    pub escrow_pda: UncheckedAccount<'info>,
+    pub escrow_pda: Box<Account<'info, TournamentEscrow>>,
     #[account(
         mut,
         constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess
@@ -61,6 +62,7 @@ pub struct CancelTournament<'info> {
     pub host_treasury: Signer<'info>,
     #[account(mut)]
     pub authority: Signer<'info>,
+    #[account(address = token::ID @ GameErrorCode::UnsupportedMintExtension)]
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -77,13 +79,9 @@ pub fn handler<'info>(
 
     let tournament = &ctx.accounts.tournament;
     let refund_amount = tournament.entry_fee;
-    // During Registration the entry fees still sit in escrow; once Active they
-    // were swept to host_treasury at start and refunds must come from there.
     let refund_from_escrow = tournament.status == TournamentStatus::Registration;
     let sol_guarantee = tournament.prize_pool;
 
-    // Collect all players from all present shards (shards 1-3 are optional —
-    // small/medium tournaments only initialize shard 0 or 0-1).
     let mut all_players: Vec<Pubkey> = Vec::new();
     let mut shards: Vec<&TournamentPlayersShard> = vec![&ctx.accounts.tournament_players_shard_0];
     if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
@@ -104,7 +102,6 @@ pub fn handler<'info>(
 
     let registered = all_players.len();
 
-    // Step 1: Return USDC prize pool to operator (if funded)
     if tournament.usdc_prize_mint.is_some() && tournament.usdc_prize_funded {
         let usdc_prize_escrow = ctx
             .accounts
@@ -116,32 +113,55 @@ pub fn handler<'info>(
             .operator_usdc_ata
             .as_ref()
             .ok_or(GameErrorCode::MissingTokenAccounts)?;
+        let usdc_mint = ctx
+            .accounts
+            .usdc_mint
+            .as_ref()
+            .ok_or(GameErrorCode::MissingTokenAccounts)?;
+
+        require_keys_eq!(
+            usdc_mint.key(),
+            tournament
+                .usdc_prize_mint
+                .ok_or(GameErrorCode::InvalidMint)?,
+            GameErrorCode::InvalidMint
+        );
+        require_keys_eq!(
+            operator_usdc_ata.mint,
+            usdc_mint.key(),
+            GameErrorCode::InvalidMint
+        );
+        require_keys_eq!(
+            operator_usdc_ata.owner,
+            ctx.accounts.authority.key(),
+            GameErrorCode::UnauthorizedAccess
+        );
 
         let usdc_balance = usdc_prize_escrow.amount;
 
         if usdc_balance > 0 {
-            // Transfer USDC from escrow back to operator
             let tournament_id_bytes = tournament_id.to_le_bytes();
             let bump = ctx.bumps.usdc_prize_escrow_authority;
             let escrow_seeds: &[&[&[u8]]] =
                 &[&[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id_bytes, &[bump]]];
 
-            token::transfer(
+            token::transfer_checked(
                 CpiContext::new_with_signer(
                     Token::id(),
-                    Transfer {
+                    TransferChecked {
                         from: usdc_prize_escrow.to_account_info(),
+                        mint: usdc_mint.to_account_info(),
                         to: operator_usdc_ata.to_account_info(),
                         authority: ctx.accounts.usdc_prize_escrow_authority.to_account_info(),
                     },
                     escrow_seeds,
                 ),
                 usdc_balance,
+                usdc_mint.decimals,
             )?;
         }
     }
 
-    // Check for duplicate player accounts to prevent double-refunds
     let mut seen_players = std::collections::HashSet::new();
     for player_key in all_players.iter() {
         require!(
@@ -150,20 +170,17 @@ pub fn handler<'info>(
         );
     }
 
-    // Step 2: Refund entry fees to players (from escrow during Registration,
-    // from host_treasury after start swept the fees there).
     if refund_amount > 0 && registered > 0 {
-        // Use remaining_accounts for player wallets
         require!(
-            ctx.remaining_accounts.len() >= registered,
-            GameErrorCode::NotInGame
+            ctx.remaining_accounts.len() == registered,
+            GameErrorCode::InvalidRemainingAccounts
         );
 
         let total_refund = refund_amount
             .checked_mul(registered as u64)
             .ok_or(GameErrorCode::Overflow)?;
         let refund_source_balance = if refund_from_escrow {
-            ctx.accounts.escrow_pda.lamports()
+            ctx.accounts.escrow_pda.to_account_info().lamports()
         } else {
             ctx.accounts.host_treasury.lamports()
         };
@@ -175,15 +192,24 @@ pub fn handler<'info>(
         for i in 0..registered {
             let player_key = all_players[i];
             let player_wallet = &ctx.remaining_accounts[i];
-            require!(player_wallet.key() == player_key, GameErrorCode::NotInGame);
-            require!(player_wallet.is_writable, GameErrorCode::UnauthorizedAccess);
+            require_keys_eq!(
+                player_wallet.key(),
+                player_key,
+                GameErrorCode::InvalidRemainingAccounts
+            );
+            require!(
+                player_wallet.is_writable && player_wallet.owner == &system_program::ID,
+                GameErrorCode::InvalidRemainingAccounts
+            );
 
             if refund_from_escrow {
-                // Program-owned escrow: direct lamport move.
-                **ctx.accounts.escrow_pda.lamports.borrow_mut() -= refund_amount;
-                **player_wallet.lamports.borrow_mut() += refund_amount;
+                crate::common::escrow::debit_program_pda(
+                    &ctx.accounts.escrow_pda.to_account_info(),
+                    player_wallet,
+                    refund_amount,
+                )
+                .map_err(|_| GameErrorCode::InsufficientTreasuryForRefund)?;
             } else {
-                // System-owned treasury wallet: system transfer (host_treasury signs).
                 anchor_lang::system_program::transfer(
                     CpiContext::new(
                         System::id(),
@@ -198,22 +224,14 @@ pub fn handler<'info>(
         }
     }
 
-    // Step 3: Return the guaranteed SOL prize from escrow to the operator.
     if sol_guarantee > 0 {
-        require!(
-            ctx.accounts.escrow_pda.lamports() >= sol_guarantee,
-            GameErrorCode::InsufficientFunds
-        );
-        **ctx.accounts.escrow_pda.lamports.borrow_mut() -= sol_guarantee;
-        **ctx
-            .accounts
-            .host_treasury
-            .to_account_info()
-            .lamports
-            .borrow_mut() += sol_guarantee;
+        crate::common::escrow::debit_program_pda(
+            &ctx.accounts.escrow_pda.to_account_info(),
+            &ctx.accounts.host_treasury.to_account_info(),
+            sol_guarantee,
+        )?;
     }
 
-    // Mark tournament as cancelled
     ctx.accounts.tournament.status = TournamentStatus::Cancelled;
     ctx.accounts.tournament.usdc_prize_funded = false;
     ctx.accounts.tournament.prize_pool = 0;

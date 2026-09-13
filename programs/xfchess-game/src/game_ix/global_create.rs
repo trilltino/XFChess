@@ -67,43 +67,9 @@ pub fn handler(
         GameErrorCode::GlobalSessionSpendingLimitExceeded
     );
 
-    // Create the `game` PDA funded by the session delegation vault.
-    //
-    // This can't be a system-program CPI at all (neither Anchor's `init,
-    // payer = session_delegation` nor a manual `invoke_signed(create_account
-    // (...))`): the System Program's transfer path — which `create_account`
-    // uses internally to move the rent lamports — unconditionally rejects a
-    // `from` account that carries data ("Transfer: `from` must not carry
-    // data"), and `session_delegation` is a `GlobalSessionDelegation` account
-    // with real data in it, not a plain wallet. Per `common::escrow`'s own
-    // rule ("program-owned PDA: the owning program may decrement lamports
-    // directly"), that has to be `debit_program_pda`, with `Allocate` +
-    // `Assign` handling the space/ownership half separately since neither
-    // touches a `from` account.
-    //
-    // Order matters: `Allocate`+`Assign` must run *before* the debit below.
-    // Crediting `game` first (while it's still owned by the System Program,
-    // i.e. not yet ours) and then passing it into `invoke_signed` trips the
-    // runtime's own "sum of account balances before and after instruction do
-    // not match" check — confirmed empirically against the real BPF runtime
-    // in `tests/global_create_game_tests.rs`.
     let space = 8 + Game::INIT_SPACE;
     let lamports = Rent::get()?.minimum_balance(space);
 
-    // `has_budget` above only checks the SOFT caps the player authorized
-    // (`max_wager`, `spending_limit`). It says nothing about whether the vault
-    // actually holds the lamports this instruction is about to move, and the two
-    // diverge constantly: every completed game spends real balance while the
-    // caps stay where they were set.
-    //
-    // Without this check the shortfall surfaces from deep inside
-    // `debit_program_pda` as a bare arithmetic/insufficient-funds failure
-    // (the "InsufficientFunds 6060" reports), which reads like a bug in the
-    // program rather than "your session vault needs a top-up" — and was one of
-    // the reasons the no-popup session path was disabled client-side.
-    //
-    // The vault must also stay rent-exempt afterwards, or the runtime reaps the
-    // delegation account and the player silently loses the session.
     {
         let vault = ctx.accounts.session_delegation.to_account_info();
         let rent_min = Rent::get()?.minimum_balance(vault.data_len());
@@ -144,15 +110,12 @@ pub fn handler(
         lamports,
     )?;
 
-    // Transfer wager from delegation vault to escrow — same rule, and
-    // `debit_program_pda` already no-ops on a zero amount.
     debit_program_pda(
         &ctx.accounts.session_delegation.to_account_info(),
         &ctx.accounts.escrow_pda.to_account_info(),
         wager_amount,
     )?;
 
-    // Update session bookkeeping
     let session = &mut ctx.accounts.session_delegation;
     session.total_spent = session_guards::checked_session_total(session.total_spent, wager_amount)?;
     session.games_remaining = session.games_remaining.saturating_sub(1);

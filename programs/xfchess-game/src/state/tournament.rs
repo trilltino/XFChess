@@ -16,8 +16,8 @@ pub struct Tournament {
     pub status: TournamentStatus,
     pub start_time: Option<i64>,
     pub end_time: Option<i64>,
-    pub fees_advanced: u64, // Accumulator for operational fees paid by relayer
-    pub fee_payer: Pubkey,  // Relayer wallet that paid; reimbursed at claim
+    pub fees_advanced: u64,
+    pub fee_payer: Pubkey,
     pub tournament_type: TournamentType,
     pub current_round: u8,
     pub total_rounds: u8,
@@ -41,7 +41,6 @@ pub struct Tournament {
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
     pub bump: u8,
-    // USDC prize pool fields (new)
     pub prizes_claimed: u16,
     pub platform_fee_pool: u64,
     pub usdc_prize_mint: Option<Pubkey>,
@@ -89,10 +88,10 @@ pub enum TournamentStatus {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, InitSpace, Debug)]
 pub struct SwissStanding {
     pub player: Pubkey,
-    pub score: u8,         // Points: 2 for win, 1 for draw, 0 for loss
-    pub buchholz: u16,     // Sum of opponents' scores
-    pub sonneborn: u16,    // Sum of defeated opponents' scores + 0.5*draws
-    pub color_balance: i8, // Whites - blacks (should balance to 0)
+    pub score: u8,
+    pub buchholz: u16,
+    pub sonneborn: u16,
+    pub color_balance: i8,
 }
 
 impl Tournament {
@@ -129,25 +128,10 @@ pub fn get_default_prize_shares(max_players: u16, winner_takes_all: bool) -> [u1
     }
 
     match max_players {
-        0..=2 => {
-            // Head-to-head: only 1st and 2nd exist — 70/30%
-            [7000, 3000, 0, 0, 0, 0, 0, 0, 0, 0]
-        }
-        3..=64 => {
-            // Top 3: 60/30/10%
-            [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0]
-        }
-        128 => {
-            // Top 5: 50/25/15/5/5% (4th and 5th equal)
-            [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0]
-        }
-        256 => {
-            // Top 10: 40/20/12/8/6/4/3/2/2/3% (top prizes attractive, 7-10 get smaller)
-            [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300]
-        }
-        _ => {
-            // Default to 64 and below distribution
-            [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0]
-        }
+        0..=2 => [7000, 3000, 0, 0, 0, 0, 0, 0, 0, 0],
+        3..=64 => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
+        128 => [5000, 2500, 1500, 500, 500, 0, 0, 0, 0, 0],
+        256 => [4000, 2000, 1200, 800, 600, 400, 300, 200, 200, 300],
+        _ => [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
     }
 }

@@ -33,9 +33,7 @@ pub enum AIEngine {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
 pub enum GameMode {
     Multiplayer,
-
     MultiplayerCompetitive,
-
     VsAI { ai_color: PieceColor },
 }
 

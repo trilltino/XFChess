@@ -3,31 +3,31 @@ use anchor_lang::prelude::*;
 #[account]
 #[derive(InitSpace)]
 pub struct Game {
-    pub game_id: u64,  // Unique ID chosen by the creator (timestamp or client-generated)
-    pub white: Pubkey, // White player's wallet
-    pub black: Pubkey, // Black player's wallet (default pubkey = no opponent yet)
+    pub game_id: u64,
+    pub white: Pubkey,
+    pub black: Pubkey,
     pub status: GameStatus,
     pub last_move_timestamp: i64,
-    pub fees_advanced: u64, // Accumulator for operational fees paid by relayer
-    pub fee_payer: Pubkey,  // Relayer wallet that paid; reimbursed at claim
+    pub fees_advanced: u64,
+    pub fee_payer: Pubkey,
     pub result: GameResult,
-    pub board_state: [u8; 68], // Compact binary form of the game (replaces FEN string)
-    pub move_count: u16,       // Total half-moves made
-    pub halfmove_clock: u16, // Half-moves since the last pawn move or capture (50-move rule = 100)
-    pub turn: u16, // Increments each half-move (odd = white to move, even = black). u16: a u8 would overflow-panic past half-move 255 in a long game.
-    pub created_at: i64, // Unix timestamp
-    pub updated_at: i64, // Updated on every move — used for inactivity checks
-    pub wager_amount: u64, // Lamports each player put in (0 = casual game)
-    pub wager_token: Option<Pubkey>, // None = SOL wager; Some = SPL token mint (future)
+    pub board_state: [u8; 68],
+    pub move_count: u16,
+    pub halfmove_clock: u16,
+    pub turn: u16,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub wager_amount: u64,
+    pub wager_token: Option<Pubkey>,
     pub game_type: GameType,
-    pub match_type: MatchType,  // Free, Ranked, Wager, or Tournament
-    pub country_fee: u64,       // Treasury fee in lamports for this game
-    pub base_time_seconds: u64, // Total clock per player in seconds; 0 = no time limit
-    pub increment_seconds: u16, // Fischer increment added after each move
-    pub bump: u8,               // PDA canonical bump stored for use in signed CPI calls
-    pub is_delegated: bool,     // True once delegate_game is called; false after undelegate
+    pub match_type: MatchType,
+    pub country_fee: u64,
+    pub base_time_seconds: u64,
+    pub increment_seconds: u16,
+    pub bump: u8,
+    pub is_delegated: bool,
     pub tournament_id: Option<u64>,
-    pub nonce: u64, // Counter for replay protection
+    pub nonce: u64,
     pub draw_offered_by: Option<Pubkey>,
 }
 
@@ -35,11 +35,11 @@ pub struct Game {
 #[derive(InitSpace)]
 pub struct SessionDelegation {
     pub game_id: u64,
-    pub player: Pubkey,      // The real wallet this delegation is for
-    pub session_key: Pubkey, // The hot key allowed to sign moves (held by the VPS)
-    pub expires_at: i64,     // Session becomes invalid after this timestamp
-    pub max_batch_len: u16,  // Max moves allowed per commit_move_batch call
-    pub enabled: bool,       // Can be set false by revoke_session_key
+    pub player: Pubkey,
+    pub session_key: Pubkey,
+    pub expires_at: i64,
+    pub max_batch_len: u16,
+    pub enabled: bool,
     pub bump: u8,
 }
 
@@ -70,9 +70,9 @@ pub enum GamePhase {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum GameResult {
-    None,           // Game not yet finished
-    Winner(Pubkey), // The winning player's pubkey
-    Draw,           // Agreed or stalemate draw
+    None,
+    Winner(Pubkey),
+    Draw,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Debug)]

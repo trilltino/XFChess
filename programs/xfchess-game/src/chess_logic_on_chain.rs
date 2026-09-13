@@ -1,9 +1,6 @@
-#![no_std]
-
-extern crate alloc;
-
-#[cfg(feature = "std")]
-extern crate std;
+//! On-chain chess move validation: the `no_std` subset of chess logic compiled
+//! directly into the Solana program, re-exporting `nimzovich_engine`'s no_std
+//! board/move-gen types with a `validation` submodule for move-legality checks.
 
 pub use nimzovich_engine;
 pub use nimzovich_engine::{parse_uci, validate_and_apply, CompactBoard, OnChainGame};
@@ -15,17 +12,14 @@ pub mod validation {
     use super::*;
 
     pub fn is_move_legal(fen_str: &str, move_uci: &str) -> bool {
-        // Use the on-chain optimized validation
         let cb = CompactBoard::from_fen(fen_str);
         let mut on_chain_game = cb.to_on_chain_game();
 
-        // Parse UCI move
         let mut move_bytes = [0u8; 5];
         let bytes = move_uci.as_bytes();
         let len = bytes.len().min(5);
         move_bytes[..len].copy_from_slice(&bytes[..len]);
 
-        // Validate and apply
         validate_and_apply(&mut on_chain_game, &move_bytes).is_ok()
     }
 }
@@ -36,9 +30,7 @@ mod tests {
 
     #[test]
     fn test_invalid_fen_returns_false() {
-        // is_move_legal must handle bad FEN gracefully (no panic) and reject the move.
         assert!(!is_move_legal("not-a-fen", "e2e4"));
-        // An over-full rank must not panic the FEN parser.
         assert!(!is_move_legal("PPPPPPPPP/8/8/8/8/8/8/8 w - - 0 1", "a2a3"));
     }
 
@@ -50,7 +42,6 @@ mod tests {
 
     #[test]
     fn test_known_illegal_move_returns_false() {
-        // e2e5 is not a legal pawn move from start
         let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
         assert!(!is_move_legal(fen, "e2e5"));
     }

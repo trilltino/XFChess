@@ -15,19 +15,6 @@ pub fn build_time_check_schedule_instruction(
     check_interval_millis: u64,
     iterations: u64,
 ) -> Result<Instruction> {
-    // The wrapped instruction is what the scheduler actually invokes against
-    // `crate::ID` once the crank fires. It must carry the same 8-byte Anchor
-    // discriminator any other caller of `crank_time_check` would send,
-    // followed by the (empty) borsh-encoded `CrankTimeCheckData` — i.e.
-    // `<instruction::CrankTimeCheck as Discriminator>::DISCRIMINATOR`, the
-    // same compiler-generated constant Anchor's own dispatcher checks
-    // against. `borsh::to_vec(&())` — the previous body here — serializes
-    // the *unit type*, producing zero bytes: no discriminator at all, so
-    // `crank_time_check` could never be dispatched to when this fires.
-    // Confirmed live on devnet: with the old body, MagicBlock's ScheduleTask
-    // consistently rejected the whole outer CPI with "invalid instruction
-    // data" — this embedded instruction is malformed before it's ever
-    // executed, not just when it eventually would have run.
     let mut data =
         <crate::instruction::CrankTimeCheck as anchor_lang::Discriminator>::DISCRIMINATOR.to_vec();
     data.extend_from_slice(

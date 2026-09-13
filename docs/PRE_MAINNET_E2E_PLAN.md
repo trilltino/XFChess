@@ -264,7 +264,7 @@ cooperation from the ER validator at all — the base layer alone can force
 the outcome. No dead end was found for any stale-delegated wagered game.
 
 **Test to add / rehearsal to schedule** (not a code gap, an ops-rehearsal
-gap): `crates/solana/er-cu-benchmark/src/recovery_drill.rs` already contains
+gap): `crates/er-cu-benchmark/src/recovery_drill.rs` already contains
 `run_stuck_delegation_drill` (a real ~60-70 minute live-devnet exercise of
 the full `request_force_undelegate → force_undelegate_after_timeout →
 recover_stuck_delegation` chain) and `run_crank_liveness_drill` (~1-2 min).

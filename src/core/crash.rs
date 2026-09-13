@@ -1,7 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::panic;
-use std::path::Path;
 use std::time::SystemTime;
 
 pub fn setup_enhanced_panic_hook() {
@@ -40,11 +39,11 @@ pub fn setup_enhanced_panic_hook() {
             env!("CARGO_PKG_VERSION")
         );
 
-        // Write to log file
-        let logs_dir = Path::new("logs");
-        if !logs_dir.exists() {
-            let _ = fs::create_dir_all(logs_dir);
-        }
+        // Write to log file — inside the active profile's log folder, next
+        // to game.log and wallet-bridge.log, so an exported support bundle
+        // always picks the crash up. (The historical CWD-relative `logs/`
+        // path was silently unwritable for installed builds.)
+        let logs_dir = crate::multiplayer::network::identity::log_dir();
 
         let filename = format!("crash_{}.log", timestamp);
         let filepath = logs_dir.join(&filename);
@@ -62,7 +61,7 @@ pub fn setup_enhanced_panic_hook() {
         eprintln!("\n");
         eprintln!("========================================");
         eprintln!("XFChess has encountered an error.");
-        eprintln!("Please check logs/{}", filename);
+        eprintln!("Please check {}", filepath.display());
         eprintln!("========================================");
     }));
 }
@@ -73,10 +72,10 @@ pub fn record_recovered_error(source: &str, error: &dyn std::fmt::Display) {
         .unwrap_or_default()
         .as_secs();
 
-    let logs_dir = Path::new("logs");
-    if !logs_dir.exists() {
-        let _ = fs::create_dir_all(logs_dir);
-    }
+    // Same folder as game.log / crash_*.log so nothing about a session is
+    // scattered across multiple locations (the old CWD-relative path failed
+    // silently on installed builds).
+    let logs_dir = crate::multiplayer::network::identity::log_dir();
 
     let filepath = logs_dir.join("recovered_errors.log");
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&filepath) {

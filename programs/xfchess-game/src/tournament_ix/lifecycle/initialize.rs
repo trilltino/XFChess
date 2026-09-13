@@ -7,11 +7,6 @@ use anchor_spl::token::{self, Token, TokenAccount};
 
 const VALID_PLAYER_COUNTS: [u16; 8] = [2, 4, 8, 16, 32, 64, 128, 256];
 
-// The #[instruction(...)] list must be an in-order PREFIX of the actual
-// instruction args — Anchor deserializes exactly these leading fields inside
-// try_accounts. Skipping args from the middle (e.g. omitting `name` and
-// `entry_fee`) shifts every later field and fails with
-// InstructionDidNotDeserialize (102) before the handler runs.
 #[derive(Accounts)]
 #[instruction(
     tournament_id: u64,
@@ -75,20 +70,16 @@ pub fn handler(
         GameErrorCode::InvalidGameStatus
     );
 
-    // Validate ELO range
     require!(elo_min <= elo_max, GameErrorCode::InvalidGameStatus);
     require!(min_players <= max_players, GameErrorCode::InvalidGameStatus);
 
-    // Validate prize shares sum to <= 10000
     let total_shares: u16 = prize_shares.iter().sum();
     require!(total_shares <= 10000, GameErrorCode::InvalidGameStatus);
 
-    // Validate USDC mint is provided if usdc_prize_escrow is being initialized
     if ctx.accounts.usdc_prize_escrow.is_some() {
         require!(usdc_mint.is_some(), GameErrorCode::InvalidGameStatus);
     }
 
-    // Use default prize shares if winner_takes_all, otherwise use provided shares
     let final_prize_shares = if winner_takes_all {
         crate::state::tournament::get_default_prize_shares(max_players, true)
     } else {
@@ -146,7 +137,6 @@ pub fn handler(
     t.fee_payer = ctx.accounts.authority.key();
     t.fees_advanced = 0;
     t.platform_fee_pool = 0;
-    // USDC prize pool fields
     t.usdc_prize_mint = usdc_mint;
     t.usdc_prize_pool = 0;
     t.usdc_prize_funded = false;

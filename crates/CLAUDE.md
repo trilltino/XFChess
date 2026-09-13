@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > `crates/engine/` into the standalone repo at `..\nimzovich`. They are path
 > dependencies (`../nimzovich/nimzovich_engine`) and are **no longer workspace
 > members of this repo** — their source, tests, and CI live in that repo.
-| `chess-logic-on-chain` | **must stay `no_std`** | Solana program (`move-validation` feature) |
+| `chess-logic-on-chain` | **must stay `no_std`** | `programs/xfchess-game/src/chess_logic_on_chain.rs` (behind `move-validation` feature) |
 | `xfchess-anticheat` | Engine-move-correlation anti-cheat | Backend |
 | `solana-chess-client` | Anchor + Solana SDK | Game client (`--features solana`) |
 | `er-cu-benchmark` | Compute-unit/RPC load-test binaries against MagicBlock ER | Standalone benchmarking tool, not linked into the app |

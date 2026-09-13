@@ -3,8 +3,6 @@ use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-// ── Small (≤ 64 players — 1 shard) ───────────────────────────────────────────
-
 #[derive(Accounts)]
 #[instruction(tournament_id: u64)]
 pub struct InitializeShardsSmall<'info> {
@@ -48,8 +46,6 @@ pub fn handler_small(ctx: Context<InitializeShardsSmall>, tournament_id: u64) ->
     );
     Ok(())
 }
-
-// ── Medium (≤ 128 players — 2 shards) ────────────────────────────────────────
 
 #[derive(Accounts)]
 #[instruction(tournament_id: u64)]
@@ -106,8 +102,6 @@ pub fn handler_medium(ctx: Context<InitializeShardsMedium>, tournament_id: u64) 
     );
     Ok(())
 }
-
-// ── Large (256 players — 4 shards) ───────────────────────────────────────────
 
 #[derive(Accounts)]
 #[instruction(tournament_id: u64)]

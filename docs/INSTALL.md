@@ -129,6 +129,73 @@ published as a separate asset only so Chrome OS users can find it by name.
 
 **Uninstalling:** delete the extracted folder.
 
+## Sending logs for debugging
+
+Every game writes diagnostics to your computer automatically — the same detail
+a local terminal run prints (moves, connections, P2P relay, errors) — so when
+something goes wrong you can send a copy straight to the devs.
+
+**The 30-second version:**
+
+1. Open XFChess → **Settings** → **Help & Support**.
+2. Click **Export logs as text file**, pick where to save (it starts in your
+   profile folder), and hit Save.
+3. The game writes one `xfchess-logs-<timestamp>.txt` containing your version,
+   OS, arch, the latest game logs, any crash reports, and the wallet/sign-in
+   log.
+4. Drag that file into the group chat (or attach it to an issue or email) —
+   done. Nothing is uploaded automatically, and you can read the file before
+   sending it.
+
+**Where the files live** (for grabbing them manually):
+
+- Once a profile exists, logs live inside **that profile's folder** — either
+  the folder you picked at profile creation ("Choose Save Location"), or by
+  default `Documents/xfchess/profiles/<your name>/logs` (`~/Documents/...` on
+  macOS and Linux/Chrome OS).
+- Fresh installs with no profile yet use the app-data folder instead:
+  Windows `%LOCALAPPDATA%\xfchess\logs`, macOS
+  `~/Library/Application Support/xfchess/logs`, Linux/Chrome OS
+  `~/.local/share/xfchess/logs`.
+
+Each day gets its own `game.log.<date>` file; `wallet-bridge.log.<date>` covers
+wallet sign-in; hard crashes write `crash_<timestamp>.log`. The export button
+bundles the latest of everything into one text file and also shows you the
+exact save path in Settings after exporting.
+## Sending logs for debugging
+
+Every game writes diagnostics to your computer automatically — the same detail
+a local terminal run prints (moves, connections, P2P relay, errors) — so when
+something goes wrong you can send a copy straight to the devs.
+
+**The 30-second version:**
+
+1. Open XFChess → **Settings** → **Help & Support**.
+2. Click **Export logs as text file**, pick where to save (it starts in your
+   profile folder), and hit Save.
+3. The game writes one `xfchess-logs-<timestamp>.txt` containing your version,
+   OS, arch, the latest game logs, any crash reports, and the wallet/sign-in
+   log.
+4. Drag that file into the group chat (or attach it to an issue or email) —
+   done. Nothing is uploaded automatically, and you can read the file before
+   sending it.
+
+**Where the files live** (for grabbing them manually):
+
+- Once a profile exists, logs live inside **that profile's folder** — either
+  the folder you picked at profile creation ("Choose Save Location"), or by
+  default `Documents/xfchess/profiles/<your name>/logs` (`~/Documents/...` on
+  macOS and Linux/Chrome OS).
+- Fresh installs with no profile yet use the app-data folder instead:
+  Windows `%LOCALAPPDATA%\xfchess\logs`, macOS
+  `~/Library/Application Support/xfchess/logs`, Linux/Chrome OS
+  `~/.local/share/xfchess/logs`.
+
+Each day gets its own `game.log.<date>` file; `wallet-bridge.log.<date>` covers
+wallet sign-in; hard crashes write `crash_<timestamp>.log`. The export button
+bundles the latest of everything into one text file and also shows you the
+exact save path in Settings after exporting.
+
 ## Troubleshooting
 
 - **The app won't connect / multiplayer doesn't load anything:** confirm

@@ -90,13 +90,7 @@ pub fn finish_by_timeout_if_expired(game: &mut Game, now: i64) -> Result<bool> {
     Ok(true)
 }
 
-fn timeout_window_seconds(game: &Game) -> i64 {
-    if game.move_count == 0 {
-        clock::ZERO_MOVE_REFUND_WINDOW_SECONDS
-    } else {
-        clock::inactivity_window_seconds(game)
-    }
-}
+pub use clock::timeout_window_seconds;
 
 fn resolve_expired_timeout(game: &mut Game, now: i64) {
     if game.move_count == 0 {
@@ -237,9 +231,6 @@ mod tests {
 
     #[test]
     fn timeout_awards_white_when_black_flags() {
-        // Mirror of `timeout_finishes_without_clearing_delegation`: turn is
-        // even here (black to move / black's clock is the one that ran out),
-        // locking in the other parity of the `white_timed_out` branch.
         let mut game = active_game();
         game.turn = 2;
         game.move_count = 1;
@@ -253,7 +244,7 @@ mod tests {
 
     #[test]
     fn timeout_rejects_before_inactivity_window_elapses() {
-        let mut game = active_game(); // timed game -> fixed 90s window
+        let mut game = active_game();
         game.updated_at = 100;
 
         let err = finish_by_timeout(&mut game, 102).unwrap_err();
@@ -322,7 +313,7 @@ mod tests {
 
     #[test]
     fn timeout_accepts_just_past_the_fixed_90s_window_for_timed_games() {
-        let mut game = active_game(); // base_time_seconds: 1 -> still "timed"
+        let mut game = active_game();
         game.move_count = 1;
         game.updated_at = 100;
 
@@ -342,7 +333,6 @@ mod tests {
         game.move_count = 1;
         game.updated_at = 100;
 
-        // Well past the 90s timed-game window, nowhere near 24h.
         let err = finish_by_timeout(&mut game, 100 + 3_600).unwrap_err();
 
         assert_eq!(err, GameErrorCode::TimeoutNotExpired.into());

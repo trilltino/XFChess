@@ -8,6 +8,7 @@ pub mod resources;
 pub mod settings_persistence;
 pub mod state_lifecycle;
 pub mod states;
+pub mod support_bundle;
 pub mod updates;
 pub mod window_config;
 

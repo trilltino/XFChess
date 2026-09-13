@@ -12,7 +12,7 @@ pub enum RatingBucket {
 
 pub fn bucket_for_time_control(base_time_seconds: u64) -> RatingBucket {
     match base_time_seconds {
-        0 => RatingBucket::Classical, // Unlimited/no-clock games
+        0 => RatingBucket::Classical,
         1..=179 => RatingBucket::Bullet,
         180..=599 => RatingBucket::Blitz,
         600..=1499 => RatingBucket::Rapid,
@@ -103,10 +103,8 @@ mod tests {
 
     #[test]
     fn bucket_for_time_control_matches_client_thresholds() {
-        // Mirrors src/game/time_control.rs's TimeControl::category(), with
-        // UltraBullet folded into Bullet and Unlimited folded into Classical.
-        assert_eq!(bucket_for_time_control(0), RatingBucket::Classical); // Unlimited
-        assert_eq!(bucket_for_time_control(15), RatingBucket::Bullet); // UltraBullet
+        assert_eq!(bucket_for_time_control(0), RatingBucket::Classical);
+        assert_eq!(bucket_for_time_control(15), RatingBucket::Bullet);
         assert_eq!(bucket_for_time_control(60), RatingBucket::Bullet);
         assert_eq!(bucket_for_time_control(179), RatingBucket::Bullet);
         assert_eq!(bucket_for_time_control(180), RatingBucket::Blitz);
@@ -121,11 +119,10 @@ mod tests {
     #[test]
     fn rating_field_mut_lazily_seeds_on_first_touch() {
         let mut profile = PlayerProfile {
-            elo_rating: 130000.0, // Classical already played
+            elo_rating: 130000.0,
             ..Default::default()
         };
 
-        // Untouched bucket (Bullet) starts at 0.0 and gets seeded on access.
         assert_eq!(profile.elo_bullet, 0.0);
         assert_eq!(
             *rating_field_mut(&mut profile, RatingBucket::Bullet),
@@ -133,7 +130,6 @@ mod tests {
         );
         assert_eq!(profile.elo_bullet, INITIAL_ELO_CENTISCALE as f64);
 
-        // Already-seeded bucket (Classical) is returned as-is, not reset.
         assert_eq!(
             *rating_field_mut(&mut profile, RatingBucket::Classical),
             130000.0

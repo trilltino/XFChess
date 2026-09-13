@@ -2,7 +2,7 @@ use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Token, TokenAccount, TransferChecked};
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
@@ -18,6 +18,7 @@ pub struct WithdrawExpiredWager<'info> {
     pub vault_nft_ata: Option<Account<'info, TokenAccount>>,
     #[account(mut)]
     pub player_nft_ata: Option<Account<'info, TokenAccount>>,
+    pub wager_token_mint: Option<Account<'info, token::Mint>>,
     pub token_program: Option<Program<'info, Token>>,
 }
 
@@ -39,7 +40,6 @@ pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> 
 
     if game.wager_amount > 0 {
         if let Some(_token_mint) = game.wager_token {
-            // Unwrapping optionals for NFT/SPL transfer
             let vault_ata = ctx
                 .accounts
                 .vault_nft_ata
@@ -50,7 +50,7 @@ pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> 
                 .player_nft_ata
                 .as_ref()
                 .ok_or(GameErrorCode::MissingTokenAccounts)?;
-            let token_program = ctx
+            let _token_program = ctx
                 .accounts
                 .token_program
                 .as_ref()
@@ -61,17 +61,25 @@ pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> 
             let seeds = &[WAGER_ESCROW_SEED, game_id_bytes.as_ref(), &[escrow_bump]];
             let signer_seeds = &[&seeds[..]];
 
-            token::transfer(
+            let mint = ctx
+                .accounts
+                .wager_token_mint
+                .as_ref()
+                .ok_or(GameErrorCode::MissingTokenAccounts)?;
+            require!(mint.key() == vault_ata.mint, GameErrorCode::InvalidMint);
+            token::transfer_checked(
                 CpiContext::new_with_signer(
                     Token::id(),
-                    Transfer {
+                    TransferChecked {
                         from: vault_ata.to_account_info(),
+                        mint: mint.to_account_info(),
                         to: player_ata.to_account_info(),
                         authority: ctx.accounts.escrow_pda.to_account_info(),
                     },
                     signer_seeds,
                 ),
                 game.wager_amount,
+                mint.decimals,
             )?;
         } else {
             let pot = game.wager_amount;

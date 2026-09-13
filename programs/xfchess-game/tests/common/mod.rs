@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use anchor_lang::{AccountDeserialize, AccountSerialize, InstructionData, Space, ToAccountMetas};
-use chess_logic_on_chain::CompactBoard;
+use xfchess_game::chess_logic_on_chain::CompactBoard;
 use solana_program_test::{BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
@@ -56,7 +56,7 @@ pub fn board_from_fen(fen: &str) -> [u8; 68] {
 
 pub fn apply(board: &[u8; 68], mv: &[u8; 5]) -> [u8; 68] {
     let mut g = CompactBoard::from_bytes(board).to_on_chain_game();
-    chess_logic_on_chain::validate_and_apply(&mut g, mv).expect("test move must be legal");
+    xfchess_game::chess_logic_on_chain::validate_and_apply(&mut g, mv).expect("test move must be legal");
     g.to_compact_board().to_bytes()
 }
 

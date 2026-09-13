@@ -20,3 +20,11 @@ pub fn mark_activity(game: &mut Game, now: i64) {
 pub fn mark_terminal(game: &mut Game, now: i64) {
     game.updated_at = now;
 }
+
+pub fn timeout_window_seconds(game: &Game) -> i64 {
+    if game.move_count == 0 {
+        ZERO_MOVE_REFUND_WINDOW_SECONDS
+    } else {
+        inactivity_window_seconds(game)
+    }
+}

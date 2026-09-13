@@ -93,8 +93,6 @@ mod tests {
 
     #[test]
     fn require_phase_propagates_unreachable_phase_error() {
-        // (WaitingForOpponent, true) isn't a phase Game::phase() ever assigns —
-        // require_phase must surface that error, not silently treat it as "no match".
         let g = game(GameStatus::WaitingForOpponent, true);
         assert!(require_phase(&g, GamePhase::WaitingBase).is_err());
     }

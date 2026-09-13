@@ -32,7 +32,6 @@ pub struct PlayerProfile {
     pub username: String,
     pub username_set: bool,
 
-    // ── External Lichess platform linkage ──
     #[max_len(30)]
     pub lichess_username: String,
     pub lichess_verified: bool,
@@ -44,15 +43,6 @@ pub struct PlayerProfile {
     pub external_elo_source: u8,
     pub seeded_from_external: bool,
 
-    // ── Per-time-control ratings (centiscale) ──
-    // Appended at the end so every existing field's byte offset — and every
-    // hand-parsed offset reader (e.g. `backend/src/signing/elo_cache.rs`) —
-    // is unaffected. `elo_rating` above doubles as the Classical/Unlimited
-    // bucket; these three cover the rest of `TimeCategory`
-    // (`src/game/time_control.rs`), folding `UltraBullet` into `Bullet`.
-    // Each starts at `0.0` and is lazily seeded to `INITIAL_ELO_CENTISCALE`
-    // the first time a game in that bucket settles — see
-    // `lifecycle::settlement::rating_field_for_time_control`.
     pub elo_bullet: f64,
     pub elo_blitz: f64,
     pub elo_rapid: f64,

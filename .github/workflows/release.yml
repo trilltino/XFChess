@@ -265,7 +265,9 @@ jobs:
           set -e
           if [ "$code" != "124" ] && [ "$code" != "0" ]; then
             echo "::error::xfchess exited with code $code — see crash log below"
-            cat logs/crash_*.log 2>/dev/null || true
+            # Crash reports land in the app-data (or profile) log dir now, not
+            # CWD-relative — search both home and the workspace.
+            find "$HOME" "$PWD" -name 'crash_*.log' -exec cat {} + 2>/dev/null || true
             exit 1
           fi
           if [ "$bridge_code" != "124" ] && [ "$bridge_code" != "0" ]; then

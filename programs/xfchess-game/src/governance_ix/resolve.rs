@@ -58,7 +58,6 @@ pub fn handler(
         now,
     )?;
 
-    // ── Pot payout (signed CPI from the system-owned escrow) ──────────────────
     if wager > 0 {
         let pot = escrow::pot(wager)?;
         if ctx.accounts.escrow_pda.lamports() >= pot {
@@ -114,9 +113,7 @@ pub fn handler(
         }
     }
 
-    // ── Dispute bond (held in the program-owned dispute PDA) ──────────────────
-    // Refund when the challenger's claim is upheld or the game is ruled a draw;
-    // forfeit to the treasury when the ruling goes to the opponent.
+    // Refunded when the challenger's claim is upheld or the game is a draw; forfeited to the treasury otherwise.
     if bond > 0 {
         let refund = match winner {
             Some(k) => k == challenger,

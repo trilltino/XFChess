@@ -23,7 +23,6 @@ pub fn handler_authorize_tournament_session(
     let delegation = &mut ctx.accounts.session_delegation;
     let player = &ctx.accounts.player;
 
-    // Transfer deposit into delegation PDA vault (if any)
     if args.deposit_lamports > 0 {
         anchor_lang::system_program::transfer(
             CpiContext::new(
@@ -51,8 +50,6 @@ pub fn handler_authorize_tournament_session(
         XfchessGameError::UnauthorizedAccess
     );
 
-    // Check player registration across all present shards (1-3 are optional
-    // — small/medium tournaments only initialize shard 0 or 0-1).
     let mut shards: Vec<&TournamentPlayersShard> = vec![&ctx.accounts.tournament_players_shard_0];
     if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
         shards.push(s);
@@ -73,9 +70,13 @@ pub fn handler_authorize_tournament_session(
         .duration_secs
         .unwrap_or(TournamentSessionDelegation::DEFAULT_DURATION);
     require!(duration > 0, XfchessGameError::UnauthorizedAccess);
+    require!(
+        duration <= MAX_SESSION_DURATION_SECS,
+        XfchessGameError::DurationTooLarge
+    );
     let expires_at = now
         .checked_add(duration)
-        .ok_or(XfchessGameError::UnauthorizedAccess)?;
+        .ok_or(XfchessGameError::ArithmeticOverflow)?;
 
     delegation.tournament_id = tournament_id;
     delegation.player = player.key();

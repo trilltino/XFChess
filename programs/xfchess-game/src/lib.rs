@@ -1,7 +1,43 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::cpi::undelegate_account;
+// ---------------------------------------------------------------------------
+// Solana security.txt metadata (mirrors the Raydium CLMM / CP-Swap / AMM pattern)
+// ---------------------------------------------------------------------------
+// Expands to a `#[no_mangle]` static in the `.security.txt` ELF section on BPF
+// targets, so explorers and `query-security-txt` read it straight off the
+// deployed program. Two macro constraints that already broke this build once:
+//   * the matcher is `($($name:ident: $value:expr),*)` - a trailing comma after
+//     the final field is a hard "unexpected end of macro invocation" error;
+//   * every `contacts` entry must be `<type>:<info>`, with type one of
+//     email | link | discord | telegram | twitter | other.
+// Values below are the canonical ones from SECURITY.md at the repo root.
+// `auditors` stays "None" until the external audit is signed off; then set it to
+// "<auditor>:<report url>".
+#[cfg(not(feature = "no-entrypoint"))]
+solana_security_txt::security_txt! {
+    name: "XFChess",
+    project_url: "https://xfchess.com",
+    contacts: "email:security@xfchess.org,link:https://github.com/trilltino/XFChess/security/advisories/new",
+    policy: "https://github.com/trilltino/XFChess/blob/main/SECURITY.md",
+    preferred_languages: "en",
+    source_code: "https://github.com/trilltino/XFChess",
+    auditors: "None"
+}
+
+// Compile-time guard: production builds must have move-validation enabled
+#[cfg(all(feature = "production", not(feature = "move-validation")))]
+compile_error!("production feature requires move-validation to be enabled");
+
+#[cfg(any(
+    all(feature = "localnet", feature = "devnet"),
+    all(feature = "localnet", feature = "mainnet"),
+    all(feature = "devnet", feature = "mainnet")
+))]
+compile_error!("exactly one of `localnet`, `devnet`, or `mainnet` may be enabled");
 
 pub mod account_ix;
+#[cfg(feature = "move-validation")]
+pub mod chess_logic_on_chain;
 pub mod common;
 pub mod constants;
 #[cfg(feature = "cranks")]
@@ -52,10 +88,17 @@ pub use tournament_ix::{
     SessionJoinGame, StartTournament, SwissMatchResult,
 };
 
-// Anchor 0.32 #[program] generates `pub use crate::__client_accounts_<snake>::*` at the crate
-// root for every instruction accounts struct. The derive macro generates these as pub(crate)
-// modules inside submodules; they cannot be pub use-d directly (E0365). Instead, create thin
-// pub mod wrappers here that re-export the pub *contents* of each pub(crate) module.
+// ---------------------------------------------------------------------------
+// Anchor client-account re-exports (required macro glue — DO NOT REMOVE)
+// ---------------------------------------------------------------------------
+// Anchor's `#[derive(Accounts)]` macro generates `pub(crate)` modules named
+// `__client_accounts_<instruction>` beside each accounts struct. The Anchor
+// instruction dispatcher and IDL builder expect these to be reachable from the
+// crate root. Because they are `pub(crate)`, we create thin `pub mod` wrappers
+// here that re-export their contents. This is boilerplate — not business logic.
+// These modules will appear grayed-out in the IDE because nothing in Rust code
+// calls them directly; they are consumed by Anchor's generated entrypoint.
+// See: https://github.com/coral-xyz/anchor/issues/2697 (E0365 workaround)
 pub mod __client_accounts_init_profile {
     pub use crate::account_ix::profile::__client_accounts_init_profile::*;
 }
@@ -261,7 +304,42 @@ pub mod __client_accounts_global_join_game {
 #[allow(unused_imports)]
 use ephemeral_rollups_sdk::anchor::MagicProgram;
 
+// ---------------------------------------------------------------------------
+// Program ID - environment-gated (mirrors the Raydium devnet/mainnet split)
+// ---------------------------------------------------------------------------
+// localnet and devnet share a single deployment address: Anchor.toml pins
+// 8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU under both [programs.localnet]
+// and [programs.devnet].
+#[cfg(any(feature = "localnet", feature = "devnet"))]
 declare_id!("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU");
+
+// No environment feature selected (bare `cargo check`, host-side unit tests):
+// fall back to the devnet address, matching the `pda_keys` fallback in
+// constants.rs so the program ID and the authority keys can never disagree.
+#[cfg(not(any(feature = "localnet", feature = "devnet", feature = "mainnet")))]
+declare_id!("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU");
+
+// mainnet: not deployed yet, so the address is unknown. `pubkey!` (and therefore
+// `declare_id!`) only accepts a base58 *literal* - it expands to
+// `Pubkey::from_str_const`, so it cannot be sourced from an env var at build
+// time. A syntactically valid placeholder is declared instead; it decodes to the
+// ASCII bytes "XFChessMainnetProgramIdNotSetYet" and exists only so that a
+// mainnet build fails with the single clear guard message below rather than a
+// cascade of "cannot find value `ID`" errors from every PDA derivation here.
+#[cfg(all(
+    feature = "mainnet",
+    not(any(feature = "localnet", feature = "devnet"))
+))]
+declare_id!("6wb25gLcgp7xNXhArZrSndcJiqx6vc7oKB1MJoWhtCFd");
+
+// Hard build guard. A panicking `const` initializer is evaluated at compile
+// time, so `--features mainnet` / `--features production` cannot build until the
+// real address above is filled in and constants.rs `_MAINNET_KEY_GUARD` passes.
+#[cfg(all(
+    feature = "mainnet",
+    not(any(feature = "localnet", feature = "devnet"))
+))]
+const _MAINNET_PROG_ID_GUARD: () = panic!("mainnet build refused: set the real program address in the mainnet declare_id!() in src/lib.rs and rotate every mainnet authority key in src/constants.rs");
 
 #[program]
 pub mod xfchess_game {

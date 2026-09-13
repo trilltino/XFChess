@@ -33,7 +33,7 @@ The Anchor 1.0 / Solana 3.x migration landed 2026-07-22, which also unblocked th
 
 ## Recovery/liveness drills — rehearsal schedule
 
-Two live-devnet drills exist in `crates/solana/er-cu-benchmark/src/recovery_drill.rs`,
+Two live-devnet drills exist in `crates/er-cu-benchmark/src/recovery_drill.rs`,
 covering the ER-unavailability escape hatch (§1.6, `docs/PRE_MAINNET_E2E_PLAN.md`):
 
 - `run_stuck_delegation_drill` — the full `request_force_undelegate` →

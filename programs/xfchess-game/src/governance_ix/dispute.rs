@@ -49,14 +49,13 @@ pub fn handler(
     dispute.reason = reason;
     dispute.evidence_hash = evidence_hash;
     dispute.status = DisputeStatus::Pending;
+    dispute.expires_at = now
+        .checked_add(crate::constants::DISPUTE_TTL_SECS)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
     dispute.created_at = now;
-    dispute.expires_at = now + crate::constants::DISPUTE_TTL_SECS;
     dispute.bond_amount = DISPUTE_BOND_LAMPORTS;
     dispute.bump = ctx.bumps.dispute_record;
 
-    // Post the dispute bond into the (program-owned) dispute PDA. It is refunded
-    // if the dispute is upheld or auto-resolved, forfeited if dismissed — which
-    // deters a losing player from freezing the pot with a frivolous dispute.
     anchor_lang::system_program::transfer(
         CpiContext::new(
             System::id(),
