@@ -58,6 +58,10 @@ bincode = { workspace = true, optional = true }
 # logic in-process via solana-program-test (loads target/deploy/xfchess_game.so).
 # Requires `cargo build-sbf` first. See docs/ER_TESTING.md.
 [[test]]
+name = "config_tests"
+path = "tests/config_tests.rs"
+
+[[test]]
 name = "er_move_tests"
 path = "tests/er_move_tests.rs"
 

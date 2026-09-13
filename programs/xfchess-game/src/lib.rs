@@ -58,8 +58,9 @@ pub mod tournament_ix;
 // can find them via their `use super::*` chain.
 pub use account_ix::{
     AcceptFriendRequest, AuthorizeGlobalSessionArgs, AuthorizeGlobalSessionCtx, BlockUser,
-    CloseFriendship, CreateSession, InitProfile, LinkExternalElo, RevokeGlobalSessionCtx,
-    RevokeSession, SendFriendRequest, SetUsername, UpdateElo, VerifyProfile, WithdrawExpiredWager,
+    CloseFriendship, CreateSession, InitProfile, InitializeConfig, InitializeConfigArgs,
+    LinkExternalElo, RevokeGlobalSessionCtx, RevokeSession, SendFriendRequest, SetUsername,
+    UpdateConfig, UpdateConfigArgs, UpdateElo, VerifyProfile, WithdrawExpiredWager,
     WithdrawGlobalSessionCtx, WithdrawTreasury,
 };
 #[cfg(feature = "cranks")]
@@ -300,6 +301,12 @@ pub mod __client_accounts_global_create_game {
 pub mod __client_accounts_global_join_game {
     pub use crate::game_ix::global_join::__client_accounts_global_join_game::*;
 }
+pub mod __client_accounts_initialize_config {
+    pub use crate::account_ix::config_ix::__client_accounts_initialize_config::*;
+}
+pub mod __client_accounts_update_config {
+    pub use crate::account_ix::config_ix::__client_accounts_update_config::*;
+}
 
 #[allow(unused_imports)]
 use ephemeral_rollups_sdk::anchor::MagicProgram;
@@ -344,6 +351,17 @@ const _MAINNET_PROG_ID_GUARD: () = panic!("mainnet build refused: set the real p
 #[program]
 pub mod xfchess_game {
     use super::*;
+
+    pub fn initialize_config(
+        ctx: Context<InitializeConfig>,
+        args: InitializeConfigArgs,
+    ) -> Result<()> {
+        crate::account_ix::config_ix::initialize_config_handler(ctx, args)
+    }
+
+    pub fn update_config(ctx: Context<UpdateConfig>, args: UpdateConfigArgs) -> Result<()> {
+        crate::account_ix::config_ix::update_config_handler(ctx, args)
+    }
 
     pub fn init_profile(
         ctx: Context<InitProfile>,
