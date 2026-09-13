@@ -29,9 +29,8 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
     require!(
         game.game_type == GameType::PvP,
         GameErrorCode::GameAlreadyFull
-    ); // AI games are active by default
+    );
 
-    // Platform fee was set at creation time from live SOL/GBP rate — no recalculation needed.
     let now = Clock::get()?.unix_timestamp;
     crate::lifecycle::transitions::join_waiting_game(game, player, fee_payer, now)?;
 

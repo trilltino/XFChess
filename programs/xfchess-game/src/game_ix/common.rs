@@ -29,7 +29,8 @@ pub fn init_game_fields(game: &mut Game, args: InitGameArgs, now: i64, bump: u8)
     #[cfg(feature = "move-validation")]
     {
         game.board_state =
-            chess_logic_on_chain::nimzovich_engine::CompactBoard::starting_position().to_bytes();
+            crate::chess_logic_on_chain::nimzovich_engine::CompactBoard::starting_position()
+                .to_bytes();
     }
     #[cfg(not(feature = "move-validation"))]
     {

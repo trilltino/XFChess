@@ -233,7 +233,7 @@ The Solana program uses `opt-level = "z"` for size. The `move-validation` featur
 See [crates/CLAUDE.md](crates/CLAUDE.md) for per-crate details. Key ones:
 
 - `nimzovich_engine` — chess AI (search + move gen), used by game client and backend. **Extracted 2026-08-28** into the standalone repo at `..\nimzovich` (sibling of this repo); referenced here as an out-of-workspace path dependency.
-- `chess-logic-on-chain` — no_std move validation, used inside the Solana program
+- `chess-logic-on-chain` — no_std move validation, consolidated into `programs/xfchess-game/src/chess_logic_on_chain.rs` (behind `move-validation` feature)
 - `braid-*` + `braid_uri` — HTTP-209 Braid protocol for live game subscriptions (P2P relay)
 - `swiss-pairing` — FIDE Dutch Swiss tournament pairing
 - `solana-chess-client` — client-side transaction builders for the Solana program

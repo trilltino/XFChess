@@ -99,7 +99,6 @@ mod tests {
     #[test]
     fn is_valid_boundary_is_exclusive() {
         let s = sample(1000);
-        // expires_at == 1000 + 3600; exactly equal is NOT valid.
         assert!(s.is_valid(s.expires_at - 1));
         assert!(!s.is_valid(s.expires_at));
     }
@@ -111,10 +110,8 @@ mod tests {
         s.total_spent = s.total_spent.saturating_add(100_000_000);
         assert!(s.has_budget(100_000_000));
         s.total_spent = s.total_spent.saturating_add(250_000_000);
-        // 350M spent + 250M attempt = 600M <= 1G cap
         assert!(s.has_budget(250_000_000));
         s.total_spent = 900_000_000;
-        // per-wager cap still enforced
         assert!(!s.has_budget(s.max_wager + 1));
     }
 }

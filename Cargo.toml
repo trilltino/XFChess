@@ -65,8 +65,10 @@ required-features = ["solana"]
 resolver = "2"
 members = [
     "crates/zarathustra_net/*",
-    "crates/solana/*",
+    # crates/solana/* removed — chess-logic-on-chain consolidated into
+    # programs/xfchess-game/src/chess_logic_on_chain.rs
     "crates/shared/*",
+    "crates/er-cu-benchmark",
     "programs/*",
     "tauri",
     "backend",
@@ -146,6 +148,10 @@ webbrowser = "=1.1.0"
 # is the canonical PDA for `delegated_account`); unblocked by the Anchor/Solana
 # migration above. See docs/runbooks/magicblock-lifecycle-devnet.md.
 ephemeral-rollups-sdk = { version = "=0.16.2", features = ["anchor", "instruction"] }
+# solana-security-txt: embeds the security.txt metadata blob read by
+# `solana-verify` / explorers. Exact-pinned to match Cargo.lock; 1.1.3 is the
+# latest release line (there is no 4.x — a `=4.1` pin broke workspace resolution).
+solana-security-txt = "=1.1.3"
 axum = "=0.8.9"
 tower-http = "=0.7.0"
 xfchess-game = { path = "programs/xfchess-game", version = "0.1.0" }
@@ -162,7 +168,8 @@ iroh-gossip = { version = "0.101.0" }
 # TODO: switch to a git dependency once the engine repo is published on GitHub.
 nimzovich_engine = { path = "../nimzovich/nimzovich_engine" }
 xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
-chess-logic-on-chain = { path = "crates/solana/chess-logic-on-chain" }
+# chess-logic-on-chain: removed from workspace dependencies — consolidated
+# into programs/xfchess-game/src/chess_logic_on_chain.rs (move-validation feature).
 # Exact-pinned because several call sites and feature flags in this repo
 # (bevy_fixed_node, sky — see below; the winit pin) target 0.19's specific
 # rc.3-era API surface, not just the 0.19 line in general; bumping needs those

@@ -41,8 +41,12 @@ pub struct CancelTimeCheck<'info> {
     )]
     pub game: Account<'info, crate::state::Game>,
 
+    /// CHECK: Pinned to `MAGIC_PROGRAM_ID` by the `address` constraint below.
+    /// The handler never reads or writes it — it is in the account list purely
+    /// so the MagicBlock program (the CPI target of `cancel_ix`) is loadable
+    /// for this transaction.
     #[account(address = MAGIC_PROGRAM_ID)]
-    pub magic_program: AccountInfo<'info>,
+    pub magic_program: UncheckedAccount<'info>,
 }
 
 // Crank-specific small error enums removed; use the central `GameErrorCode`

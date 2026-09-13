@@ -5,7 +5,6 @@ pub mod registration;
 pub mod session;
 pub mod shards;
 
-// Re-export all types from subdirectories for easier access
 pub use lifecycle::{
     CancelTournament, CloseTournament, InitializeShardsMedium, InitializeShardsSmall,
     InitializeTournament, InitializeTournamentEscrow, InitializeTournamentShards, StartTournament,

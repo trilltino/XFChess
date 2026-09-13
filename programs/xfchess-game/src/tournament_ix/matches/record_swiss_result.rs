@@ -84,9 +84,6 @@ pub fn handler(
         GameErrorCode::BoardAlreadyRecorded
     );
 
-    // Collect the present shards (1-3 are optional — small/medium tournaments
-    // only initialize shard 0 or 0-1). Presence is prefix-closed, so the
-    // position in this vec equals the shard id.
     let mut shards: Vec<&mut TournamentPlayersShard> =
         vec![&mut ctx.accounts.tournament_players_shard_0];
     if let Some(s) = ctx.accounts.tournament_players_shard_1.as_mut() {
@@ -99,8 +96,7 @@ pub fn handler(
         shards.push(s);
     }
 
-    // Find player and opponent indices across all shards
-    let mut player_shard_idx: Option<(usize, usize)> = None; // (shard_id, player_idx)
+    let mut player_shard_idx: Option<(usize, usize)> = None;
     let mut opponent_shard_idx: Option<(usize, usize)> = None;
 
     for (shard_idx, shard) in shards.iter().enumerate() {
@@ -118,16 +114,12 @@ pub fn handler(
     let (opponent_shard_id, opponent_idx) =
         opponent_shard_idx.ok_or(GameErrorCode::PlayerNotFound)?;
 
-    // Get scores before updating
     let player_score_before = shards[player_shard_id].swiss_standings[player_idx].score;
     let opponent_score_before = shards[opponent_shard_id].swiss_standings[opponent_idx].score;
 
-    // Handle updates based on whether players are in same or different shards
     if player_shard_id == opponent_shard_id {
-        // Same shard - use single mutable reference
         let shard = &mut shards[player_shard_id];
 
-        // Update scores based on result
         match result {
             SwissMatchResult::Win => {
                 shard.swiss_standings[player_idx].score += 2;
@@ -144,11 +136,9 @@ pub fn handler(
             SwissMatchResult::Draw => {
                 shard.swiss_standings[player_idx].score += 1;
                 shard.swiss_standings[opponent_idx].score += 1;
-                // No color change for draws
             }
         }
 
-        // Update tiebreakers
         shard.swiss_standings[player_idx].buchholz += opponent_score_before as u16;
         shard.swiss_standings[opponent_idx].buchholz += player_score_before as u16;
 
@@ -157,12 +147,10 @@ pub fn handler(
         } else if result == SwissMatchResult::Loss {
             shard.swiss_standings[opponent_idx].sonneborn += player_score_before as u16;
         } else {
-            // Draw - both get half of opponent's score
             shard.swiss_standings[player_idx].sonneborn += (opponent_score_before / 2) as u16;
             shard.swiss_standings[opponent_idx].sonneborn += (player_score_before / 2) as u16;
         }
     } else {
-        // Different shards — split the vec so we can hold both mutably.
         let lo = player_shard_id.min(opponent_shard_id);
         let hi = player_shard_id.max(opponent_shard_id);
         let (left, right) = shards.split_at_mut(hi);
@@ -182,11 +170,6 @@ pub fn handler(
         );
     }
 
-    // Mark this board reported for the round so `advance_round` (permissionless
-    // — see tournament_ix::matches::advance_round) can verify completeness
-    // purely from on-chain state instead of trusting an off-chain caller.
-    // Round advancement itself still isn't inferred here: a single call can
-    // only ever set its own board's bit, never skip ahead.
     crate::tournament_ix::matches::round_bitmap::set(&mut t.round_boards_reported, board);
 
     msg!(
@@ -208,7 +191,6 @@ fn update_shards(
     player_score_before: u8,
     opponent_score_before: u8,
 ) {
-    // Update scores based on result
     match result {
         SwissMatchResult::Win => {
             player_shard.swiss_standings[player_idx].score += 2;
@@ -225,11 +207,9 @@ fn update_shards(
         SwissMatchResult::Draw => {
             player_shard.swiss_standings[player_idx].score += 1;
             opponent_shard.swiss_standings[opponent_idx].score += 1;
-            // No color change for draws
         }
     }
 
-    // Update tiebreakers
     player_shard.swiss_standings[player_idx].buchholz += opponent_score_before as u16;
     opponent_shard.swiss_standings[opponent_idx].buchholz += player_score_before as u16;
 
@@ -238,7 +218,6 @@ fn update_shards(
     } else if result == SwissMatchResult::Loss {
         opponent_shard.swiss_standings[opponent_idx].sonneborn += player_score_before as u16;
     } else {
-        // Draw - both get half of opponent's score
         player_shard.swiss_standings[player_idx].sonneborn += (opponent_score_before / 2) as u16;
         opponent_shard.swiss_standings[opponent_idx].sonneborn += (player_score_before / 2) as u16;
     }

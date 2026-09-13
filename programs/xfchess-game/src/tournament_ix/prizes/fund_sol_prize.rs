@@ -1,6 +1,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::lifecycle::initialize_escrow::TournamentEscrow;
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
@@ -17,7 +18,7 @@ pub struct FundSolPrize<'info> {
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
-    pub escrow_pda: UncheckedAccount<'info>,
+    pub escrow_pda: Account<'info, TournamentEscrow>,
     #[account(mut)]
     pub operator: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -34,7 +35,6 @@ pub fn handler(ctx: Context<FundSolPrize>, tournament_id: u64, amount: u64) -> R
         tournament.status == TournamentStatus::Registration,
         GameErrorCode::TournamentNotInRegistration
     );
-    // The guarantee is locked exactly once, before the first registration.
     require!(
         tournament.prize_pool == 0,
         GameErrorCode::PrizeAlreadyFunded

@@ -37,10 +37,16 @@ fn report_move_blur(
     mut starts: MessageReader<GameStartedEvent>,
     mut telemetry: ResMut<FocusTelemetry>,
 ) {
-    if starts.read().next().is_some() {
+    for start in starts.read() {
         telemetry.ply_count = 0;
         telemetry.blurred_since_last_local_move = false;
         telemetry.turn_started_at = Some(Instant::now());
+        // Support-bundle marker: [GAME-START] + game_id lets logs be cut
+        // around a single reported online game.
+        info!(
+            "[GAME-START] game_id={} — online game session began",
+            start.game_id
+        );
     }
 
     for mv in moves.read() {

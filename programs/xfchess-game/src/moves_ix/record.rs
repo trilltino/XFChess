@@ -30,15 +30,11 @@ pub fn handler(
     next_board: [u8; 68],
     nonce: u64,
     _signature: Option<Vec<u8>>,
-    // Causal chain: client's claimed game.nonce before this move.
-    // Must equal game.nonce if provided; None = legacy client (skip check).
     parent_nonce: Option<u64>,
 ) -> Result<()> {
-    // Capture before mutable borrows to avoid split-borrow issues inside cfg blocks
     let _moving_player = ctx.accounts.session_delegation.player;
     let game = &mut ctx.accounts.game;
 
-    // Check session expiration
     require!(
         Clock::get()?.unix_timestamp <= ctx.accounts.session_delegation.expires_at,
         GameErrorCode::SessionExpired
@@ -55,22 +51,13 @@ pub fn handler(
         timestamp,
     )?;
 
-    // Human-readable FEN in the plain program log, not just the base64
-    // `MoveEvent` below — Solscan (and any explorer without this program's
-    // IDL registered) can't decode `emit!` event data, so the board state
-    // otherwise only shows as an opaque blob. `from_bytes` is a zero-cost
-    // transmute; `to_fen` is a ~64-square string build, negligible CU cost.
-    // Gated: this is the only thing outside the validation path itself that
-    // pulls `chess_logic_on_chain` in, so leaving it ungated made
-    // `--no-default-features` fail to compile and forced the whole engine
-    // into every build — including ones that don't validate moves on-chain.
     #[cfg(feature = "move-validation")]
     msg!(
         "FEN: {}",
-        chess_logic_on_chain::nimzovich_engine::CompactBoard::from_bytes(&next_board).to_fen()
+        crate::chess_logic_on_chain::nimzovich_engine::CompactBoard::from_bytes(&next_board)
+            .to_fen()
     );
 
-    // Emit MoveEvent for Ledger-based history tracking (zero rent cost)
     emit!(crate::events::MoveEvent {
         game_id: _game_id,
         player: _moving_player,

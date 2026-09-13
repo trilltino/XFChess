@@ -4,7 +4,7 @@ use crate::state::{Game, GameResult, GameStatus};
 use anchor_lang::prelude::*;
 
 #[cfg(feature = "move-validation")]
-use chess_logic_on_chain::nimzovich_engine::{
+use crate::chess_logic_on_chain::nimzovich_engine::{
     parse_uci, validate_and_apply, CompactBoard, MoveOutcome,
 };
 
@@ -94,6 +94,9 @@ pub fn apply_recorded_move(
         }
     }
 
+    // Dev-only fallback: when `move-validation` is disabled (local iteration only),
+    // skip on-chain validation and trust the client-supplied board state. Production
+    // builds enforce `move-validation` via the compile_error! guard in lib.rs.
     #[cfg(not(feature = "move-validation"))]
     {
         let _ = move_uci;

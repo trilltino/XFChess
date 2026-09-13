@@ -28,16 +28,11 @@ fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
     // Still useful on Android for offline bug reports even though `adb
     // logcat` (wired in below) is the primary live-debugging channel there —
     // see the plan's "Testing on a Samsung Galaxy S23" section.
-    #[cfg(target_os = "android")]
-    let dir = crate::core::paths::internal_data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("logs");
-    #[cfg(not(target_os = "android"))]
-    let dir = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("xfchess")
-        .join("logs");
-    let _ = std::fs::create_dir_all(&dir);
+    // Logs live in the active profile's folder (see identity::log_dir), so a
+    // player's whole XFChess footprint — node key, PGNs, logs — stays in one
+    // discoverable place they can hand over from the Settings screen. Android
+    // falls back to app-internal storage via the same helper.
+    let dir = crate::multiplayer::network::identity::log_dir();
     let file_appender = tracing_appender::rolling::daily(&dir, "game.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     Box::leak(Box::new(guard));

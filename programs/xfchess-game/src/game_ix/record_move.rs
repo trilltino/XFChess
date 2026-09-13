@@ -25,19 +25,16 @@ pub fn handler(
     let game = &mut ctx.accounts.game;
     let move_log = &mut ctx.accounts.move_log;
 
-    // Validate player is in the game
     require!(
         ctx.accounts.player.key() == game.white || ctx.accounts.player.key() == game.black,
         GameErrorCode::NotInGame
     );
 
-    // Validate game state
     require!(
         game.status == GameStatus::Active,
         GameErrorCode::GameNotActive
     );
 
-    // Validate it's player's turn
     let is_white_turn = move_log.moves.len() % 2 == 0;
     let player_color = if ctx.accounts.player.key() == game.white {
         true
@@ -49,7 +46,6 @@ pub fn handler(
         GameErrorCode::NotYourTurn
     );
 
-    // Record the move
     let move_index = move_log.moves.len();
     if move_index < move_log.moves.capacity() {
         move_log.moves[move_index] = move_str.clone();
@@ -58,7 +54,6 @@ pub fn handler(
             move_log.signatures[move_index] = sig;
         }
     } else {
-        // Handle full move log - shift or expand if needed
         move_log.moves.push(move_str.clone());
         move_log.timestamps.push(Clock::get()?.unix_timestamp);
         if let Some(sig) = signature {
@@ -66,7 +61,6 @@ pub fn handler(
         }
     }
 
-    // Update game state
     game.last_move_timestamp = Clock::get()?.unix_timestamp;
     game.current_fen = next_fen;
 

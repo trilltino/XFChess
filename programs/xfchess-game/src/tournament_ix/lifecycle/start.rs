@@ -1,6 +1,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::lifecycle::initialize_escrow::TournamentEscrow;
 use crate::tournament_ix::shards;
 use anchor_lang::prelude::*;
 
@@ -43,10 +44,11 @@ pub struct StartTournament<'info> {
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
-    pub escrow_pda: UncheckedAccount<'info>,
+    pub escrow_pda: Account<'info, TournamentEscrow>,
     #[account(
         mut,
-        constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess
+        constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess,
+        constraint = host_treasury.owner == &system_program::ID @ GameErrorCode::InvalidAccountOwner
     )]
     pub host_treasury: UncheckedAccount<'info>,
     #[account(mut)]
@@ -64,9 +66,6 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
         tournament.status == TournamentStatus::Registration,
         GameErrorCode::TournamentNotInRegistration
     );
-    // Swiss tournaments may start at min_players (pairing handles any count);
-    // single-elimination needs the full bracket. Below min_players the backend
-    // should call cancel_tournament instead, which refunds every entry fee.
     match tournament.tournament_type {
         TournamentType::Swiss { .. } => {
             require!(
@@ -84,8 +83,6 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
 
     let player_count = tournament.num_registered_players as usize;
 
-    // Small/medium tournaments only initialize shard 0 (or 0-1); the missing
-    // shard accounts are passed as the program ID and resolve to None.
     let required = shards::required_shards(tournament.max_players) as usize;
 
     {
@@ -111,7 +108,6 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
             GameErrorCode::InvalidTournamentStatus
         );
 
-        // Sort players by ELO descending
         let mut seeded = collected;
         seeded.sort_by(|a, b| b.1.cmp(&a.1));
 
@@ -146,20 +142,16 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
         }
     }
 
-    // The tournament is definitely running: sweep the entry-fee deposits from
-    // escrow to the operator treasury. What remains in escrow afterwards is
-    // exactly the guaranteed SOL prize (prize_pool) locked before registration.
     let fees_collected = tournament
         .entry_fee
         .checked_mul(tournament.num_registered_players as u64)
         .ok_or(GameErrorCode::ArithmeticOverflow)?;
     if fees_collected > 0 {
-        require!(
-            ctx.accounts.escrow_pda.lamports() >= fees_collected,
-            GameErrorCode::InsufficientFunds
-        );
-        **ctx.accounts.escrow_pda.lamports.borrow_mut() -= fees_collected;
-        **ctx.accounts.host_treasury.lamports.borrow_mut() += fees_collected;
+        crate::common::escrow::debit_program_pda(
+            &ctx.accounts.escrow_pda.to_account_info(),
+            &ctx.accounts.host_treasury.to_account_info(),
+            fees_collected,
+        )?;
         tournament.platform_fee_pool = fees_collected;
     }
 

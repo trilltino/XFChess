@@ -26,7 +26,7 @@ any current `.env` reference.
 
 ## Benchmark-only keys (not part of the live program)
 
-Used exclusively by `crates/solana/er-cu-benchmark` (a load-testing tool):
+Used exclusively by `crates/er-cu-benchmark` (a load-testing tool):
 
 | File | Purpose |
 |------|---------|

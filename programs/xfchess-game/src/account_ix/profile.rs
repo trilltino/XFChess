@@ -11,7 +11,7 @@ use anchor_lang::Discriminator;
 #[instruction(username: String, country: String, date_of_birth: i64)]
 pub struct InitProfile<'info> {
     #[account(mut)]
-    pub player_profile: AccountInfo<'info>,
+    pub player_profile: UncheckedAccount<'info>,
 
     #[account(
         init_if_needed,
@@ -35,10 +35,8 @@ pub fn handler(
     country: String,
     date_of_birth: i64,
 ) -> Result<()> {
-    // Validate username format
     validate_username(&username)?;
 
-    // Enforce 18+ age gate: DOB must be at least 18 years before now.
     let now = Clock::get()?.unix_timestamp;
     require!(
         date_of_birth > 0 && now - date_of_birth >= EIGHTEEN_YEARS_SECS,
@@ -50,7 +48,6 @@ pub fn handler(
     let system_program = &ctx.accounts.system_program;
     let record = &mut ctx.accounts.username_record;
 
-    // 1. Manually Handle Profile Account (Creation or Allocation)
     if profile_info.data_is_empty() {
         let (pda, bump) =
             Pubkey::find_program_address(&[PROFILE_SEED, player.key().as_ref()], ctx.program_id);
@@ -77,18 +74,15 @@ pub fn handler(
             &[&[PROFILE_SEED, player.key().as_ref(), &[bump]]],
         )?;
     } else {
-        // Already exists - verify ownership
         require!(
             profile_info.owner == ctx.program_id,
             crate::errors::GameErrorCode::UnauthorizedAccess
         );
 
-        // 2. Ensure enough space (Realloc if needed for legacy accounts)
         let required_space = 8 + PlayerProfile::INIT_SPACE;
         if profile_info.data_len() < required_space {
             profile_info.resize(required_space)?;
 
-            // Adjust lamports for rent exemption
             let rent = Rent::get()?;
             let new_minimum_balance = rent.minimum_balance(required_space);
             let lamports_diff = new_minimum_balance.saturating_sub(profile_info.lamports());
@@ -122,16 +116,13 @@ pub fn handler(
         profile
     };
 
-    // Write Discriminator
     let mut data = profile_info.try_borrow_mut_data()?;
     let disc = PlayerProfile::DISCRIMINATOR;
     data[..8].copy_from_slice(&disc);
 
-    // Serialize state
     let mut writer = &mut data[8..];
     profile.serialize(&mut writer)?;
 
-    // 3. Handle Username Record
     if record.owner == Pubkey::default() {
         record.owner = player.key();
         record.created_at = Clock::get()?.unix_timestamp;
@@ -154,8 +145,8 @@ pub struct VerifyProfile<'info> {
     )]
     pub player_profile: Account<'info, PlayerProfile>,
     #[account(signer, address = crate::constants::kyc_authority::ID @ crate::errors::GameErrorCode::UnauthorizedAccess)]
-    pub admin: AccountInfo<'info>,
-    pub player: AccountInfo<'info>,
+    pub admin: Signer<'info>,
+    pub player: UncheckedAccount<'info>,
 }
 
 pub fn verify_handler(ctx: Context<VerifyProfile>) -> Result<()> {

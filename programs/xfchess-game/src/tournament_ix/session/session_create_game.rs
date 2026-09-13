@@ -102,7 +102,6 @@ pub fn handler(
     let fee_payer = &ctx.accounts.session_signer;
     let _system_program = &ctx.accounts.system_program;
 
-    // Validate session
     require!(
         session.tournament_id == tournament_id,
         GameErrorCode::InvalidSession
@@ -117,7 +116,6 @@ pub fn handler(
         GameErrorCode::SpendingLimitExceeded
     );
 
-    // Check wager limits
     require!(
         wager_amount <= session.max_wager,
         GameErrorCode::WagerLimitExceeded
@@ -127,7 +125,6 @@ pub fn handler(
         GameErrorCode::StakeTooLow
     );
 
-    // Validate tournament state
     require!(
         tournament.status == TournamentStatus::Active,
         GameErrorCode::InvalidTournamentStatus
@@ -135,19 +132,6 @@ pub fn handler(
 
     let now = Clock::get()?.unix_timestamp;
 
-    // Create the `game` PDA funded by the tournament session delegation
-    // vault via `debit_program_pda`, not a system-program CPI — see the
-    // comment on `game_ix::global_create::handler` for why: the System
-    // Program's transfer path (which `create_account` also uses internally)
-    // unconditionally rejects a `from` account that carries data, and
-    // `session_delegation` does. `Allocate` + `Assign` handle space/ownership
-    // separately since neither touches a `from` account.
-    //
-    // Order matters: `Allocate`+`Assign` must run *before* the debit —
-    // crediting `game` first (while still owned by the System Program) then
-    // passing it into `invoke_signed` trips the runtime's "sum of account
-    // balances before and after instruction do not match" check. See
-    // `game_ix::global_create`'s test for the empirical confirmation.
     let space = 8 + Game::INIT_SPACE;
     let lamports = Rent::get()?.minimum_balance(space);
     let game_id_bytes = game_id.to_le_bytes();
@@ -176,7 +160,6 @@ pub fn handler(
         lamports,
     )?;
 
-    // Transfer wager from session vault to escrow — same rule.
     if wager_amount > 0 {
         require!(
             session_guards::checked_session_total(session.total_spent, wager_amount)?
@@ -190,13 +173,10 @@ pub fn handler(
         wager_amount,
     )?;
 
-    // Update session spent amount
     let session_account = &mut ctx.accounts.session_delegation;
     session_account.total_spent =
         session_guards::checked_session_total(session_account.total_spent, wager_amount)?;
 
-    // Initialize game (full init, matching create/global_create — otherwise the
-    // board, turn, and timestamps would be left zeroed and the game unplayable).
     let mut game = Game {
         game_id: 0,
         white: Pubkey::default(),

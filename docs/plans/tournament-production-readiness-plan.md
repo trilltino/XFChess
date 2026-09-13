@@ -142,7 +142,7 @@ than write them twice.
 The *cost formula*, however, is wrong in four ways, and the first is severe.
 
 **1. Rent is not modelled at all.** `generate_cost_report`
-([cost_reporter.rs:94-100](../../crates/solana/er-cu-benchmark/src/cost_reporter.rs#L94-L100)) totals
+([cost_reporter.rs:94-100](../../crates/er-cu-benchmark/src/cost_reporter.rs#L94-L100)) totals
 exactly three things: base tx fee, a flat priority fee, and ER session fees. Account
 rent — the money that actually leaves the signer's wallet — appears nowhere.
 
@@ -172,7 +172,7 @@ an operator needs both: gross = working capital required up front, net = actual 
 per tournament.
 
 **3. The `paid_instructions` allowlist is stale.**
-[cost_reporter.rs:55-72](../../crates/solana/er-cu-benchmark/src/cost_reporter.rs#L55-L72) omits
+[cost_reporter.rs:55-72](../../crates/er-cu-benchmark/src/cost_reporter.rs#L55-L72) omits
 `initialize_match`, `advance_winner`, `advance_round`, `complete_swiss_tournament`,
 `distribute_tournament_prizes`, `fund_sol_prize`, `close_tournament`,
 `leave_tournament`, `claim_tournament_prize`, `withdraw_treasury`, the
@@ -181,16 +181,16 @@ instruction not on this list is silently counted as **free** — so all 255
 `initialize_match` calls in a 256-player bracket currently contribute zero to the total.
 
 **4. Priority fee arithmetic is wrong.** The report charges a flat `10_000` lamports per
-tx ([cost_reporter.rs:95](../../crates/solana/er-cu-benchmark/src/cost_reporter.rs#L95)), but the
+tx ([cost_reporter.rs:95](../../crates/er-cu-benchmark/src/cost_reporter.rs#L95)), but the
 transactions actually set `DEFAULT_CU_PRICE = 10_000` **micro-lamports per CU**
-([lib.rs:121](../../crates/solana/er-cu-benchmark/src/lib.rs#L121)). Real priority fee is
+([lib.rs:121](../../crates/er-cu-benchmark/src/lib.rs#L121)). Real priority fee is
 `cu_price × cu_used ÷ 1_000_000` — about 2,000 lamports for a 200k-CU transaction, not
 10,000. The model over-charges cheap instructions and under-charges expensive ones.
 
 **5. ER move costs: two models that contradict each other, neither measured.**
 
 The benchmark asserts ER transactions are free — *"Base fee per TX on ER: 0 lamports"*
-([cost_reporter.rs:4-6](../../crates/solana/er-cu-benchmark/src/cost_reporter.rs#L4-L6)) — and
+([cost_reporter.rs:4-6](../../crates/er-cu-benchmark/src/cost_reporter.rs#L4-L6)) — and
 `record_move` is absent from `paid_instructions`, so every move on the rollup
 contributes exactly zero to the report.
 
@@ -237,7 +237,7 @@ Three consequences:
   matters enormously for tournaments, where time control is an operator choice.
 
 **Also stale:** `SOL_GBP_RATE = 60.0` is hardcoded
-([lib.rs:130](../../crates/solana/er-cu-benchmark/src/lib.rs#L130)) while the backend already
+([lib.rs:130](../../crates/er-cu-benchmark/src/lib.rs#L130)) while the backend already
 maintains a live rate (`signing/routes/rates.rs`). And there is no **per-signer**
 attribution — the user-facing question is "what does this cost *the operator* vs *each
 player*", and the report emits one aggregate number.

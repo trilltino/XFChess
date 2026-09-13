@@ -11,13 +11,11 @@ pub fn handler_authorize_session_key(
     let session_delegation = &mut ctx.accounts.session_delegation;
     let player = &ctx.accounts.player;
 
-    // Verify that the caller is either the white or black player in the game
     require!(
         player.key() == game.white || player.key() == game.black,
         XfchessGameError::UnauthorizedAccess
     );
 
-    // Set up the session delegation
     session_delegation.game_id = game_id;
     session_delegation.player = player.key();
     session_delegation.session_key = session_pubkey;
@@ -33,13 +31,11 @@ pub fn handler_revoke_session_key(ctx: Context<RevokeSessionCtx>, _game_id: u64)
     let session_delegation = &mut ctx.accounts.session_delegation;
     let player = &ctx.accounts.player;
 
-    // Verify that the caller is the owner of the delegation
     require!(
         player.key() == session_delegation.player,
         XfchessGameError::UnauthorizedAccess
     );
 
-    // Disable the session delegation
     session_delegation.enabled = false;
     session_delegation.expires_at = Clock::get()?.unix_timestamp; // Set to now to expire immediately
 

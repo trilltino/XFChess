@@ -1,6 +1,6 @@
-const K_SCALED: f64 = 3200.0; // K=32 × 100
-const DIVISOR: f64 = 40000.0; // 400 × 100
-const ELO_FLOOR: f64 = 10000.0; // 100 Elo minimum (× 100)
+const K_SCALED: f64 = 3200.0;
+const DIVISOR: f64 = 40000.0;
+const ELO_FLOOR: f64 = 10000.0;
 
 pub fn calculate_elo_update(white_rating: f64, black_rating: f64, sa: f64) -> (f64, f64) {
     let ea = 1.0 / (1.0 + 10.0_f64.powf((black_rating - white_rating) / DIVISOR));

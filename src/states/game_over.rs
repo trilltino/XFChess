@@ -37,4 +37,19 @@ fn record_game_stats(
         "[GAME_OVER] Game statistics recorded: winner={:?}, moves={}",
         winner, moves
     );
+
+    // Support-bundle marker: [GAME-END] closes the [GAME-START] line above;
+    // online games carry their numeric game_id on both.
+    let game_id = crate::multiplayer::network::game_id_store::get();
+    if game_id != 0 {
+        info!(
+            "[GAME-END] game_id={} result={:?} winner={:?} moves={}",
+            game_id, *game_over, winner, moves
+        );
+    } else {
+        info!(
+            "[GAME-END] result={:?} winner={:?} moves={}",
+            *game_over, winner, moves
+        );
+    }
 }

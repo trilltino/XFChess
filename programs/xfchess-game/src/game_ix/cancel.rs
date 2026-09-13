@@ -9,13 +9,13 @@ pub struct CancelGame<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
-    pub escrow_pda: UncheckedAccount<'info>,
+    pub escrow_pda: SystemAccount<'info>,
     #[account(mut)]
     pub player: Signer<'info>,
     #[account(mut, constraint = white_authority.key() == game.white @ GameErrorCode::NotInGame)]
-    pub white_authority: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub black_authority: UncheckedAccount<'info>,
+    pub white_authority: SystemAccount<'info>,
+    #[account(mut, constraint = black_authority.key() == game.black @ GameErrorCode::NotInGame)]
+    pub black_authority: SystemAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -53,14 +53,12 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
 
     game.updated_at = Clock::get()?.unix_timestamp;
 
-    // Refund Logic — both players get their wager back
     let wager_amount = game.wager_amount;
     if wager_amount > 0 {
         let game_id_bytes = _game_id.to_le_bytes();
         let bump = ctx.bumps.escrow_pda;
         let escrow_seeds: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[bump]]];
 
-        // Always refund white (creator always escrowed)
         anchor_lang::system_program::transfer(
             CpiContext::new_with_signer(
                 System::id(),
@@ -73,7 +71,6 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
             wager_amount,
         )?;
 
-        // Refund black only if they joined and escrowed their wager
         if black_has_joined {
             require!(
                 ctx.accounts.black_authority.key() == game.black,

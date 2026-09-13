@@ -3,8 +3,6 @@ use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
-// ── send_friend_request ──────────────────────────────────────────────────────
-
 #[derive(Accounts)]
 pub struct SendFriendRequest<'info> {
     #[account(
@@ -15,8 +13,8 @@ pub struct SendFriendRequest<'info> {
         bump
     )]
     pub friendship: Account<'info, Friendship>,
-    pub party_a: AccountInfo<'info>,
-    pub party_b: AccountInfo<'info>,
+    pub party_a: UncheckedAccount<'info>,
+    pub party_b: UncheckedAccount<'info>,
     #[account(mut)]
     pub requester: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -25,7 +23,6 @@ pub struct SendFriendRequest<'info> {
 pub fn send_request(ctx: Context<SendFriendRequest>) -> Result<()> {
     let a = ctx.accounts.party_a.key();
     let b = ctx.accounts.party_b.key();
-    // Strict canonical ordering also rules out self-friendship (a == b).
     require!(a < b, GameErrorCode::InvalidFriendPair);
 
     let signer = ctx.accounts.requester.key();
@@ -46,8 +43,6 @@ pub fn send_request(ctx: Context<SendFriendRequest>) -> Result<()> {
     Ok(())
 }
 
-// ── accept_friend_request ────────────────────────────────────────────────────
-
 #[derive(Accounts)]
 pub struct AcceptFriendRequest<'info> {
     #[account(
@@ -56,8 +51,8 @@ pub struct AcceptFriendRequest<'info> {
         bump = friendship.bump,
     )]
     pub friendship: Account<'info, Friendship>,
-    pub party_a: AccountInfo<'info>,
-    pub party_b: AccountInfo<'info>,
+    pub party_a: UncheckedAccount<'info>,
+    pub party_b: UncheckedAccount<'info>,
     pub addressee: Signer<'info>,
 }
 
@@ -76,8 +71,6 @@ pub fn accept_request(ctx: Context<AcceptFriendRequest>) -> Result<()> {
     Ok(())
 }
 
-// ── close_friendship (decline / cancel / remove) ─────────────────────────────
-
 #[derive(Accounts)]
 pub struct CloseFriendship<'info> {
     #[account(
@@ -87,8 +80,8 @@ pub struct CloseFriendship<'info> {
         close = signer,
     )]
     pub friendship: Account<'info, Friendship>,
-    pub party_a: AccountInfo<'info>,
-    pub party_b: AccountInfo<'info>,
+    pub party_a: UncheckedAccount<'info>,
+    pub party_b: UncheckedAccount<'info>,
     #[account(mut)]
     pub signer: Signer<'info>,
 }
@@ -103,8 +96,6 @@ pub fn close_friendship(ctx: Context<CloseFriendship>) -> Result<()> {
     Ok(())
 }
 
-// ── block_user ───────────────────────────────────────────────────────────────
-
 #[derive(Accounts)]
 pub struct BlockUser<'info> {
     #[account(
@@ -113,8 +104,8 @@ pub struct BlockUser<'info> {
         bump = friendship.bump,
     )]
     pub friendship: Account<'info, Friendship>,
-    pub party_a: AccountInfo<'info>,
-    pub party_b: AccountInfo<'info>,
+    pub party_a: UncheckedAccount<'info>,
+    pub party_b: UncheckedAccount<'info>,
     pub signer: Signer<'info>,
 }
 

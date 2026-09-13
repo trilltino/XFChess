@@ -51,7 +51,6 @@ pub fn handler(ctx: Context<ClaimStaleDispute>, game_id: u64) -> Result<()> {
         game.updated_at = now;
     }
 
-    // Split the full pot: each player gets their stake back (pot / 2 == wager).
     if wager > 0 {
         let pot = escrow::pot(wager)?;
         if ctx.accounts.escrow_pda.lamports() >= pot {
@@ -79,7 +78,6 @@ pub fn handler(ctx: Context<ClaimStaleDispute>, game_id: u64) -> Result<()> {
         }
     }
 
-    // Refund the challenger's bond (no fault was ruled).
     if bond > 0 {
         let dispute_info = ctx.accounts.dispute_record.to_account_info();
         let dest = if challenger == game_white {

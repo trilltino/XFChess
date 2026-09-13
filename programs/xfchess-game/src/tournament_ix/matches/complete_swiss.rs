@@ -50,8 +50,6 @@ pub fn handler(ctx: Context<CompleteSwissTournament>, tournament_id: u64) -> Res
         matches!(t.tournament_type, TournamentType::Swiss { .. }),
         GameErrorCode::InvalidGameStatus
     );
-    // `advance_round` refuses to advance past `total_rounds`, so this can
-    // only be true once every round has actually been played and cranked.
     require!(
         t.current_round >= t.total_rounds,
         GameErrorCode::SwissTournamentNotFinished
@@ -73,9 +71,6 @@ pub fn handler(ctx: Context<CompleteSwissTournament>, tournament_id: u64) -> Res
         standings.extend(shard.swiss_standings.iter().cloned());
     }
 
-    // Highest score first; Buchholz then Sonneborn-Berger break ties — the
-    // standard Swiss tiebreak order, both already accumulated per-match by
-    // `record_swiss_result`.
     standings.sort_by(|a, b| {
         b.score
             .cmp(&a.score)

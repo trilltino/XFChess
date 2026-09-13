@@ -70,21 +70,8 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
         GameErrorCode::GlobalSessionSpendingLimitExceeded
     );
 
-    // Transfer wager from delegation vault to escrow. `session_delegation` is
-    // a program-owned PDA carrying real account data, so the System Program
-    // refuses to act as `from` for it in any CPI ("Transfer: `from` must not
-    // carry data") no matter how it's signed — `debit_program_pda` moves the
-    // lamports directly instead, which is what a program is allowed to do
-    // with an account it owns. See `game_ix::global_create` for the fuller
-    // writeup (this is the join-side half of the same bug).
     let wager = game.wager_amount;
     if game.wager_token.is_none() {
-        // Soft caps (`has_budget`, above) are not a balance check — see the
-        // fuller writeup in `global_create`. Verify the vault can actually cover
-        // the wager and still stay rent-exempt, so a shortfall reports as
-        // "top up your session" instead of a bare insufficient-funds failure
-        // from inside `debit_program_pda`. No rent term for a game account here:
-        // unlike create, join does not allocate one.
         let vault = ctx.accounts.session_delegation.to_account_info();
         let rent_min = Rent::get()?.minimum_balance(vault.data_len());
         let required = wager
@@ -102,12 +89,10 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
         )?;
     }
 
-    // Update session bookkeeping
     let session = &mut ctx.accounts.session_delegation;
     session.total_spent = session_guards::checked_session_total(session.total_spent, wager)?;
     session.games_remaining = session.games_remaining.saturating_sub(1);
 
-    // Update game
     let game = &mut ctx.accounts.game;
     game.black = ctx.accounts.player.key();
     game.status = GameStatus::Active;

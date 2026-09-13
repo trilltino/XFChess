@@ -6,18 +6,18 @@ use anchor_lang::prelude::*;
 #[instruction(game_id: u64)]
 pub struct RequestForceUndelegateCtx<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
-    pub game: AccountInfo<'info>,
+    pub game: UncheckedAccount<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     #[account(address = crate::ID @ GameErrorCode::InvalidOwnerProgram)]
-    pub owner_program: AccountInfo<'info>,
+    pub owner_program: UncheckedAccount<'info>,
     #[account(mut)]
-    pub undelegation_request_pda: AccountInfo<'info>,
-    pub delegation_record_pda: AccountInfo<'info>,
+    pub undelegation_request_pda: UncheckedAccount<'info>,
+    pub delegation_record_pda: UncheckedAccount<'info>,
     #[account(mut)]
-    pub delegation_metadata_pda: AccountInfo<'info>,
+    pub delegation_metadata_pda: UncheckedAccount<'info>,
     #[account(address = ephemeral_rollups_sdk::id())]
-    pub delegation_program: AccountInfo<'info>,
+    pub delegation_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -44,25 +44,25 @@ pub fn handler_request_force_undelegate(
 #[instruction(game_id: u64)]
 pub struct ForceUndelegateAfterTimeoutCtx<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
-    pub game: AccountInfo<'info>,
+    pub game: UncheckedAccount<'info>,
     #[account(address = crate::ID @ GameErrorCode::InvalidOwnerProgram)]
-    pub owner_program: AccountInfo<'info>,
+    pub owner_program: UncheckedAccount<'info>,
     #[account(mut)]
-    pub undelegation_request_pda: AccountInfo<'info>,
+    pub undelegation_request_pda: UncheckedAccount<'info>,
     #[account(mut)]
-    pub delegation_record_pda: AccountInfo<'info>,
+    pub delegation_record_pda: UncheckedAccount<'info>,
     #[account(mut)]
-    pub delegation_metadata_pda: AccountInfo<'info>,
+    pub delegation_metadata_pda: UncheckedAccount<'info>,
     #[account(mut)]
-    pub delegation_rent_payer: AccountInfo<'info>,
+    pub delegation_rent_payer: UncheckedAccount<'info>,
     #[account(mut)]
-    pub commit_state_pda: AccountInfo<'info>,
+    pub commit_state_pda: UncheckedAccount<'info>,
     #[account(mut)]
-    pub commit_record_pda: AccountInfo<'info>,
+    pub commit_record_pda: UncheckedAccount<'info>,
     #[account(mut)]
-    pub commit_reimbursement: AccountInfo<'info>,
+    pub commit_reimbursement: UncheckedAccount<'info>,
     #[account(address = ephemeral_rollups_sdk::id())]
-    pub delegation_program: AccountInfo<'info>,
+    pub delegation_program: UncheckedAccount<'info>,
 }
 
 pub fn handler_force_undelegate_after_timeout(

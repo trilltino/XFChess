@@ -1,8 +1,7 @@
+use crate::constants::MAX_SESSION_DURATION_SECS;
 use crate::errors::GameErrorCode;
 use crate::state::PlayerSession;
 use anchor_lang::prelude::*;
-
-// ─── Player Session Instructions ──────────────────────────────────────────────
 
 #[derive(Accounts)]
 #[instruction(session_key: Pubkey)]
@@ -31,7 +30,15 @@ pub fn handler_create_session(
     let s = &mut ctx.accounts.session;
     s.player = ctx.accounts.player.key();
     s.session_key = session_key;
-    s.expires_at = now + duration.unwrap_or(PlayerSession::DEFAULT_DURATION);
+    let duration_secs = duration.unwrap_or(PlayerSession::DEFAULT_DURATION);
+    require!(duration_secs > 0, GameErrorCode::InvalidArgument);
+    require!(
+        duration_secs <= MAX_SESSION_DURATION_SECS,
+        GameErrorCode::DurationTooLarge
+    );
+    s.expires_at = now
+        .checked_add(duration_secs)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
     s.spending_limit = spending_limit.unwrap_or(PlayerSession::DEFAULT_SPENDING_LIMIT);
     s.max_wager = max_wager.unwrap_or(PlayerSession::MAX_WAGER_DEFAULT);
     s.total_spent = 0;
@@ -81,9 +88,6 @@ pub fn handler_update_elo(
     won_amount: u64,
 ) -> Result<()> {
     let p = &mut ctx.accounts.profile;
-    // ELO rating (elo_rating field) is updated exclusively in finalize_game using K=32.
-    // This instruction updates lifetime stats only (wins/losses/draws/wagered/won).
-    // The _opponent_rating and _opponent_rd parameters are kept for ABI compatibility.
 
     match outcome {
         10000 => {

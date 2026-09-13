@@ -1,8 +1,7 @@
 use bevy::prelude::*;
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::panic;
-use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use super::{
@@ -63,6 +62,10 @@ impl Plugin for CorePlugin {
         // Initialize settings
         app.add_systems(Startup, load_settings_system);
 
+        // Startup banner so every daily log file (and every exported support
+        // bundle) is self-describing: version, OS, arch, build mode, log path.
+        app.add_systems(Startup, log_runtime_banner);
+
         // Add state logging and validation systems
         app.add_systems(
             Update,
@@ -90,6 +93,15 @@ impl Plugin for CorePlugin {
         app.add_systems(OnEnter(GameState::InGame), log_state_entry);
         app.add_systems(OnEnter(GameState::Paused), log_state_entry);
         app.add_systems(OnEnter(GameState::GameOver), log_state_entry);
+
+        // A [GAME-START] marker for every game — online, local, or vs AI —
+        // so a support bundle can be cut around a single reported game.
+        app.add_systems(
+            OnEnter(GameState::InGame),
+            |game_mode: Res<super::states::GameMode>| {
+                info!("[GAME-START] mode={:?}", *game_mode);
+            },
+        );
 
         app.add_systems(
             OnExit(GameState::MainMenu),
@@ -186,11 +198,10 @@ fn setup_panic_hook() {
         // Print to stderr (console)
         eprintln!("\n{}", panic_report);
 
-        // Write to log file
-        let logs_dir = Path::new("logs");
-        if !logs_dir.exists() {
-            let _ = fs::create_dir_all(logs_dir);
-        }
+        // Write to log file — next to game.log in the active profile's log
+        // folder (see identity::log_dir), where the Support-bundle export
+        // and the release smoke test both pick it up.
+        let logs_dir = crate::multiplayer::network::identity::log_dir();
 
         let log_file = logs_dir.join(format!("crash_{}.log", timestamp));
         if let Ok(mut file) = OpenOptions::new()
@@ -203,6 +214,21 @@ fn setup_panic_hook() {
             eprintln!("[PANIC] Crash log written to: {:?}", log_file);
         }
     }));
+}
+
+fn log_runtime_banner() {
+    #[cfg(debug_assertions)]
+    let build = "debug";
+    #[cfg(not(debug_assertions))]
+    let build = "release";
+    info!(
+        "[runtime] XFChess v{} {} {} {} — logs → {}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        build,
+        crate::multiplayer::network::identity::log_dir().display()
+    );
 }
 
 fn update_panic_state_tracker(

@@ -2,7 +2,7 @@ use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Token, TokenAccount, TransferChecked};
 
 #[derive(Accounts)]
 #[instruction(tournament_id: u64, amount: u64)]
@@ -54,29 +54,29 @@ pub fn handler(ctx: Context<FundUsdcPrize>, tournament_id: u64, amount: u64) -> 
         GameErrorCode::UnauthorizedAccess
     );
 
-    // Verify the tournament is still in registration phase
     require!(
         tournament.status == TournamentStatus::Registration,
         GameErrorCode::TournamentNotInRegistration
     );
 
-    // The guarantee must be locked before the first player registers so the
-    // prize is provably independent of entry count.
     require!(
         tournament.num_registered_players == 0,
         GameErrorCode::PrizeAlreadyFunded
     );
 
-    // Transfer USDC from operator to escrow
-    let transfer_instruction = Transfer {
+    let transfer_instruction = TransferChecked {
         from: ctx.accounts.operator_usdc_ata.to_account_info(),
+        mint: ctx.accounts.usdc_mint.to_account_info(),
         to: ctx.accounts.usdc_prize_escrow.to_account_info(),
         authority: ctx.accounts.operator.to_account_info(),
     };
 
-    token::transfer(CpiContext::new(Token::id(), transfer_instruction), amount)?;
+    token::transfer_checked(
+        CpiContext::new(Token::id(), transfer_instruction),
+        amount,
+        ctx.accounts.usdc_mint.decimals,
+    )?;
 
-    // Update tournament state
     tournament.usdc_prize_pool = amount;
     tournament.usdc_prize_funded = true;
 

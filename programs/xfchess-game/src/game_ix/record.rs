@@ -14,7 +14,6 @@ pub fn record_result(
 
     game.status = GameStatus::Finished;
     game.fees_advanced = game.fees_advanced.checked_add(RECORD_RESULT_COST).ok_or(GameErrorCode::ArithmeticOverflow)?;
-    // Additional logic for recording game result here
 
     Ok(())
 }

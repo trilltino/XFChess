@@ -58,12 +58,7 @@ pub fn handler(
     let tournament = &mut ctx.accounts.tournament;
     let final_idx = tournament.final_match_index;
 
-    // The final must be checked before the semifinals: in a 2-player bracket
-    // there is only one match, so final_idx.saturating_sub(..) would otherwise
-    // misclassify the final as a semifinal and the tournament would never
-    // complete. Semifinals only exist for brackets of 4+ players (>= 3 matches).
     if match_index == final_idx {
-        // Final completed - tournament done
         tournament.winner = Some(winner);
         tournament.second_place = Some(loser);
         tournament.status = TournamentStatus::Completed;
@@ -125,14 +120,12 @@ pub fn handler_advance_winner(
     let winner = source.winner.ok_or(GameErrorCode::InvalidMatchStatus)?;
     let target = &mut ctx.accounts.target_match;
 
-    // Place winner in the correct slot
     if source.next_match_slot == 0 {
         target.player_white = Some(winner);
     } else {
         target.player_black = Some(winner);
     }
 
-    // Update target status to Pending if both slots filled
     if target.player_white.is_some() && target.player_black.is_some() {
         target.status = MatchStatus::Pending;
     }

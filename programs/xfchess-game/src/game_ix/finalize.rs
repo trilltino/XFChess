@@ -6,9 +6,6 @@ use anchor_lang::prelude::*;
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
 pub struct EndGame<'info> {
-    // Rent is returned to the recorded relayer (game.fee_payer), not to whoever
-    // happens to call finalize — `close` + the matching constraint block the
-    // rent/fee theft that an unconstrained destination allowed.
     #[account(
         mut,
         close = fee_payer,

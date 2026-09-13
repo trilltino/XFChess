@@ -1,6 +1,7 @@
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::lifecycle::initialize_escrow::TournamentEscrow;
 use crate::tournament_ix::shards;
 use anchor_lang::prelude::*;
 
@@ -44,26 +45,24 @@ pub struct LeaveTournament<'info> {
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
-    pub escrow_pda: UncheckedAccount<'info>,
+    pub escrow_pda: Account<'info, TournamentEscrow>,
     pub system_program: Program<'info, System>,
 }
 
 pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
+    let player_key = ctx.accounts.player.key();
+
     require!(
         tournament.tournament_id == tournament_id,
         GameErrorCode::UnauthorizedAccess
     );
-    let player_key = ctx.accounts.player.key();
 
-    // Validate tournament state
     require!(
         tournament.status == TournamentStatus::Registration,
         GameErrorCode::InvalidTournamentStatus
     );
 
-    // Shards 1-3 are optional — small/medium tournaments only initialize shard 0
-    // (or 0-1); missing shards are passed as the program ID and resolve to None.
     let mut shard_refs: Vec<&TournamentPlayersShard> =
         vec![&ctx.accounts.tournament_players_shard_0];
     if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
@@ -78,7 +77,6 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
     let (shard_id, index) =
         shards::find_player(&shard_refs, player_key).ok_or(GameErrorCode::PlayerNotFound)?;
 
-    // Get mutable reference to the correct shard
     let target_shard: &mut TournamentPlayersShard = match shard_id {
         0 => &mut ctx.accounts.tournament_players_shard_0,
         1 => ctx
@@ -110,17 +108,14 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
         .checked_sub(1)
         .ok_or(GameErrorCode::ArithmeticOverflow)?;
 
-    // Refund the entry-fee deposit from the tournament escrow PDA. The guaranteed
-    // prize (tournament.prize_pool) is untouched — it was operator-funded before
-    // registration and does not change with entry count.
     let refund_amount = tournament.entry_fee;
     if refund_amount > 0 {
-        require!(
-            ctx.accounts.escrow_pda.lamports() >= refund_amount,
-            GameErrorCode::InsufficientTreasuryForRefund
-        );
-        **ctx.accounts.escrow_pda.lamports.borrow_mut() -= refund_amount;
-        **ctx.accounts.player.lamports.borrow_mut() += refund_amount;
+        crate::common::escrow::debit_program_pda(
+            &ctx.accounts.escrow_pda.to_account_info(),
+            &ctx.accounts.player.to_account_info(),
+            refund_amount,
+        )
+        .map_err(|_| GameErrorCode::InsufficientTreasuryForRefund)?;
     }
 
     Ok(())

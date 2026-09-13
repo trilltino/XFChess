@@ -281,3 +281,72 @@ pub fn delete_profile(name: &str) {
 fn ensure_profile_pgn_dir(name: &str) {
     std::fs::create_dir_all(profile_pgn_dir(name)).ok();
 }
+
+// ── Log directory ────────────────────────────────────────────────────────────
+//
+// The game's runtime logs (game.log.<date>, crash_*.log, recovered_errors.log)
+// live inside the active profile's folder — the folder the player picked when
+// they created the profile, or the per-profile Documents/xfchess/profiles/<name>
+// default — so everything about a player (node key, PGNs, logs) stays in one
+// discoverable place they can zip up and send. Fresh installs with no profile
+// yet fall back to the app's per-user data dir until onboarding picks one.
+//
+// The directory is resolved once per process and cached: the tracing file
+// appender is created very early in startup (LogPlugin), before a profile can
+// exist, and it can't be re-pointed mid-session — so a profile created or
+// activated during the current session takes effect on the next launch.
+
+static LOG_DIR_CACHE: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn log_dir() -> PathBuf {
+    LOG_DIR_CACHE
+        .get_or_init(|| {
+            let dir = compute_log_dir();
+            std::fs::create_dir_all(&dir).ok();
+            dir
+        })
+        .clone()
+}
+
+fn compute_log_dir() -> PathBuf {
+    load_active_profile()
+        .map(|name| profile_pgn_dir(&name).join("logs"))
+        .unwrap_or_else(|| fallback_log_dir())
+}
+
+#[cfg(not(target_os = "android"))]
+fn fallback_log_dir() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("xfchess")
+        .join("logs")
+}
+
+#[cfg(target_os = "android")]
+fn fallback_log_dir() -> PathBuf {
+    crate::core::paths::internal_data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("logs")
+}
+
+/// The folder a player would think of as "my XFChess folder": the active
+/// profile's folder, or the Documents/xfchess default before one exists.
+/// Used as the starting point for the Export Logs save dialog so the bundle
+/// lands next to everything else the player cares about.
+pub fn active_profile_dir() -> PathBuf {
+    load_active_profile()
+        .map(|name| profile_pgn_dir(&name))
+        .unwrap_or_else(|| {
+            // Same base profiles_dir() uses; the dialog just needs a plausible,
+            // writable starting point.
+            #[cfg(not(target_os = "android"))]
+            let base = dirs::document_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("xfchess");
+            #[cfg(target_os = "android")]
+            let base = crate::core::paths::external_data_dir()
+                .unwrap_or_else(|| PathBuf::from("."));
+            std::fs::create_dir_all(&base).ok();
+            base
+        })
+}

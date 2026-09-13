@@ -24,5 +24,4 @@ pub use tournament_session::*;
 pub use treasury_vault::*;
 pub use username_record::*;
 
-// Re-export tournament types for use in instructions
 pub use tournament::TournamentType;

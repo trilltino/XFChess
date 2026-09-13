@@ -1,6 +1,6 @@
-use chess_logic_on_chain::validation::is_move_legal;
 use nimzovich_engine::api::game::game_from_fen;
 use nimzovich_engine::{generate_pseudo_legal_moves, is_legal_move, Color};
+use xfchess_game::chess_logic_on_chain::validation::is_move_legal;
 
 fn fen_color(fen: &str) -> Color {
     if fen.split_whitespace().nth(1) == Some("w") {

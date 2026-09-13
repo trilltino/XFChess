@@ -1,3 +1,4 @@
+use crate::constants::MAX_SESSION_DURATION_SECS;
 use crate::errors::XfchessGameError;
 use crate::state::GlobalSessionDelegation;
 use anchor_lang::prelude::*;
@@ -19,17 +20,14 @@ pub fn handler_authorize_global_session(
     let delegation = &mut ctx.accounts.session_delegation;
     let player = &ctx.accounts.player;
 
-    // Reject if a valid session is already live (player must revoke first).
     let now = Clock::get()?.unix_timestamp;
     if delegation.enabled && now < delegation.expires_at && delegation.games_remaining > 0 {
-        // Allow re-auth if it's a brand new account (player field is default).
         require!(
             delegation.player == Pubkey::default(),
             XfchessGameError::GlobalSessionAlreadyActive
         );
     }
 
-    // Deposit lamports into the delegation vault (covers future wager transfers).
     if args.deposit_lamports > 0 {
         anchor_lang::system_program::transfer(
             CpiContext::new(
@@ -47,6 +45,10 @@ pub fn handler_authorize_global_session(
         .duration_secs
         .unwrap_or(GlobalSessionDelegation::DEFAULT_DURATION);
     require!(duration > 0, XfchessGameError::UnauthorizedAccess);
+    require!(
+        duration <= MAX_SESSION_DURATION_SECS,
+        XfchessGameError::DurationTooLarge
+    );
     let expires_at = now
         .checked_add(duration)
         .ok_or(XfchessGameError::MathOverflow)?;

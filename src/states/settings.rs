@@ -1,4 +1,5 @@
 use crate::core::{GameSettings, GameState, GraphicsQuality, PreviousState};
+use crate::core::support_bundle::SupportBundleUi;
 use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -7,6 +8,7 @@ pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<SupportBundleUi>();
         app.add_systems(OnEnter(GameState::Settings), setup_settings_camera)
             .add_systems(
                 EguiPrimaryContextPass,
@@ -24,9 +26,10 @@ fn settings_ui_wrapper(
     next_state: ResMut<NextState<GameState>>,
     previous_state: Res<PreviousState>,
     settings: ResMut<GameSettings>,
+    mut support: ResMut<SupportBundleUi>,
 ) {
     info!("[SETTINGS] UI wrapper called!");
-    if let Err(e) = settings_ui(contexts, next_state, previous_state, settings) {
+    if let Err(e) = settings_ui(contexts, next_state, previous_state, settings, support) {
         error!("[SETTINGS] UI rendering failed: {:?}", e);
     } else {
         info!("[SETTINGS] UI rendered successfully!");
@@ -88,8 +91,15 @@ fn settings_ui(
     mut next_state: ResMut<NextState<GameState>>,
     previous_state: Res<PreviousState>,
     mut settings: ResMut<GameSettings>,
+    mut support: ResMut<SupportBundleUi>,
 ) -> Result<(), bevy::ecs::query::QuerySingleError> {
     let ctx = contexts.ctx_mut()?;
+
+    // Set inside the egui pass when the export button is clicked; the save
+    // dialog + bundle write run after the frame so a blocking native dialog
+    // never stalls rendering. Desktop only — Android has no rfd backend.
+    #[cfg(not(target_os = "android"))]
+    let mut export_requested = false;
 
     egui::CentralPanel::default()
         .frame(egui::Frame {
@@ -154,12 +164,46 @@ fn settings_ui(
 
                 Layout::section_space(ui);
 
+                #[cfg(not(target_os = "android"))]
+                {
+                    // Help & Support — export the latest game logs as a single
+                    // plain-text file the player can drag into the group chat.
+                    StyledPanel::card().show(ui, |ui| {
+                        ui.heading(TextStyle::heading("Help & Support", TextSize::MD));
+                        Layout::item_space(ui);
+                        ui.label(TextStyle::caption(
+                            "Something act weird? Export the latest game logs to a text file \
+                             and send it to the devs — it captures the same detail a local \
+                             terminal run would show, no setup needed.",
+                        ));
+                        Layout::item_space(ui);
+                        if StyledButton::secondary(ui, "Export logs as text file").clicked() {
+                            export_requested = true;
+                        }
+                        if let Some(status) = support.status.clone() {
+                            Layout::small_space(ui);
+                            ui.label(TextStyle::caption(status));
+                        }
+                        if let Some(err) = support.error.clone() {
+                            Layout::small_space(ui);
+                            ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
+                        }
+                    });
+                }
+
+                Layout::section_space(ui);
+
                 // Back button
                 if StyledButton::secondary(ui, "Back").clicked() {
                     next_state.set(previous_state.state);
                 }
             });
         });
+
+    #[cfg(not(target_os = "android"))]
+    if export_requested {
+        crate::core::support_bundle::run_export_dialog(support);
+    }
 
     Ok(())
 }

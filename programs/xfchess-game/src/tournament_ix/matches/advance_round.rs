@@ -30,9 +30,6 @@ pub fn handler(ctx: Context<AdvanceRound>, tournament_id: u64) -> Result<()> {
         matches!(t.tournament_type, TournamentType::Swiss { .. }),
         GameErrorCode::InvalidGameStatus
     );
-    // Nothing to advance to once the last round has been played — final
-    // standings/winner determination (a separate, not-yet-on-chain path)
-    // takes over from here.
     require!(
         t.current_round < t.total_rounds,
         GameErrorCode::InvalidGameStatus

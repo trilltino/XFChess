@@ -10,20 +10,45 @@ crate-type = ["cdylib", "lib"]
 name = "xfchess_game"
 
 [features]
-default = ["cranks", "move-validation"]
+default = ["cranks", "move-validation", "devnet"]
+# `production` feature for audit / mainnet builds. When enabled, the
+# `move-validation` feature is mandatory — production builds can never
+# ship with the client-side-only board-state validation path.
+production = ["move-validation", "mainnet"]
+# Environment feature gates — exactly one should be active at build time.
+# `localnet`   : unit tests, program-test, ephemeral-rollups dev.
+# `devnet`      : current devnet deployment keys and program ID.
+# `mainnet`     : mainnet deployment keys (must be rotated before launch).
+localnet = []
+devnet = []
+mainnet = []
 idl-build = ["anchor-spl/idl-build"]
-move-validation = ["chess-logic-on-chain"]
+# move-validation: enables the on-chain chess move-validation module.
+# Gates `pub mod chess_logic_on_chain` in lib.rs and pulls in nimzovich_engine.
+move-validation = ["dep:nimzovich_engine"]
 cranks = ["magicblock-magic-program-api", "bincode"]
 game-tests = []
 legacy-game-tests = []
+# Library builds (the host `xfchess` crate and `backend` both link this crate
+# for its types) can enable this to suppress the `#[no_mangle]` security.txt
+# static and the program entrypoint. Off by default so the deployable SBF build
+# always carries both. Declared explicitly so the `cfg(not(feature =
+# "no-entrypoint"))` guard in src/lib.rs is a real feature, not an undeclared
+# cfg tolerated only by the `unexpected_cfgs = allow` lint below.
+no-entrypoint = []
 
 [dependencies]
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 solana-program = { workspace = true }
-# solana-program version pulled in by anchor-lang
-chess-logic-on-chain = { workspace = true, optional = true }
+# nimzovich_engine: no_std chess move validation. Compiled into the program
+# behind the `move-validation` feature (see src/chess_logic_on_chain.rs).
+# default-features = false keeps it no_std; the `std` feature is only used
+# in dev-dependencies for host-side tests.
+nimzovich_engine = { workspace = true, default-features = false, features = [], optional = true }
+bytemuck = { version = "1.25.0", default-features = false, features = ["derive"], optional = true }
 ephemeral-rollups-sdk = { workspace = true }
+solana-security-txt = { workspace = true }
 
 # Crank dependencies (MagicBlock scheduled tasks) — gated by the `cranks` feature
 magicblock-magic-program-api = { version = "=0.13.11", default-features = false, optional = true }
@@ -152,7 +177,8 @@ solana-system-interface = { version = "3", features = ["bincode"] }
 base64 = { workspace = true }
 # Reused to craft board state and compute expected next-boards exactly as the
 # program does (zero divergence between test oracle and on-chain validator).
-chess-logic-on-chain = { workspace = true }
+# nimzovich_engine with std feature unlocks helpers like `game_from_fen`.
+nimzovich_engine = { workspace = true, features = ["std"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow" }

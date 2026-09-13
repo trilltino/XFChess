@@ -43,7 +43,6 @@ mod tests {
 
     #[test]
     fn last_bit_of_last_byte_is_addressable() {
-        // Board 127 is bit 7 of byte 15 — the top corner of the 16-byte array.
         let mut bitmap = [0u8; 16];
         set(&mut bitmap, 127);
         assert!(is_set(&bitmap, 127));

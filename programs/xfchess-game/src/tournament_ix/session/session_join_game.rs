@@ -98,7 +98,6 @@ pub fn handler(ctx: Context<SessionJoinGame>, _tournament_id: u64, _game_id: u64
     );
     require!(game.white != player_key, GameErrorCode::CannotPlaySelf);
 
-    // Platform fee was set at game creation time (universal, live-price-based).
     let final_fee = game.country_fee;
 
     let total_cost = game
@@ -121,12 +120,6 @@ pub fn handler(ctx: Context<SessionJoinGame>, _tournament_id: u64, _game_id: u64
     game.updated_at = Clock::get()?.unix_timestamp;
     game.country_fee = final_fee;
 
-    // Transfer wager from delegation PDA vault to escrow. `delegation` is a
-    // program-owned PDA carrying real account data, so the System Program
-    // refuses to act as `from` for it in any CPI ("Transfer: `from` must not
-    // carry data") regardless of signing — `debit_program_pda` moves the
-    // lamports directly instead. See `game_ix::global_create` for the fuller
-    // writeup (this is the tournament join-side half of the same bug).
     if game.wager_token.is_none() {
         debit_program_pda(
             &delegation.to_account_info(),
@@ -135,7 +128,6 @@ pub fn handler(ctx: Context<SessionJoinGame>, _tournament_id: u64, _game_id: u64
         )?;
     }
 
-    // Update delegation spending (count wager + fee)
     delegation.total_spent =
         session_guards::checked_session_total(delegation.total_spent, total_cost)?;
     delegation.games_played = delegation.games_played.saturating_add(1);
