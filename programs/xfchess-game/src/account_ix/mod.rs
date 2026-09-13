@@ -1,3 +1,4 @@
+pub mod config_ix;
 pub mod fee_vault_ix;
 pub mod friends_ix;
 pub mod global_session_ix;
@@ -9,6 +10,7 @@ pub mod set_username;
 pub mod treasury;
 pub mod withdraw;
 
+pub use config_ix::*;
 pub use fee_vault_ix::{CreateSession, RevokeSession, UpdateElo};
 pub use friends_ix::{AcceptFriendRequest, BlockUser, CloseFriendship, SendFriendRequest};
 pub use global_session_ix::{

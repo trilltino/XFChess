@@ -1,3 +1,4 @@
+pub mod config;
 pub mod dispute;
 pub mod friendship;
 pub mod game;
@@ -11,6 +12,7 @@ pub mod tournament_session;
 pub mod treasury_vault;
 pub mod username_record;
 
+pub use config::*;
 pub use dispute::*;
 pub use friendship::*;
 pub use game::*;
