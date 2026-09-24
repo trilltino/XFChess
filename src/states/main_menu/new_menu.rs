@@ -5,6 +5,7 @@ use crate::core::updates::{self, Platform, UpdateStatus};
 use crate::core::{DespawnOnExit, GameMode, GameState, MenuState};
 use crate::game::resources::MenuSounds;
 use crate::rendering::pieces::{PieceColor, PieceMeshes, PieceType};
+use crate::states::main_menu::{CompetitiveMenuState, MainMenuModal};
 use crate::ui::system_params::MainMenuUIContext;
 
 fn play_click(_commands: &mut Commands, _sounds: Option<&MenuSounds>) {}
@@ -389,7 +390,20 @@ pub fn menu_escape_system(
     mut panel: ResMut<NewMenuPanel>,
     mut exit_confirm: ResMut<MenuExitConfirm>,
     mut focus_mode: ResMut<MenuFocusMode>,
+    mut competitive: ResMut<CompetitiveMenuState>,
 ) {
+    if competitive.active_modal().is_some() {
+        if keyboard.just_pressed(KeyCode::Escape) {
+            competitive.set_active_modal(None);
+        }
+        return;
+    }
+    if exit_confirm.visible {
+        if keyboard.just_pressed(KeyCode::Escape) {
+            exit_confirm.visible = false;
+        }
+        return;
+    }
     if keyboard.just_pressed(KeyCode::KeyL) {
         focus_mode.active = !focus_mode.active;
         return;
@@ -428,12 +442,14 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
 
     // ── Exit confirmation dialog ─────────────────────────────────────────────
     if cx.exit_confirm.visible {
+        render_exit_confirm_backdrop(ctx);
         egui::Window::new("##exit_confirm")
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
             .fixed_size(egui::Vec2::new(300.0, 120.0))
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .order(egui::Order::Foreground)
             .frame(crate::ui::styles::StyledPanel::popup())
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
@@ -484,6 +500,7 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                     });
                 });
             });
+        return;
     }
 
     egui::Window::new("##xfc_new_menu")
@@ -510,6 +527,21 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             NewMenuPanel::Settings => render_settings_panel(ui, cx),
             NewMenuPanel::Profile => render_profile_panel(ui, cx),
             NewMenuPanel::Updates => render_updates_panel(ui, cx),
+        });
+}
+
+fn render_exit_confirm_backdrop(ctx: &egui::Context) {
+    let screen_rect = ctx.input(|i| i.content_rect());
+    egui::Area::new("exit_confirm_backdrop".into())
+        .fixed_pos(egui::Pos2::ZERO)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            ui.painter().rect_filled(
+                screen_rect,
+                egui::CornerRadius::ZERO,
+                egui::Color32::from_black_alpha(150),
+            );
+            ui.allocate_rect(screen_rect, egui::Sense::click_and_drag());
         });
 }
 
@@ -811,7 +843,7 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         W,
     ) {
         play_click(&mut cx.commands, snd);
-        cx.competitive_menu.show_ai_setup = true;
+        cx.competitive_menu.try_open_modal(MainMenuModal::AiSetup);
     }
     ui.add_space(SP);
 
@@ -823,6 +855,18 @@ fn render_main_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     ) {
         play_click(&mut cx.commands, snd);
         *cx.new_menu_panel = NewMenuPanel::PlayOnline;
+    }
+    ui.add_space(SP);
+
+    if item_tip(
+        ui,
+        "Replay PGN",
+        "Choose a .pgn file to replay and analyze a saved game.",
+        W,
+    ) {
+        play_click(&mut cx.commands, snd);
+        *cx.core_mode = GameMode::PgnReplay;
+        cx.next_state.set(GameState::InGame);
     }
     ui.add_space(SP);
 
@@ -1015,7 +1059,7 @@ fn render_multiplayer_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
     if item(ui, "Spectator", W) {
         play_click(&mut cx.commands, snd);
-        cx.competitive_menu.show_spectator_popup = true;
+        cx.competitive_menu.try_open_modal(MainMenuModal::Spectator);
     }
     ui.add_space(SP);
 
@@ -1307,7 +1351,7 @@ fn render_tournaments_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
     if item(ui, "Spectate Tournament", W) {
         play_click(&mut cx.commands, snd);
-        cx.competitive_menu.show_spectator_popup = true;
+        cx.competitive_menu.try_open_modal(MainMenuModal::Spectator);
     }
 }
 
@@ -1347,7 +1391,7 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
     if item(ui, "Keyboard Shortcuts", W) {
         play_click(&mut cx.commands, snd);
-        cx.competitive_menu.show_controls_popup = true;
+        cx.competitive_menu.try_open_modal(MainMenuModal::Controls);
     }
 
     if cx.player_identity.username.is_some() {

@@ -13,7 +13,6 @@ tools have `required-features = ["solana"]` in the root [Cargo.toml](../../Cargo
 | `read_game` | [read_game.rs](read_game.rs) | Fetch and decode a `Game` account |
 | `tournament_test` / `tournament_real_test` | [tournament_test.rs](tournament_test.rs), [tournament_real_test.rs](tournament_real_test.rs) | Drive tournament flows against devnet |
 | `tournament_data_gen` | [tournament_data_gen.rs](tournament_data_gen.rs) | **Stale** — fails against current instruction signatures; removal candidate ([docs/legacy-cleanup-audit.md](../../docs/legacy-cleanup-audit.md)) |
-| — | [on_chain_benchmark.rs](on_chain_benchmark.rs) | **Stale** — superseded by [crates/solana/er-cu-benchmark](../../crates/solana/er-cu-benchmark/); removal candidate |
 
 ## Example
 

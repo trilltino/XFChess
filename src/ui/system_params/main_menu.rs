@@ -63,6 +63,8 @@ pub struct MainMenuUIContext<'w, 's> {
     #[cfg(feature = "solana")]
     pub solana_state: Option<ResMut<'w, SolanaIntegrationState>>,
     #[cfg(feature = "solana")]
+    pub solana_session: Option<Res<'w, crate::solana::session::SessionState>>,
+    #[cfg(feature = "solana")]
     pub sol_usd_wager_rate: Option<Res<'w, SolUsdRate>>,
     #[cfg(feature = "solana")]
     pub tournament_client:

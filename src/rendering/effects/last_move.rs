@@ -35,12 +35,13 @@ pub fn update_last_move_highlight_system(
     mut commands: Commands,
     settings: Res<GameSettings>,
     move_history: Res<MoveHistory>,
+    view_mode: Res<crate::game::view_mode::ViewMode>,
     highlight_query: Query<Entity, With<LastMoveHighlight>>,
     arrow_query: Query<Entity, With<LastMoveArrow3D>>,
     materials: Res<SquareMaterials>,
     arrow_assets: Option<Res<ArrowAssets>>,
 ) {
-    if !move_history.is_changed() && !settings.is_changed() {
+    if !move_history.is_changed() && !settings.is_changed() && !view_mode.is_changed() {
         return;
     }
 
@@ -49,6 +50,10 @@ pub fn update_last_move_highlight_system(
     }
     for entity in arrow_query.iter() {
         commands.entity(entity).despawn();
+    }
+
+    if *view_mode == crate::game::view_mode::ViewMode::Standard2D {
+        return;
     }
 
     if !settings.highlight_last_move {

@@ -39,6 +39,14 @@ pub struct HealthCheck {
 }
 
 #[derive(Serialize)]
+pub struct RuntimeInfoResponse {
+    pub environment: String,
+    pub cluster: String,
+    pub program_id: String,
+    pub git_sha: String,
+}
+
+#[derive(Serialize)]
 pub struct DebugTxResponse {
     pub signature: String,
     pub debug_info: TransactionDebugInfo,
@@ -68,6 +76,26 @@ pub async fn readiness_check(State(state): State<AppState>) -> impl IntoResponse
             Json(serde_json::json!({ "status": "not_ready", "error": e.to_string() })),
         ),
     }
+}
+
+pub async fn runtime_info(State(state): State<AppState>) -> impl IntoResponse {
+    let rpc_url = state.config.solana_rpc_url.to_ascii_lowercase();
+    let cluster = if rpc_url.contains("mainnet") {
+        "mainnet"
+    } else if rpc_url.contains("devnet") {
+        "devnet"
+    } else if rpc_url.contains("localhost") || rpc_url.contains("127.0.0.1") {
+        "localnet"
+    } else {
+        "custom"
+    };
+
+    Json(RuntimeInfoResponse {
+        environment: std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+        cluster: cluster.to_string(),
+        program_id: state.program_id.to_string(),
+        git_sha: option_env!("GIT_SHA").unwrap_or("unknown").to_string(),
+    })
 }
 
 pub async fn detailed_health_check(State(state): State<AppState>) -> impl IntoResponse {
@@ -211,6 +239,7 @@ pub fn debug_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health_check))
         .route("/readyz", get(readiness_check))
+        .route("/api/runtime-info", get(runtime_info))
         .route("/health/detailed", get(detailed_health_check))
         .route("/api/debug/tx/{signature}", get(debug_transaction_endpoint))
 }

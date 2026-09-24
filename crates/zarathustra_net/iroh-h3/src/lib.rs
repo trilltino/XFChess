@@ -1,3 +1,5 @@
+//! HTTP/3 transport adapter bridging Iroh's QUIC P2P connections with the h3 HTTP/3 stack.
+
 #![deny(missing_docs)]
 
 use std::{
@@ -23,6 +25,7 @@ use tokio_util::sync::ReusableBoxFuture;
 
 type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Sync + Send + 'a>>;
 
+/// An h3 QUIC connection backed by an Iroh endpoint connection.
 pub struct Connection {
     conn: iroh::endpoint::Connection,
     incoming_bi: BoxStreamSync<'static, <AcceptBi<'static> as Future>::Output>,
@@ -32,6 +35,7 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// Creates a new [`Connection`] wrapping the given Iroh endpoint connection.
     pub fn new(conn: iroh::endpoint::Connection) -> Self {
         Self {
             conn: conn.clone(),
@@ -158,6 +162,7 @@ where
     }
 }
 
+/// A handle for opening new outgoing streams on an Iroh QUIC connection.
 pub struct OpenStreams {
     conn: iroh::endpoint::Connection,
     opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
@@ -228,6 +233,7 @@ impl Clone for OpenStreams {
     }
 }
 
+/// A bidirectional stream composed of a [`SendStream`] and a [`RecvStream`].
 pub struct BidiStream<B>
 where
     B: Buf,
@@ -305,6 +311,7 @@ where
     }
 }
 
+/// A receive-only half of an Iroh QUIC stream, implementing the h3 `RecvStream` trait.
 pub struct RecvStream {
     stream: Option<iroh::endpoint::RecvStream>,
     read_chunk_fut: ReadChunkFuture,
@@ -392,6 +399,7 @@ fn convert_write_error_to_stream_error(error: WriteError) -> StreamErrorIncoming
     }
 }
 
+/// A send-only half of an Iroh QUIC stream, implementing the h3 `SendStream` trait.
 pub struct SendStream<B: Buf> {
     stream: iroh::endpoint::SendStream,
     writing: Option<WriteBuf<B>>,

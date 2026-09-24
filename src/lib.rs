@@ -25,13 +25,6 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
-    // Still useful on Android for offline bug reports even though `adb
-    // logcat` (wired in below) is the primary live-debugging channel there —
-    // see the plan's "Testing on a Samsung Galaxy S23" section.
-    // Logs live in the active profile's folder (see identity::log_dir), so a
-    // player's whole XFChess footprint — node key, PGNs, logs — stays in one
-    // discoverable place they can hand over from the Settings screen. Android
-    // falls back to app-internal storage via the same helper.
     let dir = crate::multiplayer::network::identity::log_dir();
     let file_appender = tracing_appender::rolling::daily(&dir, "game.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
@@ -41,16 +34,6 @@ fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
         .with_ansi(false)
         .with_writer(non_blocking);
 
-    // On Android, compose the file layer with a second layer that writes
-    // directly to logcat via the NDK's `__android_log_write` (the
-    // `paranoid-android` crate) — this is what makes every `info!`/`warn!`/
-    // `error!` call site in this codebase (all `tracing`-based, via
-    // `bevy::prelude::*`) reach `adb logcat -s xfchess:V`, not just the two
-    // early-bootstrap lines in `android::main` that go through the separate
-    // `android_logger`/`log`-facade path (necessarily separate: this
-    // `LogPlugin` layer, like all of Bevy, doesn't exist yet at that point in
-    // startup). `android_logger` alone would not cover this — it bridges the
-    // `log` facade, and this codebase's logging is `tracing`, not `log`.
     #[cfg(target_os = "android")]
     {
         Some(
@@ -214,8 +197,6 @@ struct SessionConfigFile {
 pub fn build_app(game_config: GameConfig) -> App {
     let mut app = App::new();
 
-    // Bevy 0.19: route panics in systems/commands/observers to a handler that
-    // logs and recovers instead of tearing down the app mid-match.
     core::error_handling::install_recovering_error_handler(&mut app);
 
     // Configure AI if requested
@@ -242,11 +223,6 @@ pub fn build_app(game_config: GameConfig) -> App {
         });
     }
 
-    // `game()` is `Continuous` — renders flat-out regardless of focus, which
-    // is the right call on desktop but drains battery on a phone. `mobile()`
-    // is reactive 60Hz focused / reactive_low_power 1s unfocused, matching
-    // what Bevy's own `examples/mobile` uses and covering most of "don't burn
-    // battery backgrounded" for free.
     #[cfg(target_os = "android")]
     app.insert_resource(bevy::winit::WinitSettings::mobile());
     #[cfg(not(target_os = "android"))]
@@ -270,11 +246,6 @@ pub fn build_app(game_config: GameConfig) -> App {
                 meta_check: AssetMetaCheck::Never,
                 #[cfg(not(target_arch = "wasm32"))]
                 file_path: {
-                    // Resolve the assets directory in order of preference:
-                    //   1. "assets/" relative to cwd (dev workflow: `cargo run`)
-                    //   2. "assets/" next to the executable (installed build)
-                    //   3. CARGO_MANIFEST_DIR/assets (last resort — only useful
-                    //      on the build machine itself, never in a release install)
                     let cwd_assets = std::path::PathBuf::from("assets");
                     let exe_assets = std::env::current_exe()
                         .ok()
@@ -304,12 +275,6 @@ pub fn build_app(game_config: GameConfig) -> App {
                     title: core::WindowConfig::default().title,
                     fit_canvas_to_parent: true,
                     prevent_default_event_handling: false,
-                    // Without this the OS picks the window's initial
-                    // position (Windows' default placement isn't centered),
-                    // so every popup/modal — all of which anchor to the
-                    // center of the app's own viewport — reads as
-                    // off-center relative to the monitor even though it's
-                    // dead-center within the window.
                     position: WindowPosition::Centered(MonitorSelection::Current),
                     ..default()
                 }),
@@ -322,17 +287,6 @@ pub fn build_app(game_config: GameConfig) -> App {
                 ..default()
             })
             .set(LogPlugin {
-                // Release used to drop xfchess's own target to "warn" only —
-                // meant to keep noise out of a console release builds don't
-                // even have (windows_subsystem = "windows"). Now that
-                // xfchess=info goes to a real log file (file_log_layer)
-                // instead of a terminal, that tradeoff no longer holds: every
-                // subscription/topic/gossip info! line (exactly the detail
-                // needed to root-cause "made a move, opponent's client never
-                // saw it" reports) was invisible in every shipped build.
-                // Third-party crates (iroh, braid_*) stay at warn — their
-                // info-level output is much higher volume and rarely the
-                // first place a gameplay bug actually shows up.
                 filter: if cfg!(debug_assertions) {
                     "info,wgpu_core=warn,wgpu_hal=warn,xfchess=info,bevy_gltf=error,bevy_image=error,iroh=warn,iroh_relay=warn,iroh_gossip=warn,netwatch=warn,portmapper=warn,braid_chess=warn,braid_http=warn,braid_core=warn".to_string()
                 } else {
@@ -354,10 +308,6 @@ pub fn build_app(game_config: GameConfig) -> App {
         presentation::PresentationPlugin,
     ));
 
-    // GitHub-release download-panel update checker — meaningless on Android,
-    // which has no Android artifact in the GitHub release pipeline and
-    // updates through the dApp Store instead of a browser download. Desktop
-    // (Windows/macOS/Linux) keeps this exactly as before.
     #[cfg(not(target_os = "android"))]
     app.add_plugins(core::updates::UpdateCheckPlugin);
 

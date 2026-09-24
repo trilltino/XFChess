@@ -9,7 +9,6 @@ Scope: XFChess workspace, focusing on stale modules, broken helper targets, lega
 ```powershell
 cargo metadata --no-deps --format-version 1
 cargo check --workspace --all-targets
-cargo check --features solana --bin on_chain_benchmark
 cargo check --features solana --bin tournament_data_gen
 rg -n "legacy|unused|deprecated|TODO|BraidP2PConfig|BraidPvp|BraidMultiplayer|solana::multiplayer" src backend crates programs docs specs
 ```
@@ -17,7 +16,6 @@ rg -n "legacy|unused|deprecated|TODO|BraidP2PConfig|BraidPvp|BraidMultiplayer|so
 Result summary:
 
 - `cargo check --workspace --all-targets` passes without the root `solana` feature.
-- `cargo check --features solana --bin on_chain_benchmark` fails.
 - `cargo check --features solana --bin tournament_data_gen` fails.
 - Full `cargo check --workspace --all-targets --features solana` timed out, then targeted checks confirmed the known stale bins.
 
@@ -64,25 +62,18 @@ Removal:
 
 Risk: low, but compile-check after removal because `MainMenuUIContext` is a large Bevy system param.
 
-### 3. Stale root Solana helper bins
+### 3. Stale root Solana helper bins (RESOLVED)
 
 Files:
 
-- `src/bin/on_chain_benchmark.rs`
-- `src/bin/tournament_data_gen.rs`
+- `src/bin/on_chain_benchmark.rs` — removed (file deleted, `[[bin]]` entry dropped, README row dropped).
+- `src/bin/tournament_data_gen.rs` — already absent from the repo; stale references below.
 
-Evidence:
+Evidence (as of audit): `on_chain_benchmark` failed with unresolved import
+`xfchess::nimzovich_engine`; `tournament_data_gen` failed against current instruction
+signatures. Maintained benchmarking now lives under `crates/solana/er-cu-benchmark`.
 
-- `on_chain_benchmark` fails with unresolved import `xfchess::nimzovich_engine`.
-- `tournament_data_gen` fails against current instruction signatures.
-- Equivalent maintained benchmarking now appears to live under `crates/solana/er-cu-benchmark`.
-
-Removal:
-
-- Delete the two files.
-- Remove their `[[bin]]` entries from root `Cargo.toml`.
-
-Risk: medium only if someone uses these exact local helpers. Product/runtime risk is low.
+Risk: low (local-only dev helpers, not on any production path).
 
 ### 4. Orphaned `game_ix` instruction files (not part of the build)
 
@@ -275,7 +266,7 @@ a caller that assumes the seeding is already safe.
 
 1. Remove `src/solana/multiplayer`.
 2. Remove `src/multiplayer/network/braid.rs` and the unused resource injection.
-3. Remove or quarantine `on_chain_benchmark` and `tournament_data_gen`.
+3. `on_chain_benchmark` stale bin — RESOLVED (removed). `tournament_data_gen` already absent.
 4. Delete the orphaned `game_ix/record.rs` and `game_ix/record_move.rs` — zero risk, they are not compiled.
 5. Delete the unused `state::TreasuryVault` type — zero risk, never instantiated on-chain.
 6. Delete the orphaned `src/multiplayer/solana/rpc.rs` — zero risk, not compiled.

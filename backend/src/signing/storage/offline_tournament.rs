@@ -19,7 +19,9 @@ pub struct OfflineTournamentStore {
 }
 
 impl OfflineTournamentStore {
-    pub fn new(pool: SqlitePool) -> Self { Self { pool } }
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
 
     pub async fn create(&self, record: &OfflineTournamentRecord) -> Result<(), sqlx::Error> {
         sqlx::query("INSERT INTO offline_tournaments (tournament_id, name, format, status, state_json, revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -34,9 +36,15 @@ impl OfflineTournamentStore {
         let row = sqlx::query("SELECT tournament_id, name, format, status, state_json, revision, created_at, updated_at FROM offline_tournaments WHERE tournament_id = ?")
             .bind(id).fetch_optional(&self.pool).await?;
         Ok(row.map(|r| OfflineTournamentRecord {
-            tournament_id: r.get("tournament_id"), name: r.get("name"), format: r.get("format"), status: r.get("status"),
-            state: serde_json::from_str(r.get::<String, _>("state_json").as_str()).unwrap_or(serde_json::json!({})),
-            revision: r.get("revision"), created_at: r.get("created_at"), updated_at: r.get("updated_at"),
+            tournament_id: r.get("tournament_id"),
+            name: r.get("name"),
+            format: r.get("format"),
+            status: r.get("status"),
+            state: serde_json::from_str(r.get::<String, _>("state_json").as_str())
+                .unwrap_or(serde_json::json!({})),
+            revision: r.get("revision"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
         }))
     }
 
@@ -46,12 +54,21 @@ impl OfflineTournamentStore {
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
             let id: String = row.get("tournament_id");
-            if let Some(record) = self.get(&id).await? { records.push(record); }
+            if let Some(record) = self.get(&id).await? {
+                records.push(record);
+            }
         }
         Ok(records)
     }
 
-    pub async fn update_state(&self, id: &str, status: &str, state: &serde_json::Value, revision: i64, updated_at: i64) -> Result<bool, sqlx::Error> {
+    pub async fn update_state(
+        &self,
+        id: &str,
+        status: &str,
+        state: &serde_json::Value,
+        revision: i64,
+        updated_at: i64,
+    ) -> Result<bool, sqlx::Error> {
         let result = sqlx::query("UPDATE offline_tournaments SET status = ?, state_json = ?, revision = ?, updated_at = ? WHERE tournament_id = ? AND revision = ?")
             .bind(status).bind(serde_json::to_string(state).unwrap_or_else(|_| "{}".to_string())).bind(revision).bind(updated_at).bind(id).bind(revision - 1).execute(&self.pool).await?;
         Ok(result.rows_affected() == 1)

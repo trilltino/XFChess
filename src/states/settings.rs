@@ -1,5 +1,5 @@
-use crate::core::{GameSettings, GameState, GraphicsQuality, PreviousState};
 use crate::core::support_bundle::SupportBundleUi;
+use crate::core::{GameSettings, GameState, GraphicsQuality, PreviousState};
 use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};

@@ -101,6 +101,7 @@ pub struct SolanaLobbyState {
     pub opponent_poll_rx: Option<oneshot::Receiver<Result<(), String>>>,
     pub game_start_poll_rx: Option<oneshot::Receiver<Result<(), String>>>,
     pub cancel_rx: Option<oneshot::Receiver<Result<CancelOutcome, String>>>,
+    pub money_flow: crate::multiplayer::solana::money_flow::MoneyFlowState,
     // Cached from SolanaIntegrationState each frame.
     pub cached_balance: f64,
     pub cached_keypair_bytes: Option<Vec<u8>>,
@@ -147,6 +148,7 @@ impl Default for SolanaLobbyState {
             opponent_poll_rx: None,
             game_start_poll_rx: None,
             cancel_rx: None,
+            money_flow: crate::multiplayer::solana::money_flow::MoneyFlowState::default(),
             cached_balance: 0.0,
             cached_keypair_bytes: None,
             cached_rpc_url: DEVNET_RPC_URL.to_string(),
@@ -293,15 +295,23 @@ async fn async_accept_draw(
     Ok(())
 }
 
-pub fn spawn_claim_timeout(rpc_url: String, wallet_pubkey: Pubkey, game_id: u64) {
+pub fn spawn_claim_timeout(
+    rpc_url: String,
+    wallet_pubkey: Pubkey,
+    game_id: u64,
+) -> oneshot::Receiver<Result<solana_sdk::signature::Signature, String>> {
     let program_id: Pubkey = SOLANA_PROGRAM_ID.parse().unwrap_or_default();
+    let (tx, rx) = oneshot::channel();
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            if let Err(e) = async_claim_timeout(rpc_url, wallet_pubkey, program_id, game_id).await {
+            let result = async_claim_timeout(rpc_url, wallet_pubkey, program_id, game_id).await;
+            if let Err(e) = &result {
                 error!("[TIMEOUT] claim_timeout on-chain tx failed: {e}");
             }
+            let _ = tx.send(result);
         })
         .detach();
+    rx
 }
 
 async fn async_claim_timeout(
@@ -309,14 +319,14 @@ async fn async_claim_timeout(
     wallet_pubkey: Pubkey,
     program_id: Pubkey,
     game_id: u64,
-) -> Result<(), String> {
+) -> Result<solana_sdk::signature::Signature, String> {
     use crate::multiplayer::solana::tauri_signer::sign_and_send_via_tauri;
 
     let ix = claim_timeout_ix(program_id, game_id, wallet_pubkey)
         .map_err(|e| format!("build claim_timeout_ix: {e}"))?;
     let sig = sign_and_send_via_tauri(&rpc_url, wallet_pubkey, &[ix], &[], "Claiming timeout")?;
     info!("[TIMEOUT] claim_timeout confirmed on-chain: {sig}");
-    Ok(())
+    Ok(sig)
 }
 
 pub fn spawn_lookup_game(
@@ -1084,11 +1094,51 @@ fn poll_lobby_tasks(
                 };
                 let (refunded, message) = match outcome {
                     CancelOutcome::Refunded(sig) => {
+                        let sig_text = sig.to_string();
                         crate::multiplayer::solana::wager_recovery::forget(game_id);
-                        (true, format!("Wager refunded. Transaction: {sig}"))
+                        lobby.money_flow =
+                            crate::multiplayer::solana::money_flow::MoneyFlowState::confirmed(
+                                "cancel_game",
+                                Some(sig_text.clone()),
+                            );
+                        crate::multiplayer::network::vps::emit_client_event(
+                            crate::multiplayer::network::vps::ClientEvent::new("tx_confirmed")
+                                .game_id(game_id)
+                                .action("cancel_game")
+                                .signature(sig_text.clone())
+                                .status("confirmed"),
+                        );
+                        if let Err(e) = crate::multiplayer::network::vps::register_money_action(
+                            crate::multiplayer::network::vps::RegisterMoneyActionReq {
+                                action_type: "cancel_game".to_string(),
+                                scope_type: "game".to_string(),
+                                game_id: Some(game_id as i64),
+                                tournament_id: None,
+                                wallet: None,
+                                signature: Some(sig_text.clone()),
+                                reason: Some("wager host/lobby cancellation".to_string()),
+                            },
+                        ) {
+                            warn!("[money-actions] cancel_game register failed: {e}");
+                        }
+                        (true, format!("Wager refunded. Transaction: {sig_text}"))
                     }
                     CancelOutcome::NothingToRefund(message) => {
                         crate::multiplayer::solana::wager_recovery::forget(game_id);
+                        lobby.money_flow =
+                            crate::multiplayer::solana::money_flow::MoneyFlowState::confirmed(
+                                "cancel_game",
+                                Option::<solana_sdk::signature::Signature>::None,
+                            );
+                        crate::multiplayer::network::vps::emit_client_event(
+                            crate::multiplayer::network::vps::ClientEvent::new(
+                                "reconcile_resolved",
+                            )
+                            .game_id(game_id)
+                            .action("cancel_game")
+                            .status("confirmed")
+                            .reason(message.clone()),
+                        );
                         (false, message)
                     }
                 };
@@ -1117,6 +1167,18 @@ fn poll_lobby_tasks(
                     LobbyStatus::Cancelling { game_id } => game_id,
                     _ => 0,
                 };
+                lobby.money_flow =
+                    crate::multiplayer::solana::money_flow::MoneyFlowState::failed(
+                        "cancel_game",
+                        error.clone(),
+                    );
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new("tx_failed")
+                        .game_id(game_id)
+                        .action("cancel_game")
+                        .status("failed")
+                        .reason(error.clone()),
+                );
                 lobby.status = LobbyStatus::CancelFailed { game_id, error };
                 lobby.cancel_rx = None;
             }
@@ -1126,6 +1188,12 @@ fn poll_lobby_tasks(
                     LobbyStatus::Cancelling { game_id } => game_id,
                     _ => 0,
                 };
+                lobby.money_flow =
+                    crate::multiplayer::solana::money_flow::MoneyFlowState::admin_review(
+                        "cancel_game",
+                        Option::<String>::None,
+                        "cancellation task stopped unexpectedly",
+                    );
                 lobby.status = LobbyStatus::CancelFailed {
                     game_id,
                     error: "Cancellation task stopped unexpectedly".to_string(),

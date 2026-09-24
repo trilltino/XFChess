@@ -240,18 +240,25 @@ pub fn multiplayer_menu_system(
                                                                             // 2. Sign and Send via Tauri bridge
                                                                             let sign_res = crate::multiplayer::solana::tauri_signer::sign_and_send_b64_via_tauri(&crate::multiplayer::solana::integration::state::DEVNET_RPC_URL, tx_b64, "Leaving tournament");
 
-                                                                            if sign_res.is_ok() {
+                                                                            if let Ok(sig) = sign_res {
                                                                                 // 3. Confirm with backend
                                                                                 let leave_url = format!("{}/api/tournament/{}/leave", vps_url, t_id);
-                                                                                let _ = client.post(&leave_url)
-                                                                                    .json(&serde_json::json!({ "player": pubkey_str }))
-                                                                                    .send();
+                                                                                let confirmed = client.post(&leave_url)
+                                                                                    .json(&serde_json::json!({
+                                                                                        "player": pubkey_str,
+                                                                                        "signature": sig.to_string(),
+                                                                                    }))
+                                                                                    .send()
+                                                                                    .map(|r| r.status().is_success())
+                                                                                    .unwrap_or(false);
 
                                                                                 // 4. Refresh tournaments list
-                                                                                let refresh_url = format!("{}/api/tournament/my?player={}", vps_url, pubkey_str);
-                                                                                if let Ok(refresh_resp) = reqwest::blocking::get(&refresh_url) {
-                                                                                    if let Ok(new_data) = refresh_resp.json::<Vec<TournamentSummary>>() {
-                                                                                        let _ = sender.try_send(new_data);
+                                                                                if confirmed {
+                                                                                    let refresh_url = format!("{}/api/tournament/my?player={}", vps_url, pubkey_str);
+                                                                                    if let Ok(refresh_resp) = reqwest::blocking::get(&refresh_url) {
+                                                                                        if let Ok(new_data) = refresh_resp.json::<Vec<TournamentSummary>>() {
+                                                                                            let _ = sender.try_send(new_data);
+                                                                                        }
                                                                                     }
                                                                                 }
                                                                             }

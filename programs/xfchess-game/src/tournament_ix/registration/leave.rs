@@ -49,6 +49,15 @@ pub struct LeaveTournament<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[event]
+pub struct TournamentLeft {
+    pub tournament_id: u64,
+    pub player: Pubkey,
+    pub refund_amount: u64,
+    pub registered_players_after: u16,
+    pub timestamp: i64,
+}
+
 pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
     let player_key = ctx.accounts.player.key();
@@ -117,6 +126,14 @@ pub fn handler(ctx: Context<LeaveTournament>, tournament_id: u64) -> Result<()> 
         )
         .map_err(|_| GameErrorCode::InsufficientTreasuryForRefund)?;
     }
+
+    emit!(TournamentLeft {
+        tournament_id,
+        player: player_key,
+        refund_amount,
+        registered_players_after: tournament.num_registered_players,
+        timestamp: Clock::get()?.unix_timestamp,
+    });
 
     Ok(())
 }

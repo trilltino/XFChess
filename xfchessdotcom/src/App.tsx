@@ -43,7 +43,6 @@ function AppContent() {
     return (
         <div className="app-container">
             <OrganizationSchema />
-            <div className="onboarding-bg"></div>
             <nav className={`navbar ${isMenuOpen ? 'mobile-open' : ''} ${navVisible ? 'nav-visible' : 'nav-hidden'}`}>
                 <div className="nav-mobile-row">
                     <Link to="/" className="nav-logo" onClick={() => setIsMenuOpen(false)}>

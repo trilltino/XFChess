@@ -99,6 +99,19 @@ pub fn reset_game_resources(
     // Reset turn state context to default phase
     *turn_context = TurnStateContext::default();
 
+    info!(
+        "[GAME_INIT] Turn state context reset: {:?}",
+        turn_context.phase
+    );
+
+    // Reset chess engine to starting position
+    engine.reset();
+    info!("[GAME_INIT] Chess engine reset to starting position");
+
+    info!("[GAME_INIT] All game resources reset successfully - ready for new game");
+}
+
+pub fn spawn_game_lights(mut commands: Commands) {
     // Spawn overhead light (invisible source) - "Angel Light"
     // Use high intensity to illuminate board clearly from top-down view
     commands
@@ -115,16 +128,6 @@ pub fn reset_game_resources(
             crate::game::systems::camera::BOARD_LAYER,
         ))
         .insert(Name::new("Overhead Light")); // Helpful for debugging
-    info!(
-        "[GAME_INIT] Turn state context reset: {:?}",
-        turn_context.phase
-    );
-
-    // Reset chess engine to starting position
-    engine.reset();
-    info!("[GAME_INIT] Chess engine reset to starting position");
-
-    info!("[GAME_INIT] All game resources reset successfully - ready for new game");
 }
 
 pub fn initialize_players(

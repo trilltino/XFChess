@@ -1468,6 +1468,29 @@ pub async fn finalize_game(
         "[FINALIZED] game {} settled on devnet — winner={:?} wager_lamports={} payout sig {} — inspect: https://solscan.io/tx/{}?cluster=devnet",
         req.game_id, req.winner, req.wager_lamports, sig, sig
     );
+    if let Ok(record) = state
+        .money_actions
+        .create_or_get(crate::signing::storage::money_action::NewMoneyAction {
+            action_type: "finalize_game".to_string(),
+            scope_type: "game".to_string(),
+            game_id: Some(req.game_id as i64),
+            tournament_id: None,
+            wallet: req.winner.clone(),
+            signature: Some(sig.to_string()),
+            status: "submitted".to_string(),
+            reason: Some("backend submitted game finalization/payout".to_string()),
+        })
+        .await
+    {
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            crate::signing::routes::money_actions::reconcile_money_action_once(
+                state_clone,
+                record.id,
+            )
+            .await;
+        });
+    }
     let treasury_vault =
         Pubkey::find_program_address(&[solana::TREASURY_VAULT_SEED], &state.program_id).0;
     match &fee_breakdown {

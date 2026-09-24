@@ -128,6 +128,7 @@ impl Plugin for GamePlugin {
         app.add_systems(
             OnEnter(GameState::InGame),
             (
+                super::ai::systems::clear_pending_ai_tasks,
                 purge_stale_board_visuals,
                 reset_game_resources,
                 initialize_players,
@@ -136,6 +137,7 @@ impl Plugin for GamePlugin {
                 setup_game_camera,
                 setup_game_scene,
                 super::systems::game_init::warmup_game_audio,
+                super::systems::game_init::spawn_game_lights,
             )
                 .chain()
                 .run_if(not(in_mode(GameMode::PgnReplay))),
@@ -145,10 +147,12 @@ impl Plugin for GamePlugin {
         app.add_systems(
             OnEnter(GameState::InGame),
             (
+                super::ai::systems::clear_pending_ai_tasks,
                 purge_stale_board_visuals,
                 super::replay::setup_replay,
                 setup_game_camera,
                 setup_game_scene,
+                super::systems::game_init::spawn_game_lights,
             )
                 .chain()
                 .run_if(in_mode(GameMode::PgnReplay)),

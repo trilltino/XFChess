@@ -1,7 +1,6 @@
 import highFidelityChess from '../../assets/high-fidelity-chess.png';
 import wageredPvpSpectator from '../../assets/wagered-pvp-spectator.png';
 import tournamentsBoard from '../../assets/tournaments-board.png';
-import boardSilhouette from '../../assets/board-silhouette.png';
 import xfchessTitleLogo from '../../assets/xfchess-title-logo.png';
 import { SeoHead } from '../../components/SeoHead';
 import { VideoGameSchema } from '../../components/StructuredData';
@@ -15,12 +14,10 @@ export function Home() {
             <VideoGameSchema />
 
             <section className="home-hero">
-                <div className="home-hero-glow" />
-                <img src={boardSilhouette} alt="" aria-hidden="true" className="home-hero-board-silhouette" />
-                <h1 className="home-hero-title">
-                    <img src={xfchessTitleLogo} alt="XFChess — Competitive Chess Server" className="home-hero-title-img" />
-                </h1>
-            </section>
+            <h1 className="home-hero-title">
+                <img src={xfchessTitleLogo} alt="XFChess — Competitive Chess Server" className="home-hero-title-img" />
+            </h1>
+        </section>
 
             <section className="fullscreen-section">
                 <div className="section-content" style={{ display: 'flex', alignItems: 'center', gap: '60px' }}>

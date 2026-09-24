@@ -669,7 +669,6 @@ pub fn initialize_escrow_ix(
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(*authority, true),
             AccountMeta::new_readonly(solana_system_interface::program::id(), false),
-            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
         ],
         data,
     }
@@ -716,7 +715,6 @@ pub fn initialize_shards_ix(
                 AccountMeta::new(shard(0), false),
                 AccountMeta::new(*authority, true),
                 AccountMeta::new_readonly(solana_system_interface::program::id(), false),
-                AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
             ]
         } else if max_players <= 128 {
             vec![
@@ -725,7 +723,6 @@ pub fn initialize_shards_ix(
                 AccountMeta::new(shard(1), false),
                 AccountMeta::new(*authority, true),
                 AccountMeta::new_readonly(solana_system_interface::program::id(), false),
-                AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
             ]
         } else {
             vec![
@@ -736,10 +733,35 @@ pub fn initialize_shards_ix(
                 AccountMeta::new(shard(3), false),
                 AccountMeta::new(*authority, true),
                 AccountMeta::new_readonly(solana_system_interface::program::id(), false),
-                AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
             ]
         },
         data,
+    }
+}
+
+#[cfg(test)]
+mod tournament_account_layout_tests {
+    use super::*;
+
+    #[test]
+    fn tournament_init_account_lists_match_anchor_layout() {
+        let program_id = Pubkey::new_unique();
+        let authority = Pubkey::new_unique();
+        let tournament_id = 1789850187401u64;
+
+        let escrow_ix = initialize_escrow_ix(&program_id, tournament_id, &authority);
+        assert_eq!(escrow_ix.accounts.len(), 4);
+        assert!(escrow_ix
+            .accounts
+            .iter()
+            .all(|meta| meta.pubkey != solana_sdk::sysvar::rent::id()));
+
+        let shards_ix = initialize_shards_ix(&program_id, tournament_id, 64, &authority);
+        assert_eq!(shards_ix.accounts.len(), 4);
+        assert!(shards_ix
+            .accounts
+            .iter()
+            .all(|meta| meta.pubkey != solana_sdk::sysvar::rent::id()));
     }
 }
 

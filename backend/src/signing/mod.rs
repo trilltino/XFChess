@@ -47,6 +47,7 @@ pub use xfchess_braid_server::ResourceHub;
 pub struct AppState {
     pub config: Arc<SigningConfig>,
     pub store: Arc<SessionStore>,
+    pub money_actions: Arc<storage::money_action::MoneyActionStore>,
     pub feepayer: Arc<FeepayerPool>,
     pub jwt: Arc<JwtIssuer>,
     pub matchmaking: SharedMatchmakingState,
@@ -135,6 +136,7 @@ impl AppState {
             pool.clone(),
             identity_vault.clone(),
         ));
+        let money_actions = Arc::new(storage::money_action::MoneyActionStore::new(pool.clone()));
         let feepayer = Arc::new(feepayer::FeepayerPool::from_base58_list(
             &config.fee_payer_keys,
         ));
@@ -268,6 +270,7 @@ impl AppState {
         Self {
             config: Arc::new(config),
             store,
+            money_actions,
             feepayer,
             jwt,
             matchmaking,
@@ -347,6 +350,22 @@ impl AppState {
                         );
                     }
                 }
+
+                match state.money_actions.retryable(25).await {
+                    Ok(actions) => {
+                        for action in actions {
+                            let state_clone = state.clone();
+                            tokio::spawn(async move {
+                                routes::money_actions::reconcile_money_action_once(
+                                    state_clone,
+                                    action.id,
+                                )
+                                .await;
+                            });
+                        }
+                    }
+                    Err(e) => tracing::warn!("[sweep] money action retry scan failed: {}", e),
+                }
             }
         });
     }
@@ -386,6 +405,19 @@ pub fn build_router(state: AppState) -> Router<AppState> {
         // Feature-specific nested routes
         .nest("/api/auth", crate::signing::routes::auth::auth_routes())
         .nest("/api/actions", blinks::blinks_routes())
+        .nest(
+            "/api",
+            crate::signing::routes::client_events::client_events_routes(),
+        )
+        .nest(
+            "/api",
+            crate::signing::routes::money_actions::money_action_routes().layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    crate::infrastructure::require_relay_or_jwt,
+                ),
+            ),
+        )
         .nest("/api/rates", crate::signing::routes::rates::rates_routes())
         // Public RPC proxy for the distributed client — see routes::rpc_proxy docs.
         .nest(

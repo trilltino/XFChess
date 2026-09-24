@@ -1,4 +1,4 @@
-use crate::db::repository::GameRepository;
+use crate::db::repository::{GameRecord, GameRepository, MoveRecord};
 async fn tournament_transactions(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -18,8 +18,8 @@ use axum::{
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::collections::HashMap;
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, info, warn};
@@ -157,6 +157,12 @@ struct TournamentCostRequest {
     format: String,
     #[serde(default)]
     average_moves: u32,
+}
+
+#[derive(Deserialize)]
+struct DebugGameSearchQuery {
+    query: Option<String>,
+    limit: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -335,6 +341,7 @@ async fn delete_template(
 
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
+        .merge(crate::signing::routes::money_actions::admin_money_action_routes())
         // Players
         .route("/admin/players", get(list_players))
         .route(
@@ -395,6 +402,17 @@ pub fn admin_routes() -> Router<AppState> {
         )
         // Tasks / infra
         .route("/admin/tasks/status", get(tasks_status))
+        .route(
+            "/admin/debug/tx/{signature}",
+            get(crate::signing::routes::debug::debug_transaction_endpoint),
+        )
+        .route("/admin/debug/capabilities", get(debug_capabilities))
+        .route("/admin/debug/games", get(search_debug_games))
+        .route("/admin/debug/games/{game_id}", get(game_debug_bundle))
+        .route(
+            "/admin/debug/games/{game_id}/transactions",
+            get(game_debug_transactions),
+        )
         .route("/admin/metrics/summary", get(metrics_summary))
         .route("/admin/db/stats", get(db_stats))
         .route("/admin/tls/expiry", get(tls_expiry))
@@ -485,6 +503,478 @@ async fn get_game_eval(
             })))
         }
     }
+}
+
+fn section_state(
+    available: &mut Vec<String>,
+    missing: &mut Vec<String>,
+    name: &'static str,
+    present: bool,
+) {
+    if present {
+        available.push(name.to_string());
+    } else {
+        missing.push(name.to_string());
+    }
+}
+
+fn assemble_pgn_from_moves(moves: &[MoveRecord]) -> String {
+    use nimzovich_engine::{PgnAssembler, PgnResult};
+    let mut assembler = PgnAssembler::new();
+    assembler.tag("Event", "XFChess PVP").tag("Site", "XFChess");
+    for mv in moves {
+        if let Some(san) = &mv.move_san {
+            assembler.add_move(san.clone());
+        }
+    }
+    assembler.set_result(PgnResult::Unfinished);
+    assembler.to_string()
+}
+
+async fn load_anticheat_value(state: &AppState, game_id: &str) -> Result<Value, sqlx::Error> {
+    let row = sqlx::query_as::<_, AnticheatVerdictRow>(
+        "SELECT white_pubkey, black_pubkey, white_verdict, black_verdict, \
+         white_score, black_score, white_signals, black_signals, analysed_at \
+         FROM anticheat_verdicts WHERE game_id = ? ORDER BY analysed_at DESC LIMIT 1",
+    )
+    .bind(game_id)
+    .fetch_optional(&state.store.pool())
+    .await?;
+
+    Ok(match row {
+        None => json!({ "game_id": game_id, "analysed": false }),
+        Some(r) => {
+            let white_signals: Value = serde_json::from_str(&r.white_signals).unwrap_or(json!({}));
+            let black_signals: Value = serde_json::from_str(&r.black_signals).unwrap_or(json!({}));
+            json!({
+                "game_id": game_id,
+                "analysed": true,
+                "white": { "pubkey": r.white_pubkey, "verdict": r.white_verdict, "score": r.white_score, "signals": white_signals },
+                "black": { "pubkey": r.black_pubkey, "verdict": r.black_verdict, "score": r.black_score, "signals": black_signals },
+                "analysed_at": r.analysed_at,
+            })
+        }
+    })
+}
+
+async fn linked_tournament_context(state: &AppState, game_id: &str) -> Option<Value> {
+    let numeric_game_id = game_id.parse::<u64>().ok()?;
+    for tournament in state.tournament_store.list().await {
+        for m in tournament.matches.iter().flatten() {
+            if m.game_id == Some(numeric_game_id) {
+                let transactions = state
+                    .tournament_store
+                    .transactions(tournament.tournament_id)
+                    .await;
+                let registration_transactions = state
+                    .tournament_store
+                    .registration_transactions(tournament.tournament_id)
+                    .await;
+                return Some(json!({
+                    "tournament": tournament,
+                    "match": m,
+                    "transactions": transactions,
+                    "registration_transactions": registration_transactions,
+                }));
+            }
+        }
+    }
+    None
+}
+
+async fn related_game_transactions(state: &AppState, game: &GameRecord) -> Vec<Value> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    if let Some(sig) = game.finalize_sig.as_ref().filter(|s| !s.trim().is_empty()) {
+        seen.insert(sig.clone());
+        out.push(json!({
+            "signature": sig,
+            "source": "games.finalize_sig",
+            "operation": "finalize_game",
+            "status": game.status,
+            "created_at": game.end_time.or(Some(game.start_time)),
+        }));
+    }
+
+    if let Some(ctx) = linked_tournament_context(state, &game.id).await {
+        if let Some(txs) = ctx.get("transactions").and_then(Value::as_array) {
+            for tx in txs {
+                if let Some(sig) = tx.get("signature").and_then(Value::as_str) {
+                    if seen.insert(sig.to_string()) {
+                        out.push(json!({
+                            "signature": sig,
+                            "source": "tournament_transactions",
+                            "operation": tx.get("operation").and_then(Value::as_str).unwrap_or("tournament"),
+                            "status": tx.get("status").and_then(Value::as_str).unwrap_or("unknown"),
+                            "created_at": tx.get("created_at").and_then(Value::as_i64),
+                            "tournament_id": tx.get("tournament_id").and_then(Value::as_u64),
+                        }));
+                    }
+                }
+            }
+        }
+        if let Some(txs) = ctx
+            .get("registration_transactions")
+            .and_then(Value::as_array)
+        {
+            for tx in txs {
+                if let Some(sig) = tx.get("signature").and_then(Value::as_str) {
+                    if seen.insert(sig.to_string()) {
+                        out.push(json!({
+                            "signature": sig,
+                            "source": "tournament_registration_transactions",
+                            "operation": "registration",
+                            "status": "confirmed",
+                            "created_at": tx.get("confirmed_at").and_then(Value::as_i64),
+                            "tournament_id": tx.get("tournament_id").and_then(Value::as_u64),
+                            "player": tx.get("player").and_then(Value::as_str),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+async fn debug_capabilities(
+    State(_state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let v1_send_enabled = crate::signing::solana::TransactionBuildPolicy::v1_send_enabled();
+    Ok(Json(json!({
+        "sources": {
+            "game_db": true,
+            "moves_db": true,
+            "braid_event_log": true,
+            "pgn": true,
+            "tournament_store": true,
+            "tournament_transactions": true,
+            "money_actions": true,
+            "anti_cheat": true,
+            "moderation": true,
+            "archive": true,
+            "solana_tx_analyzer": true
+        },
+        "transaction_version_support": {
+            "max_supported_transaction_version": crate::signing::solana::MAX_SUPPORTED_TX_VERSION,
+            "v1_reads_enabled": true,
+            "v1_read_required": crate::signing::solana::v1_read_required(),
+            "v1_send_enabled": v1_send_enabled,
+            "default_send_policy": "legacy",
+            "large_flow_send_policy": if v1_send_enabled { "v1_when_wallet_and_rpc_support_it" } else { "v0_or_legacy_split" }
+        },
+        "rent_accounting": {
+            "rent_minimum_source": "rpc_getMinimumBalanceForRentExemption",
+            "contract_layout_policy": "stable_account_layouts",
+            "refund_policy": "rent_surplus_is_debug_evidence_not_prize_or_stake"
+        }
+    })))
+}
+
+async fn search_debug_games(
+    State(state): State<AppState>,
+    Query(q): Query<DebugGameSearchQuery>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let query = q.query.unwrap_or_default().trim().to_string();
+    if query.is_empty() {
+        return Ok(Json(json!({ "query": query, "games": [] })));
+    }
+
+    let limit = q.limit.unwrap_or(25).clamp(1, 100);
+    let like = format!("%{}%", query);
+    let repo = GameRepository::new(state.store.pool());
+    let mut seen = HashSet::new();
+    let mut games = Vec::new();
+
+    let direct = sqlx::query_as::<_, GameRecord>(
+        "SELECT * FROM games \
+         WHERE id = ? OR player_white = ? OR player_black = ? OR finalize_sig = ? \
+            OR white_username LIKE ? OR black_username LIKE ? \
+         ORDER BY start_time DESC LIMIT ?",
+    )
+    .bind(&query)
+    .bind(&query)
+    .bind(&query)
+    .bind(&query)
+    .bind(&like)
+    .bind(&like)
+    .bind(limit)
+    .fetch_all(&state.store.pool())
+    .await
+    .map_err(|e| {
+        error!("[admin-debug] game search failed for '{}': {}", query, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    for game in direct {
+        if seen.insert(game.id.clone()) {
+            games.push(game);
+        }
+    }
+
+    if let Ok(tournament_id) = query.parse::<u64>() {
+        if let Some(tournament) = state.tournament_store.get(tournament_id).await {
+            for m in tournament.matches.iter().flatten() {
+                if let Some(game_id) = m.game_id {
+                    if let Ok(Some(game)) = repo.get_game(&game_id.to_string()).await {
+                        if seen.insert(game.id.clone()) {
+                            games.push(game);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    games.truncate(limit as usize);
+    info!(
+        "[admin-debug] game search actor={} query={} results={}",
+        crate::infrastructure::auth_middleware::current_admin_actor(),
+        query,
+        games.len()
+    );
+    Ok(Json(json!({ "query": query, "games": games })))
+}
+
+async fn game_debug_transactions(
+    Path(game_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let repo = GameRepository::new(state.store.pool());
+    let game = repo
+        .get_game(&game_id)
+        .await
+        .map_err(|e| {
+            error!("[admin-debug] game lookup failed for {}: {}", game_id, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let transactions = related_game_transactions(&state, &game).await;
+    Ok(Json(
+        json!({ "game_id": game_id, "transactions": transactions }),
+    ))
+}
+
+async fn game_debug_bundle(
+    Path(game_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let repo = GameRepository::new(state.store.pool());
+    let game = repo
+        .get_game(&game_id)
+        .await
+        .map_err(|e| {
+            error!("[admin-debug] game lookup failed for {}: {}", game_id, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let mut available_sections = vec!["game".to_string()];
+    let mut missing_sections = Vec::new();
+    let mut lookup_errors = Vec::new();
+
+    let moves = match repo.get_moves(&game_id).await {
+        Ok(m) => m,
+        Err(e) => {
+            warn!("[admin-debug] moves lookup failed for {}: {}", game_id, e);
+            lookup_errors.push(json!({ "section": "moves", "error": e.to_string() }));
+            Vec::new()
+        }
+    };
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "moves",
+        !moves.is_empty(),
+    );
+
+    let stored_pgn = match repo.get_pgn_text(&game_id).await {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("[admin-debug] PGN lookup failed for {}: {}", game_id, e);
+            lookup_errors.push(json!({ "section": "pgn", "error": e.to_string() }));
+            None
+        }
+    };
+    let pgn = stored_pgn.or_else(|| {
+        if moves.iter().any(|m| m.move_san.is_some()) {
+            Some(assemble_pgn_from_moves(&moves))
+        } else {
+            None
+        }
+    });
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "pgn",
+        pgn.as_ref().is_some_and(|p| !p.trim().is_empty()),
+    );
+
+    let move_events = state.game_log.snapshot(&game_id, "moves").await;
+    let chat_events = state.game_log.snapshot(&game_id, "chat").await;
+    let events_present = move_events
+        .get("entries")
+        .and_then(Value::as_array)
+        .is_some_and(|a| !a.is_empty())
+        || chat_events
+            .get("entries")
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty());
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "events",
+        events_present,
+    );
+
+    let tournament_context = linked_tournament_context(&state, &game_id).await;
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "tournament",
+        tournament_context.is_some(),
+    );
+
+    let transactions = related_game_transactions(&state, &game).await;
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "transactions",
+        !transactions.is_empty(),
+    );
+
+    let money_actions = match game_id.parse::<i64>() {
+        Ok(numeric_game_id) => match state
+            .money_actions
+            .by_scope(Some(numeric_game_id), None, None)
+            .await
+        {
+            Ok(actions) => actions,
+            Err(e) => {
+                warn!(
+                    "[admin-debug] money action lookup failed for {}: {}",
+                    game_id, e
+                );
+                lookup_errors.push(json!({ "section": "money_actions", "error": e.to_string() }));
+                Vec::new()
+            }
+        },
+        Err(_) => Vec::new(),
+    };
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "money_actions",
+        !money_actions.is_empty(),
+    );
+    let money_actions_debug: Vec<Value> = money_actions
+        .iter()
+        .map(|action| {
+            json!({
+                "id": action.id,
+                "action_type": action.action_type,
+                "scope_type": action.scope_type,
+                "game_id": action.game_id,
+                "tournament_id": action.tournament_id,
+                "wallet": action.wallet,
+                "signature": action.signature,
+                "status": action.status,
+                "reason": action.reason,
+                "attempt_count": action.attempt_count,
+                "last_error": action.last_error,
+                "next_retry_at": action.next_retry_at,
+                "created_at": action.created_at,
+                "updated_at": action.updated_at,
+                "tx_version": null,
+                "tx_version_note": "Use Analyze Tx to fetch version, ALT, v1 resource, and rent evidence from RPC."
+            })
+        })
+        .collect();
+
+    let anti_cheat = match load_anticheat_value(&state, &game_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(
+                "[admin-debug] anti-cheat lookup failed for {}: {}",
+                game_id, e
+            );
+            lookup_errors.push(json!({ "section": "anti_cheat", "error": e.to_string() }));
+            json!({ "game_id": game_id, "analysed": false })
+        }
+    };
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "anti_cheat",
+        anti_cheat
+            .get("analysed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    );
+
+    let flagged_repo = crate::db::repository::FlaggedGameRepository::new(state.store.pool());
+    let moderation_flags: Vec<_> = flagged_repo
+        .list()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|f| f.game_id.to_string() == game_id)
+        .collect();
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "moderation",
+        !moderation_flags.is_empty(),
+    );
+
+    info!(
+        "[admin-debug] bundle actor={} game_id={} available={:?} missing={:?} errors={}",
+        crate::infrastructure::auth_middleware::current_admin_actor(),
+        game_id,
+        available_sections,
+        missing_sections,
+        lookup_errors.len()
+    );
+
+    Ok(Json(json!({
+        "game_id": game_id,
+        "available_sections": available_sections,
+        "missing_sections": missing_sections,
+        "lookup_errors": lookup_errors,
+        "game": game,
+        "players": {
+            "white": { "wallet": game.player_white, "username": game.white_username },
+            "black": { "wallet": game.player_black, "username": game.black_username }
+        },
+        "moves": moves,
+        "pgn": pgn,
+        "events": {
+            "moves": move_events,
+            "chat": chat_events
+        },
+        "tournament": tournament_context,
+        "transactions": transactions,
+        "money_actions": money_actions_debug,
+        "transaction_version_support": {
+            "max_supported_transaction_version": crate::signing::solana::MAX_SUPPORTED_TX_VERSION,
+            "v1_reads_enabled": true,
+            "v1_read_required": crate::signing::solana::v1_read_required(),
+            "v1_send_enabled": crate::signing::solana::TransactionBuildPolicy::v1_send_enabled()
+        },
+        "rent_accounting": {
+            "rent_minimum_source": "rpc_getMinimumBalanceForRentExemption",
+            "note": "Analyze a related transaction to inspect account lamports, rent-exempt minimum, and reclaimable surplus."
+        },
+        "sessions": {
+            "available": false,
+            "note": "No persisted per-game Solana session records are currently linked to this game."
+        },
+        "anti_cheat": anti_cheat,
+        "moderation": {
+            "flags": moderation_flags,
+            "dispute": null
+        }
+    })))
 }
 
 async fn list_players(

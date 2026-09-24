@@ -8,6 +8,38 @@ use crate::lifecycle::guards;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+#[event]
+pub struct GameFinalized {
+    pub game_id: u64,
+    pub white: Pubkey,
+    pub black: Pubkey,
+    pub winner: Pubkey,
+    pub result_code: u8,
+    pub wager_amount: u64,
+    pub country_fee: u64,
+    pub fees_advanced: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct GameCancelledSettlement {
+    pub game_id: u64,
+    pub white: Pubkey,
+    pub black: Pubkey,
+    pub wager_amount: u64,
+    pub refunded_white: bool,
+    pub refunded_black: bool,
+    pub timestamp: i64,
+}
+
+fn result_code(result: GameResult) -> u8 {
+    match result {
+        GameResult::None => 0,
+        GameResult::Draw => 1,
+        GameResult::Winner(_) => 2,
+    }
+}
+
 pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
     let (result, wager_amount, game_white, wager_token, match_type, country_fee, fees_advanced) = {
         let game = &mut ctx.accounts.game;
@@ -137,6 +169,24 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
         }
     }
 
+    let winner = match result {
+        GameResult::Winner(winner) => winner,
+        _ => Pubkey::default(),
+    };
+    let white = ctx.accounts.white_authority.key();
+    let black = ctx.accounts.black_authority.key();
+    emit!(GameFinalized {
+        game_id,
+        white,
+        black,
+        winner,
+        result_code: result_code(result),
+        wager_amount,
+        country_fee,
+        fees_advanced,
+        timestamp: Clock::get()?.unix_timestamp,
+    });
+
     update_profiles(ctx, result, game_white, wager_amount, match_type)
 }
 
@@ -155,30 +205,48 @@ pub fn settle_cancelled_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> 
     }
 
     let wager_amount = ctx.accounts.game.wager_amount;
+    let mut refunded_white = false;
+    let mut refunded_black = false;
     if wager_amount > 0 && ctx.accounts.game.wager_token.is_none() {
         let bump = ctx.bumps.escrow_pda;
         let sp = &ctx.accounts.system_program;
         let escrow = &ctx.accounts.escrow_pda;
 
-        escrow::pay_from_game_escrow(
-            sp,
-            escrow,
-            ctx.accounts.white_authority.as_ref(),
-            wager_amount,
-            game_id,
-            bump,
-        )?;
-        escrow::pay_from_game_escrow(
-            sp,
-            escrow,
-            ctx.accounts.black_authority.as_ref(),
-            wager_amount,
-            game_id,
-            bump,
-        )?;
+        if escrow.lamports() >= wager_amount {
+            escrow::pay_from_game_escrow(
+                sp,
+                escrow,
+                ctx.accounts.white_authority.as_ref(),
+                wager_amount,
+                game_id,
+                bump,
+            )?;
+            refunded_white = true;
+        }
+
+        if escrow.lamports() >= wager_amount {
+            escrow::pay_from_game_escrow(
+                sp,
+                escrow,
+                ctx.accounts.black_authority.as_ref(),
+                wager_amount,
+                game_id,
+                bump,
+            )?;
+            refunded_black = true;
+        }
     }
 
     ctx.accounts.game.status = GameStatus::Settled;
+    emit!(GameCancelledSettlement {
+        game_id,
+        white: ctx.accounts.white_authority.key(),
+        black: ctx.accounts.black_authority.key(),
+        wager_amount,
+        refunded_white,
+        refunded_black,
+        timestamp: Clock::get()?.unix_timestamp,
+    });
     Ok(())
 }
 

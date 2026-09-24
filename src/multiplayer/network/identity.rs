@@ -344,8 +344,8 @@ pub fn active_profile_dir() -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("xfchess");
             #[cfg(target_os = "android")]
-            let base = crate::core::paths::external_data_dir()
-                .unwrap_or_else(|| PathBuf::from("."));
+            let base =
+                crate::core::paths::external_data_dir().unwrap_or_else(|| PathBuf::from("."));
             std::fs::create_dir_all(&base).ok();
             base
         })

@@ -652,8 +652,7 @@ fn process_batch_commit_requests(
 
     if let Some((moves, next_fens)) = rollup_manager.prepare_batch_for_commit() {
         let base_nonce = bridge.move_nonce;
-        bridge.move_nonce += moves.len() as u64;
-        submit_moves_via_vps(
+        let outcome = submit_moves_via_vps(
             rollup_manager.game_id,
             &moves,
             &next_fens,
@@ -664,7 +663,38 @@ fn process_batch_commit_requests(
             &mut recent_txs,
             magicblock_resolver.er_endpoint(),
         );
-        bridge.awaiting_commit_confirmation = true;
+        bridge.move_nonce = base_nonce.saturating_add(outcome.recorded as u64);
+
+        if outcome.recorded > 0 {
+            let final_fen = next_fens
+                .get(outcome.recorded - 1)
+                .cloned()
+                .unwrap_or_else(|| rollup_manager.committed_fen.clone());
+            rollup_manager.batch_commit_success(final_fen, outcome.recorded);
+        }
+
+        if outcome.recorded < moves.len() {
+            let remaining_moves = moves[outcome.recorded..].to_vec();
+            let remaining_fens = next_fens[outcome.recorded..].to_vec();
+            rollup_manager.batch_commit_failed(remaining_moves, remaining_fens);
+            bridge.awaiting_commit_confirmation = false;
+            if let Some(error) = outcome.error {
+                error!(
+                    "[VPS] Batch flush for game {} stopped after {} / {} move(s): {}",
+                    rollup_manager.game_id,
+                    outcome.recorded,
+                    moves.len(),
+                    error
+                );
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new("solana_er_record_failed")
+                        .game_id(rollup_manager.game_id)
+                        .reason(error),
+                );
+            }
+        } else {
+            bridge.awaiting_commit_confirmation = false;
+        }
     }
 }
 
@@ -684,6 +714,12 @@ fn validate_batch_proposal(
     !moves.is_empty() && moves.len() == next_fens.len()
 }
 
+#[derive(Debug, Default)]
+struct BatchSubmitOutcome {
+    recorded: usize,
+    error: Option<String>,
+}
+
 fn submit_moves_via_vps(
     game_id: u64,
     moves: &[String],
@@ -694,10 +730,11 @@ fn submit_moves_via_vps(
     magicblock_events: &mut MessageWriter<MagicBlockEvent>,
     recent_txs: &mut RecentTransactions,
     fallback_er_endpoint: &str,
-) {
+) -> BatchSubmitOutcome {
     use crate::multiplayer::rollup::magicblock::er_explorer_url_for;
     use crate::multiplayer::vps_client;
 
+    let mut outcome = BatchSubmitOutcome::default();
     for (i, (move_str, next_fen)) in moves.iter().zip(next_fens.iter()).enumerate() {
         let ply = base_nonce + i as u64;
         let mover = mover_wallet_for_ply(ply, white_pk, black_pk).to_string();
@@ -714,16 +751,19 @@ fn submit_moves_via_vps(
                 );
                 recent_txs.push(move_str.clone(), sig.clone());
                 magicblock_events.write(MagicBlockEvent::TransactionRoutedToEr { signature: sig });
+                outcome.recorded += 1;
             }
             Err(e) => {
                 error!(
                     "[VPS] record_move failed for {} game {}: {}",
                     move_str, game_id, e
                 );
-                return;
+                outcome.error = Some(e.to_string());
+                return outcome;
             }
         }
     }
+    outcome
 }
 
 fn handle_game_start_delegation(

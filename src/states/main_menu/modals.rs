@@ -33,6 +33,7 @@ pub(super) fn render_ai_setup_modal(
         .title_bar(false)
         .fixed_size(egui::Vec2::new(380.0, 420.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .order(egui::Order::Foreground)
         .frame(panel_frame)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -55,7 +56,7 @@ pub(super) fn render_ai_setup_modal(
                         )
                         .clicked()
                     {
-                        competitive.show_ai_setup = false;
+                        competitive.set_active_modal(None);
                     }
                 });
             });
@@ -249,7 +250,7 @@ pub(super) fn render_ai_setup_modal(
                     active_tc.control = competitive.ai_time_control;
                     active_tc.ai_game = true;
                     next_state.set(GameState::InGame);
-                    competitive.show_ai_setup = false;
+                    competitive.set_active_modal(None);
                 }
             });
         });
@@ -262,6 +263,7 @@ pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut Compe
         .fixed_size(egui::Vec2::new(420.0, 380.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .title_bar(false)
+        .order(egui::Order::Foreground)
         .frame(StyledPanel::popup())
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -279,7 +281,7 @@ pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut Compe
                         )
                         .clicked()
                     {
-                        competitive.show_controls_popup = false;
+                        competitive.set_active_modal(None);
                     }
                 });
             });
@@ -333,6 +335,7 @@ pub(super) fn render_pgn_input_modal(
         .fixed_size(egui::Vec2::new(480.0, 380.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .title_bar(false)
+        .order(egui::Order::Foreground)
         .frame(StyledPanel::popup())
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -340,7 +343,7 @@ pub(super) fn render_pgn_input_modal(
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new(egui::RichText::new("X").size(12.0).color(UiColors::TEXT_POPUP_BODY))
                         .fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE)).clicked() {
-                        competitive.show_pgn_input = false;
+                        competitive.set_active_modal(None);
                     }
                 });
             });
@@ -403,7 +406,7 @@ pub(super) fn render_pgn_input_modal(
                             );
                             *core_mode = CoreGameMode::PgnReplay;
                             next_state.set(GameState::InGame);
-                            competitive.show_pgn_input = false;
+                            competitive.set_active_modal(None);
                             competitive.pgn_input_error = None;
                         }
                         Err(e) => {
@@ -422,7 +425,7 @@ pub(super) fn render_pgn_input_modal(
                     )
                     .clicked()
                 {
-                    competitive.show_pgn_input = false;
+                    competitive.set_active_modal(None);
                 }
             });
         });

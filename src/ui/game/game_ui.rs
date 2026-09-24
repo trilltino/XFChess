@@ -383,6 +383,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                                     gs,
                                     gs_pending,
                                     sol_usd_rate,
+                                    params.solana_session.as_deref(),
                                 );
                                 if let Some(pv) = profile_view {
                                     pv.open = pv_open;
@@ -399,6 +400,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
                                     None,
                                     false,
                                     sol_usd_rate,
+                                    params.solana_session.as_deref(),
                                 );
                             }
                         });
@@ -1294,6 +1296,11 @@ const DISCONNECT_GRACE_PERIOD_SECS: u64 = 20;
 pub struct OpponentDisconnectState {
     pub disconnected_at: Option<std::time::Instant>,
     pub timed_out: bool,
+    #[cfg(feature = "solana")]
+    pub timeout_claim_rx:
+        Option<tokio::sync::oneshot::Receiver<Result<solana_sdk::signature::Signature, String>>>,
+    #[cfg(feature = "solana")]
+    pub money_flow: crate::multiplayer::solana::money_flow::MoneyFlowState,
 }
 
 impl OpponentDisconnectState {
@@ -1388,6 +1395,71 @@ pub fn opponent_disconnect_ui(
         return;
     }
 
+    #[cfg(feature = "solana")]
+    if let Some(rx) = disc.timeout_claim_rx.as_mut() {
+        match rx.try_recv() {
+            Ok(Ok(sig)) => {
+                let game_id = solana_sync.as_ref().and_then(|s| s.game_id).unwrap_or(0);
+                let sig_text = sig.to_string();
+                disc.money_flow =
+                    crate::multiplayer::solana::money_flow::MoneyFlowState::pending(
+                        "claim_timeout",
+                        Some(sig_text.clone()),
+                        "timeout claim landed; waiting for settlement reconciliation",
+                    );
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new("reconcile_pending")
+                        .game_id(game_id)
+                        .action("claim_timeout")
+                        .signature(sig_text.clone())
+                        .status("pending_reconciliation"),
+                );
+                if let Err(e) = crate::multiplayer::network::vps::register_money_action(
+                    crate::multiplayer::network::vps::RegisterMoneyActionReq {
+                        action_type: "claim_timeout".to_string(),
+                        scope_type: "game".to_string(),
+                        game_id: Some(game_id as i64),
+                        tournament_id: None,
+                        wallet: solana_wallet
+                            .as_ref()
+                            .and_then(|wallet| wallet.pubkey.map(|pk| pk.to_string())),
+                        signature: Some(sig_text),
+                        reason: Some("opponent disconnect timeout claim".to_string()),
+                    },
+                ) {
+                    tracing::warn!("[money-actions] claim_timeout register failed: {e}");
+                }
+                disc.timeout_claim_rx = None;
+            }
+            Ok(Err(e)) => {
+                let game_id = solana_sync.as_ref().and_then(|s| s.game_id).unwrap_or(0);
+                disc.money_flow =
+                    crate::multiplayer::solana::money_flow::MoneyFlowState::failed(
+                        "claim_timeout",
+                        e.clone(),
+                    );
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new("tx_failed")
+                        .game_id(game_id)
+                        .action("claim_timeout")
+                        .status("failed")
+                        .reason(e),
+                );
+                disc.timeout_claim_rx = None;
+            }
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                disc.money_flow =
+                    crate::multiplayer::solana::money_flow::MoneyFlowState::admin_review(
+                        "claim_timeout",
+                        Option::<String>::None,
+                        "timeout claim task dropped before confirmation",
+                    );
+                disc.timeout_claim_rx = None;
+            }
+        }
+    }
+
     // The first-move grace period owns the pre-game abort path. Showing the
     // 60s disconnect countdown at the same time is confusing and can produce
     // two competing timeout outcomes before White has even made move one.
@@ -1453,7 +1525,19 @@ pub fn opponent_disconnect_ui(
             solana_sync.as_ref().and_then(|s| s.game_id),
             solana_sync.as_ref().map(|s| s.rpc_url.clone()),
         ) {
-            crate::multiplayer::solana::lobby::spawn_claim_timeout(rpc_url, wallet_pubkey, game_id);
+            disc.money_flow =
+                crate::multiplayer::solana::money_flow::MoneyFlowState::signing("claim_timeout");
+            crate::multiplayer::network::vps::emit_client_event(
+                crate::multiplayer::network::vps::ClientEvent::new("money_action_started")
+                    .game_id(game_id)
+                    .action("claim_timeout")
+                    .status("signing"),
+            );
+            disc.timeout_claim_rx = Some(crate::multiplayer::solana::lobby::spawn_claim_timeout(
+                rpc_url,
+                wallet_pubkey,
+                game_id,
+            ));
         }
 
         return;

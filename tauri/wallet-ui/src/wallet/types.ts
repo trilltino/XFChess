@@ -44,7 +44,51 @@ export type WalletSource = {
    * user-selected cluster to nudge, so there is nothing to reach into.
    */
   provider: unknown | null;
+  /** Best-effort transaction-version capabilities for builder policy. */
+  txCapabilities?: SolanaTxCapabilities;
 };
+
+export type SolanaTxCapabilities = {
+  canSignLegacy: boolean;
+  canSignV0: boolean;
+  canSignV1: boolean;
+  canRefreshBlockhash: boolean;
+  canHandlePartialSignatures: boolean;
+  source: WalletKind | 'unknown';
+  reason?: string;
+};
+
+export function defaultSolanaTxCapabilities(
+  source: WalletKind | 'unknown',
+): SolanaTxCapabilities {
+  return {
+    canSignLegacy: true,
+    canSignV0: true,
+    canSignV1: false,
+    canRefreshBlockhash: false,
+    canHandlePartialSignatures: true,
+    source,
+    reason: 'v1 signing is disabled until the connected wallet declares support.',
+  };
+}
+
+export function detectSolanaTxCapabilities(
+  source: WalletKind | 'unknown',
+  provider?: unknown,
+): SolanaTxCapabilities {
+  const base = defaultSolanaTxCapabilities(source);
+  const features = (provider as any)?.features ?? {};
+  const hasExplicitV1 =
+    Boolean(features['solana:signTransaction:v1']) ||
+    Boolean(features['solana:signAndSendTransaction:v1']);
+  return {
+    ...base,
+    canSignV1: hasExplicitV1,
+    reason: hasExplicitV1
+      ? 'wallet-standard provider advertises transaction v1 signing'
+      : base.reason,
+  };
+}
 
 /** Human-facing label per provider. */
 export const WALLET_LABEL: Record<WalletKind, string> = {

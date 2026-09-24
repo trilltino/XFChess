@@ -15,11 +15,7 @@ fn main() {
     } else {
         println!(" XFChess running in standalone mode.");
     }
-    // Always print resolved config, regardless of wallet mode — two instances
-    // silently pointed at different backends (a leftover BACKEND_URL/
-    // SIGNING_SERVICE_URL from an earlier dev session in the same terminal)
-    // used to be undetectable short of curling /health from both. This is
-    // the fastest way to rule that class of bug in or out.
+
     #[cfg(feature = "solana")]
     println!(
         " [CONFIG] backend={} devnet_rpc={} program_id={}",

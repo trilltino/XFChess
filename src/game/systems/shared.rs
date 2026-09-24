@@ -91,6 +91,7 @@ pub fn update_piece_state(
     _was_first_move: bool,
     is_castling: bool,
     capture: Option<CapturedTarget>,
+    is_en_passant: bool,
     promotion: Option<PieceType>,
     commands: &mut Commands,
     pieces: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
@@ -119,7 +120,7 @@ pub fn update_piece_state(
         to: target,
         captured: capture.map(|data| data.piece_type),
         is_castling,
-        is_en_passant: false,
+        is_en_passant,
         is_check: false,
         is_checkmate: false,
     };
@@ -208,6 +209,65 @@ fn apply_castling_rook_move(
     }
 }
 
+fn square_name_to_coords(square: &str) -> Option<(u8, u8)> {
+    let bytes = square.as_bytes();
+    if bytes.len() != 2 {
+        return None;
+    }
+    let file = bytes[0].to_ascii_lowercase();
+    let rank = bytes[1];
+    if !(b'a'..=b'h').contains(&file) || !(b'1'..=b'8').contains(&rank) {
+        return None;
+    }
+    Some((file - b'a', rank - b'1'))
+}
+
+fn find_en_passant_capture(
+    ctx: &MoveContext<'_>,
+    from_pos: (u8, u8),
+    engine: &ChessEngine,
+    pieces_query: &mut Query<(Entity, &mut Piece, &mut HasMoved)>,
+) -> Option<(CapturedTarget, (u8, u8))> {
+    if ctx.capture.is_some()
+        || ctx.piece.piece_type != PieceType::Pawn
+        || from_pos.0 == ctx.target.0
+        || from_pos.1.abs_diff(ctx.target.1) != 1
+    {
+        return None;
+    }
+
+    let Some(ep_square) = engine
+        .en_passant
+        .as_deref()
+        .and_then(square_name_to_coords)
+    else {
+        return None;
+    };
+    if ep_square != ctx.target {
+        return None;
+    }
+
+    let captured_square = (ctx.target.0, from_pos.1);
+    pieces_query
+        .iter_mut()
+        .find(|(_, piece, _)| {
+            piece.x == captured_square.0
+                && piece.y == captured_square.1
+                && piece.piece_type == PieceType::Pawn
+                && piece.color != ctx.piece.color
+        })
+        .map(|(entity, piece, _)| {
+            (
+                CapturedTarget {
+                    entity,
+                    piece_type: piece.piece_type,
+                    color: piece.color,
+                },
+                captured_square,
+            )
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn execute_move(
     ctx: &MoveContext<'_>,
@@ -222,20 +282,29 @@ pub fn execute_move(
     _current_turn: &CurrentTurn,
 ) -> bool {
     // 1. Play Audio
-    play_move_audio(commands, ctx.move_sound.clone(), ctx.capture.is_some());
+    // Audio is played after resolving special captures below.
 
     // Derive from_pos early — needed by both the capture and update steps.
     let from_pos = (ctx.piece.x, ctx.piece.y);
+    let en_passant_capture = find_en_passant_capture(ctx, from_pos, engine, pieces_query);
+    let (resolved_capture, capture_square, is_en_passant) =
+        if let Some((target, square)) = en_passant_capture {
+            (Some(target), square, true)
+        } else {
+            (ctx.capture, ctx.target, false)
+        };
+
+    play_move_audio(commands, ctx.move_sound.clone(), resolved_capture.is_some());
 
     // 2. Handle Capture
-    if let Some(target_cap) = ctx.capture {
+    if let Some(target_cap) = resolved_capture {
         // The captured piece stands on ctx.target — derive world position
         // using the same formula as piece spawning: X is mirrored (7 - file)
         // so the a-file renders on White's left; Z = rank, Y = board surface.
         let cap_world_pos = Vec3::new(
-            7.0 - ctx.target.0 as f32,
+            7.0 - capture_square.0 as f32,
             PIECE_ON_BOARD_Y,
-            ctx.target.1 as f32,
+            capture_square.1 as f32,
         );
         let move_dir =
             cap_world_pos - Vec3::new(7.0 - from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32);
@@ -258,7 +327,8 @@ pub fn execute_move(
         ctx.target,
         ctx.was_first_move,
         castling,
-        ctx.capture,
+        resolved_capture,
+        is_en_passant,
         ctx.promotion,
         commands,
         pieces_query,
@@ -283,7 +353,7 @@ pub fn execute_move(
         ctx.piece.color,
         from_pos,
         ctx.target,
-        ctx.capture.is_some(),
+        resolved_capture.is_some(),
         ctx.was_first_move,
     );
 
@@ -296,7 +366,7 @@ pub fn execute_move(
                 to: ctx.target,
                 piece_type: ctx.piece.piece_type,
                 piece_color: ctx.piece.color,
-                capture: ctx.capture.map(|c| c.piece_type),
+                capture: resolved_capture.map(|c| c.piece_type),
                 promotion: ctx.promotion,
                 move_number: engine.get_move_counter(),
             };
@@ -316,7 +386,7 @@ pub fn execute_move(
     //    same square in the board array — whichever is iterated last "wins" and
     //    the engine can silently drop the capturing piece from its bitboards,
     //    making subsequent captures appear blocked.
-    if let Some(cap) = ctx.capture {
+    if let Some(cap) = resolved_capture {
         if let Ok((_, mut p, _)) = pieces_query.get_mut(cap.entity) {
             p.x = u8::MAX;
             p.y = u8::MAX;
@@ -333,7 +403,7 @@ pub fn execute_move(
             to: ctx.target,
             player: format!("{:?}", ctx.piece.color),
             piece_type: ctx.piece.piece_type,
-            captured_piece: ctx.capture.map(|c| c.piece_type),
+            captured_piece: resolved_capture.map(|c| c.piece_type),
             promotion: ctx.promotion,
             remote: ctx.remote,
             game_id: ctx.game_id,

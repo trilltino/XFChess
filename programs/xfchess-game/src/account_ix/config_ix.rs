@@ -57,13 +57,9 @@ pub fn initialize_config_handler(
     config.er_session_fee_lamports = args
         .er_session_fee_lamports
         .unwrap_or(ER_SESSION_FEE_LAMPORTS);
-    config.dispute_bond_lamports = args
-        .dispute_bond_lamports
-        .unwrap_or(DISPUTE_BOND_LAMPORTS);
+    config.dispute_bond_lamports = args.dispute_bond_lamports.unwrap_or(DISPUTE_BOND_LAMPORTS);
     config.dispute_ttl_secs = args.dispute_ttl_secs.unwrap_or(DISPUTE_TTL_SECS);
-    config.crank_max_slot_delay = args
-        .crank_max_slot_delay
-        .unwrap_or(CRANK_MAX_SLOT_DELAY);
+    config.crank_max_slot_delay = args.crank_max_slot_delay.unwrap_or(CRANK_MAX_SLOT_DELAY);
     config.crank_max_seconds_early = args
         .crank_max_seconds_early
         .unwrap_or(CRANK_MAX_SECONDS_EARLY);

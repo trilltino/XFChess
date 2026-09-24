@@ -376,23 +376,6 @@ enum HighlightType {
     Capture,
 }
 
-fn piece_symbol(piece_type: PieceType, color: PieceColor) -> &'static str {
-    match (piece_type, color) {
-        (PieceType::King, PieceColor::White) => "♔",
-        (PieceType::Queen, PieceColor::White) => "♕",
-        (PieceType::Rook, PieceColor::White) => "♖",
-        (PieceType::Bishop, PieceColor::White) => "♗",
-        (PieceType::Knight, PieceColor::White) => "♘",
-        (PieceType::Pawn, PieceColor::White) => "♙",
-        (PieceType::King, PieceColor::Black) => "♚",
-        (PieceType::Queen, PieceColor::Black) => "♛",
-        (PieceType::Rook, PieceColor::Black) => "♜",
-        (PieceType::Bishop, PieceColor::Black) => "♝",
-        (PieceType::Knight, PieceColor::Black) => "♞",
-        (PieceType::Pawn, PieceColor::Black) => "♟",
-    }
-}
-
 pub fn sync_board_theme_from_settings(
     settings: Res<crate::core::GameSettings>,
     mut theme: ResMut<Board2DTheme>,
@@ -459,9 +442,10 @@ pub fn render_2d_board(
         ] {
             for pc in [PieceColor::White, PieceColor::Black] {
                 let handle = handles.get(pt, pc);
-                if let Some(id) = contexts.image_id(&handle) {
-                    texture_map.insert((pt, pc), id);
-                }
+                let id = contexts.image_id(&handle).unwrap_or_else(|| {
+                    contexts.add_image(bevy_egui::EguiTextureHandle::Strong(handle.clone()))
+                });
+                texture_map.insert((pt, pc), id);
             }
         }
     }
@@ -475,7 +459,10 @@ pub fn render_2d_board(
     let game_over = input_params.game_over.is_game_over();
     let piece_alpha = (extras.board_fade.alpha_mult * 255.0).clamp(0.0, 255.0) as u8;
     let in_check = input_params.engine.is_check();
-    let check_color = input_params.engine.current_turn;
+    // The side currently in check is determined by the engine position itself,
+    // not by the display turn/resource cache. In replay and network-lagged
+    // states `CurrentTurn` can be stale or out-of-sync with the actual FEN.
+    let check_color = input_params.engine.side_to_move();
 
     // Last move squares for highlight
     let last_move_squares: Option<((u8, u8), (u8, u8))> = input_params
@@ -755,13 +742,10 @@ pub fn render_2d_board(
 
                         if !extras.settings.blindfold && !skip_piece {
                             if let Some((pt, pc, _)) = piece_map.get(&(file, rank)) {
-                                let mut piece_drawn = false;
-
-                                // Try to draw sprite first
                                 if let Some(id) = texture_map.get(&(*pt, *pc)) {
                                     painter.image(
                                         *id,
-                                        sq_rect.shrink(square_size * 0.1),
+                                        sq_rect,
                                         egui::Rect::from_min_max(
                                             egui::pos2(0.0, 0.0),
                                             egui::pos2(1.0, 1.0),
@@ -772,39 +756,6 @@ pub fn render_2d_board(
                                             255,
                                             piece_alpha,
                                         ),
-                                    );
-                                    piece_drawn = true;
-                                }
-
-                                // Fallback to Unicode if sprite not available
-                                if !piece_drawn {
-                                    let symbol = piece_symbol(*pt, *pc);
-                                    let font_size = square_size * 0.72;
-
-                                    let shadow_col = if *pc == PieceColor::White {
-                                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160)
-                                    } else {
-                                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 80)
-                                    };
-                                    painter.text(
-                                        sq_rect.center() + egui::Vec2::new(1.5, 1.5),
-                                        egui::Align2::CENTER_CENTER,
-                                        symbol,
-                                        egui::FontId::proportional(font_size),
-                                        shadow_col,
-                                    );
-
-                                    let piece_col = if *pc == PieceColor::White {
-                                        egui::Color32::WHITE
-                                    } else {
-                                        egui::Color32::from_rgb(18, 18, 18)
-                                    };
-                                    painter.text(
-                                        sq_rect.center(),
-                                        egui::Align2::CENTER_CENTER,
-                                        symbol,
-                                        egui::FontId::proportional(font_size),
-                                        piece_col,
                                     );
                                 }
                             }
@@ -887,10 +838,9 @@ pub fn render_2d_board(
                     }
                     if let Some((pt, pc)) = extras.anim.piece {
                         let center = extras.anim.lerped_pos();
-                        let half = square_size * 0.4;
+                        let half = square_size * 0.5;
                         let rect =
                             egui::Rect::from_center_size(center, egui::Vec2::splat(half * 2.0));
-                        let mut drawn = false;
                         if let Some(id) = texture_map.get(&(pt, pc)) {
                             painter.image(
                                 *id,
@@ -900,22 +850,6 @@ pub fn render_2d_board(
                                     egui::pos2(1.0, 1.0),
                                 ),
                                 egui::Color32::WHITE,
-                            );
-                            drawn = true;
-                        }
-                        if !drawn {
-                            let symbol = piece_symbol(pt, pc);
-                            let col = if pc == PieceColor::White {
-                                egui::Color32::WHITE
-                            } else {
-                                egui::Color32::from_rgb(18, 18, 18)
-                            };
-                            painter.text(
-                                center,
-                                egui::Align2::CENTER_CENTER,
-                                symbol,
-                                egui::FontId::proportional(square_size * 0.72),
-                                col,
                             );
                         }
                     }
@@ -925,9 +859,8 @@ pub fn render_2d_board(
                 if extras.drag.dragging && !extras.settings.blindfold {
                     if let Some((pt, pc)) = extras.drag.piece {
                         let pos = extras.drag.cursor_pos;
-                        let half = square_size * 0.45;
+                        let half = square_size * 0.5;
                         let rect = egui::Rect::from_center_size(pos, egui::Vec2::splat(half * 2.0));
-                        let mut drawn = false;
                         if let Some(id) = texture_map.get(&(pt, pc)) {
                             painter.image(
                                 *id,
@@ -937,22 +870,6 @@ pub fn render_2d_board(
                                     egui::pos2(1.0, 1.0),
                                 ),
                                 egui::Color32::WHITE,
-                            );
-                            drawn = true;
-                        }
-                        if !drawn {
-                            let symbol = piece_symbol(pt, pc);
-                            let col = if pc == PieceColor::White {
-                                egui::Color32::WHITE
-                            } else {
-                                egui::Color32::from_rgb(18, 18, 18)
-                            };
-                            painter.text(
-                                pos,
-                                egui::Align2::CENTER_CENTER,
-                                symbol,
-                                egui::FontId::proportional(square_size * 0.72),
-                                col,
                             );
                         }
                     }
@@ -995,34 +912,17 @@ pub fn render_2d_board(
                                 egui::Color32::from_rgb(181, 136, 99)
                             };
                             painter.rect_filled(btn_rect, 4.0, bg);
-                            // Draw piece
-                            let symbol = piece_symbol(pt, pcolor);
-                            let font_size = square_size * 0.72;
-                            let piece_col = if pcolor == PieceColor::White {
-                                egui::Color32::from_rgb(18, 18, 18)
-                            } else {
-                                egui::Color32::WHITE
-                            };
-                            // Shadow
-                            let shadow_col = if pcolor == PieceColor::White {
-                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 120)
-                            } else {
-                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60)
-                            };
-                            painter.text(
-                                btn_rect.center() + egui::Vec2::new(1.5, 1.5),
-                                egui::Align2::CENTER_CENTER,
-                                symbol,
-                                egui::FontId::proportional(font_size),
-                                shadow_col,
-                            );
-                            painter.text(
-                                btn_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                symbol,
-                                egui::FontId::proportional(font_size),
-                                piece_col,
-                            );
+                            if let Some(id) = texture_map.get(&(pt, pcolor)) {
+                                painter.image(
+                                    *id,
+                                    btn_rect,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    egui::Color32::WHITE,
+                                );
+                            }
                             // Click detection
                             let btn_id = egui::Id::new("promo_btn").with(idx as u32);
                             let btn_resp = ui.interact(btn_rect, btn_id, egui::Sense::click());

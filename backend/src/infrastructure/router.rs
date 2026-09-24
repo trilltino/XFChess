@@ -10,6 +10,7 @@ use crate::signing::routes::history::history_routes;
 use crate::signing::routes::kyc::kyc_routes;
 use crate::signing::routes::mailer::mailer_routes;
 use crate::signing::routes::matchmaking::matchmaking_routes;
+use crate::signing::routes::offline_tournament;
 use crate::signing::routes::puzzle::{puzzle_admin_routes, puzzle_routes};
 use crate::signing::routes::spectate::routes as spectate_routes;
 use crate::signing::routes::tournament as tournament_routes;
@@ -73,6 +74,23 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
 
     let history_router = history_routes();
 
+    let offline_tournament_router = base
+        .clone()
+        .nest(
+            "/offline-tournaments",
+            offline_tournament::public_routes().with_state(signing_state.clone()),
+        )
+        .nest(
+            "/admin/offline-tournaments",
+            offline_tournament::admin_routes()
+                .with_state(signing_state.clone())
+                .layer(middleware::from_fn_with_state(
+                    signing_state.clone(),
+                    persist_admin_request,
+                ))
+                .layer(middleware::from_fn(require_api_key)),
+        );
+
     // Build dispute router
     let dispute_router = base.clone().nest("/dispute", dispute_routes()).nest(
         "/admin/dispute",
@@ -128,6 +146,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         .merge(kyc_router)
         .merge(casual_games_router)
         .merge(history_router)
+        .merge(offline_tournament_router)
         .merge(puzzle_routes())
         .merge(dispute_router)
         .merge(metrics_router)

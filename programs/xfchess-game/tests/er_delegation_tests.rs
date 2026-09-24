@@ -234,8 +234,12 @@ async fn claim_timeout_mutates_only_game_even_when_delegated() {
     send(&mut ctx, ix, &[]).await.unwrap();
 
     let game = fetch_game(&mut ctx, GAME_ID).await;
-    assert_eq!(game.status, GameStatus::Finished);
-    assert_eq!(game.result, GameResult::Winner(black));
+    assert_eq!(game.status, GameStatus::Cancelled);
+    assert_eq!(
+        game.result,
+        GameResult::None,
+        "zero moves means no winner and no one-sided payout"
+    );
     assert!(
         game.is_delegated,
         "terminal ER transition must not undelegate"

@@ -182,31 +182,13 @@ fn get_square_from_fen(fen_board: &str, file: usize, rank: usize) -> String {
             current_file += empty_squares;
         } else {
             if current_file == file {
-                return piece_symbol(c);
+                return c.to_string();
             }
             current_file += 1;
         }
     }
 
     " ".to_string()
-}
-
-fn piece_symbol(c: char) -> String {
-    match c {
-        'P' => "".to_string(),
-        'N' => "".to_string(),
-        'B' => "".to_string(),
-        'R' => "".to_string(),
-        'Q' => "".to_string(),
-        'K' => "".to_string(),
-        'p' => "".to_string(),
-        'n' => "".to_string(),
-        'b' => "".to_string(),
-        'r' => "".to_string(),
-        'q' => "".to_string(),
-        'k' => "".to_string(),
-        _ => " ".to_string(),
-    }
 }
 
 pub fn spectator_menu_ui(

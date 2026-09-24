@@ -22,6 +22,8 @@ pub struct ProfileViewState {
     pub fetching: bool,
     pub fetch_rx: Option<crossbeam_channel::Receiver<Result<Vec<GameHistoryEntry>, String>>>,
     pub elo_curve: Vec<f32>,
+    pub pgn_fetch_rx: Option<crossbeam_channel::Receiver<Result<String, String>>>,
+    pub pgn_fetching: bool,
 }
 
 impl ProfileViewState {
@@ -69,6 +71,20 @@ fn fetch_history_blocking(wallet: String) -> Result<Vec<GameHistoryEntry>, Strin
         .collect())
 }
 
+fn fetch_pgn_blocking(game_id: String) -> Result<String, String> {
+    use crate::multiplayer::network::vps::{client, vps_base};
+    let url = format!("{}/games/{}.pgn", vps_base(), game_id);
+    let resp = client()
+        .map_err(|e| e.clone())?
+        .get(url)
+        .send()
+        .map_err(|e| format!("fetch_pgn: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("fetch_pgn: HTTP {}", resp.status()));
+    }
+    Ok(resp.text().map_err(|e| format!("parse pgn: {e}"))?)
+}
+
 // ── Systems ─────────────────────────────────────────────────────────────────
 
 pub fn fetch_profile_history(
@@ -100,28 +116,63 @@ pub fn fetch_profile_history(
 }
 
 pub fn poll_profile_history(
+    mut commands: Commands,
     mut view: ResMut<ProfileViewState>,
     solana_state: Res<SolanaIntegrationState>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+    mut game_mode: ResMut<crate::core::GameMode>,
 ) {
-    let rx = match view.fetch_rx.take() {
-        Some(r) => r,
-        None => return,
-    };
-    match rx.try_recv() {
-        Ok(Ok(history)) => {
-            view.history = history;
-            view.rebuild_curve(solana_state.cached_elo);
-            view.fetching = false;
+    if let Some(rx) = view.fetch_rx.take() {
+        match rx.try_recv() {
+            Ok(Ok(history)) => {
+                view.history = history;
+                view.rebuild_curve(solana_state.cached_elo);
+                view.fetching = false;
+            }
+            Ok(Err(e)) => {
+                warn!("[PROFILE VIEW] history fetch failed: {e}");
+                view.fetching = false;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {
+                view.fetch_rx = Some(rx); // put it back
+            }
+            Err(_) => {
+                view.fetching = false;
+            }
         }
-        Ok(Err(e)) => {
-            warn!("[PROFILE VIEW] history fetch failed: {e}");
-            view.fetching = false;
-        }
-        Err(crossbeam_channel::TryRecvError::Empty) => {
-            view.fetch_rx = Some(rx); // put it back
-        }
-        Err(_) => {
-            view.fetching = false;
+    }
+
+    if let Some(rx) = view.pgn_fetch_rx.take() {
+        match rx.try_recv() {
+            Ok(Ok(pgn_text)) => {
+                view.pgn_fetching = false;
+                match nimzovich_engine::parse_pgn(&pgn_text) {
+                    Ok(pgn) => {
+                        commands.insert_resource(crate::game::replay::ParsedPgnGameResource {
+                            inner: pgn,
+                            show_eval_graph: false,
+                            puzzle_mode: false,
+                            puzzle_revealed: false,
+                        });
+                        *game_mode = crate::core::GameMode::PgnReplay;
+                        next_state.set(crate::core::GameState::InGame);
+                        view.open = false;
+                    }
+                    Err(e) => {
+                        warn!("[PROFILE VIEW] Failed to parse PGN: {e:?}");
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                warn!("[PROFILE VIEW] PGN fetch failed: {e}");
+                view.pgn_fetching = false;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {
+                view.pgn_fetch_rx = Some(rx);
+            }
+            Err(_) => {
+                view.pgn_fetching = false;
+            }
         }
     }
 }
@@ -249,7 +300,9 @@ pub fn profile_view_ui(
                 egui::ScrollArea::vertical()
                     .max_height(200.0)
                     .show(ui, |ui| {
-                        for entry in view.history.iter().take(20) {
+                        let recent_history: Vec<_> =
+                            view.history.iter().take(20).cloned().collect();
+                        for entry in recent_history {
                             let (result_text, result_color) = match entry.result.as_str() {
                                 "win" => ("WIN", egui::Color32::from_rgb(34, 197, 94)),
                                 "loss" => ("LOSS", egui::Color32::from_rgb(239, 68, 68)),
@@ -287,6 +340,30 @@ pub fn profile_view_ui(
                                         .size(10.0),
                                     );
                                 }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .add_sized(
+                                                [50.0, 20.0],
+                                                egui::Button::new(
+                                                    egui::RichText::new("Replay").size(10.0),
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            if !view.pgn_fetching {
+                                                view.pgn_fetching = true;
+                                                let (tx, rx) = crossbeam_channel::bounded(1);
+                                                view.pgn_fetch_rx = Some(rx);
+                                                let gid = entry.game_id.clone();
+                                                std::thread::spawn(move || {
+                                                    let _ = tx.send(fetch_pgn_blocking(gid));
+                                                });
+                                            }
+                                        }
+                                    },
+                                );
                             });
                         }
                     });

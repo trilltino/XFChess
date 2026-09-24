@@ -1791,6 +1791,20 @@ fn show_wallet_popup_window(app: tauri::AppHandle) {
 // Gated behind the `tournament-admin` cargo feature (off by default; not
 // passed by release.yml) — a shipped consumer build gets the no-op fallback
 // below instead, so there's no code path that can ever create this window.
+fn apply_xfchess_window_icon(window: &tauri::WebviewWindow, app: &tauri::AppHandle) {
+  let icon = app
+    .default_window_icon()
+    .cloned()
+    .or_else(|| tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png")).ok());
+  if let Some(icon) = icon {
+    if let Err(e) = window.set_icon(icon) {
+      tracing::warn!("[WindowIcon] failed to set icon for {}: {e}", window.label());
+    }
+  } else {
+    tracing::warn!("[WindowIcon] no XFChess window icon was available");
+  }
+}
+
 #[cfg(feature = "tournament-admin")]
 fn open_tournament_admin(app: &tauri::AppHandle) {
   // Window creation MUST run on the main thread in Tauri v2.
@@ -1841,6 +1855,7 @@ fn open_tournament_admin(app: &tauri::AppHandle) {
         .build()
       {
         Ok(win) => {
+          apply_xfchess_window_icon(&win, &app);
           // Closing the admin window must take the SSH tunnel with it —
           // otherwise the orphaned ssh.exe keeps port 8091 bound and the next
           // login silently fails to establish a forward.
@@ -1911,6 +1926,10 @@ fn main() {
       app.manage(auth_state);
       #[cfg(feature = "tournament-admin")]
       app.manage(AdminTunnel::default());
+
+      if let Some(win) = app.get_webview_window("main") {
+        apply_xfchess_window_icon(&win, app.handle());
+      }
 
       // ── HTTP wallet bridge — /pending, /pending/stream, /resolved, /wallet,
       // /hide, /token ── The wallet-ui React app subscribes to

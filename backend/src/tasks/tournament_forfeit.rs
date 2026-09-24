@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 
 const FORFEIT_TICK: Duration = Duration::from_secs(10);
 
-const FORFEIT_GRACE: Duration = Duration::from_secs(45);
+const FORFEIT_GRACE: Duration = Duration::from_secs(180);
 
 pub fn spawn_tournament_forfeit_watcher(state: Arc<AppState>) {
     tokio::spawn(async move {
@@ -70,11 +70,10 @@ async fn run_tick(
                 };
 
                 for (player_id, opponent) in [(&white, &black), (&black, &white)] {
-                    let is_online = t
-                        .node_ids
-                        .get(player_id)
-                        .map(|node_id| online_node_ids.contains(node_id))
-                        .unwrap_or(false);
+                    let Some(node_id) = t.node_ids.get(player_id) else {
+                        continue;
+                    };
+                    let is_online = online_node_ids.contains(node_id);
                     if is_online {
                         continue;
                     }
@@ -143,11 +142,10 @@ async fn run_tick(
                     continue;
                 }
 
-                let is_online = t
-                    .node_ids
-                    .get(player_id)
-                    .map(|node_id| online_node_ids.contains(node_id))
-                    .unwrap_or(false);
+                let Some(node_id) = t.node_ids.get(player_id) else {
+                    continue;
+                };
+                let is_online = online_node_ids.contains(node_id);
                 if is_online {
                     continue; // seen this tick — no tracked offline-since carried forward
                 }
@@ -198,39 +196,38 @@ async fn forfeit_single_elim_match(
     loser: &str,
 ) {
     let store = &state.tournament_store;
-    if !store
-        .record_result(
-            tournament_id,
-            match_index,
-            winner.to_string(),
-            loser.to_string(),
-        )
-        .await
-    {
-        warn!(
-            "[tournament-forfeit] record_result failed for match {} of tournament {}",
-            match_index, tournament_id
-        );
-        return;
-    }
-
-    let (Ok(program_id), Ok(winner_pk), Ok(loser_pk)) = (
-        Pubkey::from_str(&state.config.program_id),
-        Pubkey::from_str(winner),
-        Pubkey::from_str(loser),
-    ) else {
-        // Bot/test wallets aren't real pubkeys; the store result still stands.
-        return;
-    };
-
-    let authority = state.vps_authority.clone();
-    let rpc_url = state.config.solana_rpc_url.clone();
     let next = store.get(tournament_id).await.and_then(|t| {
         t.matches
             .get(match_index)
             .and_then(|m| m.as_ref())
             .and_then(|m| m.next_match_for_winner)
     });
+
+    let (Ok(program_id), Ok(winner_pk), Ok(loser_pk)) = (
+        Pubkey::from_str(&state.config.program_id),
+        Pubkey::from_str(winner),
+        Pubkey::from_str(loser),
+    ) else {
+        // Bot/test wallets aren't real pubkeys; they cannot be mirrored on-chain.
+        if !store
+            .record_result(
+                tournament_id,
+                match_index,
+                winner.to_string(),
+                loser.to_string(),
+            )
+            .await
+        {
+            warn!(
+                "[tournament-forfeit] record_result failed for match {} of tournament {}",
+                match_index, tournament_id
+            );
+        }
+        return;
+    };
+
+    let authority = state.vps_authority.clone();
+    let rpc_url = state.config.solana_rpc_url.clone();
 
     let submitted = tokio::task::spawn_blocking(move || {
         let rpc = crate::signing::solana::make_rpc(&rpc_url);
@@ -259,10 +256,31 @@ async fn forfeit_single_elim_match(
 
     match submitted {
         Ok(Ok(())) => {}
-        Ok(Err(e)) => error!(
-            "[tournament-forfeit] on-chain mirror failed for match {} of tournament {}: {e}",
+        Ok(Err(e)) => {
+            error!(
+                "[tournament-forfeit] on-chain mirror failed for match {} of tournament {}: {e}",
+                match_index, tournament_id
+            );
+            return;
+        }
+        Err(e) => {
+            error!("[tournament-forfeit] on-chain mirror task panicked: {e}");
+            return;
+        }
+    }
+
+    if !store
+        .record_result(
+            tournament_id,
+            match_index,
+            winner.to_string(),
+            loser.to_string(),
+        )
+        .await
+    {
+        warn!(
+            "[tournament-forfeit] record_result failed for match {} of tournament {} after on-chain mirror",
             match_index, tournament_id
-        ),
-        Err(e) => error!("[tournament-forfeit] on-chain mirror task panicked: {e}"),
+        );
     }
 }

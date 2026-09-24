@@ -1,6 +1,6 @@
+use crate::engine::board_state::ChessEngine;
 use crate::game::components::GamePhase;
 use crate::game::resources::CurrentGamePhase;
-use crate::game::resources::CurrentTurn;
 use crate::rendering::pieces::{Piece, PieceType};
 use bevy::prelude::*;
 
@@ -10,12 +10,20 @@ pub struct CheckHighlightLight;
 pub fn update_check_highlight_system(
     mut commands: Commands,
     game_phase: Res<CurrentGamePhase>,
-    current_turn: Res<CurrentTurn>,
+    engine: Res<ChessEngine>,
+    view_mode: Res<crate::game::view_mode::ViewMode>,
     pieces: Query<&Piece>,
     existing: Query<Entity, With<CheckHighlightLight>>,
     time: Res<Time>,
     mut lights: Query<(&mut PointLight, &mut Transform), With<CheckHighlightLight>>,
 ) {
+    if *view_mode == crate::game::view_mode::ViewMode::Standard2D {
+        for entity in existing.iter() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
     let in_check = matches!(game_phase.0, GamePhase::Check | GamePhase::Checkmate);
 
     // If not in check, despawn any existing highlight
@@ -26,8 +34,10 @@ pub fn update_check_highlight_system(
         return;
     }
 
-    // Find king position (the side that is in check = current turn's king)
-    let king_color = current_turn.color;
+    // The side in check is the side to move in the engine position, not the
+    // stale display turn resource. This keeps replay and network states from
+    // painting the wrong king red.
+    let king_color = engine.side_to_move();
     let king_pos = pieces
         .iter()
         .find(|p| p.piece_type == PieceType::King && p.color == king_color)

@@ -76,26 +76,7 @@ body {
     min-height: 100vh;
 }
 
-.onboarding-bg {
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-}
 
-.onboarding-bg::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(255,255,255,0.06) 0%, transparent 70%),
-                 radial-gradient(ellipse 60% 40% at 80% 80%, rgba(255,255,255,0.03) 0%, transparent 60%);
-}
-
-.onboarding-bg::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-}
 
 .app-container {
     min-height: 100vh;
@@ -195,11 +176,6 @@ body {
 .navbar.mobile-open {
     background: rgba(0, 0, 0, 0.80);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    box-shadow:
-        0 10px 40px rgba(0, 0, 0, 0.6),
-        0 0 50px rgba(255, 255, 255, 0.06);
     border-radius: 20px;
     height: auto;
     flex-direction: column;
@@ -215,9 +191,6 @@ body {
        behind them (hero art, images, etc). */
     background: rgba(0, 0, 0, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
 }
 
 .nav-mobile-row {
@@ -318,48 +291,13 @@ body {
     justify-content: flex-end;
 }
 
-/* HOME: HERO GLOW + STATS BAR */
+/* HOME HERO */
 .home-hero {
     position: relative;
     text-align: center;
     padding: 190px 24px 80px;
     overflow: hidden;
-}
-
-.home-hero-glow {
-    position: absolute;
-    top: -40px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 1100px;
-    max-width: 160vw;
-    height: 450px;
-    background: radial-gradient(ellipse at center, rgba(210, 215, 225, 0.30) 0%, rgba(180, 185, 200, 0.10) 40%, transparent 70%);
-    pointer-events: none;
-    z-index: 0;
-}
-
-.home-hero-board-silhouette {
-    position: absolute;
-    top: 40px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 620px;
-    max-width: 80vw;
-    aspect-ratio: 817 / 601;
-    height: auto;
-    opacity: 0.4;
-    filter: grayscale(1) contrast(1.1) brightness(0.9);
-    mix-blend-mode: screen;
-    pointer-events: none;
-    z-index: 0;
-    -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 95%);
-    mask-image: linear-gradient(to bottom, black 50%, transparent 95%);
-}
-
-.home-hero > *:not(.home-hero-glow):not(.home-hero-board-silhouette) {
-    position: relative;
-    z-index: 1;
+    background: #000000;
 }
 
 .home-hero-title {
@@ -380,41 +318,11 @@ body {
     max-width: 480px;
     height: auto;
     border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 @media (max-width: 768px) {
     .home-hero {
         padding: 110px 20px 60px;
-    }
-
-    /* Default `farthest-corner` ellipse sizing on this very wide, short
-       (1100x450) box gives it a vertical radius of ~318px — its 70% stop
-       (fully transparent) doesn't land until ~408px down from the hero's
-       top. The mobile hero only renders ~283px tall and clips overflow,
-       so the glow got hard-cut while still ~44% visible: the other half
-       of the same seam bug as the silhouette below. Shrink it so its
-       transparent point lands well inside the shortest mobile hero. */
-    .home-hero-glow {
-        width: 90vw;
-        max-width: 500px;
-        height: 200px;
-        top: -20px;
-    }
-
-    /* At 80vw wide, this image's own height can exceed the mobile hero's
-       much shorter fixed-pixel padding — `.home-hero`'s `overflow: hidden`
-       then hard-clips it before its mask (which only reaches fully
-       transparent at 95% of the image's own height) finishes fading,
-       leaving a visible hard edge right at the hero/section boundary.
-       Cap the rendered size and fade out much earlier so it's always
-       fully transparent well within the shortest mobile hero height. */
-    .home-hero-board-silhouette {
-        width: 60vw;
-        max-width: 380px;
-        top: 30px;
-        -webkit-mask-image: linear-gradient(to bottom, black 15%, transparent 45%);
-        mask-image: linear-gradient(to bottom, black 15%, transparent 45%);
     }
 }
 
@@ -682,7 +590,6 @@ body {
 .roadmap-item.active .r-dot {
     background: var(--primary);
     border-color: var(--primary);
-    box-shadow: 0 0 15px var(--primary);
 }
 
 .connected-stats .cs.e .v {
@@ -708,7 +615,6 @@ body {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(12px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -722,7 +628,6 @@ body {
     width: 100%;
     max-width: 440px;
     padding: 32px;
-    box-shadow: 0 50px 100px rgba(0, 0, 0, 0.8);
     position: relative;
     max-height: 90vh;
     overflow-y: auto;

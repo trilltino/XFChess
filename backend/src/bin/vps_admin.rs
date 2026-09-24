@@ -254,7 +254,10 @@ fn confirm(prompt: &str) -> bool {
 fn list_tournaments() {
     println!("\n[LIST] Fetching tournaments...\n");
 
-    match client().get(format!("{}/tournaments", vps_base())).send() {
+    match client()
+        .get(format!("{}/api/tournaments", vps_base()))
+        .send()
+    {
         Ok(resp) if resp.status().is_success() => match resp.json::<Vec<TournamentSummary>>() {
             Ok(tournaments) => {
                 if tournaments.is_empty() {
@@ -395,7 +398,7 @@ fn view_tournament() {
     println!("\n[VIEW] Fetching tournament {}...\n", id);
 
     match client()
-        .get(format!("{}/tournament/{}", vps_base(), id))
+        .get(format!("{}/api/tournament/{}", vps_base(), id))
         .send()
     {
         Ok(resp) if resp.status().is_success() => {
@@ -489,7 +492,7 @@ fn view_matches() {
     println!("\n[MATCHES] Fetching matches for tournament {}...\n", id);
 
     match client()
-        .get(format!("{}/tournament/{}/bracket", vps_base(), id))
+        .get(format!("{}/api/tournament/{}/bracket", vps_base(), id))
         .send()
     {
         Ok(resp) if resp.status().is_success() => match resp.json::<TournamentDetail>() {
@@ -637,7 +640,7 @@ fn calculate_prizes() {
     println!("\n[PRIZES] Fetching prize info for tournament {}...\n", id);
 
     match client()
-        .get(format!("{}/tournament/{}", vps_base(), id))
+        .get(format!("{}/api/tournament/{}", vps_base(), id))
         .send()
     {
         Ok(resp) if resp.status().is_success() => match resp.json::<TournamentDetail>() {

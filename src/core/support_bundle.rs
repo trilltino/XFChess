@@ -38,7 +38,7 @@ fn unix_ts() -> i64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs()
+        .as_secs() as i64
 }
 
 fn read_if_exists(path: &PathBuf) -> Option<String> {
@@ -50,7 +50,11 @@ fn read_if_exists(path: &PathBuf) -> Option<String> {
 
 fn tail_lines(text: &str, max_lines: usize) -> String {
     let total = text.lines().count();
-    let skip = if total > max_lines { total - max_lines } else { 0 };
+    let skip = if total > max_lines {
+        total - max_lines
+    } else {
+        0
+    };
     let mut seen = 0;
     let mut out = String::new();
     for line in text.lines() {
@@ -74,7 +78,7 @@ fn list_files(dir: &PathBuf, pred: impl Fn(&str) -> bool) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for entry in entries {
         let Some(entry) = entry.ok() else { continue };
-        let name = entry.file_name().to_string_lossy();
+        let name = entry.file_name().to_string_lossy().into_owned();
         if pred(&name) {
             out.push(entry.path());
         }
@@ -90,7 +94,7 @@ fn newest_n(files: &mut Vec<PathBuf>, n: usize) -> Vec<PathBuf> {
         return files.clone();
     }
     let start = files.len() - n;
-    files.get(start..).copied().collect()
+    files[start..].to_vec()
 }
 
 /// Appends every crash report + recovered-errors file, plus (optionally) the
@@ -100,32 +104,34 @@ fn append_dir_sections(mut out: &mut String, dir: &PathBuf, include_game: bool) 
 
     if include_game {
         let mut game_logs = list_files(dir, |n| n.starts_with("game.log."));
-        game_logs.sort_by_key(|p| p.display());
+        game_logs.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
         for path in newest_n(&mut game_logs, NEWEST_DAILY_FILES) {
             ordered.push(path);
         }
     }
 
     let mut bridge_logs = list_files(dir, |n| n.starts_with("wallet-bridge.log."));
-    bridge_logs.sort_by_key(|p| p.display());
+    bridge_logs.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
     for path in newest_n(&mut bridge_logs, NEWEST_DAILY_FILES) {
         ordered.push(path);
     }
 
     let mut crashes = list_files(dir, |n| n.starts_with("crash_"));
-    crashes.sort_by_key(|p| p.display());
+    crashes.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
     for path in crashes {
         ordered.push(path);
     }
 
     for path in ordered {
-        let Some(text) = read_if_exists(&path) else { continue };
+        let Some(text) = read_if_exists(&path) else {
+            continue;
+        };
         let body = tail_lines(&text, LOG_TAIL_LINES);
-        let title = path.display();
+        let title = path.display().to_string();
         out.push('\n');
         out.push_str(&title);
         out.push_str("\n");
-        out.push_str("=".repeat(title.len()));
+        out.push_str(&"=".repeat(title.len()));
         out.push('\n');
         out.push_str(&body);
         out.push('\n');
@@ -133,11 +139,11 @@ fn append_dir_sections(mut out: &mut String, dir: &PathBuf, include_game: bool) 
 
     let recovered = dir.join("recovered_errors.log");
     if let Some(text) = read_if_exists(&recovered) {
-        let title = recovered.display();
+        let title = recovered.display().to_string();
         out.push('\n');
         out.push_str(&title);
         out.push_str("\n");
-        out.push_str("=".repeat(title.len()));
+        out.push_str(&"=".repeat(title.len()));
         out.push('\n');
         out.push_str(&text);
         out.push('\n');
@@ -150,7 +156,7 @@ fn build_header(log_dir: &PathBuf) -> String {
     let build = "release";
 
     let profile = crate::multiplayer::network::identity::load_active_profile()
-        .unwrap_or("(none)");
+        .unwrap_or_else(|| "(none)".to_string());
 
     let mut out = String::new();
     out.push_str("XFChess support bundle\n");
@@ -159,7 +165,8 @@ fn build_header(log_dir: &PathBuf) -> String {
     out.push_str(&format!("Version: {}\n", env!("CARGO_PKG_VERSION")));
     out.push_str(&format!(
         "OS: {}  |  Arch: {}\n",
-        std::env::consts::OS, std::env::consts::ARCH
+        std::env::consts::OS,
+        std::env::consts::ARCH
     ));
     out.push_str(&format!("Build: {}\n", build));
     out.push_str(&format!("Profile: {}\n", profile));

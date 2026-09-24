@@ -1,6 +1,6 @@
 use crate::core::states::GameMode;
 use crate::engine::board_state::ChessEngine;
-use crate::game::components::{HasMoved, SelectedPiece};
+use crate::game::components::{HasMoved, PieceType, SelectedPiece};
 use crate::game::resources::player::Players;
 use crate::game::resources::{
     CapturedPieces, CurrentTurn, GameOverState, GameSounds, MoveHistory, PendingPromotion,
@@ -279,13 +279,24 @@ pub fn try_move_sequence(
     #[cfg(not(feature = "solana"))]
     let game_id = None;
 
+    let promotion =
+        if crate::game::resources::is_promotion_move(
+            selected_piece_data.piece_type,
+            selected_piece_data.color,
+            target_pos.1,
+        ) {
+            Some(PieceType::Queen)
+        } else {
+            None
+        };
+
     let ctx = MoveContext {
         origin: context_name,
         entity: selected_entity,
         piece: selected_piece_data,
         target: target_pos,
         capture: capture_info,
-        promotion: None,
+        promotion,
         was_first_move,
         remote: false,
         move_sound,
