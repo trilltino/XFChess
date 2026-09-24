@@ -24,7 +24,7 @@ base64 = "0.22"
 # workspace root's exact pins: the desktop wrapper isn't money/consensus-
 # adjacent, and Tauri 2.x has stayed additive across minors so far. Revisit
 # if a Tauri upgrade ever breaks the wallet-adapter bridge.
-tauri = { version = "2.11", features = ["devtools", "unstable"] }
+tauri = { version = "2.11", features = ["devtools", "unstable", "image-png"] }
 tauri-build = { version = "2.6", features = [] }
 tauri-plugin-deep-link = "2"
 tauri-plugin-notification = "2"

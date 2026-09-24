@@ -16,8 +16,9 @@ import DeploymentManager from "./components/DeploymentManager";
 import Treasury from "./components/Treasury";
 import Puzzles from "./components/Puzzles";
 import Settings from "./components/Settings";
+import TransactionDebugger from "./components/TransactionDebugger";
 
-type Page = "login" | "tournaments" | "create" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc" | "treasury" | "puzzles" | "settings";
+type Page = "login" | "tournaments" | "create" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc" | "treasury" | "puzzles" | "tx-debug" | "settings";
 
 function AppContent() {
   const { authState, loading } = useAuth();
@@ -105,6 +106,8 @@ function AppContent() {
         return <Treasury />;
       case "puzzles":
         return <Puzzles />;
+      case "tx-debug":
+        return <TransactionDebugger />;
       case "settings":
         return <Settings />;
       default:

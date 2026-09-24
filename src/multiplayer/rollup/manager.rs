@@ -136,12 +136,9 @@ impl EphemeralRollupManager {
         }
     }
 
-    pub fn batch_commit_success(&mut self, final_fen: String) {
+    pub fn batch_commit_success(&mut self, final_fen: String, move_count: usize) {
         self.committed_fen = final_fen;
-        self.committed_turn += self
-            .pending_batch
-            .as_ref()
-            .map_or(0, |b| b.moves.len() as u16);
+        self.committed_turn = self.committed_turn.saturating_add(move_count as u16);
         self.status = GameStateStatus::Synced;
     }
 

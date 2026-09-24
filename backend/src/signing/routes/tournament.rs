@@ -13,7 +13,7 @@ use solana_sdk::{
     message::Message,
     pubkey::Pubkey,
     signature::{Signature, Signer},
-    transaction::Transaction,
+    transaction::{Transaction, VersionedTransaction},
 };
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -26,7 +26,7 @@ use crate::signing::solana::{
     record_result_ix, sign_and_submit,
 };
 use crate::signing::storage::tournament::{
-    MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus,
+    MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus, TournamentTransaction,
 };
 use crate::signing::storage::vault::VaultStore;
 use crate::signing::swiss::orchestrator::OrchestratorEvent;
@@ -134,6 +134,7 @@ pub struct TournamentSummary {
     pub status: String,
     pub is_private: bool,
     pub is_tournament: bool,
+    pub source: &'static str,
     pub usdc_mint: Option<String>,
     pub min_elo: u32,
     pub max_elo: u32,
@@ -473,7 +474,7 @@ async fn create_tournament(
 
     if already_complete {
         store
-            .create(TournamentRecord::with_config(
+            .create_checked(TournamentRecord::with_config(
                 req.tournament_id,
                 req.name.clone(),
                 entry_fee_lamports,
@@ -487,7 +488,17 @@ async fn create_tournament(
                 req.scheduled_at,
                 req.kyc_required,
             ))
-            .await;
+            .await
+            .map_err(|e| {
+                error!(
+                    "[tournament] failed to persist resumed tournament {}: {}",
+                    req.tournament_id, e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "On-chain setup succeeded but tournament persistence failed".to_string(),
+                )
+            })?;
         info!(
             "[tournament] {} fully on-chain already (resumed retry) — store written",
             req.tournament_id
@@ -529,7 +540,16 @@ async fn create_tournament(
         }
     }
     let is_private = record.password_hash.is_some();
-    store.create(record).await;
+    store.create_checked(record).await.map_err(|e| {
+        error!(
+            "[tournament] failed to persist tournament {} after on-chain setup: {}",
+            req.tournament_id, e
+        );
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "On-chain setup succeeded but tournament persistence failed".to_string(),
+        )
+    })?;
 
     info!(
         "[tournament] Created tournament {} '{}' ({} players, format: {:?}, entry: {} lamports, on-chain PDAs initialized)",
@@ -569,6 +589,7 @@ async fn list_tournaments(State(state): State<AppState>) -> Json<Vec<TournamentS
             status: format!("{:?}", t.status),
             is_private: t.password_hash.is_some(),
             is_tournament: true,
+            source: "on_chain",
             usdc_mint: None,
             min_elo: t.elo_min.unwrap_or(0),
             max_elo: t.elo_max.unwrap_or(u32::MAX),
@@ -600,6 +621,7 @@ async fn list_my_tournaments(
             status: format!("{:?}", t.status),
             is_private: t.password_hash.is_some(),
             is_tournament: true,
+            source: "on_chain",
             usdc_mint: None,
             min_elo: t.elo_min.unwrap_or(0),
             max_elo: t.elo_max.unwrap_or(u32::MAX),
@@ -1329,6 +1351,78 @@ struct ConfirmJoinReq {
     password: Option<String>,
 }
 
+fn instruction_discriminator(name: &str) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("global:{name}").as_bytes());
+    hasher.finalize()[..8].to_vec()
+}
+
+fn landed_transaction(
+    rpc: &solana_client::rpc_client::RpcClient,
+    signature: &Signature,
+) -> Result<VersionedTransaction, StatusCode> {
+    let statuses = rpc
+        .get_signature_statuses(&[*signature])
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let status = statuses.value.first().and_then(|entry| entry.as_ref());
+    let Some(status) = status else {
+        return Err(StatusCode::ACCEPTED);
+    };
+    if status.err.is_some() {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    crate::signing::solana::fetch_transaction_v1_aware(rpc, signature)
+        .map(|fetched| fetched.decoded)
+        .map_err(|e| {
+            warn!(
+                "[tournament] transaction fetch failed signature={}: {}",
+                signature, e
+            );
+            StatusCode::BAD_GATEWAY
+        })
+}
+
+fn transaction_has_instruction(
+    transaction: &VersionedTransaction,
+    program_id: Pubkey,
+    discriminator: &[u8],
+    tournament_id: u64,
+    signer: Pubkey,
+    required_accounts: &[Pubkey],
+) -> bool {
+    let account_keys = transaction.message.static_account_keys();
+    let signer_ok = account_keys
+        .get(..transaction.message.header().num_required_signatures as usize)
+        .is_some_and(|signers| signers.contains(&signer));
+    if !signer_ok {
+        return false;
+    }
+
+    transaction
+        .message
+        .instructions()
+        .iter()
+        .any(|instruction| {
+            let program = account_keys
+                .get(instruction.program_id_index as usize)
+                .copied();
+            if program != Some(program_id)
+                || !instruction.data.starts_with(discriminator)
+                || instruction.data.get(8..16) != Some(tournament_id.to_le_bytes().as_slice())
+            {
+                return false;
+            }
+            required_accounts.iter().all(|required| {
+                instruction
+                    .accounts
+                    .iter()
+                    .filter_map(|index| account_keys.get(*index as usize))
+                    .any(|key| key == required)
+            })
+        })
+}
+
 async fn confirm_join(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1341,65 +1435,29 @@ async fn confirm_join(
     let player = Pubkey::from_str(&req.player).map_err(|_| StatusCode::BAD_REQUEST)?;
     let signature = Signature::from_str(&req.signature).map_err(|_| StatusCode::BAD_REQUEST)?;
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
-    let statuses = rpc
-        .get_signature_statuses(&[signature])
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-    let status = statuses.value.first().and_then(|entry| entry.as_ref());
-    let Some(status) = status else {
-        return Err(StatusCode::ACCEPTED);
-    };
-    if status.err.is_some() {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
-
-    let confirmed = rpc
-        .get_transaction(
-            &signature,
-            solana_transaction_status::UiTransactionEncoding::Base64,
-        )
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-    let Some(transaction) = confirmed.transaction.transaction.decode() else {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    };
+    let transaction = landed_transaction(&rpc, &signature)?;
     let tournament_pda = Pubkey::find_program_address(
         &[crate::signing::solana::TOURNAMENT_SEED, &id.to_le_bytes()],
         &state.program_id,
     )
     .0;
-    let discriminator = {
-        let mut hasher = Sha256::new();
-        hasher.update(b"global:register_player");
-        hasher.finalize()[..8].to_vec()
-    };
-    let account_keys = transaction.message.static_account_keys();
-    let player_is_signer = account_keys
-        .get(..transaction.message.header().num_required_signatures as usize)
-        .is_some_and(|signers| signers.contains(&player));
-    let registration_matches = transaction
+    let discriminator = instruction_discriminator("register_player");
+    let registration_matches = transaction_has_instruction(
+        &transaction,
+        state.program_id,
+        &discriminator,
+        id,
+        player,
+        &[player, tournament_pda],
+    ) && transaction
         .message
         .instructions()
         .iter()
         .any(|instruction| {
-            let program = account_keys
-                .get(instruction.program_id_index as usize)
-                .copied();
-            let data = &instruction.data;
-            program == Some(state.program_id)
-                && data.starts_with(&discriminator)
-                && data.get(8..16) == Some(id.to_le_bytes().as_slice())
-                && data.get(16..20) == Some(req.elo.to_le_bytes().as_slice())
-                && instruction
-                    .accounts
-                    .iter()
-                    .filter_map(|index| account_keys.get(*index as usize))
-                    .any(|key| *key == player)
-                && instruction
-                    .accounts
-                    .iter()
-                    .filter_map(|index| account_keys.get(*index as usize))
-                    .any(|key| *key == tournament_pda)
+            instruction.data.starts_with(&discriminator)
+                && instruction.data.get(16..20) == Some(req.elo.to_le_bytes().as_slice())
         });
-    if !player_is_signer || !registration_matches {
+    if !registration_matches {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
 
@@ -1499,6 +1557,12 @@ pub struct BuildLeaveTxReq {
     pub player: String,
 }
 
+#[derive(Deserialize)]
+pub struct ConfirmLeaveReq {
+    pub player: String,
+    pub signature: String,
+}
+
 async fn build_leave_transaction(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1563,17 +1627,98 @@ async fn leave_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
     caller: RequireWallet,
-    Json(req): Json<BuildLeaveTxReq>,
+    Json(req): Json<ConfirmLeaveReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     // A player may only remove themselves. Unauthenticated, this removed any
     // named entrant from any tournament — and entry fees are paid on-chain
     // before `confirm_join` records the roster, so eviction stranded a player
     // who had already paid, or corrupted a live bracket outright.
     caller.require_is(&req.player)?;
+    let player = Pubkey::from_str(&req.player).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "player must be a valid Solana pubkey".to_string(),
+        )
+    })?;
+    let signature = Signature::from_str(&req.signature).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "signature must be a valid Solana transaction signature".to_string(),
+        )
+    })?;
+
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let transaction = landed_transaction(&rpc, &signature).map_err(|status| {
+        let message = match status {
+            StatusCode::ACCEPTED => {
+                "leave transaction is not visible yet; retry confirmation shortly"
+            }
+            StatusCode::UNPROCESSABLE_ENTITY => "leave transaction failed or is malformed",
+            StatusCode::BAD_GATEWAY => "RPC could not verify leave transaction",
+            _ => "leave transaction could not be verified",
+        };
+        (status, message.to_string())
+    })?;
+    let tournament_pda = Pubkey::find_program_address(
+        &[crate::signing::solana::TOURNAMENT_SEED, &id.to_le_bytes()],
+        &state.program_id,
+    )
+    .0;
+    let escrow_pda = Pubkey::find_program_address(
+        &[
+            crate::signing::solana::TOURNAMENT_ESCROW_SEED,
+            &id.to_le_bytes(),
+        ],
+        &state.program_id,
+    )
+    .0;
+    let discriminator = instruction_discriminator("leave_tournament");
+    if !transaction_has_instruction(
+        &transaction,
+        state.program_id,
+        &discriminator,
+        id,
+        player,
+        &[player, tournament_pda, escrow_pda],
+    ) {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "signature does not prove this tournament leave".to_string(),
+        ));
+    }
 
     let store = &state.tournament_store;
+    let tournament = store
+        .get(id)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, format!("tournament {id} not found")))?;
+    if tournament.status != TournamentStatus::Registration {
+        warn!(
+            "[tournament] leave tx {} for {} landed, but local tournament {} is {:?}; admin reconciliation required",
+            req.signature, req.player, id, tournament.status
+        );
+        let _ = store
+            .record_transaction(TournamentTransaction {
+                tournament_id: id,
+                signature: req.signature.clone(),
+                operation: "leave_tournament".to_string(),
+                status: "needs_admin_review".to_string(),
+                retry_count: 0,
+                last_error: Some(format!(
+                    "leave landed while local status is {:?}",
+                    tournament.status
+                )),
+                next_retry_at: None,
+                created_at: chrono::Utc::now().timestamp(),
+            })
+            .await;
+        return Err((
+            StatusCode::CONFLICT,
+            "leave transaction landed, but tournament state changed; owner review required"
+                .to_string(),
+        ));
+    }
 
-    // Attempt to leave
     let ok = store.leave_tournament(id, &req.player).await;
     if !ok {
         return Err((
@@ -1581,12 +1726,28 @@ async fn leave_tournament(
             format!("player is not registered in tournament {id}"),
         ));
     }
+    let _ = store
+        .record_transaction(TournamentTransaction {
+            tournament_id: id,
+            signature: req.signature.clone(),
+            operation: "leave_tournament".to_string(),
+            status: "confirmed".to_string(),
+            retry_count: 0,
+            last_error: None,
+            next_retry_at: None,
+            created_at: chrono::Utc::now().timestamp(),
+        })
+        .await;
 
-    info!("[tournament] {} left tournament {}", req.player, id);
+    info!(
+        "[tournament] {} left tournament {} via confirmed tx {}",
+        req.player, id, req.signature
+    );
 
     Ok(Json(serde_json::json!({
         "ok": true,
         "player": req.player,
+        "signature": req.signature,
     })))
 }
 
@@ -2268,6 +2429,7 @@ mod tests {
             status: "Active".to_string(),
             is_private: false,
             is_tournament: true,
+            source: "on_chain",
             usdc_mint: None,
             min_elo: 0,
             max_elo: u32::MAX,
@@ -2291,6 +2453,7 @@ mod tests {
             status: "Registration".to_string(),
             is_private: false,
             is_tournament: true,
+            source: "on_chain",
             usdc_mint: None,
             min_elo: 0,
             max_elo: u32::MAX,

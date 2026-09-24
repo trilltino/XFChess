@@ -11,16 +11,21 @@ pub fn update_move_hints_system(
     mut commands: Commands,
     settings: Res<GameSettings>,
     selection: Res<Selection>,
+    view_mode: Res<crate::game::view_mode::ViewMode>,
     hint_query: Query<Entity, With<MoveHint>>,
     materials: Res<SquareMaterials>,
     pieces: Query<&Piece>,
 ) {
-    if !selection.is_changed() && !settings.is_changed() {
+    if !selection.is_changed() && !settings.is_changed() && !view_mode.is_changed() {
         return;
     }
 
     for entity in hint_query.iter() {
         commands.entity(entity).despawn();
+    }
+
+    if *view_mode == crate::game::view_mode::ViewMode::Standard2D {
+        return;
     }
 
     if settings.show_hints && selection.is_selected() {

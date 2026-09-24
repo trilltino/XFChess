@@ -3,6 +3,7 @@ use crate::multiplayer::solana::addon::{
 };
 use crate::multiplayer::solana::integration::state::{ProfileStatus, SolanaIntegrationState};
 use crate::multiplayer::solana::integration::systems::GlobalSessionActive;
+use crate::solana::session::{SessionHealth, SessionState};
 use crate::ui::styles::UiColors;
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -36,6 +37,7 @@ pub fn render_solana_panel(
     global_session: Option<&GlobalSessionActive>,
     global_session_pending: bool,
     sol_usd_rate: Option<f64>,
+    imported_session: Option<&SessionState>,
 ) {
     ui.vertical(|ui| {
         ui.heading(egui::RichText::new("SOLANA COMPETITIVE").color(UiColors::ACCENT_GOLD));
@@ -152,6 +154,55 @@ pub fn render_solana_panel(
         if wallet.pubkey.is_some() {
             ui.add_space(6.0);
             ui.group(|ui| {
+                ui.label(egui::RichText::new("SESSION HEALTH").strong());
+                let health = SolanaSessionHealthView::new(
+                    wallet,
+                    solana_state,
+                    global_session,
+                    global_session_pending,
+                    imported_session,
+                );
+                ui.colored_label(health.color, health.label);
+                ui.label(
+                    egui::RichText::new(health.detail)
+                        .size(11.0)
+                        .color(UiColors::TEXT_SECONDARY),
+                );
+                if let Some(recovery) = health.recovery {
+                    ui.colored_label(egui::Color32::from_rgb(255, 200, 50), recovery);
+                }
+                if let Some(imported) = imported_session.and_then(|s| s.session.as_ref()) {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(format!("Imported wallet: {}", imported.short_wallet()))
+                            .size(10.0)
+                            .color(UiColors::TEXT_SECONDARY)
+                            .monospace(),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Role: {}{}",
+                            imported.role,
+                            imported
+                                .game_id
+                                .as_ref()
+                                .map(|id| format!(" | Game: {id}"))
+                                .unwrap_or_default()
+                        ))
+                        .size(10.0)
+                        .color(UiColors::TEXT_SECONDARY),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Expires in: {} min",
+                            (imported.time_remaining().max(0) + 59) / 60
+                        ))
+                        .size(10.0)
+                        .color(UiColors::TEXT_SECONDARY),
+                    );
+                }
+
+                ui.add_space(6.0);
                 ui.label(egui::RichText::new("GLOBAL SESSION").strong());
                 if global_session_pending {
                     ui.horizontal(|ui| {
@@ -297,4 +348,87 @@ pub fn render_solana_panel(
             ui.colored_label(UiColors::DANGER, err);
         }
     });
+}
+
+struct SolanaSessionHealthView {
+    label: &'static str,
+    detail: String,
+    recovery: Option<String>,
+    color: egui::Color32,
+}
+
+impl SolanaSessionHealthView {
+    fn new(
+        wallet: &SolanaWallet,
+        solana_state: &SolanaIntegrationState,
+        global_session: Option<&GlobalSessionActive>,
+        global_session_pending: bool,
+        imported_session: Option<&SessionState>,
+    ) -> Self {
+        if let Some(imported) = imported_session {
+            match imported.health {
+                SessionHealth::Expired | SessionHealth::Invalid | SessionHealth::LoadFailed => {
+                    return Self {
+                        label: imported.status_label(),
+                        detail: imported
+                            .last_error
+                            .clone()
+                            .unwrap_or_else(|| "Imported session could not be used".to_string()),
+                        recovery: imported.recovery_message.clone(),
+                        color: UiColors::DANGER,
+                    };
+                }
+                SessionHealth::Connected => {
+                    return Self {
+                        label: "Imported session active",
+                        detail: "Launched with a pre-authorized Solana game session.".to_string(),
+                        recovery: None,
+                        color: UiColors::SUCCESS,
+                    };
+                }
+                SessionHealth::Standalone => {}
+            }
+        }
+
+        if wallet.pubkey.is_none() {
+            return Self {
+                label: "Standalone mode",
+                detail: "No wallet is connected; Solana moves and wagers are unavailable."
+                    .to_string(),
+                recovery: Some("Connect a wallet from the Solana multiplayer menu.".to_string()),
+                color: UiColors::TEXT_SECONDARY,
+            };
+        }
+
+        if global_session.is_some() || solana_state.global_session_active {
+            return Self {
+                label: "Quick-sign session active",
+                detail: "Wallet is connected and one-time session signing is available."
+                    .to_string(),
+                recovery: None,
+                color: UiColors::SUCCESS,
+            };
+        }
+
+        if global_session_pending || solana_state.global_session_setup_in_progress {
+            return Self {
+                label: "Verifying session",
+                detail: "Checking whether quick-sign session support is available.".to_string(),
+                recovery: None,
+                color: egui::Color32::from_rgb(255, 200, 50),
+            };
+        }
+
+        Self {
+            label: "Per-game signing",
+            detail: solana_state
+                .global_session_unavailable_reason
+                .clone()
+                .unwrap_or_else(|| {
+                    "Wallet is connected; transactions will ask for approval per game.".to_string()
+                }),
+            recovery: None,
+            color: UiColors::TEXT_SECONDARY,
+        }
+    }
 }

@@ -725,6 +725,10 @@ impl TournamentStore {
     }
 
     pub async fn create(&self, record: TournamentRecord) {
+        let _ = self.create_checked(record).await;
+    }
+
+    pub async fn create_checked(&self, record: TournamentRecord) -> Result<(), sqlx::Error> {
         let data = serde_json::to_string(&record).unwrap_or_default();
         let now = chrono::Utc::now().timestamp();
         sqlx::query("INSERT OR REPLACE INTO tournaments (id, data, updated_at) VALUES (?, ?, ?)")
@@ -733,7 +737,7 @@ impl TournamentStore {
             .bind(now)
             .execute(&self.pool)
             .await
-            .ok();
+            .map(|_| ())
     }
 
     pub async fn get(&self, id: u64) -> Option<TournamentRecord> {

@@ -28,6 +28,7 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
     { id: "explorer", label: "Game Explorer", icon: "" },
     { id: "treasury", label: "Treasury", icon: "" },
     { id: "puzzles", label: "Puzzles", icon: "" },
+    { id: "tx-debug", label: "Tx Debugger", icon: "" },
     { id: "settings", label: "Settings", icon: "" },
   ];
 
@@ -55,6 +56,8 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
         margin: "1rem",
         borderRadius: "24px",
         height: "calc(100% - 2rem)",
+        display: "flex",
+        flexDirection: "column",
       }}>
         <div style={{
           padding: "1rem",
@@ -92,7 +95,29 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
 
         <nav style={{
           padding: "1rem 0",
+          overflowY: "auto",
+          flex: 1,
         }}>
+          {sidebarOpen && (
+            <button
+              onClick={() => onPageChange?.("tx-debug")}
+              style={{
+                width: "calc(100% - 1.5rem)",
+                margin: "0 0.75rem 0.75rem",
+                padding: "0.7rem 0.9rem",
+                borderRadius: "12px",
+                border: "1px solid rgba(250,204,21,0.45)",
+                background: currentPage === "tx-debug" ? "var(--primary)" : "rgba(250,204,21,0.12)",
+                color: currentPage === "tx-debug" ? "#fff" : "#fde68a",
+                cursor: "pointer",
+                fontSize: "13px",
+                fontWeight: 800,
+                textAlign: "left",
+              }}
+            >
+              Transaction Debugger
+            </button>
+          )}
           {menuItems.map((item) => (
             <div
               key={item.id}
@@ -246,4 +271,3 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
     </div>
   );
 }
-

@@ -41,13 +41,19 @@ pub fn start_poller(
           Ok(tournaments) => {
             for t in tournaments {
               let mut s = state.lock().unwrap();
-              if s.last_tournament_id.as_deref() != Some(&t.id) {
-                s.last_tournament_id = Some(t.id.clone());
+              let tournament_id = t.id();
+              if s.last_tournament_id.as_deref() != Some(&tournament_id) {
+                s.last_tournament_id = Some(tournament_id);
                 drop(s);
                 notify(
                   &app,
                   "Tournament Available",
-                  &format!("{} — {} players, {} entry fee", t.name, t.players, t.fee),
+                  &format!(
+                    "{} - {} players, {} entry fee",
+                    t.name,
+                    t.player_label(),
+                    t.fee_label()
+                  ),
                 );
               }
             }
@@ -90,10 +96,30 @@ fn notify(app: &AppHandle, title: &str, body: &str) {
 
 #[derive(Debug, serde::Deserialize)]
 struct TournamentInfo {
-  id: String,
+  tournament_id: u64,
   name: String,
-  players: u32,
-  fee: String,
+  registered: usize,
+  max_players: u16,
+  entry_fee_lamports: u64,
+  status: String,
+}
+
+impl TournamentInfo {
+  fn id(&self) -> String {
+    self.tournament_id.to_string()
+  }
+
+  fn player_label(&self) -> String {
+    format!("{}/{}", self.registered, self.max_players)
+  }
+
+  fn fee_label(&self) -> String {
+    if self.entry_fee_lamports == 0 {
+      "free".to_string()
+    } else {
+      format!("{:.4} SOL", self.entry_fee_lamports as f64 / 1_000_000_000.0)
+    }
+  }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -102,11 +128,15 @@ struct MatchmakingStatus {
 }
 
 async fn poll_tournaments(backend_url: &str) -> Result<Vec<TournamentInfo>, reqwest::Error> {
-  let url = format!("{}/api/tournaments/active", backend_url);
-  reqwest::get(&url)
+  let url = format!("{}/api/tournaments", backend_url);
+  let tournaments = reqwest::get(&url)
     .await?
     .json::<Vec<TournamentInfo>>()
-    .await
+    .await?;
+  Ok(tournaments
+    .into_iter()
+    .filter(|t| t.status.eq_ignore_ascii_case("Registration") || t.status.eq_ignore_ascii_case("Active"))
+    .collect())
 }
 
 async fn poll_matchmaking(

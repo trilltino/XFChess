@@ -13,6 +13,10 @@ const SCAN_BATCH: usize = 20;
 
 const STATUS_WAITING_FOR_OPPONENT: u8 = 1;
 const STATUS_ACTIVE: u8 = 2;
+const STATUS_FINISHED: u8 = 5;
+const STATUS_SETTLED: u8 = 6;
+const STATUS_EXPIRED: u8 = 7;
+const STATUS_CANCELLED: u8 = 8;
 
 const STATUS_OFFSET: usize = 8 + 8 + 32 + 32;
 const WAGER_OFFSET: usize = 8 + 212;
@@ -103,6 +107,13 @@ fn scan_reclaimable(wallet: &Pubkey, rpc_url: &str) -> Vec<ReclaimableWager> {
             continue;
         }
         let status = data[STATUS_OFFSET];
+        if matches!(
+            status,
+            STATUS_FINISHED | STATUS_SETTLED | STATUS_EXPIRED | STATUS_CANCELLED
+        ) {
+            forget(game_id);
+            continue;
+        }
         if status != STATUS_WAITING_FOR_OPPONENT && status != STATUS_ACTIVE {
             continue;
         }

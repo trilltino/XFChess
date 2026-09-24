@@ -14,6 +14,8 @@ pub struct TournamentSummary {
     pub status: String,
     pub is_private: bool,
     pub is_tournament: bool,
+    #[serde(default = "default_tournament_source")]
+    pub source: String,
     #[serde(default)]
     pub usdc_mint: Option<String>,
     #[serde(default)]
@@ -26,6 +28,10 @@ pub struct TournamentSummary {
     pub round_deadline_at: Option<i64>,
     #[serde(default)]
     pub format: String,
+}
+
+fn default_tournament_source() -> String {
+    "on_chain".to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,15 +287,119 @@ pub fn list_tournament_games() -> Result<Vec<TournamentGameListing>, String> {
 }
 
 pub fn list_tournaments() -> Result<Vec<TournamentSummary>, String> {
-    let resp = client()?
-        .get(format!("{}/api/tournaments", vps_base()))
+    let http = client()?;
+    let configured_base = vps_base();
+    let runtime = http
+        .get(format!("{configured_base}/api/runtime-info"))
+        .send()
+        .map_err(|e| format!("vps runtime identity: {e}"))?;
+    if !runtime.status().is_success() {
+        return Err(format!("vps runtime identity: HTTP {}", runtime.status()));
+    }
+    let runtime: serde_json::Value = runtime
+        .json()
+        .map_err(|e| format!("vps runtime identity parse: {e}"))?;
+    let expected_program = crate::solana::instructions::PROGRAM_ID;
+    let actual_program = runtime
+        .get("program_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    if actual_program != expected_program {
+        return Err(format!(
+            "vps runtime mismatch: expected program {expected_program}, got {actual_program}"
+        ));
+    }
+
+    let resp = http
+        .get(format!("{configured_base}/api/tournaments"))
         .send()
         .map_err(|e| format!("vps list_tournaments: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("vps list_tournaments: HTTP {}", resp.status()));
     }
-    resp.json::<Vec<TournamentSummary>>()
-        .map_err(|e| format!("vps list_tournaments parse: {e}"))
+
+    let body = resp
+        .text()
+        .map_err(|e| format!("vps list_tournaments body: {e}"))?;
+    parse_tournament_list_body(&body)
+}
+
+fn parse_tournament_list_body(body: &str) -> Result<Vec<TournamentSummary>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| format!("vps list_tournaments parse: {e}"))?;
+    let tournaments_value = if value.is_array() {
+        value
+    } else {
+        value
+            .get("value")
+            .or_else(|| value.get("Value"))
+            .or_else(|| value.get("tournaments"))
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "vps list_tournaments parse: expected array or wrapped array, got {}",
+                    body.chars().take(160).collect::<String>()
+                )
+            })?
+    };
+    let tournaments = serde_json::from_value::<Vec<TournamentSummary>>(tournaments_value)
+        .map_err(|e| format!("vps list_tournaments parse entries: {e}"))?;
+
+    Ok(tournaments
+        .into_iter()
+        .filter(|t| t.source == "on_chain" || t.source.is_empty() || t.is_tournament)
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_tournament_list_body;
+
+    fn tournament_json() -> serde_json::Value {
+        serde_json::json!({
+            "tournament_id": 1789854523096u64,
+            "name": "2-player Single-elimination",
+            "entry_fee_lamports": 0,
+            "prize_pool": 0,
+            "max_players": 2,
+            "registered": 0,
+            "status": "Registration",
+            "is_private": false,
+            "is_tournament": true,
+            "source": "on_chain",
+            "usdc_mint": null,
+            "min_elo": 0,
+            "max_elo": 4294967295u32,
+            "format": "single_elimination",
+            "scheduled_at": null
+        })
+    }
+
+    #[test]
+    fn parses_bare_tournament_array() {
+        let body = serde_json::to_string(&serde_json::json!([tournament_json()])).unwrap();
+        let list = parse_tournament_list_body(&body).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].status, "Registration");
+    }
+
+    #[test]
+    fn parses_wrapped_tournament_array() {
+        let body = serde_json::to_string(&serde_json::json!({
+            "value": [tournament_json()],
+            "Count": 1
+        }))
+        .unwrap();
+        let list = parse_tournament_list_body(&body).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].tournament_id, 1789854523096);
+    }
+
+    #[test]
+    fn rejects_unexpected_tournament_shape() {
+        let err = parse_tournament_list_body(r#"{"ok":true}"#).unwrap_err();
+        assert!(err.contains("expected array or wrapped array"));
+    }
 }
 
 pub fn tournament_session_create_game(

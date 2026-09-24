@@ -1,9 +1,13 @@
 #[path = "vps/client.rs"]
 mod client;
+#[path = "vps/client_events.rs"]
+pub mod client_events;
 #[path = "vps/game.rs"]
 pub mod game;
 #[path = "vps/identity.rs"]
 pub mod identity;
+#[path = "vps/money_actions.rs"]
+pub mod money_actions;
 #[path = "vps/p2p.rs"]
 pub mod p2p;
 #[path = "vps/session.rs"]
@@ -18,6 +22,7 @@ pub use client::{
     client, client_fast, fetch_sol_usd_rate, logout, set_auth_token, vps_base, vps_ws_base,
     wallet_bridge_port, SolUsdRateResponse,
 };
+pub use client_events::{emit_client_event, ClientEvent};
 pub use game::{
     fetch_move_log, fetch_verified_participants, get_active_game_for_wallet, get_broadcast_delay,
     get_game_moves_for_spectator, record_move, report_blur, vps_delegate_game,
@@ -28,6 +33,10 @@ pub use identity::{
     fetch_player_profile, get_user_status, get_user_status_async, link_wallet, register_identity,
     register_wallet, require_wager_eligibility, IdentityPayload, LinkWalletReq, PlayerProfile,
     RegisterReq, UserStatus,
+};
+pub use money_actions::{
+    fetch_money_actions_by_scope, register_money_action, MoneyActionList, MoneyActionRecord,
+    RegisterMoneyActionReq,
 };
 pub use p2p::{
     p2p_accept_join, p2p_announce_game, p2p_announce_game_with_password, p2p_heartbeat,

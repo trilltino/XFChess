@@ -1,45 +1,46 @@
 # src/solana
 
-Client-side Solana integration for the Bevy game. Compiled **only** with
+Client-side Solana integration for the Bevy game. Compiled only with
 `--features solana`; the default build must never import anything from here.
-Program ID: `8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU` ([constants.rs](constants.rs)).
 
-## Role in XFChess
+Program ID: `8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU`
+([program_interface/instructions.rs](program_interface/instructions.rs)).
+
+## Role In XFChess
 
 For staked/ranked games the client records every move on-chain. This module holds
-the constants, instruction encodings, and routing logic for that path; the higher
-level flows (wallet sessions, lobby, tournaments) live in
-[`src/multiplayer/solana/`](../multiplayer/solana/) and heavy transaction building is
-delegated to the [`solana-chess-client`](../../crates/solana/solana-chess-client/) crate.
+instruction encodings, PDA helpers, and the session-key bootstrap used by that
+path. Higher level wallet, lobby, tournament, and recovery flows live in
+[`src/multiplayer/solana/`](../multiplayer/solana/).
 
 ```
-game/ (move made) ─► multiplayer/rollup/bridge.rs ─► vps_client (HTTP) ─► backend picks base RPC or Magic Router
+game/ (move made) -> multiplayer/rollup/bridge.rs -> vps_client (HTTP) -> backend picks base RPC or Magic Router
 ```
 
 The native client does not pick between base RPC and the ER itself for gameplay
-writes — it hands the move to the backend's VPS signing API
-(`crate::multiplayer::vps_client::record_move`), which is what actually decides
-base vs. Magic Router (see [MAGICBLOCK.md](../../MAGICBLOCK.md)). This module's
-own [multiplayer/rollup/magicblock.rs](../multiplayer/rollup/magicblock.rs)
-`MagicBlockResolver` is used only to build the `delegate_game` instruction
-(signed directly by the wallet) and to track local delegation status for the UI.
+writes. It hands the move to the backend's VPS signing API
+(`crate::multiplayer::vps_client::record_move`), which decides base vs. Magic
+Router. See [MAGICBLOCK.md](../../MAGICBLOCK.md).
 
-## Key files
+## Key Files
 
 | File | Contents |
 |------|----------|
-| [constants.rs](constants.rs) | Program ID, PDA seeds (`b"game"`, `b"player"`), timeouts |
-| [program_interface/](program_interface/) | Instruction builders ([instructions.rs](program_interface/instructions.rs)) and account state mirrors ([state.rs](program_interface/state.rs)) |
-| [session/](session/) | `SessionPlugin` — session-key lifecycle inside the ECS |
-| [wallet/](wallet/) | Phantom deep-link signing ([phantom_sign.rs](wallet/phantom_sign.rs)) |
-| [core/](core/) | Shared constants and error types |
-| [multiplayer/](multiplayer/) | **Legacy, unused** — scheduled for removal (see [docs/legacy-cleanup-audit.md](../../docs/legacy-cleanup-audit.md)) |
+| [mod.rs](mod.rs) | `SolanaPlugin` and stable `crate::solana::instructions::*` re-export |
+| [program_interface/instructions.rs](program_interface/instructions.rs) | Instruction builders, PDA seeds, and `PROGRAM_ID` |
+| [session/mod.rs](session/mod.rs) | `SessionPlugin` and session-key lifecycle inside ECS |
+
+## Removed Legacy Files
+
+The old `core/`, `multiplayer/`, `wallet/`, top-level `errors.rs`, top-level
+`state.rs`, and `program_interface/state.rs` files were unused or empty and were
+removed. Account-state mirrors should come from the active on-chain program or a
+generated client instead of stale duplicate local enums.
 
 ## Invariants
 
 - Keep all Solana SDK imports behind the `solana` feature gate.
 - The program ID here must match `declare_id!` in
   [programs/xfchess-game/src/lib.rs](../../programs/xfchess-game/src/lib.rs).
-- Do not send ER writes (moves, undelegate) to base RPC or vice versa — this
-  fails with owner mismatches. The backend owns that decision; see
-  [MAGICBLOCK.md](../../MAGICBLOCK.md).
+- Do not send ER writes (moves, undelegate) to base RPC or vice versa. The
+  backend owns that decision; see [MAGICBLOCK.md](../../MAGICBLOCK.md).

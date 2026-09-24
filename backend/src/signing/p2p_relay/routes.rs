@@ -297,6 +297,16 @@ pub async fn leave_game(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if let Some(game) = games.get_mut(&req.game_id) {
+        let money_linked =
+            game.announcement.stake_amount > 0.0 || game.announcement.game_type == "solana_wager";
+        if money_linked {
+            tracing::warn!(
+                "[p2p-relay] ignored unsigned leave for money-linked game {} from {}; relay state is advisory, cancel/refund must be proven on-chain",
+                req.game_id,
+                req.node_id
+            );
+            return Ok(AxumJson(AnnounceGameResponse { success: false }));
+        }
         if game.announcement.host_node_id == req.node_id {
             // Host left - remove game
             game.announcement.status = GameStatus::Finished;

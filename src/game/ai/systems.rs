@@ -205,6 +205,11 @@ impl Plugin for AIPlugin {
     }
 }
 
+pub fn clear_pending_ai_tasks(mut commands: Commands) {
+    commands.remove_resource::<PendingAIMove>();
+    commands.remove_resource::<AIMovePendingReveal>();
+}
+
 fn warmup_xf_engine_pool(mut commands: Commands, ai_config: Res<ChessAIResource>) {
     if ai_config.engine != crate::game::ai::resource::AIEngine::XFChessEngine {
         return;

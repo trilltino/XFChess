@@ -61,6 +61,8 @@ pub struct GameUIParams<'w, 's> {
     pub global_session_pending: Option<
         Res<'w, crate::multiplayer::solana::integration::systems::GlobalSessionCheckPending>,
     >,
+    #[cfg(feature = "solana")]
+    pub solana_session: Option<Res<'w, crate::solana::session::SessionState>>,
     pub spectator_mode: Res<'w, crate::ui::spectator_mode::SpectatorMode>,
     pub active_time_control:
         Res<'w, crate::game::resources::active_time_control::ActiveTimeControl>,

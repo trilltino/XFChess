@@ -1,3 +1,5 @@
+//! Axum integration for the iroh-h3 HTTP/3 transport layer.
+
 #![deny(missing_docs)]
 
 use std::{
@@ -22,12 +24,14 @@ use tower_service::Service;
 
 type H3ServerConnection = server::Connection<IrohH3Connection, Bytes>;
 
+/// An Axum HTTP/3 server backed by an Iroh QUIC endpoint.
 #[derive(Debug)]
 pub struct IrohAxum {
     router: Router,
 }
 
 impl IrohAxum {
+    /// Creates a new [`IrohAxum`] server wrapping the given Axum [`Router`].
     #[inline]
     pub fn new(router: Router) -> Self {
         Self { router }
@@ -122,6 +126,7 @@ impl HttpBody for RequestBody {
     }
 }
 
+/// Extractor that provides the remote [`EndpointId`] of the connecting Iroh peer.
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
 pub struct RemoteId(pub EndpointId);

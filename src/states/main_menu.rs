@@ -413,6 +413,14 @@ pub struct CompetitiveMenuState {
     pub pgn_input_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MainMenuModal {
+    AiSetup,
+    Spectator,
+    Controls,
+    PgnInput,
+}
+
 impl Default for CompetitiveMenuState {
     fn default() -> Self {
         Self {
@@ -441,6 +449,52 @@ impl Default for CompetitiveMenuState {
             pgn_input_error: None,
         }
     }
+}
+
+impl CompetitiveMenuState {
+    pub fn active_modal(&self) -> Option<MainMenuModal> {
+        if self.show_ai_setup {
+            Some(MainMenuModal::AiSetup)
+        } else if self.show_spectator_popup {
+            Some(MainMenuModal::Spectator)
+        } else if self.show_controls_popup {
+            Some(MainMenuModal::Controls)
+        } else if self.show_pgn_input {
+            Some(MainMenuModal::PgnInput)
+        } else {
+            None
+        }
+    }
+
+    pub fn try_open_modal(&mut self, modal: MainMenuModal) -> bool {
+        if self.active_modal().is_some() {
+            return false;
+        }
+        self.set_active_modal(Some(modal));
+        true
+    }
+
+    pub fn set_active_modal(&mut self, modal: Option<MainMenuModal>) {
+        self.show_ai_setup = matches!(modal, Some(MainMenuModal::AiSetup));
+        self.show_spectator_popup = matches!(modal, Some(MainMenuModal::Spectator));
+        self.show_controls_popup = matches!(modal, Some(MainMenuModal::Controls));
+        self.show_pgn_input = matches!(modal, Some(MainMenuModal::PgnInput));
+    }
+}
+
+fn render_menu_modal_backdrop(ctx: &egui::Context, id: &'static str) {
+    let screen_rect = ctx.input(|i| i.content_rect());
+    egui::Area::new(id.into())
+        .fixed_pos(egui::Pos2::ZERO)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            ui.painter().rect_filled(
+                screen_rect,
+                egui::CornerRadius::ZERO,
+                egui::Color32::from_black_alpha(150),
+            );
+            ui.allocate_rect(screen_rect, egui::Sense::click_and_drag());
+        });
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1442,11 +1496,16 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
         return;
     }
 
+    let active_modal = ctx_menu.competitive_menu.active_modal();
+    if active_modal.is_some() {
+        render_menu_modal_backdrop(ctx, "main_menu_modal_backdrop");
+    }
+
     render_new_style_panel(ctx, ctx_menu);
 
     render_wallet_hud(ctx, ctx_menu);
 
-    if ctx_menu.competitive_menu.show_ai_setup {
+    if active_modal == Some(MainMenuModal::AiSetup) {
         render_ai_setup_modal(
             ctx,
             &mut ctx_menu.competitive_menu,
@@ -1457,7 +1516,7 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
         );
     }
 
-    if ctx_menu.competitive_menu.show_spectator_popup {
+    if active_modal == Some(MainMenuModal::Spectator) {
         let cached_games = if let Some(vps) = &ctx_menu.p2p_vps_state {
             vps.cached_games.clone()
         } else {
@@ -1480,11 +1539,11 @@ fn render_website_menu(ctx: &egui::Context, ctx_menu: &mut MainMenuUIContext) {
         );
     }
 
-    if ctx_menu.competitive_menu.show_controls_popup {
+    if active_modal == Some(MainMenuModal::Controls) {
         render_controls_popup(ctx, &mut ctx_menu.competitive_menu);
     }
 
-    if ctx_menu.competitive_menu.show_pgn_input {
+    if active_modal == Some(MainMenuModal::PgnInput) {
         render_pgn_input_modal(
             ctx,
             &mut ctx_menu.competitive_menu,

@@ -71,6 +71,13 @@ pub fn initialize_solana_integration(
                                 DEVNET_RPC_URL.to_string(),
                                 CommitmentConfig::confirmed(),
                             ));
+                            crate::multiplayer::network::vps::emit_client_event(
+                                crate::multiplayer::network::vps::ClientEvent::new(
+                                    "solana_wallet_connected",
+                                )
+                                .wallet(pubkey)
+                                .session_kind("wallet"),
+                            );
                             if let Some(ref mut w) = solana_wallet {
                                 w.pubkey = Some(pubkey);
                             }
@@ -1015,6 +1022,13 @@ pub fn authorize_global_session_if_needed(
                 solana_state.global_session_active = true;
                 solana_state.global_session_unavailable_reason = None;
                 solana_state.global_session_setup_in_progress = false;
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new(
+                        "solana_global_session_active",
+                    )
+                    .wallet(wallet_pubkey)
+                    .session_kind("global"),
+                );
                 *rx = None;
             }
             Ok(Err(e)) => {
@@ -1028,6 +1042,19 @@ pub fn authorize_global_session_if_needed(
                     );
                     *retry_timer = f32::INFINITY; // never retry again this run
                     solana_state.global_session_unavailable_reason = Some(e);
+                    crate::multiplayer::network::vps::emit_client_event(
+                        crate::multiplayer::network::vps::ClientEvent::new(
+                            "solana_global_session_unavailable",
+                        )
+                        .wallet(wallet_pubkey)
+                        .session_kind("per_game")
+                        .reason(
+                            solana_state
+                                .global_session_unavailable_reason
+                                .clone()
+                                .unwrap_or_else(|| "authorization failed".to_string()),
+                        ),
+                    );
                 } else {
                     warn!(
                         "[GLOBAL_SESSION] Authorization failed ({}/{MAX_ATTEMPTS}): {e}",
@@ -1049,6 +1076,14 @@ pub fn authorize_global_session_if_needed(
                 if *failed_attempts >= MAX_ATTEMPTS {
                     solana_state.global_session_unavailable_reason =
                         Some("background task dropped".to_string());
+                    crate::multiplayer::network::vps::emit_client_event(
+                        crate::multiplayer::network::vps::ClientEvent::new(
+                            "solana_global_session_unavailable",
+                        )
+                        .wallet(wallet_pubkey)
+                        .session_kind("per_game")
+                        .reason("background task dropped"),
+                    );
                 }
             }
         }
@@ -1085,6 +1120,14 @@ pub fn authorize_global_session_if_needed(
             "wallet balance {:.4} SOL is below the {:.3} SOL needed to set up one-time session signing — fund the wallet and it will retry automatically",
             solana_state.balance, MIN_BALANCE_FOR_GLOBAL_SESSION_SOL
         ));
+        crate::multiplayer::network::vps::emit_client_event(
+            crate::multiplayer::network::vps::ClientEvent::new(
+                "solana_global_session_unavailable",
+            )
+            .wallet(wallet_pubkey)
+            .session_kind("per_game")
+            .reason("insufficient wallet balance for global session"),
+        );
         *attempted_for = Some(wallet_pubkey);
         *retry_timer = 30.0; // re-check periodically in case the wallet gets funded
         return;
@@ -1287,6 +1330,16 @@ pub fn poll_global_session_register_result(
             warn!(
                 "[GLOBAL_SESSION] Backend confirmed the local session key doesn't match on-chain — clearing it"
             );
+            if let Some(wallet) = solana_state.wallet_pubkey {
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new(
+                        "solana_global_session_register_failed",
+                    )
+                    .wallet(wallet)
+                    .session_kind("global")
+                    .reason("backend confirmed key mismatch"),
+                );
+            }
             solana_state.global_session_active = false;
             solana_state.global_session_keypair = None;
             commands.remove_resource::<GlobalSessionRegisterPending>();

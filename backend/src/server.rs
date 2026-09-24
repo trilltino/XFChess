@@ -102,6 +102,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         pools.vault_pool.clone(),
         Arc::new(tournament_store.clone()),
     );
+    state.money_actions.init().await?;
+    info!("[signing-server] Money action store initialized");
 
     let orchestrator_tx = crate::signing::swiss::spawn_orchestrator(
         tournament_store.clone(),

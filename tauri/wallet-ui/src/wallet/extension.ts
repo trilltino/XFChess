@@ -7,7 +7,7 @@
  */
 import bs58 from 'bs58';
 import type { WalletSource, WalletKind } from './types';
-import { WALLET_LABEL } from './types';
+import { detectSolanaTxCapabilities, WALLET_LABEL } from './types';
 
 export type ExtensionKind = Extract<WalletKind, 'phantom' | 'solflare'>;
 
@@ -68,6 +68,7 @@ export async function connectExtension(kind: ExtensionKind): Promise<WalletSourc
     kind,
     pubkey,
     provider,
+    txCapabilities: detectSolanaTxCapabilities(kind, provider),
     // Signs raw bytes with no "utf8" argument, to avoid the off-chain message
     // prefix Phantom >= 0.16 applies in that mode. The backend verifies a bare
     // ed25519 signature over the message, so a prefixed one fails.

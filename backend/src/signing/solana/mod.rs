@@ -5,6 +5,7 @@ pub mod instructions;
 pub mod routing;
 pub mod rpc;
 pub mod telemetry;
+pub mod transaction_fetch;
 pub mod transactions;
 pub mod tx_guard;
 
@@ -28,6 +29,10 @@ pub use telemetry::{
     classify_error_str, submit_er_with_telemetry, submit_with_telemetry, TxErrorCategory,
     TxErrorDetail,
 };
+pub use transaction_fetch::{
+    fetch_transaction_v1_aware, transaction_fetch_config, v1_read_required,
+    FetchedSolanaTransaction, TransactionBuildPolicy, MAX_SUPPORTED_TX_VERSION,
+};
 pub use transactions::{
     cosign_and_submit_tx, fund_account, sign_and_submit, sign_and_submit_er, submit_signed_tx,
 };
@@ -39,6 +44,7 @@ pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
 pub const PROFILE_SEED: &[u8] = b"profile";
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";
+pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
 pub const MAGIC_CONTEXT_PUBKEY: &str = "MagicContext1111111111111111111111111111111";

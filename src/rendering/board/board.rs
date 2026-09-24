@@ -120,6 +120,9 @@ pub fn create_board(
 pub fn board_view_mode_toggle_system(
     view_mode: Res<ViewMode>,
     mut board_3d_query: Query<&mut Visibility, With<BoardSquare3DVisual>>,
+    board_cam_query: Query<Entity, With<crate::game::systems::camera::BoardCamera>>,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    mut cameras: Query<&mut Camera>,
 ) {
     let mode = *view_mode;
     let show_3d = mode == ViewMode::Standard3D || mode.is_templeos();
@@ -130,6 +133,20 @@ pub fn board_view_mode_toggle_system(
         } else {
             Visibility::Hidden
         };
+    }
+    for board_cam_entity in board_cam_query.iter() {
+        if let Ok(mut cam) = cameras.get_mut(board_cam_entity) {
+            cam.is_active = show_3d;
+        }
+    }
+    if let Some(ui_cam_entity) = persistent_camera.entity {
+        if let Ok(mut cam) = cameras.get_mut(ui_cam_entity) {
+            cam.clear_color = if show_3d {
+                bevy::camera::ClearColorConfig::None
+            } else {
+                bevy::camera::ClearColorConfig::Custom(Color::srgb(0.06, 0.06, 0.08))
+            };
+        }
     }
 }
 

@@ -39,18 +39,27 @@ class ApiClient {
   }
 
   private loadCredentials() {
+    if (typeof localStorage === "undefined") {
+      return;
+    }
     this.token = localStorage.getItem("admin_token");
   }
 
   setCredentials(token: string, baseUrl: string) {
     this.token = token;
     this.baseUrl = baseUrl;
+    if (typeof localStorage === "undefined") {
+      return;
+    }
     localStorage.setItem("admin_token", token);
     localStorage.setItem("backend_url", baseUrl);
   }
 
   clearCredentials() {
     this.token = null;
+    if (typeof localStorage === "undefined") {
+      return;
+    }
     localStorage.removeItem("admin_token");
     localStorage.removeItem("backend_url");
   }
@@ -125,11 +134,16 @@ class ApiClient {
 
   // Tournament endpoints
   async getTournaments() {
-    return this.request<any[]>("/tournaments");
+    const response = await this.request<any>("/api/tournaments");
+    if (!response.ok) return response as ApiResponse<TournamentSummary[]>;
+    return {
+      ...response,
+      data: normalizeTournamentList(response.data),
+    };
   }
 
   async getTournament(id: number) {
-    return this.request<any>(`/tournament/${id}`);
+    return this.request<any>(`/api/tournament/${id}`);
   }
 
   async createTournament(data: any) {
@@ -155,7 +169,7 @@ class ApiClient {
   }
 
   async getTournamentBracket(id: number) {
-    return this.request<any>(`/tournament/${id}/bracket`);
+    return this.request<any>(`/api/tournament/${id}/bracket`);
   }
 
   async recordResult(tournamentId: number, matchIndex: number, winner: string, loser: string) {
@@ -204,6 +218,36 @@ class ApiClient {
 
   async getTournamentTransactions(tournamentId: number) {
     return this.request<any>(`/admin/tournament/${tournamentId}/transactions`);
+  }
+
+  // Offline/local events persisted by the backend. These are admin-only for
+  // writes, but the backend also exposes published events at /offline-tournaments
+  // for future public surfaces.
+  async listOfflineTournaments() {
+    return this.request<OfflineTournamentSummary[]>("/admin/offline-tournaments");
+  }
+
+  async createOfflineTournament(data: CreateOfflineTournamentRequest) {
+    return this.request<OfflineTournamentRecord>("/admin/offline-tournaments", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getOfflineTournament(tournamentId: string) {
+    return this.request<OfflineTournamentRecord>(
+      `/admin/offline-tournaments/${encodeURIComponent(tournamentId)}`
+    );
+  }
+
+  async updateOfflineTournament(tournamentId: string, data: UpdateOfflineTournamentRequest) {
+    return this.request<OfflineTournamentRecord>(
+      `/admin/offline-tournaments/${encodeURIComponent(tournamentId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      }
+    );
   }
 
   // Tournament templates — backend-persisted (SQLite), shared across
@@ -308,6 +352,44 @@ class ApiClient {
 
   async getLogsStream() {
     return this.request<any>("/admin/logs/stream");
+  }
+
+  async debugTransaction(signature: string) {
+    return this.request<any>(`/admin/debug/tx/${encodeURIComponent(signature)}`);
+  }
+
+  async getDebugCapabilities() {
+    return this.request<any>("/admin/debug/capabilities");
+  }
+
+  async searchDebugGames(query: string, limit = 25) {
+    return this.request<any>(
+      `/admin/debug/games?query=${encodeURIComponent(query)}&limit=${limit}`
+    );
+  }
+
+  async getGameDebugBundle(gameId: string | number) {
+    return this.request<any>(`/admin/debug/games/${encodeURIComponent(String(gameId))}`);
+  }
+
+  async getGameDebugTransactions(gameId: string | number) {
+    return this.request<any>(
+      `/admin/debug/games/${encodeURIComponent(String(gameId))}/transactions`
+    );
+  }
+
+  async retryMoneyAction(id: string) {
+    return this.request<any>(
+      `/admin/money-actions/${encodeURIComponent(id)}/retry-reconcile`,
+      { method: "POST", body: JSON.stringify({}) }
+    );
+  }
+
+  async markMoneyActionReview(id: string) {
+    return this.request<any>(
+      `/admin/money-actions/${encodeURIComponent(id)}/mark-review`,
+      { method: "POST", body: JSON.stringify({}) }
+    );
   }
 
   // Treasury
@@ -532,6 +614,12 @@ class ApiClient {
 // Create singleton instance
 export const apiClient = new ApiClient();
 
+export function normalizeTournamentList(data: any): TournamentSummary[] {
+  if (Array.isArray(data)) return data;
+  const wrapped = data?.value ?? data?.Value ?? data?.tournaments;
+  return Array.isArray(wrapped) ? wrapped : [];
+}
+
 // Export types for tournament data
 export interface TournamentSummary {
   tournament_id: number;
@@ -542,6 +630,42 @@ export interface TournamentSummary {
   max_players: number;
   registered: number;
   status: string;
+  is_private?: boolean;
+  is_tournament?: boolean;
+  source?: string;
+  usdc_mint?: string | null;
+  min_elo?: number;
+  max_elo?: number;
+  format?: string;
+  scheduled_at?: number | null;
+}
+
+export interface OfflineTournamentSummary {
+  tournament_id: string;
+  name: string;
+  format: "single_elimination" | "swiss" | string;
+  status: "draft" | "published" | "active" | "completed" | "cancelled" | string;
+  revision: number;
+  updated_at: number;
+  participants: string[];
+}
+
+export interface OfflineTournamentRecord extends OfflineTournamentSummary {
+  state: any;
+  created_at: number;
+}
+
+export interface CreateOfflineTournamentRequest {
+  tournament_id: string;
+  name: string;
+  format: "single_elimination" | "swiss";
+  state: any;
+}
+
+export interface UpdateOfflineTournamentRequest {
+  status: "draft" | "published" | "active" | "completed" | "cancelled" | string;
+  state: any;
+  revision: number;
 }
 
 export interface SwissStandingsEntry {
@@ -617,4 +741,3 @@ export interface MatchInfo {
   status: string;
   round?: number;
 }
-

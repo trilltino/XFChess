@@ -737,13 +737,18 @@ pub fn setup_game_camera(
         Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y)
     };
 
+    let show_3d = !is_2d;
+
     // Persistent camera becomes UI-only: draws after (higher order) the board
-    // camera and doesn't clear its output. Board/piece meshes no longer carry
-    // the default RenderLayers this camera renders, so it draws nothing 3D.
+    // camera. In 3D mode it doesn't clear output; in 2D mode it clears to solid dark background.
     if let Some(entity) = persistent_camera.entity {
         if let Ok(mut camera) = ui_cam_query.get_mut(entity) {
             camera.order = 1;
-            camera.clear_color = ClearColorConfig::None;
+            camera.clear_color = if show_3d {
+                ClearColorConfig::None
+            } else {
+                ClearColorConfig::Custom(Color::srgb(0.06, 0.06, 0.08))
+            };
         }
         commands
             .entity(entity)
@@ -756,6 +761,7 @@ pub fn setup_game_camera(
     if let Ok((entity, mut transform, mut camera)) = board_cam_query.single_mut() {
         *transform = new_transform;
         camera.order = 0;
+        camera.is_active = show_3d;
         board_entity = Some(entity);
     }
     let board_entity = board_entity.unwrap_or_else(|| {
@@ -764,6 +770,7 @@ pub fn setup_game_camera(
                 Camera3d::default(),
                 Camera {
                     order: 0,
+                    is_active: show_3d,
                     clear_color: ClearColorConfig::Default,
                     ..default()
                 },

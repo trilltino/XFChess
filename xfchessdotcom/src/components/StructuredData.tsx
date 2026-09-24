@@ -23,7 +23,7 @@ export function OrganizationSchema() {
         sameAs: [
           'https://twitter.com/xfchess',
           'https://github.com/trilltino/XFChess',
-          'https://youtube.com/xfchess',
+          'https://www.youtube.com/@xfchessdotcom',
         ],
       }}
     />

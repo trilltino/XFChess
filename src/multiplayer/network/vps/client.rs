@@ -27,9 +27,22 @@ pub fn logout() {
 }
 
 pub fn vps_base() -> String {
-    std::env::var("SIGNING_SERVICE_URL")
+    let override_url = std::env::var("SIGNING_SERVICE_URL")
         .or_else(|_| std::env::var("BACKEND_URL"))
-        .unwrap_or_else(|_| VPS_PROD_URL.to_string())
+        .ok();
+    let allow_override = cfg!(debug_assertions)
+        || std::env::var("XFCHESS_ALLOW_BACKEND_OVERRIDE")
+            .ok()
+            .as_deref()
+            == Some("1");
+
+    if allow_override {
+        override_url.unwrap_or_else(|| VPS_PROD_URL.to_string())
+    } else {
+        VPS_PROD_URL.to_string()
+    }
+    .trim_end_matches('/')
+    .to_string()
 }
 
 pub fn vps_ws_base() -> String {
@@ -115,7 +128,6 @@ pub fn wallet_bridge_port() -> u16 {
     {
         return port;
     }
-
     std::fs::read_to_string(http_bridge_port_file())
         .ok()
         .and_then(|s| s.trim().parse().ok())

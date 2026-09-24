@@ -331,7 +331,7 @@ fn fmt_timestamp(ts: i64) -> String {
 
 fn list_tournaments() {
     println!("\n[LIST] Fetching all tournaments…\n");
-    let url = format!("{}/tournaments", server_url());
+    let url = format!("{}/api/tournaments", server_url());
     match client().get(&url).send() {
         Ok(r) if r.status().is_success() => match r.json::<Vec<TournamentSummary>>() {
             Ok(ts) if ts.is_empty() => println!("  No tournaments found."),
@@ -528,7 +528,7 @@ fn create_tournament() {
 
 fn view_tournament() {
     let id = read_u64("Tournament ID");
-    let url = format!("{}/tournament/{}", server_url(), id);
+    let url = format!("{}/api/tournament/{}", server_url(), id);
     match client().get(&url).send() {
         Ok(r) if r.status().is_success() => match r.json::<TournamentDetail>() {
             Ok(t) => print_tournament_detail(&t),
@@ -623,7 +623,7 @@ fn print_tournament_detail(t: &TournamentDetail) {
 
 fn view_matches() {
     let id = read_u64("Tournament ID");
-    let url = format!("{}/tournament/{}/bracket", server_url(), id);
+    let url = format!("{}/api/tournament/{}/bracket", server_url(), id);
     match client().get(&url).send() {
         Ok(r) if r.status().is_success() => {
             match r.json::<serde_json::Value>() {
@@ -859,7 +859,7 @@ fn batch_kyc_check() {
 
 fn calculate_prizes() {
     let id = read_u64("Tournament ID");
-    let url = format!("{}/tournament/{}", server_url(), id);
+    let url = format!("{}/api/tournament/{}", server_url(), id);
     match client().get(&url).send() {
         Ok(r) if r.status().is_success() => match r.json::<TournamentDetail>() {
             Ok(t) => {

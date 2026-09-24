@@ -98,12 +98,15 @@ pub struct TournamentClientState {
     pub private_code_input: String,
     pub private_code_error: Option<String>,
     pub private_join_rx: Option<crossbeam_channel::Receiver<Result<(), String>>>,
+    pub leave_rx: Option<crossbeam_channel::Receiver<Result<String, String>>>,
+    pub money_flow: crate::multiplayer::solana::money_flow::MoneyFlowState,
 
     // Tournament waiting-room chat
     pub chat_messages: Vec<(String, String)>,
     pub chat_rx: Option<crossbeam_channel::Receiver<(String, String)>>,
     pub chat_input: String,
     pub chat_tx: Option<crossbeam_channel::Sender<(String, String)>>,
+    pub chat_stop_tx: Option<crossbeam_channel::Sender<()>>,
 
     pub status_rx: Option<
         crossbeam_channel::Receiver<
@@ -153,10 +156,13 @@ impl Default for TournamentClientState {
             private_code_input: String::new(),
             private_code_error: None,
             private_join_rx: None,
+            leave_rx: None,
+            money_flow: crate::multiplayer::solana::money_flow::MoneyFlowState::default(),
             chat_messages: Vec::new(),
             chat_rx: None,
             chat_input: String::new(),
             chat_tx: None,
+            chat_stop_tx: None,
             dismissed_ids: std::collections::HashSet::new(),
             status_rx: None,
             my_state: None,
@@ -168,7 +174,18 @@ impl Default for TournamentClientState {
 
 impl TournamentClientState {
     pub fn reset(&mut self) {
+        self.stop_chat();
         *self = Self::default();
+    }
+
+    pub fn stop_chat(&mut self) {
+        if let Some(tx) = self.chat_stop_tx.take() {
+            let _ = tx.send(());
+        }
+        self.chat_rx = None;
+        self.chat_tx = None;
+        self.chat_messages.clear();
+        self.chat_input.clear();
     }
 
     pub fn start_chat(&mut self, tournament_id: u64, player_name: String) {
@@ -177,16 +194,25 @@ impl TournamentClientState {
         }
         let (inbound_tx, inbound_rx) = crossbeam_channel::bounded::<(String, String)>(64);
         let (outbound_tx, outbound_rx) = crossbeam_channel::bounded::<(String, String)>(16);
+        let (stop_tx, stop_rx) = crossbeam_channel::bounded::<()>(1);
         self.chat_rx = Some(inbound_rx);
         self.chat_tx = Some(outbound_tx);
+        self.chat_stop_tx = Some(stop_tx);
         let base = crate::multiplayer::network::vps::vps_base();
         // Background thread: poll for new messages every 3 seconds
         let base2 = base.clone();
         let itx = inbound_tx.clone();
         std::thread::spawn(move || {
-            let client = reqwest::blocking::Client::new();
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
             let mut last_id: u64 = 0;
             loop {
+                match stop_rx.try_recv() {
+                    Ok(_) | Err(crossbeam_channel::TryRecvError::Disconnected) => break,
+                    Err(crossbeam_channel::TryRecvError::Empty) => {}
+                }
                 let url = format!(
                     "{}/api/tournament/{}/chat?after={}",
                     base2, tournament_id, last_id
@@ -208,7 +234,9 @@ impl TournamentClientState {
                             if id > last_id {
                                 last_id = id;
                             }
-                            let _ = itx.send((sender, text));
+                            if itx.send((sender, text)).is_err() {
+                                return;
+                            }
                         }
                     }
                 }
@@ -217,7 +245,10 @@ impl TournamentClientState {
         });
         // Background thread: send outbound messages
         std::thread::spawn(move || {
-            let client = reqwest::blocking::Client::new();
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
             while let Ok((player, text)) = outbound_rx.recv() {
                 let url = format!("{}/api/tournament/{}/chat", base, tournament_id);
                 let body = serde_json::json!({ "player": player, "text": text });
@@ -296,14 +327,31 @@ pub struct BracketFiredEvent {
 pub fn spawn_register_tournament(
     tournament_id: u64,
     wallet_pubkey: Pubkey,
-    _password: Option<String>,
+    password: Option<String>,
 ) -> oneshot::Receiver<Result<usize, String>> {
     let (tx, rx) = oneshot::channel();
     let rpc_url = std::env::var("SOLANA_RPC_URL")
         .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
     std::thread::spawn(move || {
-        let res = register_tournament(tournament_id, wallet_pubkey, &rpc_url);
-        let _ = tx.send(res.map(|_| 0usize));
+        let wallet = wallet_pubkey.to_string();
+        crate::multiplayer::network::vps::emit_client_event(
+            crate::multiplayer::network::vps::ClientEvent::new("tournament_registration_started")
+                .wallet(&wallet)
+                .game_id(tournament_id),
+        );
+        let result = register_tournament(tournament_id, wallet_pubkey, &rpc_url)
+            .map_err(|e| format!("on-chain register_player failed: {e}"))
+            .and_then(|signature| {
+                crate::multiplayer::network::vps::confirm_join_with_retry(
+                    tournament_id,
+                    &wallet,
+                    1200,
+                    &signature,
+                    password.as_deref(),
+                )
+                .map(|slot| slot as usize)
+            });
+        let _ = tx.send(result);
     });
     rx
 }
@@ -461,9 +509,85 @@ fn poll_tournament_tasks(
     mut tournament: ResMut<TournamentClientState>,
     mut menu_state: ResMut<NextState<crate::core::states::MenuState>>,
 ) {
+    if let Some(result) = tournament.leave_rx.as_ref().map(|rx| rx.try_recv()) {
+        match result {
+            Ok(Ok(signature)) => {
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new("tournament_leave_succeeded")
+                        .tournament_id(
+                            tournament
+                                .active_tournament_id
+                                .map(|id| id.to_string())
+                                .unwrap_or_default(),
+                        )
+                        .action("leave_tournament")
+                        .signature(signature.clone())
+                        .status("confirmed"),
+                );
+                tournament.money_flow =
+                    crate::multiplayer::solana::money_flow::MoneyFlowState::confirmed(
+                        "leave_tournament",
+                        Some(signature),
+                    );
+                tournament.leave_rx = None;
+                tournament.join_status = TournamentJoinStatus::Idle;
+                tournament.active_tournament_id = None;
+                tournament.registered_players.clear();
+                tournament.status_message = "Left tournament.".to_string();
+                tournament.stop_chat();
+            }
+            Ok(Err(e)) => {
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new("tournament_leave_failed")
+                        .tournament_id(
+                            tournament
+                                .active_tournament_id
+                                .map(|id| id.to_string())
+                                .unwrap_or_default(),
+                        )
+                        .action("leave_tournament")
+                        .status("failed")
+                        .reason(e.clone()),
+                );
+                tournament.money_flow =
+                    crate::multiplayer::solana::money_flow::MoneyFlowState::failed(
+                        "leave_tournament",
+                        e.clone(),
+                    );
+                tournament.leave_rx = None;
+                tournament.join_status = TournamentJoinStatus::Error(e.clone());
+                tournament.status_message = format!("Leave failed: {e}");
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                tournament.leave_rx = None;
+                tournament.money_flow =
+                    crate::multiplayer::solana::money_flow::MoneyFlowState::admin_review(
+                        "leave_tournament",
+                        Option::<String>::None,
+                        "leave task dropped before confirmation",
+                    );
+                tournament.join_status =
+                    TournamentJoinStatus::Error("Leave task dropped unexpectedly".to_string());
+                tournament.status_message = "Leave failed. Please retry.".to_string();
+            }
+        }
+    }
+
     if let Some(ref mut rx) = tournament.tx_rx {
         match rx.try_recv() {
             Ok(Ok(slot)) => {
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new(
+                        "tournament_registration_succeeded",
+                    )
+                    .game_id(
+                        tournament
+                            .active_tournament_id
+                            .map(|id| id.to_string())
+                            .unwrap_or_default(),
+                    ),
+                );
                 tournament.my_slot = Some(slot);
                 tournament.join_status = TournamentJoinStatus::Registered(slot);
                 tournament.status_message =
@@ -473,6 +597,18 @@ fn poll_tournament_tasks(
                 info!("[TOURNAMENT] Registration confirmed — slot {}", slot);
             }
             Ok(Err(e)) => {
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new(
+                        "tournament_registration_failed",
+                    )
+                    .game_id(
+                        tournament
+                            .active_tournament_id
+                            .map(|id| id.to_string())
+                            .unwrap_or_default(),
+                    )
+                    .reason(e.clone()),
+                );
                 tournament.join_status = TournamentJoinStatus::Error(e.clone());
                 tournament.status_message = format!("Registration failed: {}", e);
                 tournament.tx_rx = None;
@@ -501,11 +637,23 @@ fn poll_tournament_list(
     if let Some(ref rx) = tournament.list_rx {
         match rx.try_recv() {
             Ok(Ok(list)) => {
+                if list.is_empty() {
+                    crate::multiplayer::network::vps::emit_client_event(
+                        crate::multiplayer::network::vps::ClientEvent::new(
+                            "tournament_list_empty",
+                        )
+                        .reason(crate::multiplayer::network::vps::vps_base()),
+                    );
+                }
                 tournament.available_tournaments = list;
                 tournament.last_poll_error = None;
                 tournament.list_rx = None;
             }
             Ok(Err(e)) => {
+                crate::multiplayer::network::vps::emit_client_event(
+                    crate::multiplayer::network::vps::ClientEvent::new("tournament_list_failed")
+                        .reason(e.clone()),
+                );
                 tournament.last_poll_error = Some(e);
                 tournament.list_rx = None;
             }

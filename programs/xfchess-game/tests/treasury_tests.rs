@@ -1,8 +1,8 @@
-use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
+use anchor_lang::{AccountSerialize, Discriminator, InstructionData, Space, ToAccountMetas};
 use solana_program_test::{BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
-    instruction::{Instruction, InstructionError},
+    instruction::{AccountMeta, Instruction, InstructionError},
     pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signer},
     transaction::{Transaction, TransactionError},
@@ -10,6 +10,7 @@ use solana_sdk::{
 use solana_system_interface::program as system_program;
 use xfchess_game::errors::GameErrorCode;
 use xfchess_game::state::{PayoutType, Tournament, TournamentStatus, TournamentType};
+use xfchess_game::tournament_ix::lifecycle::initialize_escrow::TournamentEscrow;
 
 const PROGRAM: &str = "xfchess_game";
 
@@ -34,16 +35,6 @@ fn system_account(lamports: u64) -> Account {
         lamports,
         data: vec![],
         owner: system_program::id(),
-        executable: false,
-        rent_epoch: 0,
-    }
-}
-
-fn program_owned(lamports: u64, data_len: usize) -> Account {
-    Account {
-        lamports,
-        data: vec![0u8; data_len],
-        owner: xfchess_game::ID,
         executable: false,
         rent_epoch: 0,
     }
@@ -320,14 +311,13 @@ fn tournament(
 }
 
 fn close_ix(id: u64, authority: Pubkey) -> Instruction {
-    let accounts = xfchess_game::__client_accounts_close_tournament::CloseTournament {
-        tournament: tournament_pda(id).0,
-        prize_escrow_pda: tournament_escrow_pda(id).0,
-        treasury_vault: treasury_vault_pda().0,
-        system_program: system_program::id(),
-        authority,
-    }
-    .to_account_metas(None);
+    let accounts = vec![
+        AccountMeta::new(tournament_pda(id).0, false),
+        AccountMeta::new(tournament_escrow_pda(id).0, false),
+        AccountMeta::new(treasury_vault_pda().0, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new(authority, true),
+    ];
     let data = xfchess_game::instruction::CloseTournament { tournament_id: id }.data();
     Instruction {
         program_id: xfchess_game::ID,
@@ -337,15 +327,20 @@ fn close_ix(id: u64, authority: Pubkey) -> Instruction {
 }
 
 fn close_accounts(id: u64, t: &Tournament, escrow_lamports: u64) -> Vec<(Pubkey, Account)> {
+    let escrow_account = Account {
+        lamports: escrow_lamports,
+        data: TournamentEscrow::DISCRIMINATOR.to_vec(),
+        owner: xfchess_game::ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+
     vec![
         (
             tournament_pda(id).0,
             serialize_padded(t, 8 + Tournament::INIT_SPACE),
         ),
-        (
-            tournament_escrow_pda(id).0,
-            program_owned(escrow_lamports, 8),
-        ),
+        (tournament_escrow_pda(id).0, escrow_account),
         (treasury_vault_pda().0, system_account(1_000_000)),
     ]
 }

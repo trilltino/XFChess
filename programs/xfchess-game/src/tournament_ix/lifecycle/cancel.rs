@@ -67,6 +67,17 @@ pub struct CancelTournament<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[event]
+pub struct TournamentCancelled {
+    pub tournament_id: u64,
+    pub authority: Pubkey,
+    pub registered_players: u32,
+    pub refund_amount_per_player: u64,
+    pub sol_guarantee_returned: u64,
+    pub usdc_prize_returned: u64,
+    pub timestamp: i64,
+}
+
 pub fn handler<'info>(
     ctx: Context<'info, CancelTournament<'info>>,
     tournament_id: u64,
@@ -232,9 +243,26 @@ pub fn handler<'info>(
         )?;
     }
 
+    let usdc_prize_returned = ctx
+        .accounts
+        .usdc_prize_escrow
+        .as_ref()
+        .map(|a| a.amount)
+        .unwrap_or(0);
+
     ctx.accounts.tournament.status = TournamentStatus::Cancelled;
     ctx.accounts.tournament.usdc_prize_funded = false;
     ctx.accounts.tournament.prize_pool = 0;
+
+    emit!(TournamentCancelled {
+        tournament_id,
+        authority: ctx.accounts.authority.key(),
+        registered_players: registered as u32,
+        refund_amount_per_player: refund_amount,
+        sol_guarantee_returned: sol_guarantee,
+        usdc_prize_returned,
+        timestamp: Clock::get()?.unix_timestamp,
+    });
 
     Ok(())
 }

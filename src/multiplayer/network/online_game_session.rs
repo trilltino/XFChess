@@ -239,8 +239,6 @@ fn publish_local_move(
         let game_id_u64 = numeric_game_id(&session.game_id);
         let move_number = session.next_move_number;
         let nonce = session.next_nonce;
-        session.next_move_number = session.next_move_number.saturating_add(1);
-        session.next_nonce = session.next_nonce.saturating_add(1);
 
         // Build UCI string.
         let from_file = (b'a' + event.from.0) as char;
@@ -365,7 +363,14 @@ fn publish_local_move(
                     "[online-session] Move sent (game {game_id_u64}, turn {move_number}, uci {uci}) via gossip+braid"
                 );
             }
+        } else {
+            warn!(
+                "[online-session] No gossip sender for move (game {game_id_u64}, turn {move_number}, uci {uci}); relying on Braid publish"
+            );
         }
+
+        session.next_move_number = session.next_move_number.saturating_add(1);
+        session.next_nonce = session.next_nonce.saturating_add(1);
     }
 }
 

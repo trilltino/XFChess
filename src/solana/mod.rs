@@ -1,23 +1,19 @@
 // Solana program integration module
 
-// Sub-modules
-pub mod core;
-pub mod multiplayer;
 pub mod program_interface;
 pub mod session;
-pub mod wallet;
 
-// Expose modules themselves so callers can use `crate::solana::instructions::Foo` paths
+// Keep the stable public path used by the client: `crate::solana::instructions::*`.
 pub use program_interface::instructions;
 
 use bevy::prelude::*;
-use session::session::SessionPlugin as SessionPluginInner;
+use session::SessionPlugin;
 
 pub struct SolanaPlugin;
 
 impl Plugin for SolanaPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(SessionPluginInner)
+        app.add_plugins(SessionPlugin)
             .init_resource::<crate::multiplayer::solana::addon::SolanaWallet>()
             .init_resource::<crate::multiplayer::solana::addon::SolanaGameSync>()
             .init_resource::<crate::multiplayer::solana::addon::SolanaProfile>()

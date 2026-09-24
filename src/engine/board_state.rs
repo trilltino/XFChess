@@ -144,7 +144,7 @@ impl ChessEngine {
         self.move_cache.clear();
         self.move_cache_valid = false;
         let mut board = [0i8; 64];
-        let mut castling = CastlingRights::default();
+        let mut castling = CastlingRights::all_moved();
 
         for (_, piece, has_moved) in pieces {
             // Skip pieces that have been marked off-board (u8::MAX) — this happens
@@ -356,6 +356,19 @@ struct CastlingRights {
     wh_rook_moved: bool,
     ba_rook_moved: bool,
     bh_rook_moved: bool,
+}
+
+impl CastlingRights {
+    fn all_moved() -> Self {
+        Self {
+            white_king_moved: true,
+            black_king_moved: true,
+            wa_rook_moved: true,
+            wh_rook_moved: true,
+            ba_rook_moved: true,
+            bh_rook_moved: true,
+        }
+    }
 }
 
 fn castling_to_string(rights: &CastlingRights) -> String {

@@ -24,7 +24,7 @@ use crate::multiplayer::solana::tauri_signer;
 
 #[cfg(feature = "solana")]
 pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
-    let Some(ref mut lobby) = ctx.solana_lobby else {
+    let Some(mut lobby) = ctx.solana_lobby.take() else {
         ui.label("Solana lobby not available.");
         return;
     };
@@ -51,7 +51,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         };
         if ui.button("‹ Back").clicked() {
             if let Some(game_id) = active_game_id {
-                begin_solana_lobby_cancel(ctx, lobby, game_id);
+                begin_solana_lobby_cancel(ctx, &mut lobby, game_id);
             } else if matches!(lobby.status, LobbyStatus::Pending) {
                 // A create/join transaction has not produced a game id yet;
                 // keep the user here until its result is known so a late
@@ -217,25 +217,27 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             match lobby.mode {
                 LobbyMode::Create => render_create_tab(
                     ui,
-                    lobby,
+                    &mut lobby,
                     &mut ctx.compliance,
                     node_id_b58.as_deref(),
                     usd_per_sol,
                     global_session_setup_in_progress,
                     global_session_unavailable_reason,
+                    ctx.solana_session.as_deref(),
                 ),
                 LobbyMode::Join => render_join_tab(
                     ui,
-                    lobby,
+                    &mut lobby,
                     node_id_b58.as_deref(),
                     secret_key_bytes,
                     usd_per_sol,
                     global_session_setup_in_progress,
                     global_session_unavailable_reason,
+                    ctx.solana_session.as_deref(),
                 ),
-                LobbyMode::Browse => render_solana_browse_tab(ui, lobby, usd_per_sol),
+                LobbyMode::Browse => render_solana_browse_tab(ui, &mut lobby, usd_per_sol),
                 LobbyMode::Tournament => {
-                    render_solana_tournament_tab(ui, lobby, &mut ctx.spectate_events)
+                    render_solana_tournament_tab(ui, &mut lobby, &mut ctx.spectate_events)
                 }
             }
         }
@@ -410,7 +412,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
                 Layout::small_space(ui);
                 if ui.small_button("Cancel").clicked() {
-                    begin_solana_lobby_cancel(ctx, lobby, game_id);
+                    begin_solana_lobby_cancel(ctx, &mut lobby, game_id);
                 }
             }
 
@@ -519,7 +521,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 );
                 Layout::small_space(ui);
                 if ui.small_button("Leave").clicked() {
-                    begin_solana_lobby_cancel(ctx, lobby, game_id);
+                    begin_solana_lobby_cancel(ctx, &mut lobby, game_id);
                 }
             }
 
@@ -552,7 +554,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 ui.label(error);
                 ui.label("Your game may still hold escrow. Retry cancellation before leaving.");
                 if ui.button("Retry cancellation").clicked() {
-                    begin_solana_lobby_cancel(ctx, lobby, game_id);
+                    begin_solana_lobby_cancel(ctx, &mut lobby, game_id);
                 }
             }
 
@@ -576,6 +578,8 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             }
         }
     });
+
+    ctx.solana_lobby = Some(lobby);
 }
 
 #[cfg(feature = "solana")]
@@ -604,6 +608,14 @@ fn begin_solana_lobby_cancel(
     lobby.cancel_rx = Some(rx);
     lobby.opponent_poll_rx = None;
     lobby.game_start_poll_rx = None;
+    lobby.money_flow =
+        crate::multiplayer::solana::money_flow::MoneyFlowState::signing("cancel_game");
+    crate::multiplayer::network::vps::emit_client_event(
+        crate::multiplayer::network::vps::ClientEvent::new("money_action_started")
+            .game_id(game_id)
+            .action("cancel_game")
+            .status("signing"),
+    );
     lobby.status = LobbyStatus::Cancelling { game_id };
 }
 
@@ -624,6 +636,7 @@ pub(super) fn render_spectator_popup(
         .fixed_size(egui::Vec2::new(520.0, 380.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .title_bar(false)
+        .order(egui::Order::Foreground)
         .frame(crate::ui::styles::StyledPanel::popup())
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -635,7 +648,7 @@ pub(super) fn render_spectator_popup(
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("X").clicked() {
-                        competitive.show_spectator_popup = false;
+                        competitive.set_active_modal(None);
                     }
                 });
             });
@@ -721,7 +734,7 @@ pub(super) fn render_spectator_popup(
 
                                                 playlist: Vec::new(),
                                             });
-                                            competitive.show_spectator_popup = false;
+                                            competitive.set_active_modal(None);
                                         }
                                     }
                                 });
@@ -740,7 +753,7 @@ pub(super) fn render_spectator_popup(
                     .fill(crate::ui::styles::UiColors::ACCENT)
                     .corner_radius(4.0),
             ).clicked() {
-                competitive.show_spectator_popup = false;
+                competitive.set_active_modal(None);
             }
         });
 }
@@ -805,6 +818,7 @@ fn render_create_tab(
     usd_per_sol: Option<f64>,
     global_session_setup_in_progress: bool,
     global_session_unavailable_reason: Option<&str>,
+    imported_session: Option<&crate::solana::session::SessionState>,
 ) {
     use crate::multiplayer::solana::lobby::EloMatchPref;
 
@@ -1039,6 +1053,15 @@ fn render_create_tab(
         );
         Layout::small_space(ui);
     }
+    render_session_health_hint(
+        ui,
+        wallet_connected,
+        has_global_session,
+        global_session_setup_in_progress,
+        global_session_unavailable_reason,
+        imported_session,
+    );
+    Layout::small_space(ui);
 
     let create_btn_text = if is_free_casual {
         "Host Free Game"
@@ -1048,7 +1071,7 @@ fn render_create_tab(
         "Create Wagered Game"
     };
 
-    if ui
+    let create_clicked = ui
         .add_sized(
             [ui.available_width(), 40.0],
             egui::Button::new(egui::RichText::new(create_btn_text).size(16.0).strong()).fill(
@@ -1059,9 +1082,24 @@ fn render_create_tab(
                 },
             ),
         )
-        .clicked()
-        && can_create
-    {
+        .clicked();
+    if create_clicked && !can_create {
+        let reason = if !wallet_connected {
+            "wallet not connected"
+        } else if global_session_pending {
+            "global session pending"
+        } else if wallet_connected && balance < 0.003 {
+            "insufficient balance"
+        } else {
+            "create unavailable"
+        };
+        crate::multiplayer::network::vps::emit_client_event(
+            crate::multiplayer::network::vps::ClientEvent::new("solana_create_game_blocked")
+                .session_kind(if has_global_session { "global" } else { "per_game" })
+                .reason(reason),
+        );
+    }
+    if create_clicked && can_create {
         // Free and wagered games both go through the same signed on-chain
         // create_game call (wager_amount = 0 for free) — only an actual wager
         // on mainnet needs CARF compliance first.
@@ -1114,6 +1152,7 @@ fn render_join_tab(
     usd_per_sol: Option<f64>,
     global_session_setup_in_progress: bool,
     global_session_unavailable_reason: Option<&str>,
+    imported_session: Option<&crate::solana::session::SessionState>,
 ) {
     ui.label(egui::RichText::new("Enter Game ID:").size(14.0));
     ui.text_edit_singleline(&mut lobby.game_id_input);
@@ -1209,10 +1248,36 @@ fn render_join_tab(
             );
         }
 
-        if ui
+        render_session_health_hint(
+            ui,
+            lobby.cached_keypair_bytes.is_some(),
+            has_global_session,
+            global_session_setup_in_progress,
+            global_session_unavailable_reason,
+            imported_session,
+        );
+
+        let join_clicked = ui
             .add_enabled(can_join, egui::Button::new("Confirm Join"))
-            .clicked()
-        {
+            .clicked();
+        if join_clicked && !can_join {
+            let reason = if lobby.cached_keypair_bytes.is_none() {
+                "wallet not connected"
+            } else if global_session_pending {
+                "global session pending"
+            } else if !sufficient {
+                "insufficient balance"
+            } else {
+                "join unavailable"
+            };
+            crate::multiplayer::network::vps::emit_client_event(
+                crate::multiplayer::network::vps::ClientEvent::new("solana_join_game_blocked")
+                    .game_id(game_id)
+                    .session_kind(if has_global_session { "global" } else { "per_game" })
+                    .reason(reason),
+            );
+        }
+        if join_clicked && can_join {
             if let Some(wallet_pubkey) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
                 if let Some(node_id) = node_id {
                     match crate::multiplayer::vps_client::p2p_join_game(
@@ -1276,6 +1341,63 @@ fn render_join_tab(
                 );
             }
         }
+    }
+}
+
+#[cfg(feature = "solana")]
+fn render_session_health_hint(
+    ui: &mut egui::Ui,
+    wallet_connected: bool,
+    has_global_session: bool,
+    global_session_setup_in_progress: bool,
+    global_session_unavailable_reason: Option<&str>,
+    imported_session: Option<&crate::solana::session::SessionState>,
+) {
+    if let Some(session) = imported_session {
+        match session.health {
+            crate::solana::session::SessionHealth::Expired
+            | crate::solana::session::SessionHealth::Invalid
+            | crate::solana::session::SessionHealth::LoadFailed => {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 200, 50),
+                    session
+                        .recovery_message
+                        .as_deref()
+                        .unwrap_or("Reconnect your wallet from the launcher/web app."),
+                );
+                return;
+            }
+            crate::solana::session::SessionHealth::Connected => {
+                ui.colored_label(
+                    egui::Color32::from_rgb(80, 220, 120),
+                    "Imported Solana session active",
+                );
+                return;
+            }
+            crate::solana::session::SessionHealth::Standalone => {}
+        }
+    }
+
+    if !wallet_connected {
+        ui.colored_label(
+            egui::Color32::from_rgb(160, 130, 80),
+            "Connect wallet to create or join on-chain games.",
+        );
+    } else if has_global_session {
+        ui.colored_label(
+            egui::Color32::from_rgb(80, 220, 120),
+            "Quick-sign session active.",
+        );
+    } else if global_session_setup_in_progress {
+        ui.colored_label(
+            egui::Color32::from_rgb(200, 180, 120),
+            "Verifying quick-sign session support...",
+        );
+    } else if let Some(reason) = global_session_unavailable_reason {
+        ui.colored_label(
+            egui::Color32::from_rgb(160, 160, 160),
+            format!("Per-game signing fallback: {reason}"),
+        );
     }
 }
 
@@ -2259,6 +2381,27 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                 .map(|tc| tc.available_tournaments.clone())
                 .unwrap_or_else(Vec::new);
 
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Backend: {}",
+                        crate::multiplayer::network::vps::vps_base()
+                    ))
+                    .size(10.0)
+                    .color(egui::Color32::from_gray(120)),
+                );
+                ui.label(
+                    egui::RichText::new(format!("Fetched: {}", tournaments.len()))
+                        .size(10.0)
+                        .color(if tournaments.is_empty() {
+                            egui::Color32::from_rgb(230, 160, 80)
+                        } else {
+                            egui::Color32::from_rgb(100, 200, 140)
+                        }),
+                );
+            });
+            ui.add_space(4.0);
+
             // Filter list by selected status, and drop anything the player dismissed.
             let filter_key = ctx.tournament_client.as_ref()
                 .and_then(|tc| tc.status_filter.clone());
@@ -2358,6 +2501,22 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                 } else {
                     ui.label(egui::RichText::new("No tournaments match the current filter.").size(13.0).color(egui::Color32::GRAY).italics());
                 }
+                let filter_label = filter_key.as_deref().unwrap_or("all");
+                let last_error = ctx.tournament_client.as_ref()
+                    .and_then(|tc| tc.last_poll_error.clone())
+                    .unwrap_or_else(|| "none".to_string());
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Diagnostics: backend={} | fetched={} | visible={} | filter={} | last_error={}",
+                        crate::multiplayer::network::vps::vps_base(),
+                        tournaments.len(),
+                        visible_tournaments.len(),
+                        filter_label,
+                        last_error
+                    ))
+                    .size(10.5)
+                    .color(egui::Color32::from_gray(120)),
+                );
             } else {
                 egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                     for t in &visible_tournaments {
@@ -2479,31 +2638,19 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                                         return;
                                                     }
                                                 };
-                                                std::thread::spawn(move || {
-                                                    // Real on-chain registration (entry-fee escrow deposit) must land
-                                                    // before the off-chain roster join — otherwise a player could
-                                                    // show up in the bracket having never actually paid.
-                                                    let wallet: Result<solana_sdk::pubkey::Pubkey, _> = pk.parse();
-                                                    let signature = match wallet {
-                                                        Ok(w) => {
-                                                            let rpc_url = std::env::var("SOLANA_RPC_URL")
-                                                                .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
-                                                            match crate::multiplayer::solana::tournament::register_tournament(tid, w, &rpc_url) {
-                                                                Ok(sig) => Some(sig),
-                                                                Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); None }
-                                                            }
-                                                        }
-                                                        Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); None }
-                                                    };
-                                                    let Some(signature) = signature else {
-                                                        return;
-                                                    };
-                                                    match crate::multiplayer::network::vps::confirm_join_with_retry(tid, &pk, 1200, &signature, None) {
-                                                        Ok(slot) => info!("[TOURNAMENT] Joined tournament {} slot {}", tid, slot),
-                                                        Err(e) => warn!("[TOURNAMENT] Join failed: {}", e),
+                                                match pk.parse::<solana_sdk::pubkey::Pubkey>() {
+                                                    Ok(wallet) => {
+                                                        tc.tx_rx = Some(crate::multiplayer::solana::tournament::spawn_register_tournament(tid, wallet, None));
+                                                        tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Pending;
+                                                        tc.status_message = "Registering on-chain and confirming with backend...".to_string();
                                                     }
-                                                });
-                                                tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Pending;
+                                                    Err(e) => {
+                                                        let msg = format!("Bad wallet pubkey: {e}");
+                                                        warn!("[TOURNAMENT] {msg}");
+                                                        tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Error(msg.clone());
+                                                        tc.status_message = msg;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -2788,28 +2935,19 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                                     tc.password_error = None;
                                                 } else {
                                                     let pk = wallet_pubkey.clone().unwrap_or_default();
-                                                    std::thread::spawn(move || {
-                                                        let wallet: Result<solana_sdk::pubkey::Pubkey, _> = pk.parse();
-                                                        let signature = match wallet {
-                                                            Ok(w) => {
-                                                                let rpc_url = std::env::var("SOLANA_RPC_URL")
-                                                                    .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
-                                                                match crate::multiplayer::solana::tournament::register_tournament(tid, w, &rpc_url) {
-                                                                    Ok(sig) => Some(sig),
-                                                                    Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); None }
-                                                                }
-                                                            }
-                                                            Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); None }
-                                                        };
-                                                        let Some(signature) = signature else {
-                                                            return;
-                                                        };
-                                                        match crate::multiplayer::network::vps::confirm_join_with_retry(tid, &pk, 1200, &signature, None) {
-                                                            Ok(slot) => info!("[TOURNAMENT] Registered for {} slot {}", tid, slot),
-                                                            Err(e) => warn!("[TOURNAMENT] Register failed: {}", e),
+                                                    match pk.parse::<solana_sdk::pubkey::Pubkey>() {
+                                                        Ok(wallet) => {
+                                                            tc.tx_rx = Some(crate::multiplayer::solana::tournament::spawn_register_tournament(tid, wallet, None));
+                                                            tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Pending;
+                                                            tc.status_message = "Registering on-chain and confirming with backend...".to_string();
                                                         }
-                                                    });
-                                                    tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Pending;
+                                                        Err(e) => {
+                                                            let msg = format!("Bad wallet pubkey: {e}");
+                                                            warn!("[TOURNAMENT] {msg}");
+                                                            tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Error(msg.clone());
+                                                            tc.status_message = msg;
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -2908,14 +3046,94 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                         egui::RichText::new("Leave").size(11.0).color(egui::Color32::WHITE)
                                     ).fill(egui::Color32::from_rgb(100, 40, 40))).clicked() {
                                         let tid = t.tournament_id;
-                                        let base = crate::multiplayer::network::vps::vps_base();
-                                        std::thread::spawn(move || {
-                                            let url = format!("{}/api/tournament/{}/leave", base, tid);
-                                            let _ = reqwest::blocking::Client::new().post(&url).send();
-                                        });
-                                        tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Idle;
-                                        tc.active_tournament_id = None;
-                                        tc.registered_players.clear();
+                                        let player = wallet_pubkey.clone().unwrap_or_default();
+                                        if player.is_empty() {
+                                            let msg = "Connect your wallet before leaving this tournament.".to_string();
+                                            tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Error(msg.clone());
+                                            tc.status_message = msg;
+                                        } else {
+                                            let (tx, rx) = crossbeam_channel::bounded(1);
+                                            tc.leave_rx = Some(rx);
+                                            tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Pending;
+                                            tc.money_flow = crate::multiplayer::solana::money_flow::MoneyFlowState::signing("leave_tournament");
+                                            tc.status_message = "Building leave transaction...".to_string();
+                                            crate::multiplayer::network::vps::emit_client_event(
+                                                crate::multiplayer::network::vps::ClientEvent::new("money_action_started")
+                                                    .tournament_id(tid)
+                                                    .wallet(player.clone())
+                                                    .action("leave_tournament")
+                                                    .status("signing"),
+                                            );
+                                            std::thread::spawn(move || {
+                                                let result = (|| -> Result<String, String> {
+                                                    let base = crate::multiplayer::network::vps::vps_base();
+                                                    let client = crate::multiplayer::network::vps::client_fast()?;
+                                                    let build_url = format!("{}/api/tournament/{}/build-leave-tx", base, tid);
+                                                    let resp = client
+                                                        .post(&build_url)
+                                                        .json(&serde_json::json!({ "player": player.clone() }))
+                                                        .send()
+                                                        .map_err(|e| format!("build leave tx failed: {e}"))?;
+                                                    if !resp.status().is_success() {
+                                                        let status = resp.status();
+                                                        let body = resp.text().unwrap_or_default();
+                                                        return Err(format!("build leave tx failed: HTTP {status} - {body}"));
+                                                    }
+                                                    let data = resp
+                                                        .json::<serde_json::Value>()
+                                                        .map_err(|e| format!("build leave tx parse failed: {e}"))?;
+                                                    let tx_b64 = data
+                                                        .get("transaction")
+                                                        .and_then(|v| v.as_str())
+                                                        .ok_or_else(|| "build leave tx response missing transaction".to_string())?;
+                                                    let sig = crate::multiplayer::solana::tauri_signer::sign_and_send_b64_via_tauri(
+                                                        &crate::multiplayer::solana::integration::state::DEVNET_RPC_URL,
+                                                        tx_b64,
+                                                        "Leaving tournament",
+                                                    )
+                                                    .map_err(|e| format!("wallet signing failed: {e}"))?;
+                                                    let sig_text = sig.to_string();
+                                                    crate::multiplayer::network::vps::emit_client_event(
+                                                        crate::multiplayer::network::vps::ClientEvent::new("tx_submitted")
+                                                            .tournament_id(tid)
+                                                            .wallet(player.clone())
+                                                            .action("leave_tournament")
+                                                            .signature(sig_text.clone())
+                                                            .status("submitted"),
+                                                    );
+                                                    if let Err(e) = crate::multiplayer::network::vps::register_money_action(
+                                                        crate::multiplayer::network::vps::RegisterMoneyActionReq {
+                                                            action_type: "leave_tournament".to_string(),
+                                                            scope_type: "tournament".to_string(),
+                                                            game_id: None,
+                                                            tournament_id: Some(tid as i64),
+                                                            wallet: Some(player.clone()),
+                                                            signature: Some(sig_text.clone()),
+                                                            reason: Some("player requested tournament leave/refund".to_string()),
+                                                        },
+                                                    ) {
+                                                        tracing::warn!("[money-actions] leave_tournament register failed: {e}");
+                                                    }
+
+                                                    let leave_url = format!("{}/api/tournament/{}/leave", base, tid);
+                                                    let resp = client
+                                                        .post(&leave_url)
+                                                        .json(&serde_json::json!({
+                                                            "player": player.clone(),
+                                                            "signature": sig_text.clone(),
+                                                        }))
+                                                        .send()
+                                                        .map_err(|e| format!("confirm leave failed: {e}"))?;
+                                                    if !resp.status().is_success() {
+                                                        let status = resp.status();
+                                                        let body = resp.text().unwrap_or_default();
+                                                        return Err(format!("confirm leave failed: HTTP {status} - {body}"));
+                                                    }
+                                                    Ok(sig_text)
+                                                })();
+                                                let _ = tx.send(result);
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -2931,29 +3149,21 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                             let tid = t.tournament_id;
                                             let pk = wallet_pubkey.clone().unwrap_or_default();
                                             let password = tc.password_input.clone();
-                                            std::thread::spawn(move || {
-                                                let wallet: Result<solana_sdk::pubkey::Pubkey, _> = pk.parse();
-                                                let signature = match wallet {
-                                                    Ok(w) => {
-                                                        let rpc_url = std::env::var("SOLANA_RPC_URL")
-                                                            .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
-                                                        match crate::multiplayer::solana::tournament::register_tournament(tid, w, &rpc_url) {
-                                                            Ok(sig) => Some(sig),
-                                                            Err(e) => { warn!("[TOURNAMENT] On-chain register_player failed: {}", e); None }
-                                                        }
-                                                    }
-                                                    Err(e) => { warn!("[TOURNAMENT] Bad wallet pubkey: {}", e); None }
-                                                };
-                                                let Some(signature) = signature else {
-                                                    return;
-                                                };
-                                                match crate::multiplayer::network::vps::confirm_join_with_retry(tid, &pk, 1200, &signature, Some(&password)) {
-                                                    Ok(slot) => info!("[TOURNAMENT] Joined private tournament {} slot {}", tid, slot),
-                                                    Err(e) => warn!("[TOURNAMENT] Private join failed: {}", e),
+                                            match pk.parse::<solana_sdk::pubkey::Pubkey>() {
+                                                Ok(wallet) => {
+                                                    tc.tx_rx = Some(crate::multiplayer::solana::tournament::spawn_register_tournament(tid, wallet, Some(password)));
+                                                    tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Pending;
+                                                    tc.status_message = "Registering on-chain and confirming private entry...".to_string();
+                                                    tc.password_error = None;
                                                 }
-                                            });
-                                            tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Pending;
-                                            tc.password_error = None;
+                                                Err(e) => {
+                                                    let msg = format!("Bad wallet pubkey: {e}");
+                                                    warn!("[TOURNAMENT] {msg}");
+                                                    tc.join_status = crate::multiplayer::solana::tournament::TournamentJoinStatus::Error(msg.clone());
+                                                    tc.status_message = msg.clone();
+                                                    tc.password_error = Some(msg);
+                                                }
+                                            }
                                         }
                                         if ui.button(egui::RichText::new("Cancel").size(12.0).color(egui::Color32::WHITE)).clicked() {
                                             tc.active_tournament_id = None;
@@ -2994,11 +3204,17 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                     tc.private_code_error = None;
                     std::thread::spawn(move || {
                         let url = format!("{}/api/tournament/join-private/{}", base, code);
-                        let result = reqwest::blocking::Client::new().post(&url).send();
+                        let result = crate::multiplayer::network::vps::client_fast()
+                            .and_then(|client| {
+                                client
+                                    .post(&url)
+                                    .send()
+                                    .map_err(|e| format!("private join request failed: {e}"))
+                            });
                         let _ = tx.send(match result {
                             Ok(r) if r.status().is_success() => Ok(()),
                             Ok(r) => Err(format!("Error {}", r.status())),
-                            Err(e) => Err(e.to_string()),
+                            Err(e) => Err(e),
                         });
                     });
                 }
@@ -3210,7 +3426,6 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
                             .map(|id| bs58::encode(id.as_bytes()).into_string())
                     })
                     .unwrap_or_default();
-
                 // Direct Connection hosts skip the VPS-backed public lobby
                 // directory entirely — nothing is announced or discoverable;
                 // the host shares their raw node ID out of band instead.
@@ -3498,6 +3713,7 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
             .clicked()
         {
             if let Some(game_id) = ctx.p2p_host.game_id.clone() {
+                let wagered = ctx.p2p_host.stake_amount > 0.0;
                 let node_id = ctx
                     .network_state
                     .as_ref()
@@ -3507,7 +3723,34 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                     })
                     .unwrap_or_default();
                 // Non-blocking — don't freeze the render thread on cancel
-                {
+                if wagered {
+                    #[cfg(feature = "solana")]
+                    {
+                        if let Ok(game_id_u64) = game_id.parse::<u64>() {
+                            if let Some(mut lobby) = ctx.solana_lobby.take() {
+                                lobby.wager_sol = ctx.p2p_host.stake_amount as f32;
+                                lobby.cached_node_id = Some(node_id.clone());
+                                begin_solana_lobby_cancel(ctx, &mut lobby, game_id_u64);
+                                ctx.solana_lobby = Some(lobby);
+                                ctx.menu_state.set(crate::core::MenuState::SolanaLobby);
+                            } else {
+                                warn!(
+                                    "[LOBBY] Cancel Hosting: Solana lobby state unavailable for wagered game {game_id}; keeping host state for retry"
+                                );
+                            }
+                        } else {
+                            warn!(
+                                "[LOBBY] Cancel Hosting: wagered game id {game_id} is not numeric; keeping host state for owner review"
+                            );
+                        }
+                    }
+                    #[cfg(not(feature = "solana"))]
+                    {
+                        warn!(
+                            "[LOBBY] Cancel Hosting: wagered game {game_id} cannot be cancelled without solana feature"
+                        );
+                    }
+                } else {
                     let game_id = game_id.clone();
                     std::thread::spawn(move || {
                         if let Err(e) =
@@ -3520,59 +3763,24 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                     });
                 }
 
-                // A wagered lobby also has an on-chain `Game`/`escrow_pda` —
-                // leaving the P2P relay alone never touched that, so the
-                // wager sat stranded in escrow forever with no way to get it
-                // back. Submit the real `cancel_game` transaction too.
-                #[cfg(feature = "solana")]
-                if ctx.p2p_host.stake_amount > 0.0 {
-                    if let (Some(wallet_pubkey), Ok(game_id_u64)) = (
-                        ctx.solana_state.as_ref().and_then(|s| s.wallet_pubkey),
-                        game_id.parse::<u64>(),
-                    ) {
-                        std::thread::spawn(move || {
-                            let program_id: solana_sdk::pubkey::Pubkey =
-                                crate::solana::instructions::PROGRAM_ID.parse().unwrap();
-                            match crate::multiplayer::solana::lobby::cancel_game_on_chain(
-                                crate::multiplayer::solana::integration::state::DEVNET_RPC_URL
-                                    .to_string(),
-                                program_id,
-                                wallet_pubkey,
-                                game_id_u64,
-                            ) {
-                                Ok(crate::multiplayer::solana::lobby::CancelOutcome::Refunded(sig)) => {
-                                    info!("[LOBBY] cancel_game landed on-chain for {game_id_u64}, sig {sig} — wager refunded");
-                                    crate::multiplayer::solana::wager_recovery::forget(game_id_u64);
-                                }
-                                Ok(crate::multiplayer::solana::lobby::CancelOutcome::NothingToRefund(msg)) => {
-                                    info!("[LOBBY] cancel_game for {game_id_u64}: nothing to refund ({msg})");
-                                    crate::multiplayer::solana::wager_recovery::forget(game_id_u64);
-                                }
-                                Err(e) => warn!(
-                                    "[LOBBY] cancel_game failed for {game_id_u64}: {e} — wager may still be in escrow, retry from the lobby"
-                                ),
-                            }
-                        });
-                    } else {
-                        warn!(
-                            "[LOBBY] Cancel Hosting: wagered lobby {game_id} but no wallet pubkey available — could not submit cancel_game, wager left in escrow"
-                        );
-                    }
-                }
+                // Wagered lobby cancellation is handled above by the tracked
+                // Solana cancel path. Free PvP relay cleanup remains local.
             }
 
-            ctx.p2p_host.game_id = None;
-            ctx.p2p_host.last_heartbeat = None;
-            if let Some(ref mut p2p_state) = ctx.p2p_state {
-                p2p_state.status = P2PConnectionStatus::Disconnected;
+            if ctx.p2p_host.stake_amount <= 0.0 {
+                ctx.p2p_host.game_id = None;
+                ctx.p2p_host.last_heartbeat = None;
+                if let Some(ref mut p2p_state) = ctx.p2p_state {
+                    p2p_state.status = P2PConnectionStatus::Disconnected;
+                }
+                // Stop host relay polling
+                if let Some(ref mut vps) = ctx.p2p_vps_state {
+                    vps.hosting_game_id = None;
+                    vps.hosting_node_id = None;
+                    vps.pending_joiner = None;
+                }
+                ctx.menu_state.set(crate::core::MenuState::BraidLobby);
             }
-            // Stop host relay polling
-            if let Some(ref mut vps) = ctx.p2p_vps_state {
-                vps.hosting_game_id = None;
-                vps.hosting_node_id = None;
-                vps.pending_joiner = None;
-            }
-            ctx.menu_state.set(crate::core::MenuState::BraidLobby);
         }
     });
 }

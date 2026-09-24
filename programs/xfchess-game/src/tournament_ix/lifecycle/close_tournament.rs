@@ -2,6 +2,7 @@ use crate::common::validation;
 use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
+use crate::tournament_ix::lifecycle::initialize_escrow::TournamentEscrow;
 use crate::tournament_ix::prizes::ledger;
 use anchor_lang::prelude::*;
 
@@ -17,9 +18,10 @@ pub struct CloseTournament<'info> {
     #[account(
         mut,
         seeds = [TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()],
-        bump
+        bump,
+        close = treasury_vault
     )]
-    pub prize_escrow_pda: SystemAccount<'info>,
+    pub prize_escrow_pda: Account<'info, TournamentEscrow>,
     #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
     pub treasury_vault: SystemAccount<'info>,
     pub system_program: Program<'info, System>,
@@ -48,17 +50,6 @@ pub fn handler(ctx: Context<CloseTournament>, tournament_id: u64) -> Result<()> 
             !ledger::funded_place_unclaimed(tournament, i)?,
             GameErrorCode::PrizesOutstanding
         );
-    }
-
-    let escrow_ai = ctx.accounts.prize_escrow_pda.to_account_info();
-    let sweep = escrow_ai.lamports();
-    if sweep > 0 {
-        **escrow_ai.try_borrow_mut_lamports()? -= sweep;
-        **ctx
-            .accounts
-            .treasury_vault
-            .to_account_info()
-            .try_borrow_mut_lamports()? += sweep;
     }
 
     tournament.status = TournamentStatus::Closed;

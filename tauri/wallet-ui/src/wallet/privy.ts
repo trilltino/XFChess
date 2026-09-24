@@ -19,6 +19,7 @@
  */
 import bs58 from 'bs58';
 import type { WalletSource } from './types';
+import { detectSolanaTxCapabilities } from './types';
 
 /**
  * Generic over the wallet type rather than naming Privy's
@@ -45,6 +46,7 @@ export function privyWalletSource<W extends { address: string }>(
   return {
     kind: 'privy',
     pubkey: wallet.address,
+    txCapabilities: detectSolanaTxCapabilities('privy', wallet),
     // No provider object: an embedded wallet has no user-selected cluster, so
     // there is nothing for `ensureDevnet` to nudge. Call sites must skip that
     // step for this kind rather than reaching in here for something to poke.
