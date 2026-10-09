@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { apiClient, type TournamentSummary } from "../../services/api";
 import { lamportsToUsd } from "../../services/sol";
 import { useSolUsdRate } from "../../hooks/useSolUsdRate";
+import { cancellationState, type OperationStatus } from "../../services/adminFlows";
 
 interface TournamentListProps {
   onTournamentSelect: (tournamentId: number) => void;
@@ -13,9 +14,11 @@ const DELETABLE_STATUSES = ["cancelled", "completed"];
 export default function TournamentList({ onTournamentSelect }: TournamentListProps) {
   const [tournaments, setTournaments] = useState<TournamentSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const [cancellations, setCancellations] = useState<Record<number, OperationStatus | undefined>>({});
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const solUsdRate = useSolUsdRate();
 
@@ -23,17 +26,42 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
     loadTournaments();
   }, []);
 
+  useEffect(() => {
+    const pendingIds = Object.entries(cancellations).filter(([, status]) => cancellationState(status).pending).map(([id]) => Number(id));
+    if (!pendingIds.length) return;
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      for (const id of pendingIds) {
+        const r = await apiClient.getTournamentOperations(id);
+        if (cancelled) return;
+        if (!r.ok) { setLoadError("Could not refresh cancellation operations. Retry to refresh the list."); continue; }
+        const latest = [...(r.data?.operations ?? [])].sort((a, b) => b.created_at - a.created_at)[0];
+        if (latest) setCancellations(p => ({ ...p, [id]: latest.status }));
+      }
+    }, 10000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [cancellations]);
+
   const loadTournaments = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const response = await apiClient.getTournaments();
       if (response.ok && response.data) {
         setTournaments(response.data);
+        const operationResults = await Promise.all(response.data.map(async tournament => ({ id: tournament.tournament_id, result: await apiClient.getTournamentOperations(tournament.tournament_id) })));
+        const statuses: Record<number, OperationStatus | undefined> = {};
+        for (const { id, result } of operationResults) {
+          if (!result.ok) { statuses[id] = undefined; continue; }
+          const latest = [...(result.data?.operations ?? [])].sort((a, b) => b.created_at - a.created_at)[0];
+          if (latest) statuses[id] = latest.status;
+        }
+        setCancellations(statuses);
       } else {
-        console.error(response.error?.message || "Failed to load tournaments");
+        setLoadError("Failed to load tournaments. Retry to refresh the list.");
       }
     } catch (err) {
-      console.error("Network error loading tournaments", err);
+      setLoadError("Network error loading tournaments.");
     } finally {
       setLoading(false);
     }
@@ -69,13 +97,14 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
     );
     if (!confirmed) return;
     setCancellingId(tournament.tournament_id);
-    const r = await apiClient.cancelTournament(tournament.tournament_id);
-    setCancellingId(null);
-    if (r.ok) {
-      await loadTournaments();
-    } else {
-      alert(`Failed to cancel: ${r.error?.message || "Unknown error"}`);
-    }
+    try {
+      const r = await apiClient.cancelTournament(tournament.tournament_id);
+      if (r.ok && r.data) {
+        setCancellations(p => ({ ...p, [tournament.tournament_id]: r.data!.status }));
+        if (r.data.status === "resolved") await loadTournaments();
+      } else setLoadError(`Cancellation request failed: ${r.error?.message || "Unknown error"}`);
+    } catch { setLoadError("Cancellation response unavailable. Check tournament operations before retrying."); }
+    finally { setCancellingId(null); }
   };
 
   // Local housekeeping only — removes a Cancelled/Completed tournament from
@@ -105,6 +134,7 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
     }
   };
 
+  if (loadError) return <div role="alert">{loadError} <button onClick={loadTournaments}>Retry</button></div>;
   if (loading) {
     return (
       <div style={{
@@ -252,7 +282,7 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
                   {CANCELLABLE_STATUSES.includes(tournament.status.toLowerCase()) && (
                     <button
                       onClick={(e) => handleCancel(e, tournament)}
-                      disabled={cancellingId === tournament.tournament_id}
+                      disabled={cancellingId != null || tournament.tournament_id in cancellations}
                       style={{
                         fontSize: "10px",
                         fontWeight: "800",
@@ -279,9 +309,9 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
                     background: "rgba(255,255,255,0.05)",
                     border: `1px solid ${getStatusColor(tournament.status)}44`
                   }}>
-                    {tournament.status.toUpperCase()}
+                    {tournament.tournament_id in cancellations ? cancellationState(cancellations[tournament.tournament_id]).label : tournament.status.toUpperCase()}
                   </div>
-                  {DELETABLE_STATUSES.includes(tournament.status.toLowerCase()) && (
+                  {DELETABLE_STATUSES.includes(tournament.status.toLowerCase()) && !(tournament.tournament_id in cancellations && cancellationState(cancellations[tournament.tournament_id]).pending) && (
                     <button
                       onClick={(e) => handleDelete(e, tournament)}
                       disabled={deletingId === tournament.tournament_id}

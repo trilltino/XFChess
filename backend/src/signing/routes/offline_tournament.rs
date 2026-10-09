@@ -54,13 +54,13 @@ fn valid_status(status: &str) -> bool {
 
 pub fn public_routes() -> Router<AppState> {
     Router::new()
-        .route("", get(list_events))
+        .route("/", get(list_events))
         .route("/{id}", get(get_event))
 }
 
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
-        .route("", get(list_admin_events).post(create_event))
+        .route("/", get(list_admin_events).post(create_event))
         .route("/{id}", get(get_admin_event).post(update_event))
 }
 

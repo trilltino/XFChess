@@ -2,6 +2,7 @@ use crate::constants::*;
 use crate::errors::GameErrorCode;
 use crate::state::*;
 use crate::tournament_ix::lifecycle::initialize_escrow::TournamentEscrow;
+use crate::tournament_ix::shards;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, TransferChecked};
 
@@ -93,25 +94,43 @@ pub fn handler<'info>(
     let refund_from_escrow = tournament.status == TournamentStatus::Registration;
     let sol_guarantee = tournament.prize_pool;
 
-    let mut all_players: Vec<Pubkey> = Vec::new();
-    let mut shards: Vec<&TournamentPlayersShard> = vec![&ctx.accounts.tournament_players_shard_0];
-    if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
-        shards.push(s);
-    }
-    if let Some(s) = ctx.accounts.tournament_players_shard_2.as_ref() {
-        shards.push(s);
-    }
-    if let Some(s) = ctx.accounts.tournament_players_shard_3.as_ref() {
-        shards.push(s);
-    }
-
-    for shard in shards.iter() {
-        for player in shard.players.iter() {
-            all_players.push(*player);
-        }
-    }
-
+    let shard_slots = [
+        Some(ctx.accounts.tournament_players_shard_0.as_ref().as_ref()),
+        ctx.accounts
+            .tournament_players_shard_1
+            .as_deref()
+            .map(|s| s.as_ref()),
+        ctx.accounts
+            .tournament_players_shard_2
+            .as_deref()
+            .map(|s| s.as_ref()),
+        ctx.accounts
+            .tournament_players_shard_3
+            .as_deref()
+            .map(|s| s.as_ref()),
+    ];
+    let required = shards::required_shards(tournament.max_players) as usize;
+    require!(
+        shard_slots[..required].iter().all(Option::is_some),
+        GameErrorCode::InvalidTournamentStatus
+    );
+    let shard_refs: Vec<&TournamentPlayersShard> = shard_slots.into_iter().flatten().collect();
+    let all_players: Vec<Pubkey> = shards::collect_players(&shard_refs)?
+        .into_iter()
+        .map(|(player, _)| player)
+        .collect();
     let registered = all_players.len();
+    require!(
+        registered == tournament.num_registered_players as usize,
+        GameErrorCode::InvalidTournamentStatus
+    );
+    let mut seen_players = std::collections::HashSet::new();
+    for player_key in all_players.iter() {
+        require!(
+            seen_players.insert(player_key),
+            GameErrorCode::DuplicatePlayerAccount
+        );
+    }
 
     if tournament.usdc_prize_mint.is_some() && tournament.usdc_prize_funded {
         let usdc_prize_escrow = ctx
@@ -171,14 +190,6 @@ pub fn handler<'info>(
                 usdc_mint.decimals,
             )?;
         }
-    }
-
-    let mut seen_players = std::collections::HashSet::new();
-    for player_key in all_players.iter() {
-        require!(
-            seen_players.insert(player_key),
-            GameErrorCode::DuplicatePlayerAccount
-        );
     }
 
     if refund_amount > 0 && registered > 0 {

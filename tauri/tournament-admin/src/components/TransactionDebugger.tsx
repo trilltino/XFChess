@@ -9,8 +9,8 @@ type DebugResult = {
 
 const sigPattern = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 
-export default function TransactionDebugger() {
-  const [signature, setSignature] = useState("");
+export default function TransactionDebugger({ initialSignature = "" }: { initialSignature?: string }) {
+  const [signature, setSignature] = useState(initialSignature);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DebugResult | null>(null);
