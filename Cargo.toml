@@ -146,9 +146,8 @@ braid_chess = { path = "crates/zarathustra_net/braid_chess" }
 # is also the exact version published on crates.io — no local patches existed.
 # "net" is already in iroh-gossip's own default features.
 iroh-gossip = { version = "0.101.0" }
-# Extracted 2026-08-28 into the standalone repo at ..\\nimzovich (path dep).
-# TODO: switch to a git dependency once the engine repo is published on GitHub.
-nimzovich_engine = { path = "../nimzovich/nimzovich_engine" }
+# The public contracts repo is pinned so CI and clean checkouts can resolve it.
+nimzovich_engine = { git = "https://github.com/trilltino/xfchess-contracts.git", rev = "67932ae105b67d58b78cd2203c9657204bf8b259", package = "nimzovich_engine" }
 xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
 # chess-logic-on-chain: removed from workspace dependencies — consolidated
 # into programs/xfchess-game/src/chess_logic_on_chain.rs (move-validation feature).

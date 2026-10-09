@@ -95,8 +95,8 @@ x509-parser = "0.18"
 # pinned to match what's already resolved in Cargo.lock.
 rustls = "0.23.37"
 
-# Extracted 2026-08-28 into the standalone repo at ..\..\nimzovich (path dep).
-nimzovich_engine = { path = "../../nimzovich/nimzovich_engine", features = ["std", "search"] }
+# Engine revision is pinned to match the workspace dependency.
+nimzovich_engine = { git = "https://github.com/trilltino/xfchess-contracts.git", rev = "67932ae105b67d58b78cd2203c9657204bf8b259", package = "nimzovich_engine", features = ["std", "search"] }
 
 # Anti-cheat analysis engine
 xfchess-anticheat = { path = "../crates/shared/xfchess-anticheat" }

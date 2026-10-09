@@ -14,8 +14,17 @@ pub struct CancelGame<'info> {
     pub player: Signer<'info>,
     #[account(mut, constraint = white_authority.key() == game.white @ GameErrorCode::NotInGame)]
     pub white_authority: SystemAccount<'info>,
-    #[account(mut, constraint = black_authority.key() == game.black @ GameErrorCode::NotInGame)]
-    pub black_authority: SystemAccount<'info>,
+    /// CHECK: must equal `game.black`. Before anyone joins, `game.black` is
+    /// `Pubkey::default()` — the System Program's own id, which is owned by
+    /// the native loader — so a `SystemAccount` here rejected every
+    /// cancellation of an unjoined game (AccountNotSystemOwned) and locked the
+    /// creator's stake until `withdraw_expired_wager` after 24h. Lamports are
+    /// only ever sent here when black has joined, i.e. to a real wallet.
+    /// Not declared `mut`: the runtime demotes that reserved id to read-only,
+    /// which an Anchor `mut` constraint rejects. Clients still pass the
+    /// account writable, so a joined black wallet receives its refund.
+    #[account(constraint = black_authority.key() == game.black @ GameErrorCode::NotInGame)]
+    pub black_authority: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -33,6 +42,11 @@ pub struct GameCancelled {
     pub timestamp: i64,
 }
 
+fn require_active_canceller(player: Pubkey, white: Pubkey, black: Pubkey) -> Result<()> {
+    require!(player == white || player == black, GameErrorCode::NotInGame);
+    Ok(())
+}
+
 pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let player = ctx.accounts.player.key();
@@ -47,11 +61,8 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
             game.status = GameStatus::Cancelled;
         }
         GameStatus::Active => {
+            require_active_canceller(player, game.white, game.black)?;
             if game.move_count == 0 {
-                require!(
-                    player == game.white || player == game.black,
-                    GameErrorCode::NotInGame
-                );
                 game.status = GameStatus::Cancelled;
             } else {
                 let now = Clock::get()?.unix_timestamp;
@@ -112,6 +123,12 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
                 ctx.accounts.black_authority.key() == game.black,
                 GameErrorCode::NotInGame
             );
+            // Not declared `mut` (see the account doc), so enforce here what
+            // the attribute used to: a joined black wallet must be writable.
+            require!(
+                ctx.accounts.black_authority.is_writable,
+                anchor_lang::error::ErrorCode::ConstraintMut
+            );
             if ctx.accounts.escrow_pda.lamports() >= wager_amount {
                 anchor_lang::system_program::transfer(
                     CpiContext::new_with_signer(
@@ -143,4 +160,19 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_game_cancellation_requires_a_player_for_every_move_count() {
+        let white = Pubkey::new_unique();
+        let black = Pubkey::new_unique();
+        let outsider = Pubkey::new_unique();
+        assert!(require_active_canceller(white, white, black).is_ok());
+        assert!(require_active_canceller(black, white, black).is_ok());
+        assert!(require_active_canceller(outsider, white, black).is_err());
+    }
 }

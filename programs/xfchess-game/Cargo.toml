@@ -109,6 +109,10 @@ path = "tests/tournament_match_tests.rs"
 name = "tournament_prize_tests"
 path = "tests/tournament_prize_tests.rs"
 
+[[test]]
+name = "tournament_cancel_tests"
+path = "tests/tournament_cancel_tests.rs"
+
 # Permissionless Swiss round advancement (persistency: a round can advance
 # from player signatures + a third-party crank, no backend/authority needed).
 [[test]]
@@ -186,3 +190,7 @@ nimzovich_engine = { workspace = true, features = ["std"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow" }
+
+[[test]]
+name = "lifecycle_race_tests"
+path = "tests/lifecycle_race_tests.rs"
