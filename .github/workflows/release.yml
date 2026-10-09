@@ -335,8 +335,10 @@ jobs:
     needs: verify-backend
     # The release Stockfish artifact below is x86_64. Use an Intel runner so
     # the game, bridge, and engine are one architecture; Apple Silicon Macs
-    # can run this build through Rosetta 2.
-    runs-on: macos-13
+    # can run this build through Rosetta 2. (`macos-13` was retired; jobs on
+    # it sat queued until the 24h limit cancelled the whole release.)
+    runs-on: macos-15-intel
+    timeout-minutes: 120
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
     steps:

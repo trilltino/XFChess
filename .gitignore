@@ -147,3 +147,6 @@ mobile/local.properties
 
 # Temp markdown files
 xfchess-anticheat-crate-*.md
+
+# Local per-package build dir used to avoid lock contention with rust-analyzer
+/target-backend/

@@ -21,8 +21,8 @@ solana-system-interface = { version = "3", features = ["bincode"] }
 solana-commitment-config = "3"
 solana-compute-budget-interface = "3"
 sha2 = "0.10"
-# Extracted 2026-08-28 into the standalone repo at ..\..\..\nimzovich (path dep).
-nimzovich_engine = { path = "../../../nimzovich/nimzovich_engine" }
+# Engine revision is pinned to match the workspace dependency.
+nimzovich_engine = { git = "https://github.com/trilltino/xfchess-contracts.git", rev = "67932ae105b67d58b78cd2203c9657204bf8b259", package = "nimzovich_engine" }
 ephemeral-rollups-sdk = { workspace = true }
 # Async HTTP for the raw-JSON-RPC load test (precise 429 detection + concurrency).
 reqwest.workspace = true

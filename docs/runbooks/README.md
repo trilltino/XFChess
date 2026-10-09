@@ -11,6 +11,7 @@ system. Every SLO-linked alert ([SLO.md](../SLO.md)) must link to a runbook here
 - [game-settlement.md](game-settlement.md) — settlement worker / finalize_game issues
 - [magicblock-lifecycle-devnet.md](magicblock-lifecycle-devnet.md) — ER delegate/undelegate lifecycle on devnet
 - [tournament-lifecycle.md](tournament-lifecycle.md) — tournament scheduling/pairing/prize-distribution issues
+- [program-upgrade.md](program-upgrade.md) — shipping the game-program lifecycle fixes (pre-flight, upgrade, post-upgrade drills)
 
 ## Template
 ```
