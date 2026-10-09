@@ -198,6 +198,38 @@ pub fn cancel_game_ix(
     })
 }
 
+/// `withdraw_expired_wager`: the creator reclaims the stake of a game nobody
+/// joined within 24h. SOL wagers only — the four optional SPL-token accounts
+/// are passed as Anchor's `None` sentinel (the program id).
+pub fn withdraw_expired_wager_ix(
+    program_id: Pubkey,
+    creator: Pubkey,
+    game_id: u64,
+) -> Instruction {
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+    let escrow_pda =
+        Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
+
+    let mut data = anchor_discriminator("withdraw_expired_wager").to_vec();
+    data.extend_from_slice(&game_id.to_le_bytes());
+
+    Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(game_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(creator, true),
+            AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new_readonly(program_id, false),
+            AccountMeta::new_readonly(program_id, false),
+            AccountMeta::new_readonly(program_id, false),
+            AccountMeta::new_readonly(program_id, false),
+        ],
+        data,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // record_move
 // ---------------------------------------------------------------------------
@@ -1070,4 +1102,34 @@ pub fn block_user_ix(program_id: Pubkey, signer: Pubkey, other: Pubkey) -> Resul
         ],
         data: anchor_discriminator("block_user").to_vec(),
     })
+}
+
+#[cfg(test)]
+mod withdraw_expired_layout_tests {
+    use super::*;
+    use anchor_lang::{InstructionData, ToAccountMetas};
+
+    #[test]
+    fn withdraw_expired_wager_matches_the_program_encoding_and_account_order() {
+        let program_id: Pubkey = PROGRAM_ID.parse().unwrap();
+        let creator = Pubkey::new_unique();
+        let ix = withdraw_expired_wager_ix(program_id, creator, 77);
+        assert_eq!(
+            ix.data,
+            xfchess_game::instruction::WithdrawExpiredWager { game_id: 77 }.data()
+        );
+        let expected = xfchess_game::accounts::WithdrawExpiredWager {
+            game: ix.accounts[0].pubkey,
+            escrow_pda: ix.accounts[1].pubkey,
+            player: creator,
+            system_program: system_program::id(),
+            vault_nft_ata: None,
+            player_nft_ata: None,
+            wager_token_mint: None,
+            token_program: None,
+        }
+        .to_account_metas(None);
+        let keys = |m: &[AccountMeta]| m.iter().map(|a| (a.pubkey, a.is_signer)).collect::<Vec<_>>();
+        assert_eq!(keys(&ix.accounts), keys(&expected));
+    }
 }

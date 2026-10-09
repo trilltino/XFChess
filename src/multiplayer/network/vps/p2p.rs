@@ -162,23 +162,45 @@ fn p2p_announce_game_private(
     region: Option<String>,
     password: Option<String>,
 ) -> Result<(), String> {
+    let body = serde_json::to_value(P2PAnnounceReq {
+        game_id: game_id.clone(),
+        host_node_id,
+        display_name,
+        stake_amount,
+        game_type,
+        base_time_seconds,
+        increment_seconds,
+        username,
+        elo,
+        region,
+        password,
+    })
+    .map_err(|e| format!("vps p2p_announce encode: {e}"))?;
+    send_announce(&body)?;
+    if let Ok(mut announced) = announced_rooms().lock() {
+        announced.insert(game_id, body);
+    }
+    Ok(())
+}
+
+/// Announce bodies this process has sent, by game id. Kept only in memory so
+/// a heartbeat that finds its room gone (backend restarted past the room's
+/// TTL, or lost it) can re-announce the identical room; the backend treats a
+/// same-host re-announce as idempotent.
+fn announced_rooms(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>> {
+    static ROOMS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>,
+    > = std::sync::OnceLock::new();
+    ROOMS.get_or_init(Default::default)
+}
+
+fn send_announce(body: &serde_json::Value) -> Result<(), String> {
     let base = vps_base();
     tracing::info!("[P2P] announcing game to {}", base);
     let resp = client()?
         .post(format!("{}/p2p/announce", base))
-        .json(&P2PAnnounceReq {
-            game_id,
-            host_node_id,
-            display_name,
-            stake_amount,
-            game_type,
-            base_time_seconds,
-            increment_seconds,
-            username,
-            elo,
-            region,
-            password,
-        })
+        .json(body)
         .send()
         .map_err(|e| format!("vps p2p_announce: {e}"))?;
 
@@ -187,8 +209,16 @@ fn p2p_announce_game_private(
         let body = resp.text().unwrap_or_default();
         return Err(format!("vps p2p_announce: HTTP {status} - {body}"));
     }
-
+    let accepted = resp.json::<P2PAckResp>().map(|r| r.success).unwrap_or(true);
+    if !accepted {
+        return Err("vps p2p_announce: room id belongs to another host".to_string());
+    }
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct P2PAckResp {
+    success: bool,
 }
 
 pub fn p2p_list_games() -> Result<Vec<P2PGameListing>, String> {
@@ -360,7 +390,23 @@ pub fn p2p_heartbeat(game_id: String, host_node_id: &str) -> Result<(), String> 
     if !resp.status().is_success() {
         return Err(format!("vps p2p_heartbeat: HTTP {}", resp.status()));
     }
-    Ok(())
+    let alive = resp.json::<P2PAckResp>().map(|r| r.success).unwrap_or(true);
+    if alive {
+        return Ok(());
+    }
+    // The backend no longer has this room (restart outlived the TTL, or it
+    // expired): re-announce it from the body this process originally sent.
+    let body = announced_rooms()
+        .lock()
+        .ok()
+        .and_then(|rooms| rooms.get(&game_id).cloned());
+    match body {
+        Some(body) => {
+            tracing::warn!("[P2P] room {game_id} missing on backend; re-announcing");
+            send_announce(&body)
+        }
+        None => Err(format!("vps p2p_heartbeat: room {game_id} not found")),
+    }
 }
 
 pub fn p2p_accept_join(game_id: String, host_node_id: &str) -> Result<(), String> {

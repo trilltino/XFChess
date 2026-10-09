@@ -6,7 +6,18 @@ use bevy::prelude::*;
 pub fn start_first_move_deadline(
     mut deadline: ResMut<FirstMoveDeadline>,
     game_mode: Res<GameMode>,
+    #[cfg(feature = "solana")] game_sync: Option<
+        Res<crate::multiplayer::solana::addon::SolanaGameSync>,
+    >,
 ) {
+    #[cfg(feature = "solana")]
+    if game_sync
+        .as_ref()
+        .is_some_and(|sync| sync.game_id.is_some())
+    {
+        deadline.cancel();
+        return;
+    }
     if matches!(
         *game_mode,
         GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
@@ -26,7 +37,18 @@ pub fn tick_first_move_deadline(
     game_mode: Res<GameMode>,
     barrier: Res<crate::multiplayer::types::OnlineStartBarrier>,
     session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
+    #[cfg(feature = "solana")] game_sync: Option<
+        Res<crate::multiplayer::solana::addon::SolanaGameSync>,
+    >,
 ) {
+    #[cfg(feature = "solana")]
+    if game_sync
+        .as_ref()
+        .is_some_and(|sync| sync.game_id.is_some())
+    {
+        deadline.cancel();
+        return;
+    }
     if !deadline.active {
         return;
     }

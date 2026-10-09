@@ -367,7 +367,15 @@ pub fn sync_session_key_to_network(
         return;
     }
     if solana_state.session_keypair.is_none() {
-        let session_kp = solana_sdk::signature::Keypair::new();
+        // Persisted per wallet (see `network::device_id::wallet_gossip_seed`)
+        // so a restarted client keeps the signer its opponent already knows.
+        let wallet = solana_state
+            .wallet_pubkey
+            .map(|pk| pk.to_string())
+            .unwrap_or_default();
+        let session_kp = solana_sdk::signature::Keypair::new_from_array(
+            crate::multiplayer::network::device_id::wallet_gossip_seed(&wallet),
+        );
         info!(
             "[SESSION] Generated gossip-signing key: {}",
             session_kp.pubkey()

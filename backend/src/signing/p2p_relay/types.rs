@@ -52,7 +52,7 @@ pub struct GameListing {
     pub is_private: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveGame {
     pub announcement: P2PGameAnnouncement,
     pub joiner_node_id: Option<String>,

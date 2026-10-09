@@ -671,13 +671,24 @@ impl SessionStore {
     }
 
     pub async fn list_active_game_ids(&self) -> Vec<u64> {
-        sqlx::query_as::<_, (i64,)>("SELECT game_id FROM sessions WHERE active = 1")
+        self.try_list_active_game_ids().await.unwrap_or_default()
+    }
+
+    pub async fn try_list_active_game_ids(&self) -> Result<Vec<u64>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, (i64,)>("SELECT game_id FROM sessions WHERE active = 1")
             .fetch_all(&self.pool)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(id,)| id as u64)
-            .collect()
+            .await?;
+        Ok(rows.into_iter().map(|(id,)| id as u64).collect())
+    }
+
+    /// Unix seconds the session row was created (0 for rows predating the
+    /// column), or `None` when the session does not exist.
+    pub async fn created_at(&self, game_id: u64) -> Result<Option<i64>, sqlx::Error> {
+        let row = sqlx::query_as::<_, (i64,)>("SELECT created_at FROM sessions WHERE game_id = ?")
+            .bind(game_id as i64)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|(t,)| t))
     }
 
     pub async fn wallet_activated(&self, game_id: u64, wallet: &Pubkey) -> bool {

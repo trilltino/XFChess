@@ -1,4 +1,5 @@
 pub mod braid_transport;
+pub mod device_id;
 pub mod game_id_store;
 pub mod identity;
 pub mod online_game_session;

@@ -299,16 +299,23 @@ pub fn list_tournaments() -> Result<Vec<TournamentSummary>, String> {
     let runtime: serde_json::Value = runtime
         .json()
         .map_err(|e| format!("vps runtime identity parse: {e}"))?;
-    let expected_program = crate::solana::instructions::PROGRAM_ID;
-    let actual_program = runtime
-        .get("program_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    if actual_program != expected_program {
-        return Err(format!(
-            "vps runtime mismatch: expected program {expected_program}, got {actual_program}"
-        ));
+    // `crate::solana` only exists with the `solana` feature; the default
+    // (non-Solana) build has no program ID to compare against.
+    #[cfg(feature = "solana")]
+    {
+        let expected_program = crate::solana::instructions::PROGRAM_ID;
+        let actual_program = runtime
+            .get("program_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if actual_program != expected_program {
+            return Err(format!(
+                "vps runtime mismatch: expected program {expected_program}, got {actual_program}"
+            ));
+        }
     }
+    #[cfg(not(feature = "solana"))]
+    let _ = &runtime;
 
     let resp = http
         .get(format!("{configured_base}/api/tournaments"))

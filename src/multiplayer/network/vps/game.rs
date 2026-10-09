@@ -10,6 +10,8 @@ struct RecordMoveReq<'a> {
     next_fen: &'a str,
     nonce: u64,
     mover_wallet: &'a str,
+    /// Seat-lease writer id (see `network::device_id`).
+    device_id: &'a str,
 }
 
 #[derive(Serialize)]
@@ -116,12 +118,16 @@ pub fn record_move(
             next_fen,
             nonce,
             mover_wallet,
+            device_id: crate::multiplayer::network::device_id::device_id(),
         })
         .send()
         .map_err(|e| format!("vps record_move: {e}"))?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().unwrap_or_default();
+        if crate::multiplayer::network::device_id::is_seat_superseded_body(&body) {
+            crate::multiplayer::network::device_id::mark_seat_superseded(game_id);
+        }
         return Err(format!("vps record_move: HTTP {status} — {body}"));
     }
     let resp = response
@@ -256,7 +262,7 @@ pub fn get_active_game_for_wallet(wallet_pubkey: &str) -> Result<Option<u64>, St
         return Ok(None);
     }
     if !response.status().is_success() {
-        return Ok(None);
+        return Err(format!("get_active_game: HTTP {}", response.status()));
     }
     let resp = response
         .json::<ActiveGameResp>()
@@ -333,6 +339,62 @@ pub fn get_broadcast_delay(game_id: &str) -> Result<u64, String> {
         .json::<DelayResp>()
         .map_err(|e| format!("spectator get_broadcast_delay parse: {e}"))?;
     Ok(resp.delay_secs.max(0) as u64)
+}
+
+/// The backend's seat lease for this wallet in `game_id` (see the backend's
+/// `storage::seat_lease`): which device currently plays the seat.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct SeatLease {
+    pub device_id: String,
+    pub epoch: i64,
+}
+
+/// Claim this device's seat in `game_id`; the newest claim takes over.
+pub fn claim_seat(game_id: u64) -> Result<SeatLease, String> {
+    let response = client()?
+        .post(format!("{}/game/{}/seat/claim", vps_base(), game_id))
+        .json(&serde_json::json!({
+            "device_id": crate::multiplayer::network::device_id::device_id()
+        }))
+        .send()
+        .map_err(|e| format!("claim_seat: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("claim_seat: HTTP {status} — {body}"));
+    }
+    response
+        .json::<SeatLease>()
+        .map_err(|e| format!("claim_seat parse: {e}"))
+}
+
+pub fn get_seat(game_id: u64) -> Result<Option<SeatLease>, String> {
+    let response = client()?
+        .get(format!("{}/game/{}/seat", vps_base(), game_id))
+        .send()
+        .map_err(|e| format!("get_seat: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("get_seat: HTTP {}", response.status()));
+    }
+    response
+        .json::<Option<SeatLease>>()
+        .map_err(|e| format!("get_seat parse: {e}"))
+}
+
+/// Every event in the game's durable log (moves, resignations, draw
+/// actions, session info), in log order. Errors are returned, never folded
+/// into an empty log, so a caller can tell "no moves" from "unreachable".
+pub fn fetch_game_events(game_id: u64) -> Result<Vec<braid_chess::ChessMessage>, String> {
+    let response = client()?
+        .get(format!("{}/game/{}/moves", vps_base(), game_id))
+        .send()
+        .map_err(|e| format!("fetch_game_events: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("fetch_game_events: HTTP {}", response.status()));
+    }
+    response
+        .json::<Vec<braid_chess::ChessMessage>>()
+        .map_err(|e| format!("fetch_game_events parse: {e}"))
 }
 
 pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, String> {

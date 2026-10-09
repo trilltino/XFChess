@@ -13,6 +13,10 @@ pub mod types;
 // Submodules
 pub mod network;
 #[cfg(feature = "solana")]
+pub mod resume;
+#[cfg(feature = "solana")]
+pub mod seat;
+#[cfg(feature = "solana")]
 pub mod rollup;
 #[cfg(feature = "solana")]
 pub mod solana;
@@ -88,6 +92,8 @@ impl Plugin for MultiplayerPlugin {
             // None at runtime and those buttons silently no-op.
             solana::tournament::TournamentClientPlugin,
             monitoring::RollupHealthMonitorPlugin,
+            resume::ResumePlugin,
+            seat::SeatPlugin,
         ));
 
         // 3. Register core orchestration systems

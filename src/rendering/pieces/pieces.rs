@@ -77,6 +77,15 @@ pub struct Piece3DVisual;
 #[derive(Component)]
 pub struct Piece2DVisual;
 
+/// A position to spawn instead of the standard start: an online game being
+/// resumed after a restart from its verified move log. Set before entering
+/// `InGame`; `multiplayer::resume` applies the same FEN to the engine once the
+/// pieces exist and then clears it.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct ResumeBoard {
+    pub fen: Option<String>,
+}
+
 /// Data-driven piece setup - idiomatic Bevy approach
 ///
 /// Uses const arrays to define starting positions, then iterates to spawn pieces.
@@ -92,6 +101,7 @@ pub fn create_pieces(
     mut pieces_spawned: ResMut<PiecesSpawned>,
     sprite_handles: Option<Res<PieceSpriteHandles>>,
     puzzle_board: Option<Res<crate::puzzle::PuzzleBoard>>,
+    resume_board: Option<Res<ResumeBoard>>,
 ) {
     // Skip if already spawned
     if pieces_spawned.spawned {
@@ -135,6 +145,21 @@ pub fn create_pieces(
             info!("[PIECES] Spawned puzzle position from FEN");
             return;
         }
+    }
+
+    // Resumed online game: spawn the verified current position.
+    if let Some(fen) = resume_board.as_ref().and_then(|rb| rb.fen.as_ref()) {
+        spawn_pieces_from_fen(
+            &mut commands,
+            &piece_meshes,
+            &mut materials,
+            fen,
+            visual_offset,
+            &sprite_handles,
+        );
+        pieces_spawned.spawned = true;
+        info!("[PIECES] Spawned resumed game position from FEN");
+        return;
     }
 
     // Each piece will get its own unique material to prevent color bleeding
@@ -964,6 +989,7 @@ impl Plugin for PiecePlugin {
     fn build(&self, app: &mut App) {
         use crate::core::GameState;
         app.init_resource::<PiecesSpawned>();
+        app.init_resource::<ResumeBoard>();
         app.add_systems(Startup, (load_piece_meshes, init_piece_picking_assets));
         app.add_systems(Update, create_pieces.run_if(in_state(GameState::InGame)));
         app.add_systems(OnExit(GameState::InGame), reset_pieces_spawned);

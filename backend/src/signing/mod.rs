@@ -16,6 +16,7 @@ pub mod solana;
 pub mod storage;
 pub mod swiss;
 pub mod tournament_gossip;
+pub mod tournament_operations;
 pub mod ws_subscriber;
 
 use crate::signing::auth_ws::handle_auth_websocket;
@@ -53,6 +54,8 @@ pub struct AppState {
     pub matchmaking: SharedMatchmakingState,
     pub identity_vault: Arc<IdentityVault>,
     pub p2p_relay: Arc<p2p_relay::P2PRelayState>,
+    pub p2p_relay_store: p2p_relay::RelayStore,
+    pub seat_leases: storage::seat_lease::SeatLeaseStore,
     pub vault_pool: Arc<sqlx::SqlitePool>,
     pub elo_cache: Arc<EloCache>,
     pub vps_authority: Arc<Keypair>,
@@ -142,7 +145,8 @@ impl AppState {
         ));
         let jwt = Arc::new(auth::JwtIssuer::new(&config.jwt_secret));
 
-        let p2p_relay = Arc::new(p2p_relay::create_relay_state());
+        let p2p_relay_store = p2p_relay::RelayStore::new(pool.clone());
+        let p2p_relay = Arc::new(p2p_relay::create_relay_state(Some(p2p_relay_store.clone())));
 
         // Initialize ELO cache with 5-minute TTL
         let program_id =
@@ -276,6 +280,8 @@ impl AppState {
             matchmaking,
             identity_vault: Arc::new(identity_vault),
             p2p_relay,
+            p2p_relay_store,
+            seat_leases: storage::seat_lease::SeatLeaseStore::new(pool.clone()),
             vault_pool: Arc::new(vault_pool),
             elo_cache,
             vps_authority,

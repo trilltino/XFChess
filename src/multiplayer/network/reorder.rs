@@ -22,6 +22,16 @@ impl<T> NonceSequencer<T> {
         }
     }
 
+    /// A sequencer for a game resumed from an authoritative snapshot: nonces
+    /// below `expected` were already applied by the snapshot.
+    pub fn starting_at(expected: u64, max_buffered: usize) -> Self {
+        Self {
+            expected: expected.max(1),
+            buffered: BTreeMap::new(),
+            max_buffered,
+        }
+    }
+
     pub fn expected(&self) -> u64 {
         self.expected
     }
@@ -53,9 +63,8 @@ impl<T> NonceSequencer<T> {
 
     pub fn expire(&mut self) -> IngestOutcome<T> {
         let resync_from = self.expected;
-        if let Some((&max_seen, _)) = self.buffered.iter().next_back() {
-            self.expected = max_seen + 1;
-        }
+        // Discard unverified future moves without declaring a missing nonce
+        // applied. Only an authoritative snapshot may advance the cursor.
         self.buffered.clear();
         IngestOutcome::Overflow { resync_from }
     }
@@ -68,6 +77,14 @@ impl<T> NonceSequencer<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resumed_sequencer_rejects_snapshot_moves_and_applies_the_next() {
+        let mut seq = NonceSequencer::starting_at(4, 8);
+        assert_eq!(seq.ingest(3, "old"), IngestOutcome::Duplicate);
+        assert_eq!(seq.ingest(4, "next"), IngestOutcome::Ready(vec!["next"]));
+        assert_eq!(NonceSequencer::<&str>::starting_at(0, 8).expected(), 1);
+    }
 
     #[test]
     fn in_order_delivery_applies_immediately() {
@@ -121,8 +138,10 @@ mod tests {
             other => panic!("expected Overflow, got {other:?}"),
         }
         assert!(!seq.has_buffered());
-        // sequencer resynced past the lost gap — new in-order traffic proceeds normally
-        assert_eq!(seq.ingest(5, "e"), IngestOutcome::Ready(vec!["e"]));
+        // Future traffic remains buffered until the missing move is verified.
+        assert_eq!(seq.expected(), 1);
+        assert_eq!(seq.ingest(5, "e"), IngestOutcome::Ready(vec![]));
+        assert_eq!(seq.ingest(1, "a"), IngestOutcome::Ready(vec!["a"]));
     }
 
     #[test]

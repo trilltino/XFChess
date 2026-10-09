@@ -1092,7 +1092,7 @@ fn handle_tournament_match_assigned(
         competitive.game_id = Some(game_id);
         competitive.wager_lamports = 0;
         competitive.active = true;
-        rollup_manager.game_id = game_id;
+        rollup_manager.assign_game(game_id);
         rollup_manager.is_creator = is_white;
         crate::multiplayer::network::game_id_store::set(game_id);
 

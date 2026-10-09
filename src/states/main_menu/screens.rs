@@ -71,42 +71,56 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 .strong(),
         );
 
-        // Rejoin banner: show if an active game was found for this wallet
+        // An on-chain game this wallet is still in. Resume restores it from
+        // the verified chain state + move log (`multiplayer::resume`), never
+        // from a fresh board/nonce; a game that can't be verified or already
+        // ended says so instead.
         if let Some(rejoin_id) = lobby.rejoin_game_id {
+            use crate::multiplayer::resume::ResumeStatus;
+            let wallet = ctx.solana_state.as_ref().and_then(|s| s.wallet_pubkey);
+            let rpc_url = lobby.cached_rpc_url.clone();
             ui.separator();
             ui.horizontal(|ui| {
                 ui.colored_label(
                     egui::Color32::from_rgb(255, 220, 50),
-                    format!("Active game found (ID: {})", rejoin_id),
+                    format!("Game {rejoin_id} is still in progress. Its clock keeps running."),
                 );
-                if ui.button("Rejoin").clicked() {
-                    if let Some(ref mut sync) = ctx.solana_sync {
-                        sync.game_id = Some(rejoin_id);
-                        // Deliberately false: the rejoin path never sets
-                        // `rollup_manager.game_id`, so
-                        // `handle_game_start_delegation` never kicks off ER
-                        // delegation for it — gating input on delegation here
-                        // would deadlock White for the whole game (the
-                        // pre-v0.2.8 `game_id`-keyed gate did exactly that).
-                        // Moves flow via Braid/gossip instead.
-                        sync.requires_delegation = false;
+                if let Some(resume) = ctx.resume.as_mut() {
+                    if resume.is_checking() {
+                        ui.spinner();
+                        ui.label("Verifying game…");
+                    } else if let Some(wallet) = wallet {
+                        if ui.button("Resume game").clicked() {
+                            resume.request(
+                                rejoin_id,
+                                wallet,
+                                rpc_url.clone(),
+                                crate::multiplayer::rollup::magicblock::MAGIC_BLOCK_ER_ENDPOINT
+                                    .to_string(),
+                            );
+                        }
                     }
-                    if let Some(ref mut comp) = ctx.competitive {
-                        comp.game_id = Some(rejoin_id);
-                        comp.active = true;
-                    }
-                    crate::multiplayer::network::game_id_store::set(rejoin_id);
-                    ctx.ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
-                    *ctx.core_mode = crate::core::GameMode::OnlineMultiplayer;
-                    ctx.next_state.set(crate::core::GameState::InGame);
-                    ctx.menu_state.set(crate::core::MenuState::Main);
                 }
                 if ui.small_button("Dismiss").clicked() {
                     lobby.rejoin_game_id = None;
                 }
             });
+            if let Some(ResumeStatus::Failed { game_id, message }) =
+                ctx.resume.as_ref().map(|r| r.status.clone())
+            {
+                if game_id == rejoin_id {
+                    ui.colored_label(egui::Color32::from_rgb(255, 160, 120), message);
+                }
+            }
             ui.separator();
         }
+        if lobby.rejoin_lookup_error.is_some() {
+            ui.colored_label(
+                egui::Color32::from_rgb(255, 200, 100),
+                "Could not check for an existing game. Try again when connected.",
+            );
+        }
+        render_stake_recovery(ui, ctx, &mut lobby);
 
         Layout::item_space(ui);
 
@@ -582,11 +596,129 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ctx.solana_lobby = Some(lobby);
 }
 
+/// Stakes found on chain (not just in the local ledger) that this wallet can
+/// still recover, plus wagered games that are in play or awaiting ER
+/// undelegation. Only states the program's `cancel_game` accepts are offered
+/// as actions; the list is refreshed from chain after each cancellation.
+#[cfg(feature = "solana")]
+fn render_stake_recovery(
+    ui: &mut egui::Ui,
+    ctx: &mut MainMenuUIContext,
+    lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
+) {
+    use crate::multiplayer::solana::wager_recovery::RecoveryAction;
+
+    let busy = matches!(
+        lobby.status,
+        LobbyStatus::Pending
+            | LobbyStatus::Cancelling { .. }
+            | LobbyStatus::WaitingForOpponent { .. }
+            | LobbyStatus::OpponentJoined { .. }
+            | LobbyStatus::WaitingForHostStart { .. }
+    );
+    if lobby.recovery_rx.is_some() && lobby.recovery_scan.is_none() {
+        ui.label(
+            egui::RichText::new("Checking the chain for stakes you can recover...")
+                .size(12.0)
+                .color(egui::Color32::LIGHT_GRAY),
+        );
+        return;
+    }
+    let Some(scan) = lobby.recovery_scan.clone() else {
+        return;
+    };
+    if scan.reclaimable.is_empty() && scan.in_play.is_empty() && scan.complete {
+        return;
+    }
+
+    ui.separator();
+    let mut reclaim: Option<(u64, u64)> = None;
+    for wager in &scan.reclaimable {
+        let sol = wager.wager_lamports as f64 / 1_000_000_000.0;
+        let reason = match wager.action {
+            RecoveryAction::CancelUnjoined => "no opponent joined",
+            RecoveryAction::CancelBeforeFirstMove => "no move was played",
+            RecoveryAction::CancelAbandoned => "game abandoned for over 24 hours",
+            RecoveryAction::CompleteCancellation => "cancelled, refund not yet completed",
+            RecoveryAction::UndelegationRequired => continue,
+        };
+        ui.horizontal(|ui| {
+            ui.colored_label(
+                egui::Color32::from_rgb(255, 220, 50),
+                format!(
+                    "Game {}: {sol:.4} SOL stake recoverable ({reason}).",
+                    wager.game_id
+                ),
+            );
+            if ui
+                .add_enabled(!busy, egui::Button::new("Reclaim").small())
+                .clicked()
+            {
+                reclaim = Some((wager.game_id, wager.wager_lamports));
+            }
+        });
+    }
+    for wager in &scan.in_play {
+        let text = match (wager.action, wager.cancellable_in_secs) {
+            (RecoveryAction::UndelegationRequired, _) => format!(
+                "Game {}: stake held on the Ephemeral Rollup until the game is committed and settled.",
+                wager.game_id
+            ),
+            (_, Some(secs)) => format!(
+                "Game {}: stake held in an active game; it can be cancelled as abandoned in {}h if no one moves.",
+                wager.game_id,
+                (secs + 3599) / 3600
+            ),
+            _ => continue,
+        };
+        ui.label(
+            egui::RichText::new(text)
+                .size(12.0)
+                .color(egui::Color32::LIGHT_GRAY),
+        );
+    }
+    if !scan.complete {
+        ui.colored_label(
+            egui::Color32::from_rgb(255, 200, 100),
+            "Could not fully check the chain for held stakes. Some may not be listed.",
+        );
+        if !scan.errors.is_empty() {
+            warn!(
+                "[WAGER-RECOVERY] Incomplete scan: {}",
+                scan.errors.join("; ")
+            );
+            if let Some(rescan) = lobby.recovery_scan.as_mut() {
+                rescan.errors.clear();
+            }
+        }
+        if ui.small_button("Check again").clicked() {
+            lobby.recovery_scan = None;
+            lobby.rescan_recovery();
+        }
+    }
+    ui.separator();
+
+    if let Some((game_id, wager_lamports)) = reclaim {
+        begin_solana_lobby_cancel_for(ctx, lobby, game_id, wager_lamports);
+    }
+}
+
 #[cfg(feature = "solana")]
 fn begin_solana_lobby_cancel(
     ctx: &mut MainMenuUIContext,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
     game_id: u64,
+) {
+    let wager_lamports = lobby.wager_lamports();
+    begin_solana_lobby_cancel_for(ctx, lobby, game_id, wager_lamports);
+}
+
+#[cfg(feature = "solana")]
+fn begin_solana_lobby_cancel_for(
+    ctx: &mut MainMenuUIContext,
+    lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
+    game_id: u64,
+    wager_lamports: u64,
 ) {
     if matches!(lobby.status, LobbyStatus::Cancelling { .. }) {
         return;
@@ -601,7 +733,7 @@ fn begin_solana_lobby_cancel(
             .as_ref()
             .and_then(|state| state.wallet_pubkey),
         game_id,
-        lobby.wager_lamports(),
+        wager_lamports,
         lobby.cached_node_id.clone(),
         tx,
     );
@@ -1095,7 +1227,11 @@ fn render_create_tab(
         };
         crate::multiplayer::network::vps::emit_client_event(
             crate::multiplayer::network::vps::ClientEvent::new("solana_create_game_blocked")
-                .session_kind(if has_global_session { "global" } else { "per_game" })
+                .session_kind(if has_global_session {
+                    "global"
+                } else {
+                    "per_game"
+                })
                 .reason(reason),
         );
     }
@@ -1273,7 +1409,11 @@ fn render_join_tab(
             crate::multiplayer::network::vps::emit_client_event(
                 crate::multiplayer::network::vps::ClientEvent::new("solana_join_game_blocked")
                     .game_id(game_id)
-                    .session_kind(if has_global_session { "global" } else { "per_game" })
+                    .session_kind(if has_global_session {
+                        "global"
+                    } else {
+                        "per_game"
+                    })
                     .reason(reason),
             );
         }

@@ -28,6 +28,7 @@ const GENESIS_PARENT: &str = "0";
 #[derive(Debug)]
 pub enum PutEventError {
     ParentMismatch { expected: String },
+    VersionConflict,
     NotAParticipant,
     Db(sqlx::Error),
 }
@@ -68,12 +69,30 @@ impl GameLogState {
         game_id: &str,
         host_node_id: &str,
         joiner_node_id: &str,
-    ) {
+    ) -> Result<bool, sqlx::Error> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO casual_game_participants (game_id, host_node_id, joiner_node_id) VALUES (?, ?, ?)",
+        )
+        .bind(game_id)
+        .bind(host_node_id)
+        .bind(joiner_node_id)
+        .execute(&self.pool)
+        .await?;
+        let persisted: (String, String) = sqlx::query_as(
+            "SELECT host_node_id, joiner_node_id FROM casual_game_participants WHERE game_id = ?",
+        )
+        .bind(game_id)
+        .fetch_one(&self.pool)
+        .await?;
+        if persisted.0 != host_node_id || persisted.1 != joiner_node_id {
+            return Ok(false);
+        }
         let mut map = self.casual_identities.write().await;
         map.insert(
             game_id.to_string(),
             (host_node_id.to_string(), joiner_node_id.to_string()),
         );
+        Ok(true)
     }
 
     fn channel_key(game_id: &str, stream: &str) -> String {
@@ -173,6 +192,25 @@ impl GameLogState {
         // racing PUT for the same game_id).
         let mut tx = self.pool.begin().await.map_err(PutEventError::Db)?;
 
+        // A lost HTTP acknowledgement must not turn a retry into a second
+        // move. Check the version before the parent: the head may have moved
+        // since the original write, but the original result is still valid.
+        let previous: Option<(i64, String, String)> = sqlx::query_as(
+            "SELECT seq, kind, payload_json FROM game_event_log WHERE game_id = ? AND version_hash = ?",
+        )
+        .bind(game_id)
+        .bind(content_version)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(PutEventError::Db)?;
+        if let Some((seq, previous_kind, previous_payload)) = previous {
+            return if previous_kind == kind && previous_payload == payload_json {
+                Ok(seq)
+            } else {
+                Err(PutEventError::VersionConflict)
+            };
+        }
+
         // Causal-chain validation (and `seq` numbering below) is a global
         // per-`game_id` counter shared across every stream/kind — but the
         // *head* a new event must chain off is scoped to its own stream
@@ -248,13 +286,17 @@ impl GameLogState {
             let roster = self.roster.read().await;
             if let Some(allowed) = roster.get(game_id) {
                 if allowed.iter().any(|p| p == player_pubkey) {
-                    if player_pubkey.parse::<solana_sdk::pubkey::Pubkey>().is_ok() {
-                        let sessions = self.session_roster.read().await;
-                        if sessions
-                            .get(game_id)
-                            .and_then(|entries| entries.get(player_pubkey))
-                            != Some(&session_token.to_string())
-                        {
+                    // Only identities admitted through a session key (on-chain
+                    // games) are bound to it. Casual identities are admitted
+                    // by the JOIN_ACK pair; an Iroh node id also parses as a
+                    // Pubkey, so keying this on "looks like a pubkey" used to
+                    // reject every casual player's second write.
+                    let sessions = self.session_roster.read().await;
+                    if let Some(bound) = sessions
+                        .get(game_id)
+                        .and_then(|entries| entries.get(player_pubkey))
+                    {
+                        if bound != session_token {
                             return Err(PutEventError::NotAParticipant);
                         }
                     }
@@ -273,6 +315,16 @@ impl GameLogState {
         {
             OnChainCheck::Verified => {
                 self.add_to_roster(game_id, player_pubkey).await;
+                // Bind the identity to the session key it was verified with
+                // (casual clients send no token and stay unbound).
+                if !session_token.is_empty() {
+                    self.session_roster
+                        .write()
+                        .await
+                        .entry(game_id.to_string())
+                        .or_default()
+                        .insert(player_pubkey.to_string(), session_token.to_string());
+                }
                 Ok(())
             }
             // Ground truth exists (on-chain `Game` account, or a JOIN_ACK-
@@ -336,14 +388,47 @@ impl GameLogState {
             .on_chain_check(game_id, player_pubkey, claimed_session_key)
             .await
         {
-            OnChainCheck::Unavailable => self.casual_identity_check(game_id, player_pubkey).await,
+            OnChainCheck::Unavailable => {
+                let casual = self.casual_identity_check(game_id, player_pubkey).await;
+                if matches!(casual, OnChainCheck::Unavailable)
+                    && self.participants.is_some()
+                    && game_id.parse::<u64>().is_ok()
+                {
+                    // RPC failure is not permission to bootstrap a new
+                    // on-chain game's roster from unverified claims.
+                    OnChainCheck::Mismatch
+                } else {
+                    casual
+                }
+            }
             other => other,
         }
     }
 
     async fn casual_identity_check(&self, game_id: &str, player_pubkey: &str) -> OnChainCheck {
         let map = self.casual_identities.read().await;
-        let Some((host, joiner)) = map.get(game_id) else {
+        if let Some((host, joiner)) = map.get(game_id) {
+            return if player_pubkey == host || player_pubkey == joiner {
+                OnChainCheck::Verified
+            } else {
+                OnChainCheck::Mismatch
+            };
+        }
+        drop(map);
+        let pair: Option<(String, String)> = match sqlx::query_as(
+            "SELECT host_node_id, joiner_node_id FROM casual_game_participants WHERE game_id = ?",
+        )
+        .bind(game_id)
+        .fetch_optional(&self.pool)
+        .await
+        {
+            Ok(pair) => pair,
+            Err(e) => {
+                warn!("[game-log] participant lookup failed for game {game_id}: {e}");
+                return OnChainCheck::Mismatch;
+            }
+        };
+        let Some((host, joiner)) = pair else {
             return OnChainCheck::Unavailable;
         };
         if player_pubkey == host || player_pubkey == joiner {
@@ -436,6 +521,10 @@ pub struct GameEventReq {
     pub message: ChessMessage,
     pub content_version: String,
     pub content_parent: String,
+    /// Writer's device id, checked against the sender's seat lease
+    /// (`storage::seat_lease`) for game-affecting events.
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────────
@@ -486,6 +575,7 @@ async fn get_moves(
 async fn put_moves(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
+    headers: HeaderMap,
     Json(req): Json<GameEventReq>,
 ) -> Response {
     if matches!(
@@ -494,7 +584,8 @@ async fn put_moves(
     ) {
         return StatusCode::UNPROCESSABLE_ENTITY.into_response();
     }
-    put_event_handler(&state, &game_id, "moves", req).await
+    let bearer = bearer_wallet(&state, &headers).await;
+    put_event_handler(&state, &game_id, "moves", req, bearer).await
 }
 
 async fn get_chat(
@@ -518,7 +609,7 @@ async fn put_chat(
         return StatusCode::UNPROCESSABLE_ENTITY.into_response();
     }
     payload.text = text;
-    put_event_handler(&state, &game_id, "chat", req).await
+    put_event_handler(&state, &game_id, "chat", req, None).await
 }
 
 // ── Shared GET (subscribe) path ──────────────────────────────────────────────
@@ -613,14 +704,78 @@ fn is_db_locked(e: &sqlx::Error) -> bool {
         .unwrap_or(false)
 }
 
+/// Wallet named by a valid, non-revoked bearer JWT, if any. The game-log
+/// routes are public (casual games have no wallet), so this is read here
+/// rather than by the auth middleware.
+async fn bearer_wallet(state: &AppState, headers: &HeaderMap) -> Option<String> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("Bearer ")?;
+    let claims = state.jwt.verify(token).ok()?;
+    if state.store.token_is_revoked(&claims.sub, claims.iat).await {
+        return None;
+    }
+    Some(claims.sub)
+}
+
+/// Seat-lease gate for game-affecting events. Unclaimed seats keep the legacy
+/// behaviour. Once a device has claimed the sender's seat, a write must come
+/// from that device *and* carry a JWT for the sender's wallet — so neither a
+/// superseded device nor a third party naming the wallet can write.
+async fn seat_write_allowed(
+    state: &AppState,
+    game_id: &str,
+    req: &GameEventReq,
+    bearer: Option<String>,
+) -> Result<(), (StatusCode, String)> {
+    use crate::signing::storage::seat_lease::SeatCheck;
+    match state
+        .seat_leases
+        .check(game_id, &req.sender_identity, req.device_id.as_deref())
+        .await
+    {
+        Ok(SeatCheck::Unclaimed) => Ok(()),
+        Ok(SeatCheck::Holder) if bearer.as_deref() == Some(req.sender_identity.as_str()) => Ok(()),
+        Ok(SeatCheck::Holder) => Err((
+            StatusCode::UNAUTHORIZED,
+            "a claimed seat requires the player's wallet token".to_string(),
+        )),
+        Ok(SeatCheck::Superseded(lease)) => Err((
+            StatusCode::CONFLICT,
+            format!(
+                "seat_superseded: this game is being played on another device (epoch {})",
+                lease.epoch
+            ),
+        )),
+        Err(e) => {
+            warn!("[game-log] seat check failed for game {game_id}: {e}");
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "seat check failed".to_string(),
+            ))
+        }
+    }
+}
+
 async fn put_event_handler(
     state: &AppState,
     game_id: &str,
     stream: &str,
     req: GameEventReq,
+    bearer: Option<String>,
 ) -> Response {
     if !auth_ok(state, &req).await {
         return StatusCode::UNAUTHORIZED.into_response();
+    }
+    // Moves, resignations and draw actions only from the device holding the
+    // sender's seat; chat stays open to every device the player signed in on.
+    if !matches!(req.message, ChessMessage::Chat(_)) {
+        if let Err((status, msg)) = seat_write_allowed(state, game_id, &req, bearer).await {
+            warn!("[game-log] rejected event for game {game_id}: {msg}");
+            return (status, msg).into_response();
+        }
     }
 
     let kind = kind_of(&req.message);
@@ -692,6 +847,7 @@ async fn put_event_handler(
             )
                 .into_response()
         }
+        Err(PutEventError::VersionConflict) => StatusCode::CONFLICT.into_response(),
         Err(PutEventError::NotAParticipant) => {
             warn!(
                 "[game-log] rejected event for game {}: {} is not a registered participant",
@@ -746,6 +902,12 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/032_casual_game_participants.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
         pool
     }
 
@@ -809,6 +971,52 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(seq, 1);
+    }
+
+    #[tokio::test]
+    async fn retry_after_lost_ack_reuses_original_sequence_even_after_head_moves() {
+        let state = GameLogState::new(migrated_pool().await, None);
+        let first = move_message("fen1", 1);
+        let v1 = braid_chess::version_hash("fen1", 1);
+        let second = move_message("fen2", 2);
+        let v2 = braid_chess::version_hash("fen2", 2);
+        assert_eq!(
+            state
+                .put_event("g1", "moves", "alice", &first, &v1, "0")
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            state
+                .put_event("g1", "moves", "bob", &second, &v2, &v1)
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            state
+                .put_event("g1", "moves", "alice", &first, &v1, "0")
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            state
+                .snapshot("g1", "moves")
+                .await
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        let altered = move_message("different-fen", 1);
+        assert!(matches!(
+            state
+                .put_event("g1", "moves", "alice", &altered, &v1, "0")
+                .await,
+            Err(PutEventError::VersionConflict)
+        ));
     }
 
     #[tokio::test]
@@ -1091,7 +1299,8 @@ mod tests {
 
         state
             .register_casual_identities("g1", "host-node-id", "joiner-node-id")
-            .await;
+            .await
+            .unwrap();
 
         // An impostor node_id races in first — this is exactly the scenario
         // that used to win the old first-two-seen roster unconditionally.
@@ -1116,6 +1325,46 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(seq, 1);
+    }
+
+    #[tokio::test]
+    async fn casual_participants_survive_restart_and_cannot_be_replaced() {
+        let pool = migrated_pool().await;
+        let original = GameLogState::new(pool.clone(), None);
+        assert!(original
+            .register_casual_identities("g1", "host", "joiner")
+            .await
+            .unwrap());
+        assert!(!original
+            .register_casual_identities("g1", "host", "impostor")
+            .await
+            .unwrap());
+        drop(original);
+
+        let restarted = GameLogState::new(pool, None);
+        assert!(matches!(
+            restarted.casual_identity_check("g1", "impostor").await,
+            OnChainCheck::Mismatch
+        ));
+        assert!(matches!(
+            restarted.casual_identity_check("g1", "joiner").await,
+            OnChainCheck::Verified
+        ));
+    }
+
+    #[tokio::test]
+    async fn unavailable_chain_participants_do_not_trust_first_claimant() {
+        let rpc = std::sync::Arc::new(crate::signing::solana::rpc::make_rpc("http://127.0.0.1:1"));
+        let participants = crate::signing::solana::game_participants::GameParticipantsCache::new(
+            rpc,
+            solana_sdk::pubkey::Pubkey::new_unique(),
+        );
+        let state = GameLogState::new(migrated_pool().await, Some(participants));
+        let claimant = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        assert!(matches!(
+            state.verify_claim("42", &claimant, None).await,
+            OnChainCheck::Mismatch
+        ));
     }
 
     #[tokio::test]
