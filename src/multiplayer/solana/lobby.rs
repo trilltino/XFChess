@@ -117,8 +117,14 @@ pub struct SolanaLobbyState {
     pub time_control_base: u32,
     pub time_control_inc: u32,
     pub elo_pref: EloMatchPref,
-    pub rejoin_rx: Option<oneshot::Receiver<Option<u64>>>,
+    pub rejoin_rx: Option<oneshot::Receiver<Result<Option<u64>, String>>>,
     pub rejoin_game_id: Option<u64>,
+    pub rejoin_lookup_error: Option<String>,
+    /// Chain-backed scan for stakes this wallet can still recover — see
+    /// `wager_recovery`. Re-run on wallet change and after a cancellation.
+    pub recovery_rx:
+        Option<oneshot::Receiver<crate::multiplayer::solana::wager_recovery::WagerScan>>,
+    pub recovery_scan: Option<crate::multiplayer::solana::wager_recovery::WagerScan>,
     pub browse_games: Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>,
     pub browse_last_fetch: Option<std::time::Instant>,
     pub browse_rx: Option<
@@ -165,6 +171,9 @@ impl Default for SolanaLobbyState {
             elo_pref: EloMatchPref::default(),
             rejoin_rx: None,
             rejoin_game_id: None,
+            rejoin_lookup_error: None,
+            recovery_rx: None,
+            recovery_scan: None,
             browse_games: Vec::new(),
             browse_last_fetch: None,
             browse_rx: None,
@@ -181,6 +190,28 @@ impl SolanaLobbyState {
     pub fn wager_lamports(&self) -> u64 {
         (self.wager_sol as f64 * 1_000_000_000.0) as u64
     }
+
+    pub fn start_recovery_scan(&mut self, wallet: Pubkey) {
+        let (tx, rx) = oneshot::channel();
+        crate::multiplayer::solana::wager_recovery::spawn_scan(
+            wallet,
+            self.cached_rpc_url.clone(),
+            tx,
+        );
+        self.recovery_rx = Some(rx);
+    }
+
+    /// Refresh the recovery list from chain after a cancellation resolves, so
+    /// it reflects the confirmed escrow state rather than the HTTP/UI result.
+    pub fn rescan_recovery(&mut self) {
+        let wallet = self
+            .cached_keypair_bytes
+            .as_deref()
+            .and_then(|b| Pubkey::try_from(b).ok());
+        if let Some(wallet) = wallet {
+            self.start_recovery_scan(wallet);
+        }
+    }
 }
 
 pub struct SolanaLobbyPlugin;
@@ -196,6 +227,7 @@ impl Plugin for SolanaLobbyPlugin {
                     sync_from_solana_state,
                     poll_lobby_tasks,
                     poll_rejoin_check,
+                    poll_recovery_scan,
                     poll_solana_browse,
                     poll_tournament_games,
                 )
@@ -700,54 +732,99 @@ pub fn cancel_game_on_chain(
         Err(e) => {
             let s = e.to_string();
             if s.contains("not found") || s.contains("AccountNotFound") {
-                return Ok(CancelOutcome::NothingToRefund(
-                    "game account does not exist".to_string(),
-                ));
+                return Err(
+                    "Game account missing; checking transaction history and settlement is required"
+                        .to_string(),
+                );
             }
             return Err(format!("fetch game account: {s}"));
         }
     };
-    // Anchor discriminator (8) + game_id (8) precede white/black — see
-    // `settlement_worker.rs::parse_game_account` for the same layout used
-    // server-side.
-    let white = data.get(16..48).map(Pubkey::try_from).and_then(Result::ok);
-    let black = data.get(48..80).map(Pubkey::try_from).and_then(Result::ok);
-    let (Some(white), Some(black)) = (white, black) else {
-        return Ok(CancelOutcome::NothingToRefund(
-            "game account malformed/empty".to_string(),
-        ));
+    use crate::multiplayer::solana::wager_recovery;
+    use xfchess_game::state::GameStatus;
+
+    let Some(game) = wager_recovery::decode_game(&data) else {
+        return Err("Game account unreadable; refund status is unknown".to_string());
     };
+    let (white, black) = (game.white, game.black);
+    if game.is_delegated {
+        return Err(
+            "Game is still delegated to the Ephemeral Rollup; it must be undelegated before a refund"
+                .to_string(),
+        );
+    }
 
-    // Status byte follows white/black; wager_amount offset is pinned by the
-    // program's `wager_amount_offset_is_212` test (+8 discriminator).
-    // Statuses: 0=Pending 1=WaitingForOpponent 2=Active 3=Inactive 4=Disputed
-    // 5=Finished 6=Settled 7=Expired 8=Cancelled (state/game.rs).
-    const STATUS_OFFSET: usize = 8 + 8 + 32 + 32;
-    const WAGER_OFFSET: usize = 8 + 212;
-    let status = data.get(STATUS_OFFSET).copied().unwrap_or(0);
-    let wager_amount = data
-        .get(WAGER_OFFSET..WAGER_OFFSET + 8)
-        .map(|b| u64::from_le_bytes(b.try_into().expect("8-byte slice")))
+    match game.status {
+        GameStatus::WaitingForOpponent | GameStatus::Active => {}
+        GameStatus::Cancelled => {
+            // An earlier cancellation landed (possibly with its
+            // acknowledgement lost). The escrow balance says whether the
+            // refund transfers completed; the program's Cancelled branch is
+            // idempotent and only sweeps what is still held.
+            let escrow = wager_recovery::escrow_pda(&program_id, game_id);
+            let held = rpc
+                .get_balance(&escrow)
+                .map_err(|e| format!("Game is cancelled; escrow balance unknown: {e}"))?;
+            if held < game.wager_amount {
+                return Ok(CancelOutcome::NothingToRefund(
+                    "Game was already cancelled and its escrow has been refunded".to_string(),
+                ));
+            }
+        }
+        GameStatus::Settled => {
+            return Ok(CancelOutcome::NothingToRefund(
+                "game already settled".to_string(),
+            ));
+        }
+        GameStatus::Finished => {
+            return Err(
+                "Game finished; its payout is settled by the settlement worker, not a cancellation"
+                    .to_string(),
+            );
+        }
+        GameStatus::Expired => {
+            return Err("Game expired; refund status requires chain reconciliation".to_string());
+        }
+        status => {
+            // Pending / Inactive / Disputed — the on-chain cancel would reject
+            // these states; don't burn a wallet popup on a doomed transaction.
+            return Err(format!(
+                "game {game_id} cannot be cancelled right now (status {status:?})"
+            ));
+        }
+    }
+
+    // An unjoined game past its 24h window is reclaimed with
+    // `withdraw_expired_wager`, which every deployed program version accepts.
+    // Before that, `cancel_game` is the path; programs older than the
+    // unjoined-cancel fix reject it with AccountNotSystemOwned (3011).
+    let unjoined = game.status == GameStatus::WaitingForOpponent;
+    let withdrawable_at = game.created_at + 86_400;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-
-    if matches!(status, 5..=8) {
-        return Ok(CancelOutcome::NothingToRefund(match status {
-            5 => "game already finished".to_string(),
-            6 => "game already settled".to_string(),
-            7 => "game already expired".to_string(),
-            _ => "game already cancelled".to_string(),
-        }));
-    }
-    if status != 1 && status != 2 {
-        // Pending / Inactive / Disputed — the on-chain cancel would reject
-        // these states; don't burn a wallet popup on a doomed transaction.
-        return Err(format!(
-            "game {game_id} cannot be cancelled right now (status {status})"
-        ));
-    }
-
-    let ix = cancel_game_ix(program_id, wallet_pubkey, white, black, game_id)
-        .map_err(|e| format!("build cancel_game_ix: {e}"))?;
+    let ix = if unjoined && now > withdrawable_at {
+        crate::solana::instructions::withdraw_expired_wager_ix(program_id, wallet_pubkey, game_id)
+    } else {
+        cancel_game_ix(program_id, wallet_pubkey, white, black, game_id)
+            .map_err(|e| format!("build cancel_game_ix: {e}"))?
+    };
+    let explain = |e: String| -> String {
+        if unjoined
+            && (e.contains("0xbc3")
+                || e.contains("Custom(3011)")
+                || e.contains("AccountNotSystemOwned"))
+        {
+            let hours = ((withdrawable_at - now).max(0) + 3599) / 3600;
+            format!(
+                "This network's game program can't cancel a game before an opponent joins yet. \
+                 Your stake is safe in escrow and can be reclaimed here in about {hours}h. ({e})"
+            )
+        } else {
+            e
+        }
+    };
 
     let mut attempt = 0;
     loop {
@@ -760,6 +837,34 @@ pub fn cancel_game_on_chain(
             "Cancelling wagered game",
         ) {
             Ok(sig) => {
+                // `submit_and_poll(SubmitConfig::fast())` returns a signature
+                // after two seconds even when confirmation is still unknown.
+                // Do not clear the wager ledger or tell the player it was
+                // refunded until the signed cancellation is confirmed.
+                let mut confirmed = false;
+                for _ in 0..20 {
+                    match rpc
+                        .get_signature_status_with_commitment(&sig, CommitmentConfig::confirmed())
+                    {
+                        Ok(Some(Ok(()))) => {
+                            confirmed = true;
+                            break;
+                        }
+                        Ok(Some(Err(e))) => {
+                            return Err(explain(format!(
+                                "Cancellation transaction {sig} failed: {e:?}"
+                            )));
+                        }
+                        Ok(None) | Err(_) => {
+                            std::thread::sleep(std::time::Duration::from_millis(250));
+                        }
+                    }
+                }
+                if !confirmed {
+                    return Err(format!(
+                        "Cancellation outcome unknown for signature {sig}; check the chain before retrying"
+                    ));
+                }
                 info!(
                     "[CANCEL_GAME] game {} cancelled on-chain, sig {}",
                     game_id, sig
@@ -767,8 +872,10 @@ pub fn cancel_game_on_chain(
                 return Ok(CancelOutcome::Refunded(sig));
             }
             Err(e) => {
-                if attempt >= 3 || is_user_rejection(&e) {
-                    return Err(e);
+                // A program error is deterministic: retrying would only
+                // re-prompt the wallet for the same rejection.
+                if attempt >= 3 || is_user_rejection(&e) || e.contains("custom program error") {
+                    return Err(explain(e));
                 }
                 warn!(
                     "[CANCEL_GAME] attempt {} failed for game {}: {}, retrying...",
@@ -1148,6 +1255,7 @@ fn poll_lobby_tasks(
                     message,
                 };
                 lobby.cancel_rx = None;
+                lobby.rescan_recovery();
                 lobby.opponent_poll_rx = None;
                 lobby.game_start_poll_rx = None;
                 let game_id = game_id.to_string();
@@ -1167,11 +1275,10 @@ fn poll_lobby_tasks(
                     LobbyStatus::Cancelling { game_id } => game_id,
                     _ => 0,
                 };
-                lobby.money_flow =
-                    crate::multiplayer::solana::money_flow::MoneyFlowState::failed(
-                        "cancel_game",
-                        error.clone(),
-                    );
+                lobby.money_flow = crate::multiplayer::solana::money_flow::MoneyFlowState::failed(
+                    "cancel_game",
+                    error.clone(),
+                );
                 crate::multiplayer::network::vps::emit_client_event(
                     crate::multiplayer::network::vps::ClientEvent::new("tx_failed")
                         .game_id(game_id)
@@ -1181,6 +1288,7 @@ fn poll_lobby_tasks(
                 );
                 lobby.status = LobbyStatus::CancelFailed { game_id, error };
                 lobby.cancel_rx = None;
+                lobby.rescan_recovery();
             }
             Err(oneshot::error::TryRecvError::Empty) => {}
             Err(_) => {
@@ -1220,7 +1328,7 @@ fn poll_lobby_tasks(
                 lobby.status = LobbyStatus::Success(game_id);
                 lobby.tx_rx = None;
                 crate::multiplayer::network::game_id_store::set(game_id);
-                rollup_manager.game_id = game_id;
+                rollup_manager.assign_game(game_id);
                 rollup_manager.is_creator = lobby.mode == LobbyMode::Create;
                 rollup_manager.used_global_session = lobby.last_attempt_used_global_session;
                 info!(
@@ -1416,30 +1524,59 @@ fn sync_from_solana_state(
         lobby.cached_display_name = solana.cached_display_name.clone();
     }
 
-    if lobby.cached_keypair_bytes.is_none() {
-        if let Some(ref pubkey) = solana.wallet_pubkey {
-            lobby.cached_keypair_bytes = Some(pubkey.to_bytes().to_vec());
+    let wallet_bytes = solana
+        .wallet_pubkey
+        .map(|pubkey| pubkey.to_bytes().to_vec());
+    if lobby.cached_keypair_bytes != wallet_bytes {
+        // A lookup from the previous wallet must not offer its game to the
+        // newly selected wallet, even if that lookup finishes late.
+        lobby.cached_keypair_bytes = wallet_bytes;
+        lobby.rejoin_rx = None;
+        lobby.rejoin_game_id = None;
+        lobby.rejoin_lookup_error = None;
+        lobby.recovery_rx = None;
+        lobby.recovery_scan = None;
+        lobby.cached_display_name = None;
+        if let Some(pubkey) = solana.wallet_pubkey {
+            let (tx, rx) = oneshot::channel();
+            spawn_check_active_game(pubkey, tx);
+            lobby.rejoin_rx = Some(rx);
+            lobby.start_recovery_scan(pubkey);
+        }
+    }
+}
 
-            // Kick off a one-time on-chain active-game check for the rejoin flow.
-            if lobby.rejoin_rx.is_none() && lobby.rejoin_game_id.is_none() {
-                let (tx, rx) = oneshot::channel();
-                spawn_check_active_game(*pubkey, tx);
-                lobby.rejoin_rx = Some(rx);
+fn poll_recovery_scan(mut lobby: ResMut<SolanaLobbyState>) {
+    if let Some(ref mut rx) = lobby.recovery_rx {
+        match rx.try_recv() {
+            Ok(scan) => {
+                lobby.recovery_scan = Some(scan);
+                lobby.recovery_rx = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            Err(_) => {
+                lobby.recovery_scan = Some(crate::multiplayer::solana::wager_recovery::WagerScan {
+                    complete: false,
+                    errors: vec!["stake recovery scan stopped unexpectedly".to_string()],
+                    ..Default::default()
+                });
+                lobby.recovery_rx = None;
             }
         }
     }
 }
 
-pub fn spawn_check_active_game(wallet_pubkey: Pubkey, tx: oneshot::Sender<Option<u64>>) {
+pub fn spawn_check_active_game(
+    wallet_pubkey: Pubkey,
+    tx: oneshot::Sender<Result<Option<u64>, String>>,
+) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
             // Enumerate up to 20 recent game IDs and check for an Active game owned by wallet.
             // In practice the backend /games/active/{wallet} endpoint would be faster.
             let result = crate::multiplayer::vps_client::get_active_game_for_wallet(
                 &wallet_pubkey.to_string(),
-            )
-            .ok()
-            .flatten();
+            );
             let _ = tx.send(result);
         })
         .detach();
@@ -1448,12 +1585,19 @@ pub fn spawn_check_active_game(wallet_pubkey: Pubkey, tx: oneshot::Sender<Option
 fn poll_rejoin_check(mut lobby: ResMut<SolanaLobbyState>) {
     if let Some(ref mut rx) = lobby.rejoin_rx {
         match rx.try_recv() {
-            Ok(maybe_id) => {
+            Ok(Ok(maybe_id)) => {
                 lobby.rejoin_game_id = maybe_id;
+                lobby.rejoin_lookup_error = None;
+                lobby.rejoin_rx = None;
+            }
+            Ok(Err(e)) => {
+                lobby.rejoin_lookup_error = Some(e);
                 lobby.rejoin_rx = None;
             }
             Err(oneshot::error::TryRecvError::Empty) => {}
             Err(_) => {
+                lobby.rejoin_lookup_error =
+                    Some("Active-game lookup stopped unexpectedly".to_string());
                 lobby.rejoin_rx = None;
             }
         }

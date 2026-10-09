@@ -76,6 +76,29 @@ pub struct CausalChainState {
     pub applied_versions: HashMap<u64, std::collections::HashSet<String>>,
     pub pending_versions: HashMap<u64, std::collections::HashSet<String>>,
     pub verified_wallets: HashMap<u64, (String, String)>,
+    /// For a game resumed from the authoritative log after a restart: the
+    /// opponent's last applied gossip `seq` and head version. A first message
+    /// from an agent with no lane yet continues from here instead of from
+    /// genesis, so the opponent's next move isn't rejected as a causal gap
+    /// and a stale or forked continuation still is.
+    pub resume_seeds: HashMap<u64, (u64, String)>,
+}
+
+impl CausalChainState {
+    /// `(last_seq, head)` for `agent_key`, falling back to the game's resume
+    /// seed when this agent has no lane yet.
+    pub fn lane(&self, agent_key: &(u64, Vec<u8>)) -> (u64, String) {
+        match (
+            self.last_seq.get(agent_key),
+            self.head_version.get(agent_key),
+        ) {
+            (None, None) => self.resume_seeds.get(&agent_key.0).cloned().unwrap_or_default(),
+            (seq, head) => (
+                seq.copied().unwrap_or(0),
+                head.cloned().unwrap_or_default(),
+            ),
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -262,5 +285,28 @@ impl Default for NetworkConfig {
             vps_base_url: base.clone(),
             relay_base_url: base,
         }
+    }
+}
+
+#[cfg(test)]
+mod resume_lane_tests {
+    use super::CausalChainState;
+
+    #[test]
+    fn a_new_agent_in_a_resumed_game_continues_from_the_seed() {
+        let mut causal = CausalChainState::default();
+        let opponent = (9u64, vec![7u8; 32]);
+        assert_eq!(causal.lane(&opponent), (0, String::new()));
+
+        causal.resume_seeds.insert(9, (3, "opp-head".to_string()));
+        assert_eq!(causal.lane(&opponent), (3, "opp-head".to_string()));
+
+        // Once the lane exists, it is authoritative over the seed.
+        causal.last_seq.insert(opponent.clone(), 4);
+        causal.head_version.insert(opponent.clone(), "next".to_string());
+        assert_eq!(causal.lane(&opponent), (4, "next".to_string()));
+
+        // Seeds are per game.
+        assert_eq!(causal.lane(&(10, vec![7u8; 32])), (0, String::new()));
     }
 }

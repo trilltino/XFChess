@@ -206,6 +206,17 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_030 = include_str!("../../migrations/030_social_identities.sql");
     run_script(&pools.session_pool, migration_030, "030").await?;
 
+    let migration_032 = include_str!("../../migrations/032_casual_game_participants.sql");
+    run_script(&pools.session_pool, migration_032, "032").await?;
+
+    // ── Migration 033: durable P2P relay rooms (survive backend restart) ──────
+    let migration_033 = include_str!("../../migrations/033_p2p_relay_rooms.sql");
+    run_script(&pools.session_pool, migration_033, "033").await?;
+
+    // ── Migration 034: per-game seat leases (one playing device per player) ──
+    let migration_034 = include_str!("../../migrations/034_game_seat_leases.sql");
+    run_script(&pools.session_pool, migration_034, "034").await?;
+
     info!("[Database] All migrations completed successfully");
     Ok(())
 }

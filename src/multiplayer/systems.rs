@@ -784,7 +784,7 @@ pub fn handle_network_events(
                             }
 
                             let agent_key = (game_id, signer_pubkey.clone());
-                            let last = causal.last_seq.get(&agent_key).copied().unwrap_or(0);
+                            let (last, our_head) = causal.lane(&agent_key);
                             if *seq != last + 1 {
                                 warn!(
                                     "[NET] Causal seq gap for game {} agent {:?}: got {} expected {}",
@@ -813,11 +813,6 @@ pub fn handle_network_events(
                             // forking our local head. Verified by the TLA+ model in
                             // specs/CausalChain.tla (CC_byzantine_current = fork,
                             // CC_byzantine_fixed = safe across 15.2M states).
-                            let our_head = causal
-                                .head_version
-                                .get(&agent_key)
-                                .cloned()
-                                .unwrap_or_default();
                             if !our_head.is_empty() && parent_version != &our_head {
                                 warn!(
                                     "[NET] Equivocation detected for game {}: \
@@ -1342,16 +1337,71 @@ pub fn dispatch_remote_moves(
     }
 }
 
+pub(crate) fn fen_ply(fen: &str) -> Option<u64> {
+    let mut fields = fen.split_whitespace();
+    fields.next()?;
+    let side = fields.next()?;
+    fields.next()?;
+    fields.next()?;
+    fields.next()?;
+    let fullmove: u64 = fields.next()?.parse().ok()?;
+    let base = fullmove.checked_sub(1)?.checked_mul(2)?;
+    match side {
+        "w" => Some(base),
+        "b" => base.checked_add(1),
+        _ => None,
+    }
+}
+
 pub fn handle_resync_response(
     mut network_events: MessageReader<NetworkEvent>,
     mut engine: ResMut<crate::engine::board_state::ChessEngine>,
     mut selection: ResMut<crate::game::resources::Selection>,
+    session: Res<crate::multiplayer::network::online_game_session::OnlineGameSession>,
+    #[cfg(feature = "solana")] game_sync: Option<
+        Res<crate::multiplayer::solana::addon::SolanaGameSync>,
+    >,
 ) {
     for event in network_events.read() {
         if let NetworkEvent::MessageReceived(NetworkMessage::ResyncResponse {
-            committed_fen, ..
+            game_id,
+            committed_fen,
+            ..
         }) = event
         {
+            if !session.active
+                || *game_id
+                    != crate::multiplayer::network::online_game_session::numeric_game_id(
+                        &session.game_id,
+                    )
+                || session.wager_amount > 0.0
+                || {
+                    #[cfg(feature = "solana")]
+                    {
+                        game_sync
+                            .as_ref()
+                            .is_some_and(|sync| sync.game_id == Some(*game_id))
+                    }
+                    #[cfg(not(feature = "solana"))]
+                    {
+                        false
+                    }
+                }
+            {
+                continue;
+            }
+            let (Some(incoming_ply), Some(current_ply)) =
+                (fen_ply(committed_fen), fen_ply(engine.current_fen()))
+            else {
+                warn!("[NET] Ignoring malformed resync FEN for game {game_id}");
+                continue;
+            };
+            if incoming_ply < current_ply
+                || (incoming_ply == current_ply && committed_fen != engine.current_fen())
+            {
+                warn!("[NET] Ignoring stale or conflicting resync for game {game_id}");
+                continue;
+            }
             warn!(
                 "[NET] Applying ResyncResponse — overwriting local engine with FEN: {}",
                 committed_fen
@@ -1359,6 +1409,45 @@ pub fn handle_resync_response(
             let _ = engine.set_from_fen(committed_fen);
             *selection = crate::game::resources::Selection::default();
         }
+    }
+}
+
+fn is_current_game_message(
+    msg: &crate::multiplayer::network::protocol::NetworkMessage,
+    session: Option<&crate::multiplayer::network::online_game_session::OnlineGameSession>,
+) -> bool {
+    session.is_some_and(|session| {
+        session.active
+            && msg.game_id()
+                == crate::multiplayer::network::online_game_session::numeric_game_id(
+                    &session.game_id,
+                )
+    })
+}
+
+#[cfg(test)]
+mod game_control_scope_tests {
+    use super::*;
+    use crate::multiplayer::network::online_game_session::OnlineGameSession;
+
+    #[test]
+    fn late_control_message_cannot_affect_the_next_game() {
+        let current = OnlineGameSession {
+            game_id: "22".to_string(),
+            active: true,
+            ..Default::default()
+        };
+        let old_timeout = NetworkMessage::FlagTimeout {
+            game_id: 21,
+            flagged_player: "white".to_string(),
+        };
+        let current_timeout = NetworkMessage::FlagTimeout {
+            game_id: 22,
+            flagged_player: "white".to_string(),
+        };
+        assert!(!is_current_game_message(&old_timeout, Some(&current)));
+        assert!(is_current_game_message(&current_timeout, Some(&current)));
+        assert!(!is_current_game_message(&current_timeout, None));
     }
 }
 
@@ -1370,6 +1459,7 @@ pub fn handle_game_control_messages(
     mut rematch_response: MessageWriter<crate::game::events::RematchResponseEvent>,
     mut flag_timeout: MessageWriter<crate::game::events::FlagTimeoutEvent>,
     network_state: Res<OnlineNetworkState>,
+    session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
 ) {
     use crate::multiplayer::network::protocol::NetworkMessage;
 
@@ -1377,6 +1467,9 @@ pub fn handle_game_control_messages(
         let NetworkEvent::MessageReceived(msg) = event else {
             continue;
         };
+        if !is_current_game_message(msg, session.as_deref()) {
+            continue;
+        }
 
         match msg {
             NetworkMessage::DrawOffer { player, .. } => {
@@ -1526,14 +1619,41 @@ pub fn handle_resync_request(
     mut network_events: MessageReader<NetworkEvent>,
     engine: Res<crate::engine::board_state::ChessEngine>,
     network_state: Res<OnlineNetworkState>,
+    session: Res<crate::multiplayer::network::online_game_session::OnlineGameSession>,
+    #[cfg(feature = "solana")] game_sync: Option<
+        Res<crate::multiplayer::solana::addon::SolanaGameSync>,
+    >,
 ) {
     for event in network_events.read() {
         if let NetworkEvent::MessageReceived(NetworkMessage::ResyncRequest { game_id }) = event {
+            if !session.active
+                || *game_id
+                    != crate::multiplayer::network::online_game_session::numeric_game_id(
+                        &session.game_id,
+                    )
+                || session.wager_amount > 0.0
+                || {
+                    #[cfg(feature = "solana")]
+                    {
+                        game_sync
+                            .as_ref()
+                            .is_some_and(|sync| sync.game_id == Some(*game_id))
+                    }
+                    #[cfg(not(feature = "solana"))]
+                    {
+                        false
+                    }
+                }
+            {
+                continue;
+            }
             if let Some(tx) = &network_state.message_sender {
                 let response = NetworkMessage::ResyncResponse {
                     game_id: *game_id,
                     committed_fen: engine.current_fen().to_string(),
-                    committed_turn: 0,
+                    committed_turn: fen_ply(engine.current_fen())
+                        .unwrap_or(0)
+                        .min(u16::MAX as u64) as u16,
                 };
                 if let Err(e) = tx.send(response) {
                     warn!("[NET] Failed to send ResyncResponse: {e}");
@@ -1612,6 +1732,7 @@ pub fn reset_multiplayer_session_state(
     mut heartbeat: ResMut<HeartbeatState>,
     mut braid_transport: ResMut<crate::multiplayer::network::braid_transport::BraidTransportState>,
     mut liveness: ResMut<crate::multiplayer::social::OpponentLivenessState>,
+    mut pending: ResMut<crate::multiplayer::types::PendingMoveBuffer>,
     #[cfg(feature = "solana")] mut rollup_manager: ResMut<
         crate::multiplayer::rollup::manager::EphemeralRollupManager,
     >,
@@ -1622,6 +1743,8 @@ pub fn reset_multiplayer_session_state(
     *p2p_conn = crate::multiplayer::network::p2p::P2PConnectionState::default();
     *heartbeat = HeartbeatState::default();
     braid_transport.reset();
+    pending.sequencers.clear();
+    pending.oldest_buffered_since.clear();
     // Without this, a stale opponent-last-seen timestamp from the previous
     // match's opponent could immediately read as "stale" against the new
     // match's clock, false-positiving a disconnect banner at kickoff.
@@ -1689,6 +1812,15 @@ pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
 #[cfg(test)]
 mod gossip_mesh_tests {
     use super::*;
+
+    #[test]
+    fn fen_ply_rejects_invalid_turns_and_orders_positions() {
+        assert_eq!(fen_ply("8/8/8/8/8/8/8/8 w - - 0 1"), Some(0));
+        assert_eq!(fen_ply("8/8/8/8/8/8/8/8 b - - 0 1"), Some(1));
+        assert_eq!(fen_ply("8/8/8/8/8/8/8/8 w - - 0 2"), Some(2));
+        assert_eq!(fen_ply("8/8/8/8/8/8/8/8 x - - 0 2"), None);
+        assert_eq!(fen_ply("8/8/8/8/8/8/8/8 w - - 0 0"), None);
+    }
 
     fn peer(byte: u8) -> EndpointId {
         SecretKey::from_bytes(&[byte; 32]).public()
@@ -1892,6 +2024,7 @@ mod dual_transport_dedup_property_tests {
         app.insert_resource(GameMode::OnlineMultiplayer);
         app.insert_resource(CausalChainState::default());
         app.insert_resource(PendingMoveBuffer::default());
+        app.init_resource::<crate::multiplayer::types::OnlineStartBarrier>();
         app.insert_resource(OnlineGameSession {
             game_id: GAME_ID.to_string(),
             ..Default::default()
@@ -2053,6 +2186,7 @@ mod verified_wallets_roster_tests {
         let mut app = App::new();
         app.insert_resource(CausalChainState::default());
         app.insert_resource(PendingMoveBuffer::default());
+        app.init_resource::<crate::multiplayer::types::OnlineStartBarrier>();
         app.add_message::<NetworkEvent>();
         app.add_message::<ResignEvent>();
         app.add_systems(Update, handle_network_events);

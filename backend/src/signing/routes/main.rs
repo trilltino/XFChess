@@ -24,6 +24,74 @@ const SESSION_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(
 
 const SESSION_MAX_PENDING_PER_WALLET: i64 = 6;
 
+#[derive(Serialize)]
+struct ActiveGameForWalletResp {
+    game_id: Option<u64>,
+}
+
+async fn active_game_for_wallet(
+    State(state): State<AppState>,
+    Path(wallet): Path<String>,
+) -> Result<Json<ActiveGameForWalletResp>, StatusCode> {
+    let wallet = Pubkey::from_str(&wallet).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let game_ids = state.store.try_list_active_game_ids().await.map_err(|e| {
+        warn!("[active-game] session lookup failed: {e}");
+        StatusCode::SERVICE_UNAVAILABLE
+    })?;
+    if game_ids.is_empty() {
+        return Ok(Json(ActiveGameForWalletResp { game_id: None }));
+    }
+
+    let rpc = state.solana_rpc.clone();
+    let program_id = state.program_id;
+    let delegation_program = Pubkey::from_str(solana::DELEGATION_PROGRAM_ID)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let found = tokio::task::spawn_blocking(move || -> Result<Option<u64>, StatusCode> {
+        use crate::signing::solana::game_account::{
+            parse, STATUS_ACTIVE, STATUS_WAITING_FOR_OPPONENT,
+        };
+
+        for chunk in game_ids.chunks(100) {
+            let pdas: Vec<Pubkey> = chunk
+                .iter()
+                .map(|id| {
+                    Pubkey::find_program_address(
+                        &[solana::GAME_SEED, &id.to_le_bytes()],
+                        &program_id,
+                    )
+                    .0
+                })
+                .collect();
+            let accounts = rpc.get_multiple_accounts(&pdas).map_err(|e| {
+                warn!("[active-game] RPC lookup failed: {e}");
+                StatusCode::SERVICE_UNAVAILABLE
+            })?;
+            for (game_id, account) in chunk.iter().zip(accounts) {
+                let Some(account) = account else { continue };
+                // A game in play on the Ephemeral Rollup is owned by the
+                // delegation program on the base layer; its data is still
+                // the Game layout and it is still this wallet's active game.
+                if account.owner != program_id && account.owner != delegation_program {
+                    continue;
+                }
+                let Some(game) = parse(&account.data) else {
+                    continue;
+                };
+                if game.game_id == *game_id
+                    && (game.white == wallet || game.black == wallet)
+                    && matches!(game.status, STATUS_WAITING_FOR_OPPONENT | STATUS_ACTIVE)
+                {
+                    return Ok(Some(*game_id));
+                }
+            }
+        }
+        Ok(None)
+    })
+    .await
+    .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)??;
+    Ok(Json(ActiveGameForWalletResp { game_id: found }))
+}
+
 fn session_create_tracker() -> &'static tokio::sync::Mutex<HashMap<String, Vec<std::time::Instant>>>
 {
     static TRACKER: std::sync::OnceLock<
@@ -110,6 +178,9 @@ pub struct RecordMoveReq {
     pub nonce: u64,
     #[serde(default)]
     pub mover_wallet: String,
+    /// Writer's device id; checked against the caller's seat lease.
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -166,6 +237,7 @@ pub struct PlayerProfileResp {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route("/games/active/{wallet}", get(active_game_for_wallet))
         .route("/session/status/{game_id}", get(session_status))
         .route("/game/{game_id}/nonce", get(get_move_nonce))
         .route("/player/{pubkey}", get(get_player_profile))
@@ -187,6 +259,86 @@ pub fn protected_routes() -> Router<AppState> {
         // should have been reachable without an identity.
         .route("/telemetry/blur", post(report_blur_telemetry))
         .route("/ratings/update", post(update_free_rated_result))
+        .route("/game/{game_id}/seat", get(get_seat))
+        .route("/game/{game_id}/seat/claim", post(claim_seat))
+}
+
+// ── Seat leases (one playing device per player per game) ─────────────────────
+//
+// See `storage::seat_lease` for the policy: the newest device to claim a seat
+// takes it over and earlier devices become view-only. Only an authenticated
+// on-chain participant may claim their own seat.
+
+#[derive(Deserialize)]
+pub struct ClaimSeatReq {
+    pub device_id: String,
+}
+
+pub async fn claim_seat(
+    State(state): State<AppState>,
+    Path(game_id): Path<u64>,
+    caller: crate::signing::auth::RequireWallet,
+    Json(req): Json<ClaimSeatReq>,
+) -> Result<Json<crate::signing::storage::seat_lease::SeatLease>, (StatusCode, String)> {
+    if !crate::signing::storage::seat_lease::valid_device_id(&req.device_id) {
+        return Err((StatusCode::BAD_REQUEST, "invalid device_id".to_string()));
+    }
+    require_game_participant(&state, game_id, &caller.0).await?;
+    let now = chrono::Utc::now().timestamp();
+    let lease = state
+        .seat_leases
+        .claim(&game_id.to_string(), &caller.0, &req.device_id, now)
+        .await
+        .map_err(|e| {
+            error!("[seat] claim failed for game {game_id}: {e}");
+            (StatusCode::SERVICE_UNAVAILABLE, "seat claim failed".to_string())
+        })?;
+    info!(
+        "[seat] game {game_id}: {} seat held by device {} (epoch {})",
+        caller.0, lease.device_id, lease.epoch
+    );
+    Ok(Json(lease))
+}
+
+pub async fn get_seat(
+    State(state): State<AppState>,
+    Path(game_id): Path<u64>,
+    caller: crate::signing::auth::RequireWallet,
+) -> Result<Json<Option<crate::signing::storage::seat_lease::SeatLease>>, (StatusCode, String)> {
+    state
+        .seat_leases
+        .get(&game_id.to_string(), &caller.0)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            error!("[seat] lookup failed for game {game_id}: {e}");
+            (StatusCode::SERVICE_UNAVAILABLE, "seat lookup failed".to_string())
+        })
+}
+
+/// Refuse a game-affecting write from a device that no longer holds
+/// `wallet`'s seat. A store error fails closed for a claimed-capable request.
+pub(crate) async fn require_seat_holder(
+    state: &AppState,
+    game_id: &str,
+    wallet: &str,
+    device_id: Option<&str>,
+) -> Result<(), (StatusCode, String)> {
+    use crate::signing::storage::seat_lease::SeatCheck;
+    match state.seat_leases.check(game_id, wallet, device_id).await {
+        Ok(SeatCheck::Unclaimed | SeatCheck::Holder) => Ok(()),
+        Ok(SeatCheck::Superseded(lease)) => Err((
+            StatusCode::CONFLICT,
+            format!(
+                "seat_superseded: this game is being played on another device (epoch {})",
+                lease.epoch
+            ),
+        )),
+        Err(e) => {
+            error!("[seat] check failed for game {game_id}: {e}");
+            Err((StatusCode::SERVICE_UNAVAILABLE, "seat check failed".to_string()))
+        }
+    }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -503,6 +655,14 @@ pub async fn record_move(
                 (status, msg)
             })?;
     }
+    // A device that lost the caller's seat to another device is view-only.
+    require_seat_holder(
+        &state,
+        &req.game_id.to_string(),
+        &caller.0,
+        req.device_id.as_deref(),
+    )
+    .await?;
     let mover_wallet = Pubkey::from_str(&req.mover_wallet).map_err(|_| {
         let msg = format!(
             "Bad or missing mover_wallet '{}' for game {}",
@@ -1776,19 +1936,8 @@ pub async fn get_move_nonce(
     if let Some(on_chain) = read_game_nonce(&state, game_id).await {
         return Ok(Json(NonceResp { nonce: on_chain }));
     }
-
-    let repo = GameRepository::new(state.store.pool());
-    let next = repo
-        .get_next_move_number(&game_id.to_string())
-        .await
-        .unwrap_or(1) as u64;
-    // next_move_number is 1-based; last confirmed nonce = next - 1 (0 if no moves yet).
-    let nonce = next.saturating_sub(1);
-    warn!(
-        "[VPS] game {game_id}: could not read on-chain nonce, falling back to local move log \
-         ({nonce}) — a mismatch here surfaces to the client as InvalidNonce"
-    );
-    Ok(Json(NonceResp { nonce }))
+    warn!("[VPS] game {game_id}: cannot read authoritative nonce; refusing an unverified fallback");
+    Err(StatusCode::SERVICE_UNAVAILABLE)
 }
 
 async fn read_game_nonce(state: &AppState, game_id: u64) -> Option<u64> {
@@ -1970,6 +2119,7 @@ mod tests {
             next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
             nonce: 1,
             mover_wallet: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string(),
+            device_id: None,
         };
 
         let json = serde_json::to_string(&req);
@@ -2212,6 +2362,7 @@ mod tests {
             next_fen: String::new(),
             nonce: 1,
             mover_wallet: black_wallet.to_string(),
+            device_id: None,
         };
 
         // The host (authenticated as white) relays black's move — must clear
@@ -2337,6 +2488,7 @@ mod tests {
                 next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
                 nonce: 1,
                 mover_wallet: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string(),
+                device_id: None,
             };
             assert_eq!(req.move_uci, move_uci);
         }
@@ -2351,6 +2503,7 @@ mod tests {
             next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".to_string(),
             nonce: 0, // Using #[serde(default)]
             mover_wallet: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string(),
+            device_id: None,
         };
         assert_eq!(req.nonce, 0);
     }

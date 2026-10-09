@@ -1,4 +1,5 @@
 pub mod money_action;
+pub mod seat_lease;
 pub mod offline_tournament;
 pub mod session;
 pub mod tournament;

@@ -23,6 +23,75 @@ struct FinalizationResult {
     country_fee: u64,
     operating_cost_lamports: u64,
     elo_fee: u64,
+    /// Set only from chain evidence, never from the HTTP response alone.
+    status: SettlementStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SettlementStatus {
+    /// The finalize signature confirmed, or the Game PDA is closed (which
+    /// only `finalize_game` does, after paying out the escrow).
+    Confirmed,
+    /// Not proven on chain; the settlement worker keeps retrying server-side.
+    Pending(String),
+}
+
+impl Default for SettlementStatus {
+    fn default() -> Self {
+        Self::Pending("Settlement not yet confirmed on chain".to_string())
+    }
+}
+
+/// Combine the finalize signature's status and the Game PDA's existence into
+/// the settlement status shown to the player.
+///
+/// `sig_status`: `Some(Ok)` confirmed, `Some(Err)` failed, `None` unknown.
+/// `game_closed`: `Some(true)` the PDA no longer exists, `None` lookup failed.
+fn settlement_status(
+    sig_status: Option<Result<(), String>>,
+    game_closed: Option<bool>,
+) -> SettlementStatus {
+    match (sig_status, game_closed) {
+        (Some(Ok(())), _) | (_, Some(true)) => SettlementStatus::Confirmed,
+        (Some(Err(e)), _) => SettlementStatus::Pending(format!(
+            "Settlement transaction failed ({e}); it will be retried automatically"
+        )),
+        (None, _) => SettlementStatus::Pending(
+            "Settlement submitted; waiting for on-chain confirmation".to_string(),
+        ),
+    }
+}
+
+/// Poll the finalize signature, then fall back to the Game PDA's existence.
+fn verify_settlement_on_chain(
+    rpc: &RpcClient,
+    game_pda: &Pubkey,
+    sig: Option<&str>,
+) -> SettlementStatus {
+    let mut sig_status = None;
+    if let Some(sig) = sig.and_then(|s| s.parse::<solana_sdk::signature::Signature>().ok()) {
+        for _ in 0..20 {
+            match rpc.get_signature_status_with_commitment(&sig, CommitmentConfig::confirmed()) {
+                Ok(Some(Ok(()))) => {
+                    sig_status = Some(Ok(()));
+                    break;
+                }
+                Ok(Some(Err(e))) => {
+                    sig_status = Some(Err(format!("{e:?}")));
+                    break;
+                }
+                Ok(None) | Err(_) => std::thread::sleep(std::time::Duration::from_millis(500)),
+            }
+        }
+    }
+    let game_closed = if sig_status == Some(Ok(())) {
+        None
+    } else {
+        rpc.get_account_with_commitment(game_pda, CommitmentConfig::confirmed())
+            .ok()
+            .map(|resp| resp.value.is_none())
+    };
+    settlement_status(sig_status, game_closed)
 }
 
 const MAX_UNDELEGATE_WAIT_SECS: u64 = 60;
@@ -91,6 +160,39 @@ impl RollupNetworkBridge {
             || self.finalization_rx.is_some()
             || self.game_end_moves_flushing
             || self.game_end_flush_rx.is_some()
+    }
+
+    /// Next `record_move` nonce, set from an authoritative source (the
+    /// chain, via a resumed game's verified state).
+    pub fn set_move_nonce(&mut self, next_nonce: u64) {
+        self.move_nonce = next_nonce.max(1);
+    }
+
+    /// Fetch the Game PDA's nonce and apply it before the next batch, so this
+    /// client never records moves from a stale local counter.
+    pub fn request_nonce_resync(&mut self, game_id: u64) {
+        let (nonce_tx, nonce_rx) = oneshot::channel::<u64>();
+        self.nonce_rx = Some(nonce_rx);
+        bevy::tasks::IoTaskPool::get()
+            .spawn(async move {
+                use crate::multiplayer::vps_client;
+                match vps_client::vps_fetch_move_nonce(game_id) {
+                    Ok(next_nonce) => {
+                        info!(
+                            "[NONCE] Resynced nonce for game {} → {}",
+                            game_id, next_nonce
+                        );
+                        let _ = nonce_tx.send(next_nonce);
+                    }
+                    Err(e) => {
+                        warn!(
+                            "[NONCE] Failed to fetch nonce for game {}: {} — keeping local nonce",
+                            game_id, e
+                        );
+                    }
+                }
+            })
+            .detach();
     }
 
     pub fn reset_preserving_finalization(&mut self) {
@@ -457,10 +559,9 @@ fn handle_network_to_rollup_events(
                 new_fen,
                 new_turn,
             } => {
-                if *game_id == rollup_manager.game_id {
-                    rollup_manager.committed_fen = new_fen.clone();
-                    rollup_manager.committed_turn = *new_turn;
-                    rollup_manager.status = GameStateStatus::Synced;
+                // Peer-reported, not read from the Game PDA: only a newer,
+                // non-conflicting position is accepted.
+                if rollup_manager.accept_peer_baseline(*game_id, new_fen, *new_turn) {
                     info!("Batch committed on-chain, tx: {}", tx_sig);
                     rollup_events.write(RollupEvent::BatchCommitted {
                         game_id: *game_id,
@@ -488,10 +589,7 @@ fn handle_network_to_rollup_events(
                 committed_fen,
                 committed_turn,
             } => {
-                if *game_id == rollup_manager.game_id {
-                    rollup_manager.committed_fen = committed_fen.clone();
-                    rollup_manager.committed_turn = *committed_turn;
-                    rollup_manager.status = GameStateStatus::Synced;
+                if rollup_manager.accept_peer_baseline(*game_id, committed_fen, *committed_turn) {
                     info!(
                         "Resynced game {} from peer, turn {}",
                         game_id, committed_turn
@@ -634,6 +732,11 @@ fn process_batch_commit_requests(
     solana_state: Option<Res<SolanaIntegrationState>>,
 ) {
     if bridge.awaiting_commit_confirmation {
+        return;
+    }
+    // Never record from a counter that is about to be replaced by the chain's
+    // nonce (`request_nonce_resync`); the batch stays pending until it lands.
+    if bridge.nonce_rx.is_some() {
         return;
     }
     if rollup_manager.status != GameStateStatus::Pending || !rollup_manager.should_flush() {
@@ -916,28 +1019,7 @@ fn handle_game_start_delegation(
             .detach();
 
         // Item 5: fetch on-chain nonce so we never start with a stale local nonce.
-        let (nonce_tx, nonce_rx) = oneshot::channel::<u64>();
-        bridge.nonce_rx = Some(nonce_rx);
-        bevy::tasks::IoTaskPool::get()
-            .spawn(async move {
-                use crate::multiplayer::vps_client;
-                match vps_client::vps_fetch_move_nonce(game_id) {
-                    Ok(next_nonce) => {
-                        info!(
-                            "[NONCE] Resynced nonce for game {} → {}",
-                            game_id, next_nonce
-                        );
-                        let _ = nonce_tx.send(next_nonce);
-                    }
-                    Err(e) => {
-                        warn!(
-                            "[NONCE] Failed to fetch nonce for game {}: {} — keeping local nonce",
-                            game_id, e
-                        );
-                    }
-                }
-            })
-            .detach();
+        bridge.request_nonce_resync(game_id);
     }
 }
 
@@ -1056,6 +1138,11 @@ fn poll_joiner_delegation_wait(
                 magicblock_resolver.delegation_status = DelegationStatus::Delegated;
                 magicblock_resolver.delegated_game_pda = Some(game_pda);
                 magicblock_events.write(MagicBlockEvent::GameDelegated { game_pda });
+                // The joiner (and a resumed client) records moves too; start
+                // from the chain's nonce, not a local counter that may be 0.
+                if let Some(game_id) = bridge.joiner_delegation_wait_game_id {
+                    bridge.request_nonce_resync(game_id);
+                }
                 bridge.joiner_delegation_wait_rx = None;
                 bridge.joiner_delegation_wait_game_id = None;
             }
@@ -1470,9 +1557,10 @@ fn spawn_finalization_task(
 
             match vps_client::vps_finalize_game(game_id, win_ref, &w_str, &b_str, wager_lamports) {
                 Ok(result) => {
+                    let status = verify_settlement_on_chain(&rpc, &game_pda, Some(&result.sig));
                     info!(
-                        "[FINALIZED] Game {} settled on-chain, payout {} lamports to winner, sig {}",
-                        game_id, result.winner_lamports, result.sig
+                        "[FINALIZED] Game {} finalize returned payout {} lamports, sig {}, chain status {:?}",
+                        game_id, result.winner_lamports, result.sig, status
                     );
                     if result.country_fee > 0 {
                         info!(
@@ -1486,12 +1574,26 @@ fn spawn_finalization_task(
                         country_fee: result.country_fee,
                         operating_cost_lamports: result.operating_cost_lamports,
                         elo_fee: result.elo_fee,
+                        status,
                     });
                 }
                 Err(e) => {
                     error!("[FINALIZE] Game {} finalization failed: {e}", game_id);
-                    // Send a zero-prize result so the UI still shows the popup correctly.
-                    let _ = result_tx.send(FinalizationResult::default());
+                    // The request failing does not mean settlement failed: the
+                    // settlement worker may already have finalized (closing
+                    // the PDA), and otherwise it retries server-side. Report
+                    // what the chain shows, never a confirmed payout.
+                    let status = match verify_settlement_on_chain(&rpc, &game_pda, None) {
+                        SettlementStatus::Confirmed => SettlementStatus::Confirmed,
+                        SettlementStatus::Pending(_) => SettlementStatus::Pending(
+                            "Settlement has not completed yet; it will be retried automatically"
+                                .to_string(),
+                        ),
+                    };
+                    let _ = result_tx.send(FinalizationResult {
+                        status,
+                        ..Default::default()
+                    });
                 }
             }
         })
@@ -1591,8 +1693,19 @@ fn apply_finalization_result(
         Ok(result) => {
             bridge.finalization_rx = None;
             if let Some(ref mut info) = payout_info {
+                if let SettlementStatus::Pending(reason) = result.status {
+                    // Keep the popup in its "settling" state with the reason;
+                    // the HTTP response alone never marks a payout complete.
+                    warn!("[FINALIZE] Settlement not confirmed on chain: {reason}");
+                    info.settlement_pending_reason = Some(reason);
+                    if !result.sig.is_empty() {
+                        info.finalize_sig = Some(result.sig);
+                    }
+                    return;
+                }
                 info.payout_confirmed = true;
-                info.finalize_sig = Some(result.sig);
+                info.settlement_pending_reason = None;
+                info.finalize_sig = (!result.sig.is_empty()).then_some(result.sig);
                 if result.winner_lamports > 0 {
                     info.winning_prize = result.winner_lamports;
                 }
@@ -1926,5 +2039,49 @@ mod game_end_ordering_tests {
             "REGRESSION: finalize/undelegate fired on a later frame while \
              still flushing"
         );
+    }
+}
+
+#[cfg(test)]
+mod settlement_status_tests {
+    use super::*;
+
+    #[test]
+    fn confirmed_signature_or_closed_game_proves_settlement() {
+        assert_eq!(
+            settlement_status(Some(Ok(())), None),
+            SettlementStatus::Confirmed
+        );
+        // finalize_game closes the PDA, so closure is proof even when this
+        // client's own request failed (e.g. the settlement worker won).
+        assert_eq!(
+            settlement_status(None, Some(true)),
+            SettlementStatus::Confirmed
+        );
+        assert_eq!(
+            settlement_status(Some(Err("x".into())), Some(true)),
+            SettlementStatus::Confirmed
+        );
+    }
+
+    #[test]
+    fn http_success_without_chain_evidence_stays_pending() {
+        assert!(matches!(
+            settlement_status(None, Some(false)),
+            SettlementStatus::Pending(_)
+        ));
+        // RPC lookup failure is not evidence either way.
+        assert!(matches!(
+            settlement_status(None, None),
+            SettlementStatus::Pending(_)
+        ));
+        assert!(matches!(
+            settlement_status(Some(Err("custom program error".into())), Some(false)),
+            SettlementStatus::Pending(_)
+        ));
+        assert!(matches!(
+            FinalizationResult::default().status,
+            SettlementStatus::Pending(_)
+        ));
     }
 }

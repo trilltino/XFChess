@@ -67,6 +67,8 @@ pub struct MainMenuUIContext<'w, 's> {
     #[cfg(feature = "solana")]
     pub sol_usd_wager_rate: Option<Res<'w, SolUsdRate>>,
     #[cfg(feature = "solana")]
+    pub resume: Option<ResMut<'w, crate::multiplayer::resume::ResumeState>>,
+    #[cfg(feature = "solana")]
     pub tournament_client:
         Option<ResMut<'w, crate::multiplayer::solana::tournament::TournamentClientState>>,
     pub pgn_replay_fetch: ResMut<'w, crate::states::main_menu::tournament_replay::PgnReplayFetch>,

@@ -128,7 +128,15 @@ impl TestApp {
 }
 
 async fn spawn_app() -> TestApp {
-    let pools = initialize_pools(&unique_db_url("session"), &unique_db_url("vault"))
+    spawn_app_on(&unique_db_url("session"), &unique_db_url("vault")).await
+}
+
+/// Build a fresh `AppState` (empty in-memory maps, as after a process
+/// restart) over existing databases. Shared-cache in-memory SQLite stays
+/// alive while any earlier app's pool is open, so calling this twice with the
+/// same URLs simulates a backend restart over durable storage.
+async fn spawn_app_on(session_url: &str, vault_url: &str) -> TestApp {
+    let pools = initialize_pools(session_url, vault_url)
         .await
         .expect("init pools");
     run_migrations(&pools).await.expect("run migrations");
@@ -150,6 +158,12 @@ async fn spawn_app() -> TestApp {
     );
     // Social tables (some routes touch them; harmless for the rest).
     let _ = state.friends.init().await;
+    // Same startup step as `server::run`: restore persisted relay rooms.
+    state
+        .p2p_relay_store
+        .hydrate(&state.p2p_relay)
+        .await
+        .expect("hydrate relay rooms");
 
     TestApp { state }
 }
@@ -228,12 +242,35 @@ async fn health_detailed_reports_real_memory_and_disk_state() {
 // ── Blur telemetry parity (anti-cheat input boundary) ─────────────────────────
 
 #[tokio::test]
-async fn blur_telemetry_unknown_game_is_404() {
+async fn blur_telemetry_requires_a_wallet_identity() {
     let app = spawn_app().await;
+    // Blur telemetry is anti-cheat evidence against a named player, so it
+    // moved behind wallet auth; an anonymous report is rejected outright.
     let (status, _) = app
         .post_json(
             "/telemetry/blur",
             &json!({ "game_id": 999001, "move_number": 1, "color": "white", "blurred": true }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn blur_telemetry_unknown_game_is_404() {
+    let app = spawn_app().await;
+    let token = app
+        .state
+        .jwt
+        .issue(&Keypair::new().pubkey().to_string())
+        .expect("issue jwt");
+    let (status, _) = app
+        .send_auth(
+            "POST",
+            "/telemetry/blur",
+            Some(&token),
+            Some(
+                &json!({ "game_id": 999001, "move_number": 1, "color": "white", "blurred": true }),
+            ),
         )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -249,33 +286,49 @@ async fn blur_telemetry_enforces_ply_parity() {
         .create(game_id, solana_sdk::pubkey::Pubkey::new_unique())
         .await
         .expect("create session");
-
-    // Ply 1 is white's — correct color accepted.
-    let (ok_status, _) = app
-        .post_json(
-            "/telemetry/blur",
-            &json!({ "game_id": game_id, "move_number": 1, "color": "white", "blurred": false, "think_ms": 3000 }),
-        )
-        .await;
-    assert_eq!(ok_status, StatusCode::NO_CONTENT);
+    let token = app
+        .state
+        .jwt
+        .issue(&Keypair::new().pubkey().to_string())
+        .expect("issue jwt");
 
     // Ply 1 claimed as black — parity violation rejected.
     let (bad_status, _) = app
-        .post_json(
+        .send_auth(
+            "POST",
             "/telemetry/blur",
-            &json!({ "game_id": game_id, "move_number": 1, "color": "black", "blurred": true }),
+            Some(&token),
+            Some(
+                &json!({ "game_id": game_id, "move_number": 1, "color": "black", "blurred": true }),
+            ),
         )
         .await;
     assert_eq!(bad_status, StatusCode::BAD_REQUEST);
 
     // Ply 0 is invalid.
     let (zero_status, _) = app
-        .post_json(
+        .send_auth(
+            "POST",
             "/telemetry/blur",
-            &json!({ "game_id": game_id, "move_number": 0, "color": "white", "blurred": false }),
+            Some(&token),
+            Some(&json!({ "game_id": game_id, "move_number": 0, "color": "white", "blurred": false })),
         )
         .await;
     assert_eq!(zero_status, StatusCode::BAD_REQUEST);
+
+    // Correct parity passes the parity check, then the caller must be a
+    // verifiable participant; this wallet is not, so the report is refused
+    // rather than recorded against the game.
+    let (ok_parity, _) = app
+        .send_auth(
+            "POST",
+            "/telemetry/blur",
+            Some(&token),
+            Some(&json!({ "game_id": game_id, "move_number": 1, "color": "white", "blurred": false, "think_ms": 3000 })),
+        )
+        .await;
+    assert_ne!(ok_parity, StatusCode::BAD_REQUEST);
+    assert_ne!(ok_parity, StatusCode::NO_CONTENT);
 }
 
 // ── Broadcast-delay gating (esports integrity) ────────────────────────────────
@@ -843,7 +896,9 @@ async fn dual_accept_auth_guards_signing_endpoints() {
     let (status, _) = app.post_json("/move/record", &move_body).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "no auth must 401");
 
-    // (b) Legacy relay secret → accepted (handler then 404s: no such session).
+    // (b) Relay secret alone passes the router guard but carries no wallet
+    // identity; `record_move` requires one (`RequireWallet`), so a move can
+    // no longer be submitted on a self-declared `mover_wallet` alone.
     let req = Request::builder()
         .uri("/move/record")
         .method("POST")
@@ -852,10 +907,10 @@ async fn dual_accept_auth_guards_signing_endpoints() {
         .body(Body::from(serde_json::to_vec(&move_body).unwrap()))
         .unwrap();
     let (status, _) = app.send(req).await;
-    assert_ne!(
+    assert_eq!(
         status,
         StatusCode::UNAUTHORIZED,
-        "valid relay secret must pass"
+        "relay secret without a wallet identity must not record a move"
     );
 
     // (c) Per-user JWT (no relay header) → accepted.
@@ -1003,13 +1058,14 @@ async fn treasury_refund_never_signs_in_process() {
         body.get("signature").is_none(),
         "no signature should ever come from this process: {body}"
     );
-    let command = body["run_on_isolated_host"]
-        .as_str()
-        .expect("run_on_isolated_host string");
-    assert!(
-        command.contains("treasury_signer"),
-        "should hand the operator the isolated-host command: {command}"
-    );
+    // Structured binary + args (not a shell string), and the RPC URL — which
+    // carries the provider token — is never echoed back unredacted.
+    let handoff = &body["run_on_isolated_host"];
+    assert_eq!(handoff["binary"], "treasury_signer", "{body}");
+    let args = handoff["args"].as_array().expect("args array");
+    assert_eq!(args[0], wallet.as_str());
+    assert_eq!(args[1], "1000000");
+    assert!(handoff.get("command").is_none(), "no shell line: {body}");
 }
 
 // ── Tournament templates + persistent audit log (Phase 3) ─────────────────────
@@ -1151,4 +1207,318 @@ async fn private_tournament_rejects_bad_password() {
         "no player should have been added: {:?}",
         after.players
     );
+}
+
+// ── Multiplayer lifecycle drills (two clients, backend restart) ──────────────
+//
+// In-process two-client drills against the real router. "Restart" builds a
+// brand-new `AppState` (all in-memory maps empty) over the same SQLite
+// databases, exactly what a process restart leaves behind.
+
+fn relay_sign(kp: &Keypair, game_id: &str, message: &str) -> Vec<u8> {
+    let signable = format!("{}:{}:{}", game_id, kp.pubkey(), message);
+    kp.sign_message(signable.as_bytes()).as_ref().to_vec()
+}
+
+fn announce_body(game_id: &str, host: &str) -> Value {
+    json!({
+        "game_id": game_id, "host_node_id": host, "display_name": "host",
+        "stake_amount": 0.0, "game_type": "P2P", "base_time_seconds": 300,
+        "increment_seconds": 0, "username": null, "elo": null,
+        "region": null, "password": null
+    })
+}
+
+/// announce → join → accept, which also registers the immutable casual
+/// participant pair the game log checks writers against.
+async fn start_casual_game(app: &TestApp, game_id: &str, host: &str, joiner: &str) {
+    let (_, b) = app
+        .post_json("/p2p/announce", &announce_body(game_id, host))
+        .await;
+    assert_eq!(b["success"], true);
+    let (_, b) = app
+        .post_json(
+            "/p2p/join",
+            &json!({ "game_id": game_id, "joiner_node_id": joiner, "password": null }),
+        )
+        .await;
+    assert_eq!(b["success"], true);
+    let (_, b) = app
+        .post_json(
+            "/p2p/accept",
+            &json!({ "game_id": game_id, "host_node_id": host }),
+        )
+        .await;
+    assert_eq!(b["success"], true);
+}
+
+#[tokio::test]
+async fn drill_lobby_and_join_ack_survive_backend_restart() {
+    let session_url = unique_db_url("drill_relay_s");
+    let vault_url = unique_db_url("drill_relay_v");
+    let app = spawn_app_on(&session_url, &vault_url).await;
+    let host = Keypair::new();
+    let joiner = Keypair::new();
+    let game_id = "drill-relay-1";
+    let announce = announce_body(game_id, &host.pubkey().to_string());
+
+    let (_, b) = app.post_json("/p2p/announce", &announce).await;
+    assert_eq!(b["success"], true);
+    let (_, b) = app
+        .post_json(
+            "/p2p/join",
+            &json!({ "game_id": game_id, "joiner_node_id": joiner.pubkey().to_string(), "password": null }),
+        )
+        .await;
+    assert_eq!(b["success"], true);
+    let ack = "JOIN_ACK:host|white|1200";
+    let (_, b) = app
+        .post_json(
+            "/p2p/message",
+            &json!({
+                "game_id": game_id, "from_node_id": host.pubkey().to_string(),
+                "message": ack, "signature": relay_sign(&host, game_id, ack)
+            }),
+        )
+        .await;
+    assert_eq!(b["success"], true);
+
+    // Backend restarts before the joiner polled the JOIN_ACK.
+    let app = spawn_app_on(&session_url, &vault_url).await;
+
+    let (_, b) = app
+        .post_json(
+            "/p2p/poll",
+            &json!({ "game_id": game_id, "node_id": joiner.pubkey().to_string(), "since_index": 0 }),
+        )
+        .await;
+    assert_eq!(b["messages"], json!([ack]), "JOIN_ACK survives the restart");
+    assert_eq!(b["next_index"], 1);
+
+    // A cursor from before the restart that is past the end must not panic.
+    let (s, b) = app
+        .post_json(
+            "/p2p/poll",
+            &json!({ "game_id": game_id, "node_id": joiner.pubkey().to_string(), "since_index": 50 }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(b["next_index"], 1);
+
+    // Heartbeat finds the room; a same-host re-announce keeps the joiner;
+    // a different node cannot take the room over.
+    let (_, b) = app
+        .post_json(
+            "/p2p/heartbeat",
+            &json!({ "game_id": game_id, "host_node_id": host.pubkey().to_string() }),
+        )
+        .await;
+    assert_eq!(b["success"], true);
+    let (_, b) = app.post_json("/p2p/announce", &announce).await;
+    assert_eq!(b["success"], true);
+    let (_, listing) = app.get("/p2p/games").await;
+    let room = listing
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["game_id"] == game_id)
+        .cloned()
+        .expect("room listed after restart");
+    assert_eq!(room["players_joined"], 2, "re-announce kept the joiner");
+    let hijack = announce_body(game_id, &Keypair::new().pubkey().to_string());
+    let (_, b) = app.post_json("/p2p/announce", &hijack).await;
+    assert_eq!(
+        b["success"], false,
+        "another node cannot overwrite the room"
+    );
+
+    // The handshake completes after the restart.
+    let (_, b) = app
+        .post_json(
+            "/p2p/accept",
+            &json!({ "game_id": game_id, "host_node_id": host.pubkey().to_string() }),
+        )
+        .await;
+    assert_eq!(b["success"], true);
+}
+
+fn move_event(player: &str, uci: &str, fen: &str, n: u32, parent: &str) -> (Value, String) {
+    let version = braid_chess::version_hash(fen, n);
+    let body = json!({
+        "player_pubkey": player,
+        "session_token": "",
+        "message": {
+            "type": "move", "from": &uci[0..2], "to": &uci[2..4], "promotion": null,
+            "uci": uci, "fen_after": fen, "move_number": n, "player": player
+        },
+        "content_version": version,
+        "content_parent": parent,
+    });
+    (body, version)
+}
+
+async fn put_move(app: &TestApp, game_id: &str, body: &Value, bearer: Option<&str>) -> StatusCode {
+    app.send_auth("PUT", &format!("/game/{game_id}/moves"), bearer, Some(body))
+        .await
+        .0
+}
+
+async fn move_log(app: &TestApp, game_id: &str) -> Vec<Value> {
+    let (s, v) = app.get(&format!("/game/{game_id}/moves")).await;
+    assert_eq!(s, StatusCode::OK);
+    v.as_array().cloned().unwrap_or_default()
+}
+
+const FEN_E4: &str = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+const FEN_E4E5: &str = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2";
+const FEN_NF3: &str = "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2";
+
+#[tokio::test]
+async fn drill_casual_game_survives_restart_without_duplicate_or_foreign_moves() {
+    let session_url = unique_db_url("drill_log_s");
+    let vault_url = unique_db_url("drill_log_v");
+    let app = spawn_app_on(&session_url, &vault_url).await;
+    let host = Keypair::new().pubkey().to_string();
+    let joiner = Keypair::new().pubkey().to_string();
+    let game_id = "drill-casual-1";
+    start_casual_game(&app, game_id, &host, &joiner).await;
+
+    let (m1, v1) = move_event(&host, "e2e4", FEN_E4, 1, "0");
+    let (m2, v2) = move_event(&joiner, "e7e5", FEN_E4E5, 1, &v1);
+    assert_eq!(put_move(&app, game_id, &m1, None).await, StatusCode::OK);
+    assert_eq!(put_move(&app, game_id, &m2, None).await, StatusCode::OK);
+
+    // Backend restarts mid-game.
+    let app = spawn_app_on(&session_url, &vault_url).await;
+
+    assert_eq!(
+        move_log(&app, game_id).await.len(),
+        2,
+        "log survives restart"
+    );
+    // The joiner never saw its ack and retries the same write: idempotent.
+    assert_eq!(put_move(&app, game_id, &m2, None).await, StatusCode::OK);
+    assert_eq!(
+        move_log(&app, game_id).await.len(),
+        2,
+        "retry is not a second move"
+    );
+    // A third party naming itself cannot write into the game after restart.
+    let stranger = Keypair::new().pubkey().to_string();
+    let (foreign, _) = move_event(&stranger, "g1f3", FEN_NF3, 2, &v2);
+    assert_eq!(
+        put_move(&app, game_id, &foreign, None).await,
+        StatusCode::FORBIDDEN
+    );
+    // Play continues on the persisted head.
+    let (m3, _) = move_event(&host, "g1f3", FEN_NF3, 2, &v2);
+    assert_eq!(put_move(&app, game_id, &m3, None).await, StatusCode::OK);
+    let log = move_log(&app, game_id).await;
+    assert_eq!(log.len(), 3);
+    assert_eq!(log[2]["fen_after"], FEN_NF3);
+}
+
+#[tokio::test]
+async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() {
+    let app = spawn_app().await;
+    let host = Keypair::new().pubkey().to_string();
+    let joiner = Keypair::new().pubkey().to_string();
+    let game_id = "drill-seat-1";
+    start_casual_game(&app, game_id, &host, &joiner).await;
+    let host_jwt = app.state.jwt.issue(&host).expect("jwt");
+
+    // Device A holds the host seat. (The claim route checks on-chain
+    // participation, unavailable here, so the lease is taken via the store.)
+    app.state
+        .seat_leases
+        .claim(game_id, &host, "device-aaaa-0001", 1)
+        .await
+        .unwrap();
+    let (mut m1, v1) = move_event(&host, "e2e4", FEN_E4, 1, "0");
+    m1["device_id"] = json!("device-aaaa-0001");
+    assert_eq!(
+        put_move(&app, game_id, &m1, Some(&host_jwt)).await,
+        StatusCode::OK
+    );
+
+    // The opponent never claimed a seat: legacy behaviour.
+    let (opp, v2) = move_event(&joiner, "e7e5", FEN_E4E5, 1, &v1);
+    assert_eq!(put_move(&app, game_id, &opp, None).await, StatusCode::OK);
+
+    // Once claimed, the seat also needs the wallet token, not just its name.
+    let (mut no_token, _) = move_event(&host, "g1f3", FEN_NF3, 2, &v2);
+    no_token["device_id"] = json!("device-aaaa-0001");
+    assert_eq!(
+        put_move(&app, game_id, &no_token, None).await,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // Device B (same wallet) takes over; A is now view-only.
+    let lease = app
+        .state
+        .seat_leases
+        .claim(game_id, &host, "device-bbbb-0002", 2)
+        .await
+        .unwrap();
+    assert_eq!(lease.epoch, 2);
+    let mut from_a = no_token.clone();
+    from_a["device_id"] = json!("device-aaaa-0001");
+    assert_eq!(
+        put_move(&app, game_id, &from_a, Some(&host_jwt)).await,
+        StatusCode::CONFLICT,
+        "superseded device cannot move"
+    );
+    let mut from_b = from_a.clone();
+    from_b["device_id"] = json!("device-bbbb-0002");
+    assert_eq!(
+        put_move(&app, game_id, &from_b, Some(&host_jwt)).await,
+        StatusCode::OK
+    );
+    assert_eq!(move_log(&app, game_id).await.len(), 3);
+
+    // Seat routes: readable by the wallet; claiming needs auth + participation.
+    let (s, v) = app
+        .send_auth("GET", "/game/77001/seat", Some(&host_jwt), None)
+        .await;
+    assert_eq!((s, v), (StatusCode::OK, Value::Null));
+    let claim = json!({ "device_id": "device-cccc-0003" });
+    let (s, _) = app
+        .send_auth(
+            "POST",
+            "/game/77001/seat/claim",
+            Some(&host_jwt),
+            Some(&claim),
+        )
+        .await;
+    assert_eq!(
+        s,
+        StatusCode::FORBIDDEN,
+        "unverifiable participant cannot claim"
+    );
+    let (s, _) = app
+        .send_auth("POST", "/game/77001/seat/claim", None, Some(&claim))
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn casual_player_can_write_more_than_one_move_in_the_same_backend_process() {
+    // Regression: Iroh node ids parse as Pubkeys, so the roster fast path
+    // demanded a session key no casual client has and 403'd every casual
+    // player's second Braid write until the backend restarted.
+    let app = spawn_app().await;
+    let host = Keypair::new().pubkey().to_string();
+    let joiner = Keypair::new().pubkey().to_string();
+    let game_id = "casual-second-write";
+    start_casual_game(&app, game_id, &host, &joiner).await;
+
+    let (m1, v1) = move_event(&host, "e2e4", FEN_E4, 1, "0");
+    let (m2, v2) = move_event(&joiner, "e7e5", FEN_E4E5, 1, &v1);
+    let (m3, v3) = move_event(&host, "g1f3", FEN_NF3, 2, &v2);
+    let fen4 = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
+    let (m4, _) = move_event(&joiner, "b8c6", fen4, 2, &v3);
+    for m in [&m1, &m2, &m3, &m4] {
+        assert_eq!(put_move(&app, game_id, m, None).await, StatusCode::OK);
+    }
+    assert_eq!(move_log(&app, game_id).await.len(), 4);
 }

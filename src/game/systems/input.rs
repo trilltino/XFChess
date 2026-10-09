@@ -71,6 +71,8 @@ pub struct InputSystemParams<'w, 's> {
     pub game_sync: Option<Res<'w, SolanaGameSync>>,
     #[cfg(feature = "solana")]
     pub magicblock_resolver: Option<Res<'w, MagicBlockResolver>>,
+    #[cfg(feature = "solana")]
+    pub seat: Option<Res<'w, crate::multiplayer::seat::SeatState>>,
     // pub connection_state: Option<Res<'w, crate::multiplayer::network::p2p::P2PConnectionState>>, // Temporarily disabled
 }
 
@@ -106,6 +108,12 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
     // `SolanaGameSync::requires_delegation`). Keying this off `game_id`
     // alone (pre-v0.2.8) permanently locked White in stake-0 free lobby
     // games, where `game_id` is set but delegation never completes.
+    // Another device took over this player's seat: this window is view-only.
+    #[cfg(feature = "solana")]
+    if params.seat.as_ref().is_some_and(|seat| seat.superseded) {
+        return false;
+    }
+
     #[cfg(feature = "solana")]
     if let Some(solana_sync) = &params.game_sync {
         if solana_sync.requires_delegation {

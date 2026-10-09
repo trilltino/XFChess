@@ -31,6 +31,116 @@ fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
 
 const RPC_BATCH_SIZE: usize = 100;
 
+/// A missing Game PDA is only treated as resolved once the session is older
+/// than this, so a lagging RPC node that has not yet seen a just-created game
+/// (and its escrow) cannot retire the session.
+const MISSING_GAME_GRACE_SECS: i64 = 10 * 60;
+
+/// `finalize_game` closes the Game PDA after paying the pot out of the escrow
+/// PDA; a draw split can leave at most a lamport or two behind. Anything above
+/// this means a stake is still held without a Game account to settle it.
+const ESCROW_DUST_LAMPORTS: u64 = 5_000;
+
+#[derive(Debug, PartialEq, Eq)]
+enum MissingGameResolution {
+    /// Escrow is empty: settled-and-closed, or never funded. Safe to retire.
+    Resolved,
+    /// Escrow still holds funds with no Game account — operator recovery.
+    FundsHeld(u64),
+    /// Escrow balance or session age could not be established this tick.
+    Unknown,
+    /// Too recent to distinguish from RPC lag.
+    Grace,
+}
+
+/// Decide what a missing Game PDA means. `finalize_game` closes the account
+/// (`close = fee_payer`), so absence is the normal post-settlement state —
+/// but absence alone does not prove the stake left the escrow.
+fn resolve_missing_game(
+    escrow: &Fetched,
+    session_created_at: Option<i64>,
+    now: i64,
+) -> MissingGameResolution {
+    let Some(created_at) = session_created_at else {
+        return MissingGameResolution::Unknown;
+    };
+    // created_at == 0 marks rows that predate the column: old enough.
+    if created_at > 0 && now.saturating_sub(created_at) < MISSING_GAME_GRACE_SECS {
+        return MissingGameResolution::Grace;
+    }
+    match escrow {
+        Fetched::Unknown => MissingGameResolution::Unknown,
+        Fetched::Missing => MissingGameResolution::Resolved,
+        Fetched::Found(acc) if acc.lamports <= ESCROW_DUST_LAMPORTS => {
+            MissingGameResolution::Resolved
+        }
+        Fetched::Found(acc) => MissingGameResolution::FundsHeld(acc.lamports),
+    }
+}
+
+/// Retire sessions whose Game PDA is gone only when the escrow PDA confirms
+/// the stake was paid out or refunded; otherwise keep them and report.
+async fn reconcile_missing_games(
+    state: &Arc<AppState>,
+    program_id: &Pubkey,
+    missing: Vec<u64>,
+    now: i64,
+) -> u64 {
+    if missing.is_empty() {
+        return 0;
+    }
+    let escrows: Vec<Pubkey> = missing
+        .iter()
+        .map(|id| {
+            Pubkey::find_program_address(
+                &[solana::WAGER_ESCROW_SEED, &id.to_le_bytes()],
+                program_id,
+            )
+            .0
+        })
+        .collect();
+    let fetched = fetch_accounts_batched(
+        state.config.solana_rpc_url.clone(),
+        escrows,
+        state.metrics.clone(),
+    )
+    .await;
+    if fetched.len() != missing.len() {
+        warn!("[settlement] escrow reconciliation returned the wrong account count");
+        return 0;
+    }
+    let mut resolved = 0;
+    for (game_id, escrow) in missing.into_iter().zip(fetched) {
+        let created_at = match state.store.created_at(game_id).await {
+            Ok(t) => t,
+            Err(e) => {
+                warn!(
+                    "[settlement] game {}: session lookup failed: {}",
+                    game_id, e
+                );
+                None
+            }
+        };
+        match resolve_missing_game(&escrow, created_at, now) {
+            MissingGameResolution::Resolved => {
+                info!(
+                    "[settlement] game {}: Game PDA closed and escrow empty; retiring session",
+                    game_id
+                );
+                state.store.deactivate(game_id).await;
+                resolved += 1;
+            }
+            MissingGameResolution::FundsHeld(lamports) => error!(
+                "[settlement] game {}: Game PDA missing but escrow still holds {} lamports — \
+                 operator recovery required (see docs/runbooks/game-settlement.md)",
+                game_id, lamports
+            ),
+            MissingGameResolution::Unknown | MissingGameResolution::Grace => {}
+        }
+    }
+    resolved
+}
+
 enum Fetched {
     Unknown,
     Missing,
@@ -120,7 +230,11 @@ pub fn spawn_settlement_worker(state: Arc<AppState>) {
 }
 
 async fn reconcile_startup_sessions(state: &Arc<AppState>) -> Result<u64, String> {
-    let game_ids = state.store.list_active_game_ids().await;
+    let game_ids = state
+        .store
+        .try_list_active_game_ids()
+        .await
+        .map_err(|e| format!("list active sessions: {e}"))?;
     if game_ids.is_empty() {
         return Ok(0);
     }
@@ -142,9 +256,14 @@ async fn reconcile_startup_sessions(state: &Arc<AppState>) -> Result<u64, String
     }
 
     let mut deactivated = 0;
+    let mut missing = Vec::new();
     for (game_id, fetched) in game_ids.into_iter().zip(fetched) {
         let terminal = match fetched {
-            Fetched::Missing => true,
+            // A missing account is reconciled against its escrow below.
+            Fetched::Missing => {
+                missing.push(game_id);
+                false
+            }
             Fetched::Found(account) => parse_game_account(&account.data)
                 .map(|snapshot| matches!(snapshot.status, STATUS_SETTLED | STATUS_EXPIRED))
                 .unwrap_or(false),
@@ -155,12 +274,21 @@ async fn reconcile_startup_sessions(state: &Arc<AppState>) -> Result<u64, String
             deactivated += 1;
         }
     }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    deactivated += reconcile_missing_games(state, &program_id, missing, now).await;
 
     Ok(deactivated)
 }
 
 async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
-    let game_ids = state.store.list_active_game_ids().await;
+    let game_ids = state
+        .store
+        .try_list_active_game_ids()
+        .await
+        .map_err(|e| format!("list active sessions: {e}"))?;
     if game_ids.is_empty() {
         return Ok(0);
     }
@@ -188,15 +316,13 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let mut stale_delegated: u64 = 0;
+    let mut missing: Vec<u64> = Vec::new();
 
     for (i, f) in fetched.iter().enumerate() {
         let game_id = game_ids[i];
         match f {
             Fetched::Unknown => {}
-            Fetched::Missing => {
-                // Account closed — finalize already ran and reclaimed the rent.
-                state.store.deactivate(game_id).await;
-            }
+            Fetched::Missing => missing.push(game_id),
             Fetched::Found(account) => {
                 let Some(snap) = parse_game_account(&account.data) else {
                     warn!("[settlement] game {}: unparseable game account", game_id);
@@ -204,6 +330,17 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
                 };
                 match snap.status {
                     STATUS_SETTLED | STATUS_EXPIRED => {
+                        state.store.deactivate(game_id).await;
+                    }
+                    // Nobody joined: `cancel_game` refunded the creator's
+                    // stake in the same transaction that set Cancelled, and
+                    // `finalize_game` needs a black profile that never
+                    // existed — retrying it would fail forever.
+                    STATUS_CANCELLED if !snap.is_delegated && snap.black == Pubkey::default() => {
+                        info!(
+                            "[settlement] game {}: cancelled before an opponent joined; refund was part of the cancellation",
+                            game_id
+                        );
                         state.store.deactivate(game_id).await;
                     }
                     STATUS_CANCELLED if !snap.is_delegated => {
@@ -296,6 +433,8 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
             }
         }
     }
+
+    reconcile_missing_games(state, &program_id, missing, now).await;
 
     // The devnet copy is frozen while delegated; check the live ER copies and
     // pull finished games back to devnet so finalize can run next tick.
@@ -916,6 +1055,60 @@ mod tests {
     // Not imported at module scope: only the tests assert on the winner tag,
     // so importing it above would warn as unused in non-test builds.
     use crate::signing::solana::game_account::RESULT_WINNER;
+
+    fn escrow_with(lamports: u64) -> Fetched {
+        Fetched::Found(solana_sdk::account::Account {
+            lamports,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn missing_game_with_empty_escrow_is_resolved_after_grace() {
+        let now = 1_000_000;
+        let old = Some(now - MISSING_GAME_GRACE_SECS - 1);
+        assert_eq!(
+            resolve_missing_game(&Fetched::Missing, old, now),
+            MissingGameResolution::Resolved
+        );
+        assert_eq!(
+            resolve_missing_game(&escrow_with(1), old, now),
+            MissingGameResolution::Resolved
+        );
+        // Legacy rows have created_at = 0 and are treated as old.
+        assert_eq!(
+            resolve_missing_game(&Fetched::Missing, Some(0), now),
+            MissingGameResolution::Resolved
+        );
+    }
+
+    #[test]
+    fn missing_game_with_held_escrow_is_never_retired() {
+        let now = 1_000_000;
+        let old = Some(now - MISSING_GAME_GRACE_SECS - 1);
+        assert_eq!(
+            resolve_missing_game(&escrow_with(10_000_000), old, now),
+            MissingGameResolution::FundsHeld(10_000_000)
+        );
+    }
+
+    #[test]
+    fn rpc_failure_or_recent_session_keeps_missing_game_pending() {
+        let now = 1_000_000;
+        let old = Some(now - MISSING_GAME_GRACE_SECS - 1);
+        assert_eq!(
+            resolve_missing_game(&Fetched::Unknown, old, now),
+            MissingGameResolution::Unknown
+        );
+        assert_eq!(
+            resolve_missing_game(&Fetched::Missing, None, now),
+            MissingGameResolution::Unknown
+        );
+        assert_eq!(
+            resolve_missing_game(&Fetched::Missing, Some(now - 30), now),
+            MissingGameResolution::Grace
+        );
+    }
 
     #[allow(clippy::too_many_arguments)]
     fn build_game_data(

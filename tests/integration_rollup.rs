@@ -56,11 +56,11 @@ fn test_batch_commit_success_advances_turn() {
     // Force a commit
     let _ = mgr.prepare_batch_for_commit();
     let pre_turn = mgr.committed_turn;
-    mgr.batch_commit_success("new_fen_after_5".to_string());
+    mgr.batch_commit_success("new_fen_after_5".to_string(), 5);
 
-    // Committed turn must not regress (batch was cleared so delta is 0 from
-    // the perspective of batch_commit_success internal logic — turn is not
-    // incremented further, but FEN must have updated).
+    // The committed turn advances by exactly the batch size and the FEN
+    // becomes the batch's final position.
+    assert_eq!(mgr.committed_turn, pre_turn + 5);
     assert_eq!(mgr.committed_fen, "new_fen_after_5");
     assert_eq!(mgr.status, GameStateStatus::Synced);
 }

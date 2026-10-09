@@ -89,6 +89,7 @@ struct GameEventReq<'a> {
     message: &'a ChessMessage,
     content_version: &'a str,
     content_parent: &'a str,
+    device_id: &'a str,
 }
 
 #[derive(serde::Deserialize)]
@@ -138,6 +139,7 @@ fn publish(
                 message: &message,
                 content_version: &content_version,
                 content_parent: &parent,
+                device_id: crate::multiplayer::network::device_id::device_id(),
             };
             match client.put(&url).json(&body).send() {
                 Ok(resp) if resp.status().is_success() => {
@@ -148,7 +150,17 @@ fn publish(
                     return;
                 }
                 Ok(resp) if resp.status() == reqwest::StatusCode::CONFLICT => {
-                    match resp.json::<ParentMismatchResp>() {
+                    let text = resp.text().unwrap_or_default();
+                    if crate::multiplayer::network::device_id::is_seat_superseded_body(&text) {
+                        warn!(
+                            "[braid-transport] game {game_id} is being played on another device; this window is view-only"
+                        );
+                        if let Ok(id) = game_id.parse::<u64>() {
+                            crate::multiplayer::network::device_id::mark_seat_superseded(id);
+                        }
+                        return;
+                    }
+                    match serde_json::from_str::<ParentMismatchResp>(&text) {
                         Ok(m) => {
                             debug!(
                                 "[braid-transport] re-chaining {stream} publish for game {game_id} onto head {} (attempt {})",

@@ -105,6 +105,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     state.money_actions.init().await?;
     info!("[signing-server] Money action store initialized");
 
+    // Restore lobby rooms / JOIN_ACK mailboxes that were live when the
+    // previous process stopped (migration 033); expired rooms are dropped.
+    match state.p2p_relay_store.hydrate(&state.p2p_relay).await {
+        Ok(n) => info!("[signing-server] Restored {n} P2P relay room(s)"),
+        Err(e) => tracing::warn!("[signing-server] P2P relay hydrate failed: {e}"),
+    }
+
     let orchestrator_tx = crate::signing::swiss::spawn_orchestrator(
         tournament_store.clone(),
         state.swiss_service.clone(),

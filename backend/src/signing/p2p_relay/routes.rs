@@ -44,14 +44,6 @@ pub async fn announce_game(
     State(state): State<AppState>,
     Json(req): Json<AnnounceGameRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
-    let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state
-        .write()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let game_id_clone = req.game_id.clone();
-    let host_node_id_clone = req.host_node_id.clone();
-
     let password_hash = req.password.as_deref().map(|p| {
         use argon2::{
             password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
@@ -64,38 +56,65 @@ pub async fn announce_game(
             .unwrap_or_default()
     });
 
-    let announcement = super::types::P2PGameAnnouncement {
-        game_id: req.game_id,
-        host_node_id: req.host_node_id,
-        display_name: req.display_name,
-        stake_amount: req.stake_amount,
-        game_type: req.game_type,
-        base_time_seconds: req.base_time_seconds,
-        increment_seconds: req.increment_seconds,
-        created_at: Utc::now(),
-        status: GameStatus::Open,
-        username: req.username,
-        elo: req.elo,
-        region: req.region,
-        password_hash,
+    let game_id = req.game_id.clone();
+    let host_node_id = req.host_node_id.clone();
+    let saved = {
+        let mut games = state
+            .p2p_relay
+            .write()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        match games.get_mut(&game_id) {
+            // Re-announce by the same host (e.g. after a backend restart or a
+            // client reconnect): refresh the room but keep its joiner, status
+            // and undelivered messages instead of resetting the handshake.
+            Some(existing)
+                if existing.announcement.host_node_id == host_node_id
+                    && existing.announcement.status != GameStatus::Finished =>
+            {
+                existing.last_activity = Utc::now();
+                existing.clone()
+            }
+            // Someone else's live room: never overwrite it.
+            Some(existing) if existing.announcement.status != GameStatus::Finished => {
+                tracing::warn!(
+                    "[p2p-relay] rejected announce for {} by {}: room belongs to another host",
+                    game_id,
+                    host_node_id
+                );
+                return Ok(AxumJson(AnnounceGameResponse { success: false }));
+            }
+            _ => {
+                let active_game = ActiveGame {
+                    announcement: super::types::P2PGameAnnouncement {
+                        game_id: req.game_id,
+                        host_node_id: req.host_node_id,
+                        display_name: req.display_name,
+                        stake_amount: req.stake_amount,
+                        game_type: req.game_type,
+                        base_time_seconds: req.base_time_seconds,
+                        increment_seconds: req.increment_seconds,
+                        created_at: Utc::now(),
+                        status: GameStatus::Open,
+                        username: req.username,
+                        elo: req.elo,
+                        region: req.region,
+                        password_hash,
+                    },
+                    joiner_node_id: None,
+                    host_messages: Vec::new(),
+                    joiner_messages: Vec::new(),
+                    last_activity: Utc::now(),
+                    pending_invites: Vec::new(),
+                };
+                games.insert(game_id.clone(), active_game.clone());
+                active_game
+            }
+        }
     };
+    state.p2p_relay_store.save(&saved).await;
 
-    let active_game = ActiveGame {
-        announcement,
-        joiner_node_id: None,
-        host_messages: Vec::new(),
-        joiner_messages: Vec::new(),
-        last_activity: Utc::now(),
-        pending_invites: Vec::new(),
-    };
-
-    games.insert(game_id_clone.clone(), active_game);
-
-    tracing::info!(
-        "P2P game announced: {} by {}",
-        game_id_clone,
-        host_node_id_clone
-    );
+    tracing::info!("P2P game announced: {} by {}", game_id, host_node_id);
 
     Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
@@ -185,59 +204,61 @@ pub async fn join_game(
     State(state): State<AppState>,
     Json(req): Json<JoinGameRequest>,
 ) -> Result<AxumJson<JoinGameResponse>, StatusCode> {
-    let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state
-        .write()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let game_id_clone = req.game_id.clone();
-    let joiner_node_id_clone = req.joiner_node_id.clone();
-
-    let Some(game) = games.get_mut(&req.game_id) else {
-        return Ok(AxumJson(JoinGameResponse {
+    let rejected = || {
+        Ok(AxumJson(JoinGameResponse {
             success: false,
             host_node_id: None,
-        }));
+        }))
     };
+    let (saved, host_node_id) = {
+        let mut games = state
+            .p2p_relay
+            .write()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if game.announcement.status != GameStatus::Open {
-        return Ok(AxumJson(JoinGameResponse {
-            success: false,
-            host_node_id: None,
-        }));
-    }
+        let Some(game) = games.get_mut(&req.game_id) else {
+            return rejected();
+        };
 
-    // Password check for private rooms
-    if let Some(ref hash) = game.announcement.password_hash.clone() {
-        use argon2::{password_hash::PasswordHash, password_hash::PasswordVerifier, Argon2};
-        let provided = req.password.as_deref().unwrap_or("");
-        let verified = PasswordHash::new(hash)
-            .ok()
-            .map(|parsed| {
-                Argon2::default()
-                    .verify_password(provided.as_bytes(), &parsed)
-                    .is_ok()
-            })
-            .unwrap_or(false);
-        if !verified {
-            tracing::warn!("Wrong password for game {}", req.game_id);
-            return Ok(AxumJson(JoinGameResponse {
-                success: false,
-                host_node_id: None,
-            }));
+        // A retried join from the same joiner (lost response, restart) is
+        // idempotent; any other join only succeeds against an Open room.
+        let is_retry = game.joiner_node_id.as_deref() == Some(req.joiner_node_id.as_str())
+            && game.announcement.status != GameStatus::Finished;
+        if !is_retry && game.announcement.status != GameStatus::Open {
+            return rejected();
         }
-    }
 
-    game.joiner_node_id = Some(req.joiner_node_id);
-    game.announcement.status = GameStatus::Connecting;
-    game.last_activity = Utc::now();
+        // Password check for private rooms
+        if let Some(ref hash) = game.announcement.password_hash.clone() {
+            use argon2::{password_hash::PasswordHash, password_hash::PasswordVerifier, Argon2};
+            let provided = req.password.as_deref().unwrap_or("");
+            let verified = PasswordHash::new(hash)
+                .ok()
+                .map(|parsed| {
+                    Argon2::default()
+                        .verify_password(provided.as_bytes(), &parsed)
+                        .is_ok()
+                })
+                .unwrap_or(false);
+            if !verified {
+                tracing::warn!("Wrong password for game {}", req.game_id);
+                return rejected();
+            }
+        }
 
-    let host_node_id = game.announcement.host_node_id.clone();
+        if !is_retry {
+            game.joiner_node_id = Some(req.joiner_node_id.clone());
+            game.announcement.status = GameStatus::Connecting;
+        }
+        game.last_activity = Utc::now();
+        (game.clone(), game.announcement.host_node_id.clone())
+    };
+    state.p2p_relay_store.save(&saved).await;
 
     tracing::info!(
         "P2P join request: game={}, joiner={}",
-        game_id_clone,
-        joiner_node_id_clone
+        req.game_id,
+        req.joiner_node_id
     );
 
     Ok(AxumJson(JoinGameResponse {
@@ -250,13 +271,11 @@ pub async fn accept_join(
     State(state): State<AppState>,
     Json(req): Json<AcceptJoinReq>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
-    let joiner_node_id = {
-        let relay_state = state.p2p_relay.clone();
-        let mut games = relay_state
+    let (saved, joiner_node_id) = {
+        let mut games = state
+            .p2p_relay
             .write()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        let game_id_for_log = req.game_id.clone();
 
         let Some(game) = games.get_mut(&req.game_id) else {
             return Ok(AxumJson(AnnounceGameResponse { success: false }));
@@ -274,15 +293,24 @@ pub async fn accept_join(
 
         game.announcement.status = GameStatus::InProgress;
         game.last_activity = chrono::Utc::now();
-
-        tracing::info!("P2P game {} started", game_id_for_log);
-        joiner_node_id
+        (game.clone(), joiner_node_id)
     };
+    state.p2p_relay_store.save(&saved).await;
+    tracing::info!("P2P game {} started", req.game_id);
 
     state
         .game_log
         .register_casual_identities(&req.game_id, &req.host_node_id, &joiner_node_id)
-        .await;
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "Failed to persist participants for casual game {}: {e}",
+                req.game_id
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .then_some(())
+        .ok_or(StatusCode::CONFLICT)?;
 
     Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
@@ -291,12 +319,15 @@ pub async fn leave_game(
     State(state): State<AppState>,
     Json(req): Json<LeaveGameRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
-    let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state
-        .write()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let saved = {
+        let mut games = state
+            .p2p_relay
+            .write()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if let Some(game) = games.get_mut(&req.game_id) {
+        let Some(game) = games.get_mut(&req.game_id) else {
+            return Ok(AxumJson(AnnounceGameResponse { success: true }));
+        };
         let money_linked =
             game.announcement.stake_amount > 0.0 || game.announcement.game_type == "solana_wager";
         if money_linked {
@@ -307,6 +338,12 @@ pub async fn leave_game(
             );
             return Ok(AxumJson(AnnounceGameResponse { success: false }));
         }
+        // A relay leave can be caused by a closed window or a failed
+        // transport. Once play began it cannot decide the chess result or
+        // reopen the room for a third player.
+        if game.announcement.status == GameStatus::InProgress {
+            return Ok(AxumJson(AnnounceGameResponse { success: true }));
+        }
         if game.announcement.host_node_id == req.node_id {
             // Host left - remove game
             game.announcement.status = GameStatus::Finished;
@@ -316,8 +353,12 @@ pub async fn leave_game(
             game.joiner_node_id = None;
             game.announcement.status = GameStatus::Open;
             tracing::info!("P2P game {} open again (joiner left)", req.game_id);
+        } else {
+            return Ok(AxumJson(AnnounceGameResponse { success: true }));
         }
-    }
+        game.clone()
+    };
+    state.p2p_relay_store.save(&saved).await;
 
     Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
@@ -349,28 +390,43 @@ pub async fn send_message(
         return Ok(AxumJson(AnnounceGameResponse { success: false }));
     }
 
-    let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state
-        .write()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let saved = {
+        let mut games = state
+            .p2p_relay
+            .write()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let Some(game) = games.get_mut(&req.game_id) else {
-        return Ok(AxumJson(AnnounceGameResponse { success: false }));
+        let Some(game) = games.get_mut(&req.game_id) else {
+            return Ok(AxumJson(AnnounceGameResponse { success: false }));
+        };
+
+        game.last_activity = chrono::Utc::now();
+
+        if game.announcement.host_node_id == req.from_node_id {
+            // Message from host to joiner
+            game.host_messages.push(req.message);
+        } else if game.joiner_node_id.as_ref() == Some(&req.from_node_id) {
+            // Message from joiner to host
+            game.joiner_messages.push(req.message);
+        } else {
+            return Ok(AxumJson(AnnounceGameResponse { success: false }));
+        }
+        game.clone()
     };
-
-    game.last_activity = chrono::Utc::now();
-
-    if game.announcement.host_node_id == req.from_node_id {
-        // Message from host to joiner
-        game.host_messages.push(req.message);
-    } else if game.joiner_node_id.as_ref() == Some(&req.from_node_id) {
-        // Message from joiner to host
-        game.joiner_messages.push(req.message);
-    } else {
-        return Ok(AxumJson(AnnounceGameResponse { success: false }));
-    }
+    state.p2p_relay_store.save(&saved).await;
 
     Ok(AxumJson(AnnounceGameResponse { success: true }))
+}
+
+/// Messages after `since_index`. An index past the end (a client that kept
+/// its cursor across a backend restart) yields an empty page and moves the
+/// cursor to where the mailbox actually ends, instead of panicking on an
+/// out-of-range slice.
+fn page_from(messages: &[String], since_index: usize) -> (Vec<String>, usize) {
+    match messages.get(since_index..) {
+        Some(page) => (page.to_vec(), since_index + page.len()),
+        None => (Vec::new(), messages.len()),
+    }
 }
 
 pub async fn poll_messages(
@@ -389,17 +445,15 @@ pub async fn poll_messages(
         }));
     };
 
-    let messages = if game.announcement.host_node_id == req.node_id {
+    let (messages, next_index) = if game.announcement.host_node_id == req.node_id {
         // Host polls joiner messages
-        game.joiner_messages[req.since_index..].to_vec()
+        page_from(&game.joiner_messages, req.since_index)
     } else if game.joiner_node_id.as_ref() == Some(&req.node_id) {
         // Joiner polls host messages
-        game.host_messages[req.since_index..].to_vec()
+        page_from(&game.host_messages, req.since_index)
     } else {
-        vec![]
+        (vec![], req.since_index)
     };
-
-    let next_index = req.since_index + messages.len();
 
     Ok(AxumJson(PollMessagesResponse {
         messages,
@@ -411,19 +465,22 @@ pub async fn heartbeat_game(
     State(state): State<AppState>,
     Json(req): Json<HeartbeatRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
-    let relay_state = state.p2p_relay.clone();
-    let mut games = relay_state
-        .write()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let saved = {
+        let mut games = state
+            .p2p_relay
+            .write()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if let Some(game) = games.get_mut(&req.game_id) {
-        if game.announcement.host_node_id == req.host_node_id {
-            game.last_activity = Utc::now();
-            return Ok(AxumJson(AnnounceGameResponse { success: true }));
+        match games.get_mut(&req.game_id) {
+            Some(game) if game.announcement.host_node_id == req.host_node_id => {
+                game.last_activity = Utc::now();
+                game.clone()
+            }
+            _ => return Ok(AxumJson(AnnounceGameResponse { success: false })),
         }
-    }
-
-    Ok(AxumJson(AnnounceGameResponse { success: false }))
+    };
+    state.p2p_relay_store.save(&saved).await;
+    Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
 
 pub async fn get_region() -> AxumJson<serde_json::Value> {
@@ -458,6 +515,17 @@ mod tests {
             message: message.to_string(),
             signature,
         }
+    }
+
+    #[test]
+    fn poll_cursor_past_end_after_restart_does_not_panic() {
+        let msgs = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(page_from(&msgs, 0), (msgs.clone(), 2));
+        assert_eq!(page_from(&msgs, 1), (vec!["b".to_string()], 2));
+        assert_eq!(page_from(&msgs, 2), (vec![], 2));
+        // A cursor from before a restart that lost later messages.
+        assert_eq!(page_from(&msgs, 9), (vec![], 2));
+        assert_eq!(page_from(&[], 5), (vec![], 0));
     }
 
     #[test]

@@ -26,6 +26,9 @@ pub struct GameOverPayoutInfo {
 
     // Settlement
     pub payout_confirmed: bool,
+    /// Why settlement is not confirmed yet, once the client's own
+    /// finalization attempt has finished without on-chain proof.
+    pub settlement_pending_reason: Option<String>,
     pub fee_breakdown_confirmed: bool,
     pub finalize_sig: Option<String>,
     pub game_ended_at: Option<std::time::Instant>,
@@ -593,6 +596,13 @@ pub fn game_over_popup_system(
                                     );
                                 }
                             });
+                        } else if let Some(reason) = &info.settlement_pending_reason {
+                            ui.label(
+                                egui::RichText::new(format!("Settlement pending: {reason}."))
+                                    .size(11.0)
+                                    .italics()
+                                    .color(text_secondary),
+                            );
                         } else {
                             let elapsed = info.settlement_elapsed();
                             if elapsed < 60 {
