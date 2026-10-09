@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { apiClient } from "../services/api";
 import { lamportsToUsd, solInputToLamports, usdInputToLamports } from "../services/sol";
 import { useSolUsdRate } from "../hooks/useSolUsdRate";
+import { refundOutcome } from "../services/adminFlows";
 
-interface Payout { game_id: string; winner: string; amount_sol: number; tx_sig: string; settled_at: number; }
+interface Payout { game_id: string; winner: string; amount_sol: number | null; tx_sig: string; settled_at: number; }
 interface FeeReport { total_fee_sol: number; total_fee_lamports: number; total_wagered_sol: number; game_count: number; period: string; }
 
 export default function Treasury() {
@@ -11,6 +12,8 @@ export default function Treasury() {
   const [feeReport, setFeeReport] = useState<FeeReport | null>(null);
   const [period, setPeriod] = useState("week");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [refunding, setRefunding] = useState(false);
 
   // Manual refund form
   const [refundWallet, setRefundWallet] = useState("");
@@ -25,27 +28,34 @@ export default function Treasury() {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError("");
+    try {
     const [pr, fr] = await Promise.all([apiClient.getTreasuryPayouts(), apiClient.getFeeReport(period)]);
     if (pr.ok) setPayouts(pr.data.payouts ?? []);
     if (fr.ok) setFeeReport(fr.data);
-    setLoading(false);
+    if (!pr.ok || !fr.ok) setLoadError(`Could not load ${!pr.ok ? "payouts" : ""}${!pr.ok && !fr.ok ? " and " : ""}${!fr.ok ? "fee report" : ""}. Refresh to retry.`);
+    } catch { setLoadError("Could not load treasury data. Refresh to retry."); }
+    finally { setLoading(false); }
   };
 
   const handleRefund = async () => {
     const lam = solUsdRate != null
       ? usdInputToLamports(refundSol, solUsdRate)
       : solInputToLamports(refundSol);
-    if (!refundWallet || lam <= 0 || !refundReason || !refundAdminToken) return;
+    if (refunding || !refundWallet.trim() || !Number.isSafeInteger(lam) || lam <= 0 || !refundReason.trim() || !refundAdminToken.trim()) return;
+    setRefunding(true); setRefundMsg(null); setRefundTx(null);
+    try {
     const r = await apiClient.manualRefund(refundWallet, lam, refundReason, refundAdminToken);
     if (r.ok) {
-      // Backend now signs + submits withdraw_treasury with treasury_authority and
-      // returns the confirmed on-chain signature (no more client-side signing).
-      setRefundMsg(`Refund submitted on-chain. Sig: ${r.data?.signature ?? "—"}`);
-      setRefundTx(r.data?.signature ?? null);
+      const outcome = refundOutcome(r.data);
+      setRefundMsg(outcome.message);
+      setRefundTx(outcome.signature);
       setRefundWallet(""); setRefundSol(""); setRefundReason(""); setRefundAdminToken("");
     } else {
       setRefundMsg(`Error: ${r.error?.message}`);
     }
+    } catch { setRefundMsg("Error: Refund request failed. Check its status before retrying."); }
+    finally { setRefunding(false); setRefundAdminToken(""); }
   };
 
   return (
@@ -68,6 +78,7 @@ export default function Treasury() {
       </div>
 
       {/* Fee report summary */}
+      {loadError && <p role="alert">{loadError}</p>}
       {feeReport && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1.25rem" }}>
           <StatCard label="FEES COLLECTED" value={`${feeReport.total_fee_sol.toFixed(4)} SOL`} color="var(--accent)" />
@@ -83,6 +94,7 @@ export default function Treasury() {
         </div>
         {loading
           ? <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-dim)" }}>Loading…</div>
+          : loadError ? <p role="alert">Treasury data is unavailable or stale.</p>
           : payouts.length === 0
           ? <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-dim)", fontStyle: "italic" }}>No wagered games in this period.</div>
           : <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
@@ -98,7 +110,7 @@ export default function Treasury() {
                   <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                     <td style={{ padding: "0.75rem 1rem", fontFamily: "monospace", color: "var(--text-dim)" }}>{p.game_id}</td>
                     <td style={{ padding: "0.75rem 1rem", fontFamily: "monospace", color: "#fff" }}>{p.winner ? `${String(p.winner).slice(0, 10)}…` : "—"}</td>
-                    <td style={{ padding: "0.75rem 1rem", color: "#4ade80", fontWeight: "700" }}>{p.amount_sol?.toFixed(4)} SOL</td>
+                    <td style={{ padding: "0.75rem 1rem", color: "#4ade80", fontWeight: "700" }}>{p.amount_sol == null ? "Unknown" : `${p.amount_sol.toFixed(4)} SOL`}</td>
                     <td style={{ padding: "0.75rem 1rem", fontFamily: "monospace", color: "var(--text-dim)", fontSize: "11px" }}>{p.tx_sig && p.tx_sig !== "—" ? `${p.tx_sig.slice(0, 16)}…` : "—"}</td>
                     <td style={{ padding: "0.75rem 1rem", color: "var(--text-dim)" }}>{p.settled_at ? new Date(p.settled_at * 1000).toLocaleString() : "—"}</td>
                   </tr>
@@ -112,8 +124,7 @@ export default function Treasury() {
       <div style={{ backgroundColor: "var(--surface)", borderRadius: "24px", border: "1px solid var(--border)", padding: "1.5rem" }}>
         <h3 style={{ color: "var(--primary)", fontSize: "12px", fontWeight: "800", letterSpacing: "2px", margin: "0 0 1.25rem" }}>MANUAL REFUND</h3>
         <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 1rem" }}>
-          Signs + submits <code>withdraw_treasury</code> with treasury_authority and returns the
-          on-chain signature. Requires the ADMIN_TOKEN second factor (money path).
+          Refund requests may require manual execution on the isolated signing host.
         </p>
         <div style={{ display: "flex", gap: "10px", marginBottom: "10px", flexWrap: "wrap" }}>
           <input value={refundWallet} onChange={e => setRefundWallet(e.target.value)} placeholder="Recipient wallet…"
@@ -126,7 +137,7 @@ export default function Treasury() {
             style={{ flex: 2, minWidth: "160px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
           <input value={refundAdminToken} onChange={e => setRefundAdminToken(e.target.value)} type="password" placeholder="ADMIN_TOKEN (2nd factor)…"
             style={{ flex: 2, minWidth: "180px", background: "rgba(255,255,255,0.06)", border: "1px solid #f59e0b55", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
-          <button onClick={handleRefund} style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>SUBMIT REFUND</button>
+          <button disabled={refunding || !refundWallet.trim() || !refundSol || !refundReason.trim() || !refundAdminToken.trim()} onClick={handleRefund} style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>{refunding ? "SUBMITTING..." : "REQUEST REFUND"}</button>
         </div>
         {refundSol && (() => {
           const lam = solUsdRate != null

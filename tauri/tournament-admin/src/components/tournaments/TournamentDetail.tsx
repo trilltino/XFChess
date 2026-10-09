@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiClient, type TournamentDetail } from "../../services/api";
+import { duplicateConfig, resolveResult, swissResult, cancellationState, type TournamentOperation, type Side } from "../../services/adminFlows";
+import CreateTournament from "./CreateTournament";
+import TransactionDebugger from "../TransactionDebugger";
 
 /** Countdown clock that ticks every second until `deadlineAt` Unix timestamp. */
 function RoundCountdown({ deadlineAt }: { deadlineAt: number }) {
@@ -67,7 +70,16 @@ interface SwissData {
 
 type ResultChoice = "white" | "black" | "draw" | null;
 
-export default function TournamentDetail({ tournamentId, onBack, onEdit }: TournamentDetailProps) {
+export default function TournamentDetail({ tournamentId, onBack }: TournamentDetailProps) {
+  const [duplicate, setDuplicate] = useState<ReturnType<typeof duplicateConfig> | null>(null);
+  const [analyzeSignature, setAnalyzeSignature] = useState<string | null>(null);
+  const [forfeitSides, setForfeitSides] = useState<Record<number, Side | undefined>>({});
+  const [forfeitReasons, setForfeitReasons] = useState<Record<number, string>>({});
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
+  const [approving, setApproving] = useState(false);
+  const [approvalMsg, setApprovalMsg] = useState("");
+  const [operations, setOperations] = useState<TournamentOperation[]>([]);
+  const reportLoad = (name: string, ok: boolean) => setLoadErrors(p => ({ ...p, [name]: ok ? "" : `Could not load ${name}. Refresh to retry.` }));
   const [tournament, setTournament] = useState<TournamentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
@@ -162,6 +174,7 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
     try {
       setLoading(true);
       const r = await apiClient.getTournament(tournamentId);
+      reportLoad("tournament", r.ok);
       if (r.ok && r.data) {
         setTournament(r.data);
         if (r.data.swiss_data) setSwissData(r.data.swiss_data);
@@ -188,6 +201,7 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
     setBracketLoading(true);
     try {
       const r = await apiClient.getTournamentBracket(tournamentId);
+      reportLoad("matches", r.ok);
       if (r.ok && r.data) setBracket(r.data);
     } finally { setBracketLoading(false); }
   }, [tournamentId]);
@@ -204,11 +218,16 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
 
   const loadAudit = async () => {
     const r = await apiClient.getTournamentAuditLog(tournamentId, 20);
+    reportLoad("audit", r.ok);
     if (r.ok) setAuditEntries(r.data?.entries ?? []);
   };
 
   const loadTransactions = async () => {
+    const ops = await apiClient.getTournamentOperations(tournamentId);
+    reportLoad("operations", ops.ok);
+    if (ops.ok) setOperations(ops.data?.operations ?? []);
     const r = await apiClient.getTournamentTransactions(tournamentId);
+    reportLoad("transactions", r.ok);
     if (r.ok) setTransactions(r.data?.transactions ?? []);
   };
 
@@ -239,14 +258,18 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
     setAdvancingRound(false);
   };
 
-  const handleRecordResult = async (matchIndex: number, white: string, black: string, forfeit = false) => {
+  const handleRecordResult = async (match: MatchRecord, white: string, black: string, forfeit = false) => {
+    const matchIndex = match.match_index;
+    if (submittingMatch != null) return;
+    try {
+    if (forfeit && !forfeitSides[matchIndex]) throw new Error("Select the forfeiting side.");
+    const outcome = resolveResult(tournament!.format, forfeit ? null : resultChoices[matchIndex], forfeit ? forfeitSides[matchIndex] : undefined, forfeitReasons[matchIndex]);
+    const payload = tournament!.format === "Swiss" ? swissResult(match.round, match.board, outcome) : null;
     if (!window.confirm("Record this result as an emergency override? The normal path is settlement-driven.")) return;
-    const choice = forfeit ? "white" : resultChoices[matchIndex];
-    if (!choice) return;
-    const winner = choice === "white" ? white : choice === "black" ? black : null;
-    const loser  = choice === "white" ? black  : choice === "black" ? white : null;
+    const winner = outcome.winner === "white" ? white : black;
+    const loser = outcome.winner === "white" ? black : white;
     setSubmittingMatch(matchIndex);
-    const r = await apiClient.recordResult(tournamentId, matchIndex, winner ?? white, loser ?? black);
+    const r = payload ? await apiClient.recordSwissResult(tournamentId, payload) : await apiClient.recordResult(tournamentId, matchIndex, winner, loser, outcome.reason);
     if (r.ok) {
       setResultMessages(prev => ({ ...prev, [matchIndex]: forfeit ? "Forfeit recorded." : "Result recorded." }));
       setResultChoices(prev => { const n = { ...prev }; delete n[matchIndex]; return n; });
@@ -254,7 +277,9 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
     } else {
       setResultMessages(prev => ({ ...prev, [matchIndex]: r.error?.message || "Failed." }));
     }
-    setSubmittingMatch(null);
+    } catch (error) {
+      setResultMessages(prev => ({ ...prev, [matchIndex]: `Error: ${error instanceof Error ? error.message : "Result submission failed."}` }));
+    } finally { setSubmittingMatch(null); }
   };
 
   const handleSetGameId = async (matchIndex: number) => {
@@ -383,12 +408,33 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
         </InfoCard>
 
         <InfoCard title="TRANSACTION OPERATIONS">
+          {operations.map(operation => <div key={operation.id} style={{ padding: "8px 0", overflowWrap: "anywhere" }}>
+            <strong>{cancellationState(operation.status).label}</strong>
+            <div>Operation {operation.id} / tournament {operation.tournament_id}</div>
+            <div>Actor: {operation.actor} / Reason: {operation.reason || "Not provided"}</div>
+            <div>Created: {fmtTs(operation.created_at)} / Updated: {fmtTs(operation.updated_at)}</div>
+            {operation.last_error && <p role="alert">{operation.last_error}</p>}
+            {operation.signature ? <><div>{operation.signature}</div><button onClick={() => setAnalyzeSignature(operation.signature)}>Analyze</button></> : <div>No transaction signature recorded.</div>}
+          </div>)}
+          {!loadErrors.operations && operations.length === 0 && <p>No recovery operations recorded.</p>}
+          {loadErrors.transactions && <p role="alert">{loadErrors.transactions}</p>}
+          <button disabled={approving || !!approvalMsg && !approvalMsg.startsWith("Error") || tournament.status.toLowerCase() !== "completed"} onClick={async () => {
+            if (!window.confirm(`Approve prize release for tournament #${tournamentId}?`)) return;
+            setApproving(true);
+            try {
+              const r = await apiClient.approvePrizeRelease(tournamentId);
+              setApprovalMsg(r.ok ? "Prize release approved. Payout execution is pending." : `Error: ${r.error?.message || "Approval failed."}`);
+            } catch { setApprovalMsg("Error: Approval failed."); }
+            finally { setApproving(false); }
+          }}>{approving ? "APPROVING..." : "APPROVE PRIZE RELEASE"}</button>
+          {approvalMsg && <p role="status">{approvalMsg}</p>}
           {transactions.length === 0
             ? <div style={{ color: "var(--text-dim)", fontSize: "12px" }}>No persisted tournament transactions.</div>
             : transactions.slice(0, 8).map((tx, index) => (
               <div key={index} style={{ borderBottom: "1px solid var(--border)", padding: "6px 0", fontSize: "11px" }}>
                 <strong>{tx.operation}</strong> · {tx.status} · retries {tx.retry_count}
                 <div style={{ color: "var(--text-dim)", fontFamily: "monospace" }}>{tx.signature}</div>
+                {tx.signature && <button onClick={() => setAnalyzeSignature(tx.signature)}>Analyze</button>}
               </div>
             ))}
         </InfoCard>
@@ -515,7 +561,7 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
                 <div style={{ marginTop: "8px" }}>
           <div>
             <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-              {(["white", "black", "draw"] as ResultChoice[]).map(opt => (
+              {((tournament?.format === "Swiss" ? ["white", "black", "draw"] : ["white", "black"]) as ResultChoice[]).map(opt => (
                 <button key={opt!} onClick={() => setResultChoices(p => ({ ...p, [match.match_index]: opt === choice ? null : opt }))}
                   style={{ flex: 1, padding: "0.45rem", borderRadius: "8px", fontSize: "11px", fontWeight: "700", cursor: "pointer",
                     backgroundColor: choice === opt ? (opt === "white" ? "rgba(255,255,255,0.15)" : opt === "black" ? "rgba(0,0,0,0.5)" : "rgba(100,100,100,0.3)") : "rgba(255,255,255,0.04)",
@@ -525,18 +571,22 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
               ))}
             </div>
             <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-              <button disabled={!choice || submittingMatch === match.match_index}
-                onClick={() => handleRecordResult(match.match_index, white, black)}
+              <button disabled={!choice || submittingMatch != null}
+                onClick={() => handleRecordResult(match, white, black)}
                 style={{ flex: 2, padding: "0.55rem", borderRadius: "8px", fontSize: "12px", fontWeight: "800",
                   backgroundColor: choice ? "var(--primary)" : "rgba(255,255,255,0.05)", color: choice ? "#000" : "var(--text-dim)", border: "none", cursor: choice ? "pointer" : "not-allowed" }}>
                 {submittingMatch === match.match_index ? "SUBMITTING…" : "CONFIRM"}
               </button>
-              <button onClick={() => handleRecordResult(match.match_index, white, black, true)} disabled={submittingMatch === match.match_index}
+              <button onClick={() => handleRecordResult(match, white, black, true)} disabled={submittingMatch != null || !forfeitSides[match.match_index] || !forfeitReasons[match.match_index]?.trim()}
                 style={{ flex: 1, padding: "0.55rem", borderRadius: "8px", fontSize: "11px", fontWeight: "700",
                   backgroundColor: "rgba(239,68,68,0.12)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)", cursor: "pointer" }}>
                 FORFEIT
               </button>
             </div>
+            <select aria-label="Forfeiting side" value={forfeitSides[match.match_index] ?? ""} onChange={e => setForfeitSides(p => ({ ...p, [match.match_index]: e.target.value as Side || undefined }))}>
+              <option value="">Select forfeiting side</option><option value="white">White forfeits</option><option value="black">Black forfeits</option>
+            </select>
+            <input aria-label="Forfeit reason" placeholder="Forfeit reason" value={forfeitReasons[match.match_index] ?? ""} onChange={e => setForfeitReasons(p => ({ ...p, [match.match_index]: e.target.value }))} />
             <div style={{ display: "flex", gap: "6px" }}>
               <input value={gameIdInputs[match.match_index] ?? ""} onChange={e => setGameIdInputs(p => ({ ...p, [match.match_index]: e.target.value }))}
                 placeholder="Set game ID…" type="number"
@@ -680,8 +730,9 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
     );
   };
 
-  if (loading) return <div style={{ textAlign: "center", padding: "4rem", color: "var(--text-dim)" }}>DECRYPTING DATA...</div>;
-  if (!tournament) return <div style={{ textAlign: "center", padding: "4rem", color: "var(--text-dim)" }}>Tournament not found.</div>;
+  if (duplicate) return <CreateTournament initialConfig={duplicate} onCancel={() => setDuplicate(null)} onTournamentCreated={onBack} />;
+  if (loading && !tournament) return <div>Loading tournament...</div>;
+  if (!tournament) return <div role="alert">Could not load tournament. <button onClick={loadTournament}>Retry</button><button onClick={onBack}>Back</button></div>;
 
   return (
     <div style={{ width: "100%" }}>
@@ -690,7 +741,7 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
           <button onClick={onBack} style={{ padding: "0.6rem 1.25rem", backgroundColor: "var(--glass)", color: "var(--text-dim)", border: "1px solid var(--border)", borderRadius: "100px", cursor: "pointer", fontSize: "12px", fontWeight: "700" }}>← RETURN</button>
           <h2 style={{ color: "#fff", margin: 0, fontSize: "28px", fontWeight: "900" }}>{tournament.name}</h2>
         </div>
-        <button onClick={() => onEdit(tournament!.tournament_id)} className="primary" style={{ padding: "0.75rem 2rem", borderRadius: "100px" }}>MODIFY CONFIG</button>
+        <button onClick={() => setDuplicate(duplicateConfig(tournament!, Math.max(Date.now(), tournamentId + 1)))} className="primary" style={{ padding: "0.75rem 2rem", borderRadius: "100px" }}>DUPLICATE CONFIG</button>
       </div>
 
       <div style={{ marginBottom: "2rem" }}>
@@ -705,6 +756,9 @@ export default function TournamentDetail({ tournamentId, onBack, onEdit }: Tourn
       </div>
 
       <div style={{ animation: "fadeIn 0.4s ease" }}>
+        {Object.entries(loadErrors).filter(([, message]) => message).map(([name, message]) => <p role="alert" key={name}>{message}</p>)}
+        <button onClick={() => { loadTournament(); loadBracket(); loadAudit(); loadTransactions(); }}>Refresh</button>
+        {analyzeSignature && <div><button onClick={() => setAnalyzeSignature(null)}>Close analysis</button><TransactionDebugger key={analyzeSignature} initialSignature={analyzeSignature} /></div>}
         {activeTab === "overview" && renderOverview()}
         {activeTab === "players" && renderPlayers()}
         {activeTab === "matches" && renderMatches()}

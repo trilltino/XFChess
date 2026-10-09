@@ -602,6 +602,9 @@ pub struct TournamentTransaction {
 
 impl TournamentStore {
     pub async fn new(pool: SqlitePool) -> Self {
+        crate::signing::tournament_operations::init(&pool)
+            .await
+            .expect("tournament operations storage must be available");
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS tournaments (
                 id       INTEGER PRIMARY KEY,
@@ -731,7 +734,7 @@ impl TournamentStore {
     pub async fn create_checked(&self, record: TournamentRecord) -> Result<(), sqlx::Error> {
         let data = serde_json::to_string(&record).unwrap_or_default();
         let now = chrono::Utc::now().timestamp();
-        sqlx::query("INSERT OR REPLACE INTO tournaments (id, data, updated_at) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO tournaments (id, data, updated_at) VALUES (?, ?, ?)")
             .bind(record.tournament_id as i64)
             .bind(&data)
             .bind(now)
@@ -762,8 +765,15 @@ impl TournamentStore {
             .collect()
     }
 
+    pub async fn visible(&self) -> Result<Vec<TournamentRecord>, sqlx::Error> {
+        let data: Vec<String> = sqlx::query_scalar("SELECT data FROM tournaments WHERE id NOT IN (SELECT tournament_id FROM archived_tournaments) ORDER BY id DESC")
+            .fetch_all(&self.pool).await?;
+        data.into_iter().map(|data| serde_json::from_str(&data)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))).collect()
+    }
+
     pub async fn delete(&self, id: u64) -> bool {
-        sqlx::query("DELETE FROM tournaments WHERE id = ?")
+        sqlx::query("INSERT OR IGNORE INTO archived_tournaments (tournament_id, archived_at) VALUES (?, unixepoch())")
             .bind(id as i64)
             .execute(&self.pool)
             .await
@@ -772,19 +782,34 @@ impl TournamentStore {
     }
 
     pub async fn update<F: FnOnce(&mut TournamentRecord)>(&self, id: u64, f: F) -> bool {
-        if let Some(mut record) = self.get(id).await {
+        self.update_checked(id, f).await.is_ok()
+    }
+
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
+    pub async fn update_checked<F: FnOnce(&mut TournamentRecord)>(&self, id: u64, f: F) -> Result<(), sqlx::Error> {
+        // Acquire the SQLite write lock before reading the JSON record. Otherwise
+        // simultaneous registrations/results can silently replace each other.
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let data: Option<String> = sqlx::query_scalar("SELECT data FROM tournaments WHERE id = ?")
+            .bind(id as i64).fetch_optional(&mut *tx).await?;
+        if let Some(data) = data {
+            let mut record: TournamentRecord = serde_json::from_str(&data)
+                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
             f(&mut record);
-            let data = serde_json::to_string(&record).unwrap_or_default();
+            let data = serde_json::to_string(&record).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
             let now = chrono::Utc::now().timestamp();
             sqlx::query("UPDATE tournaments SET data = ?, updated_at = ? WHERE id = ?")
                 .bind(data)
                 .bind(now)
                 .bind(id as i64)
-                .execute(&self.pool)
-                .await
-                .is_ok()
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await
         } else {
-            false
+            Err(sqlx::Error::RowNotFound)
         }
     }
 

@@ -88,6 +88,14 @@ struct OnChainConfig {
 }
 
 impl TournamentScheduler {
+    fn cancellation_service(&self) -> Option<crate::signing::tournament_operations::CancellationService> {
+        let config = self.on_chain.as_ref()?;
+        Some(crate::signing::tournament_operations::CancellationService {
+            store: self.store.clone(), rpc_url: config.rpc_url.clone(),
+            program_id: config.program_id.parse().ok()?, authority: config.vps_authority.clone(),
+            host_treasury: config.host_treasury,
+        })
+    }
     pub fn new(store: TournamentStore) -> (Self, mpsc::Sender<TournamentTrigger>) {
         let (trigger_tx, trigger_rx) = mpsc::channel(TOURNAMENT_TRIGGER_CHANNEL_SIZE);
         (
@@ -124,7 +132,19 @@ impl TournamentScheduler {
 
     pub async fn run(mut self) {
         info!("[tournament-scheduler] Async-fill scheduler started");
-        while let Some(trigger) = self.trigger_rx.recv().await {
+        let mut reconciliation = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            let trigger = tokio::select! {
+                trigger = self.trigger_rx.recv() => match trigger { Some(trigger) => trigger, None => break },
+                _ = reconciliation.tick() => {
+                    if let Some(service) = self.cancellation_service() {
+                        if let Err(e) = service.reconcile_pending().await {
+                            error!("[tournament-scheduler] cancellation recovery failed: {}", e);
+                        }
+                    }
+                    continue;
+                }
+            };
             match trigger {
                 TournamentTrigger::CheckStart { tournament_id } => {
                     self.try_scheduled_start(tournament_id).await;
@@ -359,10 +379,13 @@ impl TournamentScheduler {
                         "[tournament-scheduler] Tournament {} past grace ({}/{} min). Cancelling.",
                         tournament_id, count, min
                     );
-                    let _ = self
-                        .store
-                        .update_status(tournament_id, TournamentStatus::Cancelled)
-                        .await;
+                    if let Some(service) = self.cancellation_service() {
+                        if let Err(e) = service.cancel(tournament_id, "scheduler", "Minimum player deadline expired").await {
+                            error!("[tournament-scheduler] cancellation pending for {}: {}", tournament_id, e);
+                        }
+                    } else {
+                        warn!("[tournament-scheduler] cancellation requires chain configuration; keeping {} open", tournament_id);
+                    }
                 } else {
                     info!(
                         "[tournament-scheduler] Tournament {} past scheduled_at, within grace ({}/{} min). Waiting.",
@@ -377,6 +400,13 @@ impl TournamentScheduler {
     // ── start ─────────────────────────────────────────────────────────────────
 
     async fn start_tournament(&self, tournament_id: u64) {
+        if let Ok(operations) = crate::signing::tournament_operations::list(self.store.pool(), tournament_id).await {
+            if operations.iter().any(|op| op.action == "cancel_tournament" && op.status != "failed") {
+                return;
+            }
+        } else {
+            return;
+        }
         // ── On-chain: start_tournament + initialize_match × N ────────────────
         if let Some(cfg) = &self.on_chain {
             let record = self.store.get(tournament_id).await;
@@ -744,9 +774,6 @@ pub fn spawn_prize_distributor(
                         "[prize-distributor] Tournament {}: all prize places flagged, leaving escrow for governance",
                         t.tournament_id
                     );
-                    store
-                        .update(t.tournament_id, |t| t.prizes_distributed = true)
-                        .await;
                     continue;
                 }
 

@@ -210,14 +210,15 @@ fn action_instruction_name(action_type: &str) -> Option<&'static str> {
         "claim_timeout" => Some("claim_timeout"),
         "finalize_game" => Some("finalize_game"),
         "cancel_tournament" => Some("cancel_tournament"),
-        "claim_prize" => Some("claim_prize"),
-        "distribute_prize" | "prize_distribution" => Some("distribute_prize"),
+        "claim_prize" => Some("claim_tournament_prize"),
+        "distribute_prize" | "prize_distribution" => Some("distribute_tournament_prizes"),
         _ => None,
     }
 }
 
 fn tx_has_expected_instruction(
     tx: &VersionedTransaction,
+    keys: &[Pubkey],
     program_id: Pubkey,
     action_type: &str,
     game_id: Option<i64>,
@@ -227,50 +228,112 @@ fn tx_has_expected_instruction(
     let instruction_name = action_instruction_name(action_type)
         .ok_or_else(|| format!("unsupported money action type: {action_type}"))?;
     let discriminator = instruction_discriminator(instruction_name);
-    let keys = tx.message.static_account_keys();
-
-    if let Some(wallet) = wallet {
-        let wallet = Pubkey::from_str(wallet).map_err(|e| e.to_string())?;
-        let signer_count = tx.message.header().num_required_signatures as usize;
-        let signer_ok = keys
-            .get(..signer_count)
-            .is_some_and(|signers| signers.contains(&wallet));
-        if !signer_ok {
-            return Ok(false);
-        }
+    // Positions follow the program's Accounts structs, including optional slots.
+    let (is_game, min_accounts, escrow_slot, role_slots, role_signs):
+        (bool, usize, Option<usize>, &[usize], bool) = match action_type {
+        "cancel_game" => (true, 6, Some(1), &[2], true),
+        "claim_timeout" => (true, 2, None, &[1], true),
+        "finalize_game" => (true, 9, Some(5), &[3, 4, 7], false),
+        "leave_tournament" => (false, 8, Some(6), &[5], true),
+        "cancel_tournament" => (false, 14, Some(9), &[11], true),
+        "claim_prize" => (false, 10, Some(5), &[7], true),
+        "distribute_prize" | "prize_distribution" => (false, 3, Some(1), &[2], true),
+        _ => unreachable!(),
+    };
+    let id = if is_game { game_id } else { tournament_id }
+        .and_then(|id| u64::try_from(id).ok())
+        .ok_or_else(|| "missing or negative action scope ID".to_string())?;
+    if (is_game && tournament_id.is_some()) || (!is_game && game_id.is_some()) {
+        return Err("conflicting action scope IDs".to_string());
     }
-
-    let expected_id = game_id.or(tournament_id).map(|v| v as u64);
+    let wallet = wallet.map(Pubkey::from_str).transpose().map_err(|e| e.to_string())?;
+    let seed: &[u8] = if is_game { b"game" } else { b"tournament" };
+    let escrow_seed: &[u8] = if is_game { b"escrow" } else { b"t_escrow" };
+    let pda = |seed: &[u8]| Pubkey::find_program_address(&[seed, &id.to_le_bytes()], &program_id).0;
+    let signer_count = tx.message.header().num_required_signatures as usize;
     Ok(tx.message.instructions().iter().any(|ix| {
         let program = keys.get(ix.program_id_index as usize).copied();
-        if program != Some(program_id) || !ix.data.starts_with(&discriminator) {
+        if program != Some(program_id)
+            || ix.data.len() != 16
+            || !ix.data.starts_with(&discriminator)
+            || ix.data.get(8..16) != Some(id.to_le_bytes().as_slice())
+            || ix.accounts.len() < min_accounts
+            || ix.accounts.iter().any(|index| usize::from(*index) >= keys.len())
+        {
             return false;
         }
-        if let Some(id) = expected_id {
-            ix.data.get(8..16) == Some(id.to_le_bytes().as_slice())
-        } else {
-            true
+        let account = |slot: usize| ix.accounts.get(slot).and_then(|index| keys.get(*index as usize)).copied();
+        if account(0) != Some(pda(seed))
+            || escrow_slot.is_some_and(|slot| account(slot) != Some(pda(escrow_seed)))
+        {
+            return false;
         }
+        if action_type == "claim_prize"
+            && (account(1) != Some(pda(b"t_usdc_prize")) || account(6) != account(7))
+        {
+            return false;
+        }
+        role_slots.iter().any(|slot| {
+            let index = ix.accounts[*slot] as usize;
+            (!role_signs || index < signer_count)
+                && wallet.is_none_or(|wallet| account(*slot) == Some(wallet))
+        })
     }))
+}
+
+fn resolved_account_keys(
+    tx: &VersionedTransaction,
+    writable: &[String],
+    readonly: &[String],
+) -> Result<Vec<Pubkey>, String> {
+    let (mut expected_writable, mut expected_readonly) = (0, 0);
+    for lookup in tx.message.address_table_lookups().unwrap_or_default() {
+        expected_writable += lookup.writable_indexes.len();
+        expected_readonly += lookup.readonly_indexes.len();
+    }
+    if writable.len() != expected_writable || readonly.len() != expected_readonly {
+        return Err("missing or inconsistent resolved lookup-table addresses".to_string());
+    }
+    let mut keys = tx.message.static_account_keys().to_vec();
+    for address in writable.iter().chain(readonly) {
+        keys.push(Pubkey::from_str(address).map_err(|e| format!("invalid loaded address: {e}"))?);
+    }
+    Ok(keys)
 }
 
 fn landed_transaction(
     rpc: &solana_client::rpc_client::RpcClient,
     signature: &Signature,
-) -> Result<Option<VersionedTransaction>, String> {
+) -> Result<Option<(VersionedTransaction, Vec<Pubkey>)>, String> {
     let statuses = rpc
-        .get_signature_statuses(&[*signature])
+        .get_signature_statuses_with_history(&[*signature])
         .map_err(|e| format!("signature status lookup failed: {e}"))?;
     let status = statuses.value.first().and_then(|entry| entry.as_ref());
     let Some(status) = status else {
         return Ok(None);
     };
+    if !status.satisfies_commitment(solana_commitment_config::CommitmentConfig::confirmed()) {
+        return Ok(None);
+    }
     if let Some(err) = &status.err {
         return Err(format!("transaction failed on-chain: {err:?}"));
     }
     let fetched = crate::signing::solana::fetch_transaction_v1_aware(rpc, signature)
         .map_err(|e| e.to_string())?;
-    Ok(Some(fetched.decoded))
+    let meta = fetched.confirmed.transaction.meta.as_ref()
+        .ok_or_else(|| "transaction metadata is missing".to_string())?;
+    if meta.err.is_some() || meta.status.is_err() {
+        return Err(format!("transaction failed on-chain: {:?}", meta.err));
+    }
+    if fetched.decoded.signatures.first() != Some(signature) {
+        return Err("fetched transaction signature mismatch".to_string());
+    }
+    let keys = resolved_account_keys(
+        &fetched.decoded,
+        &fetched.loaded_writable_accounts,
+        &fetched.loaded_readonly_accounts,
+    )?;
+    Ok(Some((fetched.decoded, keys)))
 }
 
 fn resolved_status_for(action_type: &str) -> (&'static str, &'static str) {
@@ -330,7 +393,11 @@ pub async fn reconcile_money_action_once(state: AppState, id: String) {
         }
     };
 
-    match landed_transaction(&state.solana_rpc, &sig) {
+    let rpc = state.solana_rpc.clone();
+    let landed = tokio::task::spawn_blocking(move || landed_transaction(&rpc, &sig))
+        .await
+        .unwrap_or_else(|e| Err(format!("transaction lookup worker failed: {e}")));
+    match landed {
         Ok(None) => {
             let next = Utc::now().timestamp() + 30;
             let _ = state
@@ -352,9 +419,10 @@ pub async fn reconcile_money_action_once(state: AppState, id: String) {
                 action_type = %record.action_type
             );
         }
-        Ok(Some(tx)) => {
+        Ok(Some((tx, keys))) => {
             match tx_has_expected_instruction(
                 &tx,
+                &keys,
                 state.program_id,
                 &record.action_type,
                 record.game_id,

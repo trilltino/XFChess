@@ -1,4 +1,6 @@
 use crate::db::repository::{GameRecord, GameRepository, MoveRecord};
+#[path = "admin_reporting.rs"]
+mod reporting;
 async fn tournament_transactions(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -42,7 +44,6 @@ struct AuditEntry {
     result: String,
 }
 
-static ELO_OVERRIDES: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static IP_BANS: Lazy<Mutex<Vec<IpBanEntry>>> = Lazy::new(|| Mutex::new(Vec::new()));
 static AUDIT_LOG: Lazy<Mutex<Vec<AuditEntry>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
@@ -104,11 +105,6 @@ struct BanReq {
     duration_days: Option<u32>,
 }
 
-#[derive(Deserialize)]
-struct EloOverrideReq {
-    new_elo: u32,
-    reason: String,
-}
 
 #[derive(Deserialize)]
 struct ForceResignReq {
@@ -149,6 +145,8 @@ struct AuditLogQuery {
 #[derive(Deserialize)]
 struct FeeReportQuery {
     period: Option<String>,
+    from: Option<i64>,
+    to: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -228,9 +226,10 @@ async fn operator_affordability(
     use solana_sdk::signature::Signer;
     let rpc = state.solana_rpc.clone();
     let wallet = state.vps_authority.pubkey();
-    let balance = tokio::task::spawn_blocking(move || rpc.get_balance(&wallet).unwrap_or(0))
+    let balance = tokio::task::spawn_blocking(move || rpc.get_balance(&wallet))
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
 
     // max_players defaults to the largest bracket size so an unparameterised
     // call reports the worst case rather than silently claiming affordability
@@ -344,6 +343,8 @@ pub fn admin_routes() -> Router<AppState> {
         .merge(crate::signing::routes::money_actions::admin_money_action_routes())
         // Players
         .route("/admin/players", get(list_players))
+        .route("/admin/players/{wallet}", get(reporting::player_detail))
+        .route("/admin/pvp/summary", get(reporting::pvp_summary))
         .route(
             "/admin/players/{wallet}/history",
             get(get_player_elo_history),
@@ -435,7 +436,7 @@ async fn anti_cheat_reports(
     // 1045), which is fabricated data on a compliance/moderation surface. Report
     // only genuinely flagged games, persisted in flagged_games (migration 024).
     let flagged_repo = crate::db::repository::FlaggedGameRepository::new(state.store.pool());
-    let flagged = flagged_repo.list().await.unwrap_or_default();
+    let flagged = flagged_repo.list().await.map_err(reporting::query_error)?;
     let reports: Vec<serde_json::Value> = flagged
         .into_iter()
         .map(|f| {
@@ -446,7 +447,7 @@ async fn anti_cheat_reports(
                 "suspect": "Unknown",
                 "verdict": "Flag",
                 "wager": "—",
-                "score": 0.0,
+                "score": null,
                 "reason": f.reason,
                 "status": "Flagged",
                 "created_at": f.flagged_at,
@@ -582,7 +583,7 @@ async fn linked_tournament_context(state: &AppState, game_id: &str) -> Option<Va
     None
 }
 
-async fn related_game_transactions(state: &AppState, game: &GameRecord) -> Vec<Value> {
+async fn related_game_transactions(state: &AppState, game: &GameRecord) -> Result<Vec<Value>, sqlx::Error> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     if let Some(sig) = game.finalize_sig.as_ref().filter(|s| !s.trim().is_empty()) {
@@ -591,7 +592,7 @@ async fn related_game_transactions(state: &AppState, game: &GameRecord) -> Vec<V
             "signature": sig,
             "source": "games.finalize_sig",
             "operation": "finalize_game",
-            "status": game.status,
+            "status": "recorded",
             "created_at": game.end_time.or(Some(game.start_time)),
         }));
     }
@@ -634,41 +635,26 @@ async fn related_game_transactions(state: &AppState, game: &GameRecord) -> Vec<V
             }
         }
     }
-    out
+    let actions = sqlx::query_as::<_, crate::signing::storage::money_action::MoneyActionRecord>(
+        "SELECT * FROM money_actions WHERE CAST(game_id AS TEXT) = ? AND signature IS NOT NULL AND TRIM(signature) != '' ORDER BY updated_at DESC",
+    ).bind(&game.id).fetch_all(&state.store.pool()).await?;
+    for action in actions {
+        if let Some(signature) = action.signature {
+            if seen.insert(signature.clone()) {
+                out.push(json!({"signature": signature, "source": "money_actions",
+                    "operation": action.action_type, "status": action.status,
+                    "created_at": action.created_at, "updated_at": action.updated_at,
+                    "money_action_id": action.id}));
+            }
+        }
+    }
+    Ok(out)
 }
 
 async fn debug_capabilities(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let v1_send_enabled = crate::signing::solana::TransactionBuildPolicy::v1_send_enabled();
-    Ok(Json(json!({
-        "sources": {
-            "game_db": true,
-            "moves_db": true,
-            "braid_event_log": true,
-            "pgn": true,
-            "tournament_store": true,
-            "tournament_transactions": true,
-            "money_actions": true,
-            "anti_cheat": true,
-            "moderation": true,
-            "archive": true,
-            "solana_tx_analyzer": true
-        },
-        "transaction_version_support": {
-            "max_supported_transaction_version": crate::signing::solana::MAX_SUPPORTED_TX_VERSION,
-            "v1_reads_enabled": true,
-            "v1_read_required": crate::signing::solana::v1_read_required(),
-            "v1_send_enabled": v1_send_enabled,
-            "default_send_policy": "legacy",
-            "large_flow_send_policy": if v1_send_enabled { "v1_when_wallet_and_rpc_support_it" } else { "v0_or_legacy_split" }
-        },
-        "rent_accounting": {
-            "rent_minimum_source": "rpc_getMinimumBalanceForRentExemption",
-            "contract_layout_policy": "stable_account_layouts",
-            "refund_policy": "rent_surplus_is_debug_evidence_not_prize_or_stake"
-        }
-    })))
+    reporting::capabilities(State(state)).await
 }
 
 async fn search_debug_games(
@@ -749,7 +735,7 @@ async fn game_debug_transactions(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
-    let transactions = related_game_transactions(&state, &game).await;
+    let transactions = related_game_transactions(&state, &game).await.map_err(reporting::query_error)?;
     Ok(Json(
         json!({ "game_id": game_id, "transactions": transactions }),
     ))
@@ -835,7 +821,13 @@ async fn game_debug_bundle(
         tournament_context.is_some(),
     );
 
-    let transactions = related_game_transactions(&state, &game).await;
+    let transactions = match related_game_transactions(&state, &game).await {
+        Ok(transactions) => transactions,
+        Err(e) => {
+            lookup_errors.push(json!({"section": "transactions", "error": e.to_string()}));
+            Vec::new()
+        }
+    };
     section_state(
         &mut available_sections,
         &mut missing_sections,
@@ -916,7 +908,10 @@ async fn game_debug_bundle(
     let moderation_flags: Vec<_> = flagged_repo
         .list()
         .await
-        .unwrap_or_default()
+        .unwrap_or_else(|e| {
+            lookup_errors.push(json!({"section": "moderation", "error": e.to_string()}));
+            Vec::new()
+        })
         .into_iter()
         .filter(|f| f.game_id.to_string() == game_id)
         .collect();
@@ -926,6 +921,24 @@ async fn game_debug_bundle(
         "moderation",
         !moderation_flags.is_empty(),
     );
+    let sessions = match reporting::game_sessions(&state.store.pool(), &game_id).await {
+        Ok(value) => value,
+        Err(e) => {
+            lookup_errors.push(json!({"section": "sessions", "error": e.to_string()}));
+            Value::Null
+        }
+    };
+    let dispute = match sqlx::query_as::<_, crate::db::repository::DisputeRecord>(
+        "SELECT * FROM disputes WHERE CAST(game_id AS TEXT) = ?",
+    ).bind(&game_id).fetch_optional(&state.store.pool()).await {
+        Ok(value) => json!(value),
+        Err(e) => {
+            lookup_errors.push(json!({"section": "dispute", "error": e.to_string()}));
+            Value::Null
+        }
+    };
+    section_state(&mut available_sections, &mut missing_sections, "sessions", !sessions.is_null());
+    section_state(&mut available_sections, &mut missing_sections, "dispute", !dispute.is_null());
 
     info!(
         "[admin-debug] bundle actor={} game_id={} available={:?} missing={:?} errors={}",
@@ -965,14 +978,11 @@ async fn game_debug_bundle(
             "rent_minimum_source": "rpc_getMinimumBalanceForRentExemption",
             "note": "Analyze a related transaction to inspect account lamports, rent-exempt minimum, and reclaimable surplus."
         },
-        "sessions": {
-            "available": false,
-            "note": "No persisted per-game Solana session records are currently linked to this game."
-        },
+        "sessions": sessions,
         "anti_cheat": anti_cheat,
         "moderation": {
             "flags": moderation_flags,
-            "dispute": null
+            "dispute": dispute
         }
     })))
 }
@@ -981,7 +991,7 @@ async fn list_players(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let limit = query.limit.unwrap_or(200);
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
     let players = state
         .store
         .list_players(limit)
@@ -992,11 +1002,10 @@ async fn list_players(
     let bans: HashMap<String, crate::db::repository::BanRecord> = ban_repo
         .list()
         .await
-        .unwrap_or_default()
+        .map_err(reporting::query_error)?
         .into_iter()
         .map(|b| (b.wallet.clone(), b))
         .collect();
-    let elo_overrides = ELO_OVERRIDES.lock().map(|e| e.clone()).unwrap_or_default();
 
     let players_json: Vec<_> = players
         .into_iter()
@@ -1012,14 +1021,15 @@ async fn list_players(
                     return None;
                 }
             }
-            let elo = elo_overrides.get(&wallet).copied().unwrap_or(1200);
+            let rating = reporting::cached_rating(&state, &wallet);
+            let elo = rating.get("value").and_then(Value::as_f64);
             if let Some(min) = query.elo_min {
-                if (elo as i32) < min {
+                if !elo.is_some_and(|v| v >= min as f64) {
                     return None;
                 }
             }
             if let Some(max) = query.elo_max {
-                if (elo as i32) > max {
+                if !elo.is_some_and(|v| v <= max as f64) {
                     return None;
                 }
             }
@@ -1033,6 +1043,7 @@ async fn list_players(
                 "username": username,
                 "kyc_status": kyc_status,
                 "elo": elo,
+                "rating": rating,
                 "banned": is_banned,
                 "ban_reason": bans.get(&wallet).map(|b| &b.reason),
             }))
@@ -1055,7 +1066,7 @@ async fn get_player_elo_history(
     let games = repo
         .get_games_by_player(&wallet, 50)
         .await
-        .unwrap_or_default();
+        .map_err(reporting::query_error)?;
     let history: Vec<_> = games
         .iter()
         .map(|g| {
@@ -1096,26 +1107,11 @@ async fn ban_player(
 }
 
 async fn elo_override(
-    Path(wallet): Path<String>,
-    Json(req): Json<EloOverrideReq>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    if let Ok(mut overrides) = ELO_OVERRIDES.lock() {
-        overrides.insert(wallet.clone(), req.new_elo);
-    }
-    add_audit(
-        None,
-        "elo_override",
-        &wallet,
-        &format!("new_elo={} reason={}", req.new_elo, req.reason),
-    )
-    .await;
-    info!(
-        "[admin] ELO override for {} → {} reason={}",
-        wallet, req.new_elo, req.reason
-    );
-    Ok(Json(
-        json!({ "ok": true, "wallet": wallet, "new_elo": req.new_elo }),
-    ))
+) -> (StatusCode, Json<Value>) {
+    (StatusCode::NOT_IMPLEMENTED, Json(json!({
+        "ok": false,
+        "error": "authoritative_rating_mutation_unavailable"
+    })))
 }
 
 async fn list_active_sessions(
@@ -1319,44 +1315,16 @@ async fn logs_stream() -> Result<Json<serde_json::Value>, StatusCode> {
 
 async fn treasury_payouts(
     State(state): State<AppState>,
+    Query(q): Query<FeeReportQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let repo = GameRepository::new(state.store.pool());
-    let games = repo.list_games(Some(50), None).await.unwrap_or_default();
-    let payouts: Vec<_> = games
-        .iter()
-        .filter_map(|g| {
-            let stake = g.stake_amount;
-            if stake < 0.000001 {
-                return None;
-            }
-            Some(json!({
-                "game_id": g.id,
-                "winner": g.winner,
-                "amount_sol": stake,
-                "tx_sig": g.finalize_sig.as_deref().unwrap_or("—"),
-                "settled_at": g.end_time,
-            }))
-        })
-        .collect();
-    Ok(Json(json!({ "payouts": payouts })))
+    reporting::payouts(&state, q).await.map(Json)
 }
 
 async fn treasury_fee_report(
     State(state): State<AppState>,
     Query(q): Query<FeeReportQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let period = q.period.unwrap_or_else(|| "week".to_string());
-    let repo = GameRepository::new(state.store.pool());
-    let games = repo.list_games(Some(200), None).await.unwrap_or_default();
-    let total_fees: i64 = games.iter().map(|g| g.fee_lamports).sum();
-    let total_stake: f64 = games.iter().map(|g| g.stake_amount).sum();
-    Ok(Json(json!({
-        "total_fee_sol": total_fees as f64 / 1e9,
-        "total_fee_lamports": total_fees,
-        "total_wagered_sol": total_stake,
-        "game_count": games.len(),
-        "period": period,
-    })))
+    reporting::fee_report(&state.store.pool(), q).await.map(Json)
 }
 
 async fn treasury_refund(
@@ -1447,9 +1415,10 @@ async fn tournament_escrow_balance(
     let seeds = &[b"t_escrow", &id.to_le_bytes()[..]];
     let (escrow_pda, _bump) = solana_sdk::pubkey::Pubkey::find_program_address(seeds, &program_id);
     let rpc = state.solana_rpc.clone();
-    let balance = tokio::task::spawn_blocking(move || rpc.get_balance(&escrow_pda).unwrap_or(0))
+    let balance = tokio::task::spawn_blocking(move || rpc.get_balance(&escrow_pda))
         .await
-        .unwrap_or(0);
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
     Ok(Json(json!({
         "tournament_id": id,
         "escrow_pda": escrow_pda.to_string(),
@@ -1672,27 +1641,27 @@ async fn db_stats(State(state): State<AppState>) -> Result<Json<serde_json::Valu
     let sessions_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
         .fetch_one(&pool)
         .await
-        .unwrap_or(0);
-    let games_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM game_history")
+        .map_err(reporting::query_error)?;
+    let games_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
         .fetch_one(&pool)
         .await
-        .unwrap_or(0);
-    let users_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .map_err(reporting::query_error)?;
+    let users_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users_v2 WHERE deleted_at IS NULL")
         .fetch_one(&pool)
         .await
-        .unwrap_or(0);
+        .map_err(reporting::query_error)?;
 
     let db_path = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sessions.db".to_string())
         .replace("sqlite://", "");
-    let db_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+    let db_bytes = std::fs::metadata(&db_path).ok().map(|m| m.len());
 
     Ok(Json(json!({
         "sessions_rows": sessions_rows,
         "games_rows": games_rows,
         "users_rows": users_rows,
         "db_bytes": db_bytes,
-        "db_mb": db_bytes as f64 / 1_048_576.0,
+        "db_mb": db_bytes.map(|bytes| bytes as f64 / 1_048_576.0),
     })))
 }
 

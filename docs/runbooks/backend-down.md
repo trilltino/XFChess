@@ -22,6 +22,7 @@
 1. `curl -s https://$SERVER/health` → `status: ok` and expected `git_sha`.
 2. `curl -s https://$SERVER/readyz` → 200 `ready`.
 3. Error rate returns to baseline in Grafana.
+4. For an in-progress casual game, confirm `casual_game_participants` still holds the accepted host and joiner after restart. The JOIN_ACK lobby registry itself is in memory, so pending lobby handshakes may need reannouncement. Do not treat an empty registry as evidence that an already accepted game ended.
 
 ## Root cause / follow-up
 - Capture logs, open a blameless postmortem, add a test/alert so it can't recur silently.

@@ -4,6 +4,7 @@ import { lamportsToUsd, lamportsToUsdInput, usdInputToLamports } from "../../ser
 import { useSolUsdRate } from "../../hooks/useSolUsdRate";
 
 interface CreateTournamentProps {
+  initialConfig?: CreateTournamentRequest;
   onTournamentCreated: () => void;
   onCancel: () => void;
 }
@@ -21,7 +22,7 @@ const generatedTournamentName = (
   return `${maxPlayers}-player ${label}`;
 };
 
-export default function CreateTournament({ onTournamentCreated, onCancel }: CreateTournamentProps) {
+export default function CreateTournament({ onTournamentCreated, onCancel, initialConfig }: CreateTournamentProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -30,7 +31,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
   const [preflightLoading, setPreflightLoading] = useState(false);
 
   // Form state
-  const [formData, setFormData] = useState<CreateTournamentRequest>({
+  const [formData, setFormData] = useState<CreateTournamentRequest>(() => initialConfig ?? ({
     tournament_id: generatedTournamentId(),
     name: generatedTournamentName("SingleElimination", 16),
     entry_fee_lamports: 0,
@@ -45,7 +46,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel }: Crea
     winner_takes_all: false,
     scheduled_at: undefined,
     kyc_required: false,
-  });
+  }));
 
   // Text mirrors of the two lamport fields, kept as separate string state so
   // the input can hold in-progress text ("0.", "0.00") that parseFloat would

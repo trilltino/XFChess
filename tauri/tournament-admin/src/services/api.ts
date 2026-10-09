@@ -16,6 +16,7 @@
 // drop-in compatible with window.fetch. Scope: capabilities/admin-http.json.
 // See docs/plans/tournament-admin-connection-rearchitecture.md §3 Phase 1.
 import { fetch } from "@tauri-apps/plugin-http";
+import type { SwissResultRequest, CancellationResponse, TournamentOperation } from "./adminFlows";
 
 export interface ApiError {
   message: string;
@@ -133,6 +134,17 @@ class ApiClient {
   }
 
   // Tournament endpoints
+  async getTournamentOperations(id: number) {
+    return this.request<{ operations: TournamentOperation[] }>(`/admin/tournament/${id}/operations`);
+  }
+  async recordSwissResult(id: number, result: SwissResultRequest) {
+    return this.request<{ ok: boolean }>(`/admin/tournament/${id}/result`, { method: "POST", body: JSON.stringify(result) });
+  }
+
+  async approvePrizeRelease(id: number) {
+    return this.request<{ ok: boolean }>(`/admin/tournament/${id}/approve-prize-release`, { method: "POST", body: JSON.stringify({}) });
+  }
+
   async getTournaments() {
     const response = await this.request<any>("/api/tournaments");
     if (!response.ok) return response as ApiResponse<TournamentSummary[]>;
@@ -172,13 +184,14 @@ class ApiClient {
     return this.request<any>(`/api/tournament/${id}/bracket`);
   }
 
-  async recordResult(tournamentId: number, matchIndex: number, winner: string, loser: string) {
+  async recordResult(tournamentId: number, matchIndex: number, winner: string, loser: string, reason?: string) {
     return this.request<any>(`/admin/tournament/${tournamentId}/record-result`, {
       method: "POST",
       body: JSON.stringify({
         match_index: matchIndex,
         winner,
         loser,
+        ...(reason ? { reason } : {}),
       }),
     });
   }
@@ -292,7 +305,7 @@ class ApiClient {
   // Cancels the tournament on-chain (refunds entry fees + returns the
   // guaranteed prize to the operator) and marks it Cancelled in the store.
   async cancelTournament(tournamentId: number) {
-    return this.request<{ ok: boolean; signature: string; players_refunded: number }>(
+    return this.request<CancellationResponse>(
       `/admin/tournament/${tournamentId}/cancel`,
       { method: "POST", body: JSON.stringify({}) }
     );
