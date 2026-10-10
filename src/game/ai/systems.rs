@@ -32,20 +32,8 @@ pub struct AIMovePendingReveal {
 #[derive(Resource, Clone)]
 pub struct XFChessGamePool(pub std::sync::Arc<std::sync::Mutex<Option<nimzovich_engine::Game>>>);
 
-// Deliberately NOT cfg(not(target_os = "android"))-gated, unlike Stockfish's
-// treatment elsewhere in the codebase. `std::process::Command` compiles and
-// links fine on Android (confirmed — this file was part of the first
-// successful Android cross-compile, unmodified) and this code is genuinely
-// unreachable there: the engine picker in modals.rs no longer offers
-// `AIEngine::Stockfish` as an option, and every default in the codebase now
-// resolves to `XFChessEngine` on Android. The only way this runs on Android
-// is a future bug that constructs `AIEngine::Stockfish` some other way, and
-// even then `resolve_stockfish_path()` returns a plain `Err` (no candidate
-// path exists in an Android app's directories) rather than anything unsafe.
-// Cfg-gating it out would need restructuring `AiSpawnParams`' `sf_process`
-// field and the dispatch match in `spawn_ai_task_system` for a benefit that's
-// purely dead-code APK size — not worth the churn versus the actual fix
-// (removing every path that could select this engine).
+// Stockfish process code remains buildable on Android but is not offered by
+// the engine picker. A missing executable resolves to Err.
 struct StockfishInner {
     child: std::process::Child,
     stdin: std::process::ChildStdin,
@@ -266,9 +254,7 @@ fn compute_think_params(
     let base_secs = tc.base_seconds();
     let inc_secs = tc.increment_seconds();
 
-    // Remaining-time budget: base / estimated_moves_left (never less than 5),
-    // with most of the increment available to the engine. Keep a reserve so
-    // repeated long searches cannot flag the AI in a real clocked game.
+    // Reserve clock time so repeated engine searches cannot flag the AI.
     let think_time = if base_secs > 0 {
         let est_moves_left = (40.0 - half_moves_played as f32 / 2.0).max(5.0);
         let increment_bonus = inc_secs as f32 * 0.8;
@@ -389,9 +375,8 @@ fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
                 "[AI] Spawning XFChessEngine task — think_time={:.2}s max_depth={:?}",
                 think_time, max_depth
             );
-            // Try to take the pre-warmed game from the pool to avoid re-allocating the
-            // 2.2 GB transposition table on every move. Pass the pool Arc into the
-            // task so it can put the game back when the search finishes.
+            // Reuse the pooled Game to avoid reallocating its 2.2 GB search table each move.
+            // Return it to the pool after searching.
             let pool_arc = params.game_pool.as_ref().map(|p| p.0.clone());
             let preloaded = pool_arc.as_ref().and_then(|arc| arc.lock().ok()?.take());
             let task =
@@ -440,7 +425,6 @@ fn spawn_xf_engine_task(
 
         let depth_reached = game.max_depth_so_far as u8;
 
-        // Return game to the pool for reuse on the next AI move.
         if let Some(arc) = pool {
             if let Ok(mut guard) = arc.lock() {
                 *guard = Some(game);
@@ -558,7 +542,6 @@ fn spawn_stockfish_task_persistent(
             }
         }
 
-        // Send position and search command.
         writeln!(guard.stdin, "position fen {}", fen).map_err(|e| e.to_string())?;
         guard.stdin.flush().map_err(|e| e.to_string())?;
         writeln!(
@@ -788,7 +771,6 @@ fn apply_ai_result(
             move_found = Some(ai_move.uci);
             move_from_direct_stockfish = true;
 
-            // Update AI statistics
             params.ai_stats.last_score = ai_move.score as i64;
             params.ai_stats.last_depth = ai_move.depth as i64;
             params.ai_stats.last_nodes = ai_move.nodes;

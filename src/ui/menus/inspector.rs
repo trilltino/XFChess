@@ -36,7 +36,6 @@ pub fn inspector_ui(world: &mut World, mut selected_entities: Local<SelectedEnti
             });
         });
 
-    // Right panel: Selected entity component inspector
     egui::SidePanel::right("entity_inspector")
         .default_width(300.0)
         .show(egui_context.get_mut(), |ui| {
@@ -65,7 +64,6 @@ pub fn inspector_ui(world: &mut World, mut selected_entities: Local<SelectedEnti
             });
         });
 
-    // Bottom panel: Game resources and state
     egui::TopBottomPanel::bottom("game_resources")
         .default_height(250.0)
         .show(egui_context.get_mut(), |ui| {
@@ -131,7 +129,6 @@ pub fn inspector_ui(world: &mut World, mut selected_entities: Local<SelectedEnti
                         columns[1].label("No piece selected");
                     }
 
-                    // Column 3: Move History
                     columns[2].heading("Move History");
                     columns[2].label(format!("Total moves: {}", history_len));
                     if let Some(last) = last_move {

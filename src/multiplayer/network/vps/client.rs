@@ -70,10 +70,8 @@ fn default_headers() -> reqwest::header::HeaderMap {
             }
         }
     }
-    // Legacy fallback for the VPS session-key signing endpoints
-    // (/move/record, /session/*, /game/finalize, …): a shared relay
-    // secret matching the backend's RELAY_SHARED_SECRET. Sent alongside
-    // the JWT during the dual-accept rollout; harmless once retired.
+    // Legacy relay secret matching RELAY_SHARED_SECRET, sent with JWTs
+    // while session-signing endpoints accept both authentication paths.
     if let Ok(secret) = std::env::var("RELAY_SHARED_SECRET") {
         if let Ok(value) = reqwest::header::HeaderValue::from_str(&secret) {
             h.insert("X-Relay-Secret", value);
@@ -98,14 +96,8 @@ pub fn client_fast() -> Result<reqwest::blocking::Client, String> {
         .map_err(|e| format!("Failed to build HTTP client: {e}"))
 }
 
-// ── Tauri wallet bridge port resolution ─────────────────────────────────────
-//
-// Pure local port-file/env-var lookup — no Solana SDK dependency — so it
-// lives here rather than under `multiplayer::solana` (which is gated behind
-// the `solana` cargo feature). It was previously defined in
-// `multiplayer::solana::tauri_signer`, which broke every no-`solana`-feature
-// build the moment a caller outside that module (main_menu.rs's wallet-bridge
-// status poller, itself feature-independent) referenced it unconditionally.
+// Keep wallet bridge port lookup feature-independent; menu polling also
+// builds without the solana feature.
 
 fn nominal_wallet_bridge_port() -> u16 {
     std::env::var("XFCHESS_WALLET_PORT")

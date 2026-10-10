@@ -107,9 +107,7 @@ pub async fn persist_admin_request(
             .unwrap_or_default()
             .as_secs() as i64;
         let result = format!("{} -> {}", method.as_str(), status);
-        // Awaited, not spawned — same durability reasoning as
-        // `admin::add_audit`: an audit entry that can be silently dropped by
-        // a crash racing a fire-and-forget task isn't durable.
+        // Await audit writes so a crash cannot lose a fire-and-forget entry.
         if let Err(e) = sqlx::query(
             "INSERT INTO admin_audit_log (ts, actor, action, target, result, method, path, status) \
              VALUES (?, ?, ?, '', ?, ?, ?, ?)",
@@ -167,7 +165,6 @@ pub async fn require_relay_or_jwt(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // 1) Preferred: a valid, non-revoked per-user JWT.
     if let Some(token) = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
@@ -184,7 +181,6 @@ pub async fn require_relay_or_jwt(
         // Invalid token → fall through to the relay-secret path (dual-accept).
     }
 
-    // 2) Legacy: the shared relay secret. Unset/empty → fail closed.
     match env::var("RELAY_SHARED_SECRET") {
         Ok(secret) if !secret.is_empty() => {
             let provided = request
@@ -255,7 +251,6 @@ mod tests {
     #[tokio::test]
     #[ignore = "Flaky: race condition with parallel tests modifying global env vars"]
     async fn test_require_api_key_missing_env_var() {
-        // Remove env var if it exists
         std::env::remove_var("ADMIN_API_KEY");
 
         let app = Router::new()

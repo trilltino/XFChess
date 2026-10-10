@@ -1,9 +1,5 @@
--- Migration 034: one playing device per player per game
---
--- A wallet signed in on two devices could submit moves for the same seat from
--- both. A seat lease names the single device allowed to write moves for
--- (game_id, wallet). Claiming increments `epoch`, so the newest claim takes
--- over and the previous device becomes view-only.
+-- Each (game_id, wallet) has one writing device. A new claim increments epoch
+-- and makes the previous device view-only.
 
 CREATE TABLE IF NOT EXISTS game_seat_leases (
     game_id TEXT NOT NULL,

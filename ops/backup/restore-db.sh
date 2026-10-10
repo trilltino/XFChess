@@ -1,19 +1,7 @@
 #!/usr/bin/env bash
-# XFChess DB restore — pull an encrypted snapshot, decrypt, and place it.
-#
-# Decryption needs the age PRIVATE key, which is kept OFFLINE (not on the server).
-# Run this from a trusted operator machine that has the key, or copy the key in
-# temporarily via `break-glass` and shred it afterwards.
-#
-# Usage:
-#   BACKUP_AGE_IDENTITY=/path/to/age-key.txt \
-#   ./restore-db.sh <db-name> [<object-name.age>] [<dest-path>]
-#
-#   db-name      e.g. sessions | vault        (matches <name>.db)
-#   object-name  specific backup to restore   (default: latest for that db)
-#   dest-path    where to write the .db        (default: /opt/xfchess/data/<name>.db)
-#
-# Env: BACKUP_REMOTE (rclone target, same as backup-db.sh), BACKUP_AGE_IDENTITY (key file)
+# Restore an age-encrypted DB with rclone from a trusted operator host.
+# Required: BACKUP_REMOTE, BACKUP_AGE_IDENTITY (private key path).
+# Usage: ./restore-db.sh <db-name> [<object-name.age>] [<dest-path>]
 set -euo pipefail
 
 NAME="${1:?usage: restore-db.sh <db-name> [object.age] [dest]}"

@@ -33,16 +33,8 @@ pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";
 
-// ---------------------------------------------------------------------------
-// Authority Constants (environment-gated)
-// ---------------------------------------------------------------------------
-// Mirrors Raydium's pattern: `declare_id!` and all privileged authority
-// constants are split by `localnet` / `devnet` / `mainnet` feature gates.
-//
-// * `localnet`  — fixed pubkeys for local program-test runs.
-// * `devnet`    — the current devnet deployment pubkeys (default feature).
-// * `mainnet`   — placeholder all-zeros keys; the const-assertion guard
-//   below prevents mainnet builds until keys are rotated.
+// Gate authority keys by localnet/devnet/mainnet. Mainnet placeholders are
+// blocked by compile-time assertions until real keys are configured.
 
 #[cfg(feature = "localnet")]
 mod pda_keys {
@@ -237,10 +229,7 @@ pub const CRANK_MAX_SLOT_DELAY: u64 = 300;
 
 pub const CRANK_MAX_SECONDS_EARLY: i64 = 60;
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Bounded durations (checked_add-safe)
-// ---------------------------------------------------------------------------
+// Bound durations so checked_add cannot overflow.
 
 /// Maximum session-key validity: 30 days.
 pub const MAX_SESSION_DURATION_SECS: i64 = 30 * 24 * 60 * 60;

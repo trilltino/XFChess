@@ -43,7 +43,6 @@ pub fn render_solana_panel(
         ui.heading(egui::RichText::new("SOLANA COMPETITIVE").color(UiColors::ACCENT_GOLD));
         ui.add_space(10.0);
 
-        // --- Wallet Section ---
         ui.group(|ui| {
             ui.label(egui::RichText::new("WALLET").strong());
             if let Some(pubkey) = &wallet.pubkey {
@@ -105,7 +104,6 @@ pub fn render_solana_panel(
 
         ui.add_space(10.0);
 
-        // --- Verification Section ---
         if wallet.pubkey.is_some() {
             ui.group(|ui| {
                 ui.label(egui::RichText::new("VERIFICATION").strong());
@@ -136,11 +134,7 @@ pub fn render_solana_panel(
                 });
 
                 ui.add_space(5.0);
-                // XFCHESS_WEB_URL points at the web frontend (React SPA), not
-                // BACKEND_URL (the JSON API server) — that mismatch used to send
-                // this button to the API's bare domain, which serves no /profile
-                // page. Same fix as the "Web ↗" button below and the working
-                // precedent in main_menu/new_menu.rs's "XFChess.com" link.
+                // Use XFCHESS_WEB_URL for frontend pages; BACKEND_URL serves the JSON API.
                 let web_url = std::env::var("XFCHESS_WEB_URL")
                     .unwrap_or_else(|_| "https://xfchess.com".to_string());
                 let profile_url = format!("{}/profile", web_url);
@@ -150,7 +144,6 @@ pub fn render_solana_panel(
             });
         }
 
-        // --- Global Session Status ---
         if wallet.pubkey.is_some() {
             ui.add_space(6.0);
             ui.group(|ui| {
@@ -243,11 +236,9 @@ pub fn render_solana_panel(
 
         ui.add_space(10.0);
 
-        // --- Stats Section ---
         ui.group(|ui| {
             ui.label(egui::RichText::new("ON-CHAIN STATS").strong());
 
-            // Profile status chip
             let status = solana_state.profile_status;
             let chip_color = profile_status_color(status);
             let chip_label = profile_status_label(status);
@@ -256,7 +247,6 @@ pub fn render_solana_panel(
                 ui.colored_label(chip_color, chip_label);
             });
 
-            // Display name if available
             if let Some(ref name) = solana_state.cached_display_name {
                 ui.label(format!("Username: {}", name));
             }
@@ -288,11 +278,7 @@ pub fn render_solana_panel(
 
         ui.add_space(10.0);
 
-        // --- Wager Section ---
-        // A free on-chain game (stake 0) is a live match too, but it is not
-        // a wager — showing "ACTIVE WAGER / Amount: —" for it (the
-        // pre-v0.2.8 behavior, keyed off `game_id.is_some()`) read as a
-        // broken connection/escrow state.
+        // Zero-stake on-chain games are live matches, not active wagers.
         let has_on_chain_game = sync.game_id.is_some();
         let wager_active = competitive.active || sync.wager_amount > 0;
         if wager_active {

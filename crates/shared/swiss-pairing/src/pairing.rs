@@ -53,7 +53,6 @@ pub fn generate_pairings(
         .cloned()
         .collect();
 
-    // 1. Sort players by rank (score desc, rating desc, id asc)
     let mut ranked = auto_players.clone();
     ranked.sort_by(|a, b| {
         b.score
@@ -63,11 +62,9 @@ pub fn generate_pairings(
             .then_with(|| a.id.cmp(&b.id))
     });
 
-    // 2. Group by score
     let scoregroups = group_by_score(&ranked);
     debug!("Created {} scoregroups", scoregroups.len());
 
-    // 3. Pair each scoregroup
     let mut all_pairings: Vec<Pairing> = manual_pairings;
     let mut byes: Vec<String> = Vec::new();
     let mut used_players: Vec<String> = overridden_ids.into_iter().collect();
@@ -92,7 +89,6 @@ pub fn generate_pairings(
             continue;
         }
 
-        // Try to pair this scoregroup
         let (pairings, bye, remaining) = pair_scoregroup(&available, config)?;
 
         all_pairings.extend(pairings);
@@ -102,7 +98,6 @@ pub fn generate_pairings(
         used_players.extend(remaining);
     }
 
-    // Handle remaining unpaired players (float to next group)
     let unpaired: Vec<SwissPlayer> = ranked
         .iter()
         .filter(|p| !used_players.contains(&p.id) && !byes.contains(&p.id))
@@ -146,10 +141,8 @@ pub fn generate_pairings(
         byes.extend(float_byes);
     }
 
-    // 4. Assign colors — use the full active pool for color history lookup
     let colored = assign_colors_dutch(&all_pairings, &active)?;
 
-    // 5. Assign board numbers (sorted by combined rating)
     let numbered = assign_board_numbers(colored, &active);
 
     debug!(

@@ -19,10 +19,6 @@ pub fn braid_router(hub: ResourceHub) -> Router {
         .expose_headers(Any);
 
     Router::new()
-        // axum 0.8 wildcard syntax. This read `/*res` (axum 0.7) until the
-        // router was first mounted — `Router::route` *panics* on the old form,
-        // so simply building this router would have taken the server down at
-        // startup. Nothing caught it because nothing called `braid_router`.
         .route("/{*res}", get(resource::subscribe::get_resource))
         .layer(cors)
         .with_state(hub)

@@ -9,8 +9,7 @@ loopback-only wallet bridge. It never runs as a standalone web/vite dev server.
 From the repo root:
 
 ```bash
-just admin                          # opens the desktop admin window
-scripts\start-tournament-admin.bat  # same, plus starts a local backend
+just admin  # starts a local backend and opens the desktop admin window
 ```
 
 Or from a running dev stack (`just dev`): right-click the tray icon →

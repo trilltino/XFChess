@@ -28,8 +28,7 @@ window, served from the loopback-only wallet bridge. It never runs as a
 standalone web/vite dev server.
 
 ```bash
-just admin                          # from the repo root: opens the desktop window
-scripts\start-tournament-admin.bat  # same, plus starts a local backend
+just admin  # from the repo root: starts a local backend and opens the desktop window
 ```
 
 From a running dev stack (`just dev`): tray icon → **Tournament Admin**.

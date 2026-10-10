@@ -1,17 +1,5 @@
-; XFChess Windows installer (NSIS)
-; -----------------------------------------------------------------------------
-; Bundles the three binaries (game + wallet bridge + stockfish) plus assets into
-; a single signed Setup.exe. Built and signed in CI by .github/workflows/release.yml.
-;
-; The staged payload is expected next to this script under ..\..\release\win\:
-;   xfchess.exe          (game, main app)
-;   xfchess-tauri.exe    (wallet bridge companion)
-;   stockfish.exe        (chess engine — mandatory, release.yml fails the job
-;                          before this script even runs if it couldn't be fetched)
-;   assets\              (game assets)
-;   wallet-ui\dist\       (built wallet-signing popup UI, served by xfchess-tauri)
-; All .exe files MUST already be Authenticode-signed before makensis runs, then
-; the resulting Setup.exe is signed too. See docs/PUBLISHING.md.
+; Package the signed payload from release/win. Sign all binaries before
+; makensis, then sign Setup.exe. See docs/PUBLISHING.md.
 
 !define APP_NAME      "XFChess"
 !define APP_PUBLISHER "trilltino"
@@ -25,10 +13,8 @@
   !define PAYLOAD_DIR "..\..\release\win"
 !endif
 
-; Production backend endpoints baked into the launcher. Override at build time:
-;   makensis /DBACKEND_URL=https://xfchess.com /DSIGNING_URL=https://xfchess.com xfchess.nsi
-; nginx serves the frontend + API from the same domain (see ops/nginx/nginx.conf) —
-; there's no separate api.* subdomain.
+; Override endpoints with makensis /DBACKEND_URL=... /DSIGNING_URL=... .
+; Production serves frontend and API from the same domain.
 !ifndef BACKEND_URL
   !define BACKEND_URL "https://xfchess.com"
 !endif
@@ -62,12 +48,7 @@ BrandingText "${APP_NAME} ${APP_VERSION}"
 !insertmacro MUI_LANGUAGE "English"
 
 Section "Install"
-  ; Kill any already-running instance first. Overwriting a locked binary below
-  ; fails with a bare "Error opening file for writing <name>.exe" — no
-  ; explanation that it's because a previous session's process (game or wallet
-  ; bridge) is still holding the file open. Silent (nsExec, not Exec) so no
-  ; console flash; ignore the exit code — "no such process" is the common,
-  ; harmless case on a first-ever install.
+  ; Stop running binaries before overwriting them; missing processes are harmless.
   nsExec::Exec 'taskkill /F /IM ${APP_EXE} /T'
   nsExec::Exec 'taskkill /F /IM ${BRIDGE_EXE} /T'
   Sleep 500
@@ -81,37 +62,18 @@ Section "Install"
   SetOutPath "$INSTDIR\assets"
   File /r "${PAYLOAD_DIR}\assets\*.*"
 
-  ; wallet-ui: served by xfchess-tauri itself from wallet-ui\dist next to its
-  ; own exe (resolved via current_exe().parent() — see main.rs). Without this
-  ; the wallet-signing popup has nowhere real to load.
+  ; Ship wallet-ui/dist beside the companion executable so its signing popup can load.
   SetOutPath "$INSTDIR\wallet-ui\dist"
   File /r "${PAYLOAD_DIR}\wallet-ui\dist\*.*"
 
-  ; Launcher: sets production endpoints, starts the wallet bridge, then the game.
-  ; This completes the dev .bat (which started only the bridge).
-  ;
-  ; Kills any already-running bridge/game first: the bridge holds its
-  ; connected wallet (pubkey + username) in memory for as long as the process
-  ; lives, with no expiry, and nothing here used to stop a leftover instance
-  ; from a previous launch before starting a new pair — closing the game
-  ; window doesn't kill the bridge, so it survives indefinitely in the
-  ; background. A later launch would then silently fail to rebind the bridge's
-  ; port (already held by the stale one) while the fresh game instance still
-  ; polled that same stale bridge, showing whichever wallet was connected
-  ; however many sessions ago instead of the one just chosen. Confirmed live:
-  ; a player who reconnected a different wallet kept seeing an old username
-  ; from a session that had never actually been closed. Forcing a clean slate
-  ; on every launch is the only version of this that can't drift.
+  ; Stop stale bridge/game processes before launching so cached wallet identity
+  ; and bound bridge ports cannot leak between sessions.
   SetOutPath "$INSTDIR"
   FileOpen $0 "$INSTDIR\launch.bat" w
   FileWrite $0 "@echo off$\r$\n"
   FileWrite $0 "setlocal$\r$\n"
   FileWrite $0 "set SCRIPT_DIR=%~dp0$\r$\n"
-  ; Strip the trailing backslash that %~dp0 always appends.  Without this,
-  ; start /D \"%SCRIPT_DIR%\" becomes start /D \"C:\\path\\\" — the \\\" is
-  ; parsed by cmd.exe as an escaped quote, swallowing the closing quote and
-  ; corrupting the /D argument, leaving the game with the wrong cwd so that
-  ; assets/ is never found relative to it.
+  ; Strip the trailing backslash from SCRIPT_DIR before passing it to start /D.
   FileWrite $0 "set SCRIPT_DIR_Q=%SCRIPT_DIR:~0,-1%$\r$\n"
   FileWrite $0 "set BACKEND_URL=${BACKEND_URL}$\r$\n"
   FileWrite $0 "set SIGNING_SERVICE_URL=${SIGNING_URL}$\r$\n"
@@ -123,25 +85,12 @@ Section "Install"
   FileWrite $0 "endlocal$\r$\n"
   FileClose $0
 
-  ; Hidden launcher: a shortcut targeting launch.bat directly makes cmd.exe
-  ; flash a visible console window while it hosts the batch script, even
-  ; though xfchess.exe/xfchess-tauri.exe both suppress their own console
-  ; (windows_subsystem="windows" in release builds) — cmd.exe itself is what's
-  ; visible, not either app. Route shortcuts through a VBScript wrapper that
-  ; runs launch.bat with a hidden window style (0) instead.
+  ; Use the hidden VBScript wrapper so shortcuts do not flash a cmd window.
   FileOpen $1 "$INSTDIR\launch.vbs" w
   FileWrite $1 "CreateObject($\"WScript.Shell$\").Run $\"$\"$\"$INSTDIR\launch.bat$\"$\"$\", 0, False$\r$\n"
   FileClose $1
 
-  ; Second-instance launcher: sets a distinct XFCHESS_WALLET_PORT (and node
-  ; identity path) before starting its own bridge+game pair, so testing
-  ; multiplayer against yourself on one PC actually works — two instances
-  ; launched from the plain shortcut both default to the same port, so the
-  ; second bridge's HTTP server either fails outright or (now) falls back to
-  ; a port neither the game nor the wallet popup can reliably discover,
-  ; since nothing distinguishes "this instance's" bridge from any other's.
-  ; An explicit different port sidesteps that ambiguity entirely instead of
-  ; trying to guess it away after the fact. Mirrors `just dev2`'s P2 setup.
+  ; Give the second instance its own bridge port and node identity, matching just dev2.
   FileOpen $2 "$INSTDIR\launch-second-instance.bat" w
   FileWrite $2 "@echo off$\r$\n"
   FileWrite $2 "setlocal$\r$\n"

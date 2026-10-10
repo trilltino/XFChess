@@ -42,7 +42,6 @@ pub fn sync_spectator_board(
             is_check: _,
         }) = event
         {
-            // 1. Handle Initial Sync (Hard Teleport)
             if !sync_status.initialized {
                 info!("[SPECTATE] Initial sync from FEN: {}", fen);
                 if let Err(e) = engine.set_from_fen(&fen) {
@@ -53,7 +52,6 @@ pub fn sync_spectator_board(
                 continue;
             }
 
-            // 2. Handle Subsequent Moves (Animation)
             if let Some(uci) = last_move {
                 if Some(uci.clone()) != sync_status.last_move_uci {
                     info!("[SPECTATE] Detected new move: {}", uci);

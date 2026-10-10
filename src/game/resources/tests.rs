@@ -2,9 +2,6 @@ use super::*;
 use crate::game::components::{GamePhase, MoveRecord};
 use crate::rendering::pieces::PieceColor;
 
-// ============================================================================
-// CurrentTurn Tests
-// ============================================================================
 
 #[test]
 fn test_current_turn_default() {
@@ -66,9 +63,6 @@ fn test_multiple_turn_switches() {
     assert_eq!(turn.move_number, 3);
 }
 
-// ============================================================================
-// CurrentGamePhase Tests
-// ============================================================================
 
 #[test]
 fn test_game_phase_default() {
@@ -100,9 +94,6 @@ fn test_game_phase_transitions() {
     assert_eq!(phase.0, GamePhase::Playing);
 }
 
-// ============================================================================
-// MoveHistory Tests
-// ============================================================================
 
 #[test]
 fn test_move_history_default() {
@@ -214,9 +205,6 @@ fn test_move_history_with_capture() {
     );
 }
 
-// ============================================================================
-// GameTimer Tests
-// ============================================================================
 
 #[test]
 fn test_game_timer_default() {

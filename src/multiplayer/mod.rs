@@ -45,13 +45,11 @@ pub struct MultiplayerPlugin;
 
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
-        // Initialize Tokio runtime for background tasks
         let runtime = Runtime::new().unwrap_or_else(|e| {
             panic!("Failed to create Tokio runtime: {}", e);
         });
         app.insert_resource(TokioRuntime(runtime));
 
-        // 1. Register shared types and events
         app.init_resource::<OnlineNetworkState>()
             .init_resource::<OnlineGameSync>()
             .init_resource::<HeartbeatState>()
@@ -65,7 +63,6 @@ impl Plugin for MultiplayerPlugin {
         #[cfg(feature = "solana")]
         app.init_resource::<rollup::session_keys::HandshakeOrderingKeyManager>();
 
-        // 2. Register sub-plugins
         app.add_plugins((
             network::p2p::P2PConnectionPlugin,
             network::p2p_vps::P2PVpsPlugin,
@@ -86,17 +83,13 @@ impl Plugin for MultiplayerPlugin {
             solana::integration::SolanaIntegrationPlugin,
             solana::lobby::SolanaLobbyPlugin,
             solana::wager_rate::SolUsdRatePlugin,
-            // Backs ctx.tournament_client (ui/system_params/main_menu.rs) — the
-            // resource every tournament register/join/expand click handler in
-            // screens.rs is gated on. Without this, that Option resolves to
-            // None at runtime and those buttons silently no-op.
+            // Tournament click handlers require this resource; a missing client silently disables them.
             solana::tournament::TournamentClientPlugin,
             monitoring::RollupHealthMonitorPlugin,
             resume::ResumePlugin,
             seat::SeatPlugin,
         ));
 
-        // 3. Register core orchestration systems
         app.add_systems(
             Update,
             (
@@ -109,12 +102,7 @@ impl Plugin for MultiplayerPlugin {
                 systems::handle_resync_request,
                 systems::handle_game_control_messages,
                 systems::send_local_draw_events,
-                // Gated to InGame: `game_mode` alone doesn't reset on
-                // leaving a match, so an ungated heartbeat kept ticking
-                // in the background after returning to the menu and
-                // could still time out there, forcing a bogus
-                // MainMenu -> GameOver transition (stale "Game Aborted"
-                // popup surfacing outside the game).
+                // Gate heartbeats to InGame; game_mode persists after returning to the menu.
                 systems::tick_heartbeat.run_if(in_state(crate::core::states::GameState::InGame)),
                 systems::handle_pong,
                 systems::record_casual_game_on_end,
@@ -125,22 +113,18 @@ impl Plugin for MultiplayerPlugin {
             systems::reset_multiplayer_session_state,
         );
 
-        // 4. Register feature-specific cross-cutting systems
         #[cfg(feature = "solana")]
         {
             use crate::game::system_sets::GameSystems;
             app.add_systems(
                 Update,
                 (
-                    // Step 1: feed moves into rollup batch AFTER GameSystems::Execution has applied them
                     (
                         systems::feed_local_moves_to_rollup,
                         systems::feed_remote_moves_to_rollup,
                     )
                         .after(GameSystems::Execution),
-                    // Step 2: detect game over
                     systems::emit_game_ended_event.after(GameSystems::Execution),
-                    // Step 3: flush batch AFTER feeds have added all moves and event is emitted
                     systems::finalize_game_on_end
                         .after(systems::feed_local_moves_to_rollup)
                         .after(systems::feed_remote_moves_to_rollup)

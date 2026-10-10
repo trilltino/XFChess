@@ -1,8 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
 
-/**
- * @see https://playwright.dev/docs/test-configuration
- */
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
@@ -17,9 +14,7 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
-  // Serves the real production build (dist/), including the prerendered
-  // public routes from scripts/prerender.mjs — `npm run dev` would only
-  // ever show the CSR fallback shell and couldn't validate Phase 3.
+  // Serve production dist to test prerendered HTML rather than the dev server’s CSR shell.
   webServer: {
     command: 'npm run build && npm run preview -- --port 4321',
     url: 'http://localhost:4321',

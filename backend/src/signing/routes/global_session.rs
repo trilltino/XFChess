@@ -17,7 +17,6 @@ use tracing::{info, warn};
 use crate::signing::auth::RequireWallet;
 use crate::signing::AppState;
 
-// ── Route registration ────────────────────────────────────────────────────────
 
 pub fn global_session_public_routes() -> Router<AppState> {
     Router::new().route("/{wallet}/verify", axum::routing::get(verify))
@@ -30,7 +29,6 @@ pub fn global_session_protected_routes() -> Router<AppState> {
         .route("/{wallet}", delete(revoke))
 }
 
-// ── Request / Response types ──────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct RegisterReq {
@@ -112,10 +110,7 @@ async fn track_game(
     caller: RequireWallet,
     Json(req): Json<TrackGameReq>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Without this the route copied any named wallet's global session keypair
-    // into `sessions[game_id]` for a caller-chosen `game_id`, with no
-    // authentication whatsoever — the first half of a chain that ended in that
-    // wallet's key signing an attacker-supplied transaction.
+    // Require wallet ownership before copying its global key into a game session.
     caller.require_is(&req.wallet_pubkey)?;
 
     let wallet = Pubkey::from_str(&req.wallet_pubkey)

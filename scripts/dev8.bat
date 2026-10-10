@@ -5,7 +5,7 @@ echo XFChess Dev8 - 8-Player Tournament Test Launcher
 echo --------------------------------------------------
 echo Launches 8 isolated game instances for tournament testing.
 echo Each instance has its own P2P identity and port.
-echo Start run_offline.bat first to have the backend running.
+echo Start just dev first to have the backend running.
 echo.
 
 set SCRIPT_DIR=%~dp0
@@ -13,15 +13,9 @@ for %%i in ("%SCRIPT_DIR%..") do set "ROOT=%%~fi"
 set "RELEASE_DIR=%ROOT%\target\debug"
 set "DATA_ROOT=%ROOT%\dev8_data"
 
-:: --- Shared environment (mirrors run_offline.bat) ---
 set BACKEND_URL=http://127.0.0.1:8090
 set SIGNING_SERVICE_URL=http://127.0.0.1:8090
-:: Pick up the dedicated RPC provider (e.g. Triton) from backend\.env so
-:: client instances don't fall back to the heavily rate-limited public devnet
-:: endpoint for their pre-popup blockhash fetch (that rate-limiting is the
-:: main cause of slow/stuck wallet signing popups). Falls back to the free
-:: public devnet RPC if backend\.env has no override or doesn't exist. Export
-:: SOLANA_RPC_URL/XFCHESS_RPC_URL yourself first to take precedence over both.
+:: Use exported RPC values first, then backend\.env, then public devnet.
 if not defined SOLANA_RPC_URL (
     for /f "tokens=1,* delims==" %%a in ('findstr /b "SOLANA_RPC_URL=" "%ROOT%\backend\.env" 2^>nul') do set "SOLANA_RPC_URL=%%b"
 )
@@ -37,16 +31,14 @@ if not defined JWT_SECRET set JWT_SECRET=000000000000000000000000000000000000000
 if not defined IDENTITY_ENCRYPTION_KEY set IDENTITY_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
 if not defined IDENTITY_SALT set IDENTITY_SALT=1111111111111111111111111111111111111111111111111111111111111111
 
-:: --- Check backend is reachable ---
 curl -s --max-time 2 http://127.0.0.1:8090/health >nul 2>&1
 if !errorlevel! neq 0 (
     echo [WARN] Backend not responding on :8090.
-    echo        Run scripts\run_offline.bat first, then re-run dev8.bat.
+    echo        Run just dev first, then re-run just dev8.
     echo        Launching anyway — instances will reconnect when backend starts.
     echo.
 )
 
-:: --- Build once ---
 echo [BUILD] Building xfchess with Solana features...
 cd /d "%ROOT%"
 cargo build --bin xfchess --features solana
@@ -58,17 +50,14 @@ if !errorlevel! neq 0 (
 echo [BUILD] Done.
 echo.
 
-:: --- Kill stale dev8 instances ---
 echo [CLEANUP] Killing stale xfchess instances...
 taskkill /F /IM xfchess.exe >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-:: --- Create per-player data dirs ---
 for /l %%i in (1,1,8) do (
     mkdir "%DATA_ROOT%\player%%i" >nul 2>&1
 )
 
-:: --- Launch 8 instances ---
 echo [LAUNCH] Starting 8 instances (ports 5001-5008)...
 echo          Each window = one tournament participant.
 echo.

@@ -1,12 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-# Builds the xfchess game client (src/) as a native Linux binary.
-# Build from repo root:
-#   docker build -f docker/game-linux.Dockerfile -t xfchess-linux .
-# Extract the binary:
-#   docker create --name xfchess-extract xfchess-linux
-#   docker cp xfchess-extract:/app/xfchess ./xfchess-linux
-#   docker rm xfchess-extract
+# Build from the repo root with docker build -f docker/game-linux.Dockerfile .
+# The binary is /app/xfchess inside the image.
 
 FROM rust:1.96-slim-bookworm AS builder
 
@@ -44,7 +39,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && cp target/release/xfchess /app/xfchess-out \
     && cp -r target/release/assets /app/assets-out
 
-# --- Runtime smoke-test stage ---
 FROM debian:bookworm-slim AS runtime
 
 WORKDIR /app

@@ -1,12 +1,5 @@
--- Durable job queue (WS-A, Production Reality Plan).
---
--- For work with NO durable backing of its own (email sends, anti-cheat analyses).
--- Chain-derived work (settlement, prize distribution) deliberately does NOT use
--- this table — those workers re-derive their work from on-chain state every tick,
--- which is already durable and idempotent.
---
--- Lifecycle: pending → running → done | pending (retry, run_at pushed back)
---                                     | dead    (attempts exhausted → DLQ)
+-- Queue non-chain work such as email and anti-cheat analysis. Chain workers
+-- rederive work from on-chain state. pending -> running -> done, retry, or dead.
 
 CREATE TABLE IF NOT EXISTS jobs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

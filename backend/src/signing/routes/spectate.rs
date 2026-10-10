@@ -48,9 +48,7 @@ async fn get_spectator_moves(
 
     let path = spectator_moves_path(&game_id);
 
-    // Hydrate from durable storage if this game's log isn't in memory — the
-    // process may have restarted mid-game, and a spectator joining then must
-    // still see the moves already played, not just the next one.
+    // Hydrate durable history after restarts so spectators receive all prior moves.
     if state.braid_hub.ensure_log(&path) {
         match repo.get_moves(&game_id).await {
             Ok(moves) => {
@@ -82,10 +80,8 @@ async fn get_spectator_moves(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    // One chunk per historical move, each shaped exactly like a live update
-    // body (a bare `ChessMessage`), so `braid_chess::ChessSubscriber` decodes
-    // history and tail through one code path. A single bulk-array snapshot
-    // chunk would not decode — see `game_log.rs`'s regression test.
+    // Stream each historical move as a live-shaped ChessMessage chunk so the
+    // same subscriber decodes history and tail.
     let history_chunks: Vec<Bytes> = snapshot
         .body
         .as_array()
@@ -119,9 +115,7 @@ async fn get_spectator_moves(
             tokio::select! {
                 maybe_update = rx_stream.next() => {
                     match maybe_update {
-                        // A live append arrives as an `add /-` patch carrying
-                        // the one new move; re-emit it as a bare snapshot body
-                        // so it decodes identically to the history above.
+                        // Convert add /- patches to bare snapshots so live and historical moves decode identically.
                         Some(Ok(update)) => {
                             if let Some(entry) = appended_entry(&update) {
                                 yield Ok(format_chunk(&BraidUpdate::snapshot(update.version, entry)));

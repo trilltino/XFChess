@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 const SEED: &[u8] = b"global_session";
 
-// ── PDA helper ────────────────────────────────────────────────────────────────
 
 pub fn find_global_session_pda(program_id: &Pubkey, player: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SEED, player.as_ref()], program_id)
@@ -94,7 +93,6 @@ pub fn check_global_session_can_afford_wager(
     Ok(())
 }
 
-// ── Disk-persisted global session keypair ─────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GlobalSessionKeyData {
@@ -120,14 +118,8 @@ fn instance_scoped_dir(base: PathBuf, wallet_port: Option<&str>) -> PathBuf {
 
 impl GlobalSessionKeyManager {
     fn storage_dir() -> PathBuf {
-        // This is the most important of the paths this module resolves — it's
-        // where the encrypted global session key lives. Desktop's fallback
-        // (`env::temp_dir()`) already tolerates `ProjectDirs` failing; on
-        // Android that fallback resolves to a location apps generally cannot
-        // write to, which would silently degrade to "re-authorize the wallet
-        // every launch" instead of erroring — so Android gets its own
-        // explicit, always-writable branch rather than falling through to
-        // the desktop fallback chain.
+        // Android requires app-writable session-key storage; the desktop temp-directory
+        // fallback may be unwritable there.
         #[cfg(target_os = "android")]
         let base = crate::core::paths::internal_data_dir()
             .unwrap_or_else(|| std::env::temp_dir().join("XFChess"));
@@ -230,7 +222,6 @@ impl GlobalSessionKeyManager {
     }
 }
 
-// ── Instruction builders ──────────────────────────────────────────────────────
 
 fn anchor_discriminator(name: &str) -> [u8; 8] {
     use sha2::{Digest, Sha256};
@@ -420,7 +411,6 @@ pub fn build_first_time_auth_tx(
     (tx, session_pda)
 }
 
-// ── Borsh serialization helpers ───────────────────────────────────────────────
 
 fn push_option_i64(buf: &mut Vec<u8>, v: Option<i64>) {
     match v {

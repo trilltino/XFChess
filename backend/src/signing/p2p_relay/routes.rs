@@ -65,9 +65,7 @@ pub async fn announce_game(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         match games.get_mut(&game_id) {
-            // Re-announce by the same host (e.g. after a backend restart or a
-            // client reconnect): refresh the room but keep its joiner, status
-            // and undelivered messages instead of resetting the handshake.
+            // Same-host re-announcements refresh the room without resetting the joiner or handshake.
             Some(existing)
                 if existing.announcement.host_node_id == host_node_id
                     && existing.announcement.status != GameStatus::Finished =>
@@ -129,13 +127,8 @@ pub async fn list_games(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let now = Utc::now();
 
-    // Open (joinable) AND Connecting/InProgress (already underway) are all
-    // listed — spectators need to see live games, not just open lobbies.
-    // Only Finished games are dropped. Client-side, the join-lobby screen
-    // already disables its Join button once `players_joined >= capacity`
-    // (independent of this status field), and the spectator popup filters
-    // to exactly that condition — so a non-Open game showing up here can't
-    // be joined twice, only watched.
+    // List active games for spectators as well as open lobbies. Capacity guards
+    // prevent joining an already full game.
     let mut listings: Vec<GameListing> = games
         .values()
         .filter(|g| g.announcement.status != GameStatus::Finished)
@@ -179,7 +172,6 @@ pub async fn list_games(
         })
         .collect();
 
-    // Sort
     match filter.sort.as_deref().unwrap_or("newest") {
         "elo_asc" => listings.sort_by_key(|l| l.elo.unwrap_or(0)),
         "elo_desc" => listings.sort_by(|a, b| b.elo.unwrap_or(0).cmp(&a.elo.unwrap_or(0))),
@@ -338,9 +330,7 @@ pub async fn leave_game(
             );
             return Ok(AxumJson(AnnounceGameResponse { success: false }));
         }
-        // A relay leave can be caused by a closed window or a failed
-        // transport. Once play began it cannot decide the chess result or
-        // reopen the room for a third player.
+        // Relay departure cannot decide a started game’s result or reopen its seat.
         if game.announcement.status == GameStatus::InProgress {
             return Ok(AxumJson(AnnounceGameResponse { success: true }));
         }
@@ -403,10 +393,8 @@ pub async fn send_message(
         game.last_activity = chrono::Utc::now();
 
         if game.announcement.host_node_id == req.from_node_id {
-            // Message from host to joiner
             game.host_messages.push(req.message);
         } else if game.joiner_node_id.as_ref() == Some(&req.from_node_id) {
-            // Message from joiner to host
             game.joiner_messages.push(req.message);
         } else {
             return Ok(AxumJson(AnnounceGameResponse { success: false }));
@@ -418,10 +406,8 @@ pub async fn send_message(
     Ok(AxumJson(AnnounceGameResponse { success: true }))
 }
 
-/// Messages after `since_index`. An index past the end (a client that kept
-/// its cursor across a backend restart) yields an empty page and moves the
-/// cursor to where the mailbox actually ends, instead of panicking on an
-/// out-of-range slice.
+/// Return messages after since_index. Clamp cursors past the mailbox end
+/// and return an empty page, including after restart.
 fn page_from(messages: &[String], since_index: usize) -> (Vec<String>, usize) {
     match messages.get(since_index..) {
         Some(page) => (page.to_vec(), since_index + page.len()),

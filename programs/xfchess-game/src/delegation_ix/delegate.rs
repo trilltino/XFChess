@@ -9,8 +9,7 @@ mod inner {
     pub fn handler_delegate_game(
         ctx: Context<DelegateGameCtx>,
         _game_id: u64,
-        // Retained for instruction ABI compatibility; no longer used to derive
-        // the commit cadence (that was a bug — it multiplied a unix timestamp).
+        // Retained for instruction ABI compatibility; unused for commit cadence.
         _valid_until: i64,
     ) -> Result<()> {
         let game_id_bytes = _game_id.to_le_bytes();

@@ -2,8 +2,7 @@
 Description=XFChess Backend API (STAGING)
 After=network.target
 
-# Staging mirror of the prod unit, isolated by user + data dir + port so it can run
-# on the same box without touching production. See docs/ENVIRONMENTS.md.
+# Isolate staging by user, data directory, and port; see docs/ENVIRONMENTS.md.
 [Service]
 Type=simple
 User=xfchess-staging

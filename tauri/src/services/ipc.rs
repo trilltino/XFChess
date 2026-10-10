@@ -127,8 +127,7 @@ pub fn show_notification(title: String, body: String, app: AppHandle) {
 
 #[tauri::command]
 pub fn open_url(url: String, _app: AppHandle) {
-  // Only open safe, expected schemes. `open::that` maps to ShellExecute on Windows,
-  // which would otherwise launch arbitrary files/executables/protocol handlers.
+  // Restrict URL schemes: Windows ShellExecute can otherwise launch files and arbitrary handlers.
   const ALLOWED: [&str; 4] = ["http://", "https://", "mailto:", "xfchess://"];
   if ALLOWED.iter().any(|p| url.starts_with(p)) {
     if let Err(e) = open::that(&url) {

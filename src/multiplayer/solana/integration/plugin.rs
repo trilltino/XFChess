@@ -7,7 +7,6 @@ use crate::ui::account::profile_view::{
     fetch_profile_history, poll_profile_history, profile_view_ui, ProfileViewState,
 };
 
-// Plugin for Solana integration
 pub struct SolanaIntegrationPlugin;
 
 impl Plugin for SolanaIntegrationPlugin {
@@ -30,32 +29,9 @@ impl Plugin for SolanaIntegrationPlugin {
         );
         app.add_systems(Update, poll_global_session_result);
         app.add_systems(Update, poll_global_session_register_result);
-        // Was disabled outright by request: auto-establishing a new global
-        // session was the single biggest source of confusing popups
-        // (revoke+reauthorize cascades, a real 0.11 SOL deposit, 3
-        // timed-out wallet-approval attempts that still fell back to
-        // per-game signing anyway). It is NOT required for gameplay —
-        // lobby.rs already falls back to per-game signing whenever no
-        // global session is cached, which is the path every game (free or
-        // wagered) already works through. `try_load_global_session` (called
-        // at wallet-connect, in `initialize_solana_integration`) still
-        // opportunistically picks up an existing, correctly-matched session
-        // regardless of this flag.
-        //
-        // Since then: `establish_global_session` gained a pre-flight
-        // on-chain check (`global_session_is_live_onchain`) that skips the
-        // doomed first authorize attempt entirely when a stale delegation is
-        // already known, cutting the worst-case cascade from "attempt, fail,
-        // revoke, reauthorize" down to "revoke, reauthorize" — and the
-        // Tauri wallet bridge now hides (reuses) the popup between
-        // signatures instead of killing and respawning a whole browser
-        // process for each one, so a 2-signature revoke+reauth cascade is
-        // far cheaper than when this was disabled. Still gated behind an
-        // opt-in env var rather than flipped on by default: this exact path
-        // has never been exercised against a live app end-to-end (see
-        // docs/plans/global-session-flow-fix-plan.md), only `cargo check`.
-        // Set XFCHESS_ENABLE_GLOBAL_SESSION_AUTOSETUP=1 to opt in for
-        // testing; flip the default once that's happened cleanly.
+        // Opt in with XFCHESS_ENABLE_GLOBAL_SESSION_AUTOSETUP=1. Automatic setup may
+        // require a deposit and revoke/reauthorize signatures; per-game signing remains
+        // available when no global session is cached.
         if std::env::var("XFCHESS_ENABLE_GLOBAL_SESSION_AUTOSETUP").is_ok_and(|v| v == "1") {
             app.add_systems(Update, authorize_global_session_if_needed);
         }

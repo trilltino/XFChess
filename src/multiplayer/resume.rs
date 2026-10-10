@@ -1,23 +1,7 @@
-//! Resume an on-chain game after the client restarted (crash, closed window,
-//! OS kill, new device).
-//!
-//! Nothing process-local is trusted. A resume is planned only from:
-//! * the Game PDA (base layer, or the Ephemeral Rollup copy while delegated):
-//!   participants, status, and how many moves the chain has recorded;
-//! * the backend's durable move log (`GET /game/{id}/moves`), whose every
-//!   move is re-checked for legality from the start position.
-//!
-//! The log may be *ahead* of the chain by the moves still waiting in a batch
-//! (moves are recorded on the ER in batches); those are re-queued for
-//! recording. A log *behind* the chain, a log with an illegal move, or a game
-//! that already ended is refused with the exact reason — the player sees the
-//! real state instead of a fresh board.
-//!
-//! Restored from the plan: board/engine position, side to move, the Braid
-//! per-sender move counter and head, the cross-transport dedup set (so the
-//! log replay on resubscribe is not applied twice), the gossip sequencer and
-//! causal lane for the opponent, the rollup baseline + unrecorded batch, the
-//! record-move nonce (from chain), the start barrier, and the seat lease.
+//! Resume from the on-chain Game PDA and the backend move log, replaying every
+//! move for legality. Requeue logged moves ahead of the chain; reject a log behind
+//! the chain, illegal moves, or an ended game. Restore transport sequencing and
+//! deduplication state along with the board.
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -222,7 +206,6 @@ pub fn plan_resume(
     })
 }
 
-// ── Async gathering of the authoritative inputs ─────────────────────────────
 
 struct ResumeInputs {
     plan: ResumePlan,
@@ -289,7 +272,6 @@ fn gather(
     Ok(ResumeInputs { plan, next_nonce })
 }
 
-// ── Bevy state + systems ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum ResumeStatus {

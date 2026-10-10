@@ -18,9 +18,7 @@ interface PlayerDetailProps {
 interface GameResultEntry { game_id: string; result: "win" | "loss" | "draw" | "in_progress"; stake_amount: number; ended_at: number | null; }
 
 function PlayerDetail({ wallet, onClose }: PlayerDetailProps) {
-  // No per-game ELO snapshot is recorded anywhere (on-chain PlayerProfile
-  // only keeps the current rating) — this used to show a fabricated sparkline.
-  // Real per-game outcomes are what's actually available.
+  // Show real game outcomes; no per-game ELO snapshots are stored.
   const [history, setHistory] = useState<GameResultEntry[]>([]);
   const [newElo, setNewElo] = useState("");
   const [eloReason, setEloReason] = useState("");

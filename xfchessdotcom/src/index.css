@@ -18,9 +18,6 @@ html {
     scroll-behavior: smooth;
 }
 
-/* The browser's default scrollbar is a stark light-gray bar against this
-   site's pure-black background — reads as an unwanted border/seam down the
-   right edge. Thin it out and tint it to match the theme. */
 html {
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
@@ -185,10 +182,7 @@ body {
     gap: 20px;
     width: 92%;
     max-width: 520px;
-    /* The collapsed navbar is intentionally background-less, but the expanded
-       mobile menu is an overlay panel covering page content underneath it —
-       without its own backdrop the links are unreadable against whatever's
-       behind them (hero art, images, etc). */
+    /* The expanded mobile menu needs its own backdrop for readability over page content. */
     background: rgba(0, 0, 0, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -215,7 +209,7 @@ body {
     .nav-mobile-row {
         width: 100%;
     }
-    
+
     .mobile-menu-toggle {
         display: flex;
     }
@@ -225,7 +219,6 @@ body {
     transform: rotate(180deg);
 }
 
-/* Remove default wallet-adapter-react-ui button styles that interfere */
 .wallet-adapter-button-trigger {
     background-color: transparent !important;
 }
@@ -291,7 +284,6 @@ body {
     justify-content: flex-end;
 }
 
-/* HOME HERO */
 .home-hero {
     position: relative;
     text-align: center;
@@ -436,7 +428,7 @@ body {
     .profile-card {
         padding: 24px;
     }
-    
+
     .connected-stats {
         grid-template-columns: 1fr 1fr;
     }
@@ -714,7 +706,6 @@ body {
     }
 }
 
-/* FOOTER */
 .footer {
     padding: 80px 24px;
     text-align: center;
@@ -834,12 +825,12 @@ body {
     .compliance-dropdown {
         width: 240px;
     }
-    
+
     .dropdown-button {
         padding: 14px 16px;
         font-size: 0.9rem;
     }
-    
+
     .dropdown-item {
         padding: 12px 16px;
         font-size: 0.9rem;
@@ -852,32 +843,32 @@ body {
         padding: 24px;
         margin: 0 16px;
     }
-    
+
     .legal-title h3 {
         font-size: 1.5rem;
     }
-    
+
     .legal-section {
         padding: 20px;
     }
-    
+
     .legal-section h4 {
         font-size: 1.2rem;
     }
-    
+
     .legal-subsection {
         padding: 16px;
         margin: 16px 0;
     }
-    
+
     .pricing-breakdown {
         padding: 16px;
     }
-    
+
     .pricing-item {
         font-size: 0.8rem;
     }
-    
+
     .legal-disclaimer {
         padding: 16px;
         flex-direction: column;
@@ -934,33 +925,33 @@ body {
         padding: 24px;
         margin: 0 16px;
     }
-    
+
     .anti-cheat-section h3 {
         font-size: 1.5rem;
     }
-    
+
     .detection-methods {
         grid-template-columns: 1fr;
     }
-    
+
     .enforcement-tiers {
         grid-template-columns: 1fr;
     }
-    
+
     .security-features {
         grid-template-columns: 1fr;
     }
-    
+
     .reporting-steps {
         grid-template-columns: 1fr;
     }
-    
+
     .step {
         flex-direction: column;
         text-align: center;
         gap: 16px;
     }
-    
+
     .anti-cheat-notice {
         flex-direction: column;
         gap: 16px;
@@ -974,29 +965,29 @@ body {
         padding: 24px;
         margin: 0 16px;
     }
-    
+
     .calculator-section h3 {
         font-size: 1.5rem;
     }
-    
+
     .inputs-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .results-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .warnings-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .result-item {
         flex-direction: column;
         align-items: flex-start;
         gap: 4px;
     }
-    
+
     .warning-card,
     .info-card {
         flex-direction: column;
@@ -1015,35 +1006,35 @@ body {
         grid-template-columns: 1fr;
         gap: 20px;
     }
-    
+
     .arena-card {
         padding: 20px;
     }
-    
+
     .arena-header {
         flex-direction: column;
         text-align: center;
         gap: 12px;
     }
-    
+
     .arena-header h5 {
         font-size: 1.2rem;
     }
-    
+
     .detection-category {
         padding: 20px;
     }
-    
+
     .process-step {
         flex-direction: column;
         text-align: center;
         gap: 16px;
     }
-    
+
     .outcomes-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .permitted-item {
         flex-direction: column;
         text-align: center;
@@ -1056,35 +1047,35 @@ body {
     .kyc-reasons {
         grid-template-columns: 1fr;
     }
-    
+
     .verification-steps {
         grid-template-columns: 1fr;
     }
-    
+
     .documents-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .processing-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .security-measures {
         grid-template-columns: 1fr;
     }
-    
+
     .failure-reasons {
         grid-template-columns: 1fr;
     }
-    
+
     .monitoring-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .contact-info {
         grid-template-columns: 1fr;
     }
-    
+
     .reason-card,
     .step-card,
     .doc-category,
@@ -1094,7 +1085,7 @@ body {
     .contact-item {
         padding: 16px;
     }
-    
+
     .step-number {
         width: 28px;
         height: 28px;
@@ -1107,20 +1098,20 @@ body {
     .verification-requirements {
         grid-template-columns: 1fr;
     }
-    
+
     .data-comparison {
         grid-template-columns: 1fr;
         gap: 24px;
     }
-    
+
     .sanctions-list {
         grid-template-columns: 1fr;
     }
-    
+
     .data-protection-points {
         grid-template-columns: 1fr;
     }
-    
+
     .requirement-item,
     .data-category,
     .sanctions-item,
@@ -1135,19 +1126,19 @@ body {
         grid-template-columns: 1fr;
         gap: 24px;
     }
-    
+
     .break-even-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .billing-points {
         grid-template-columns: 1fr;
     }
-    
+
     .refund-conditions {
         grid-template-columns: 1fr;
     }
-    
+
     .tier-card,
     .break-even-card,
     .billing-item,
@@ -1155,7 +1146,7 @@ body {
     .refund-item {
         padding: 16px;
     }
-    
+
     .tier-header h5 {
         font-size: 1.2rem;
     }
@@ -1167,17 +1158,17 @@ body {
         padding: 32px 24px;
         margin: 0 16px;
     }
-    
+
     .download-icon {
         width: 64px;
         height: 64px;
         margin-bottom: 20px;
     }
-    
+
     .download-card h3 {
         font-size: 1.3rem;
     }
-    
+
     .download-btn {
         padding: 14px 28px;
         font-size: 0.9rem;
@@ -1189,28 +1180,28 @@ body {
     .hero-content h3 {
         font-size: 2rem;
     }
-    
+
     .hero-subtitle {
         font-size: 1.1rem;
     }
-    
+
     .cta-buttons {
         flex-direction: column;
         align-items: center;
     }
-    
+
     .features-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .value-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .tech-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .step-item {
         flex-direction: column;
         text-align: center;
@@ -1235,29 +1226,29 @@ body {
     .page-hero h3 {
         font-size: 2rem;
     }
-    
+
     .page-hero-subtitle {
         font-size: 1.1rem;
     }
-    
+
     .btn-group {
         flex-direction: column;
         align-items: center;
     }
-    
+
     .grid-2,
     .grid-3,
     .grid-4,
     .grid-auto {
         grid-template-columns: 1fr;
     }
-    
+
     .step-item {
         flex-direction: column;
         text-align: center;
         gap: 16px;
     }
-    
+
     .card {
         padding: 24px;
     }
@@ -1270,17 +1261,17 @@ body {
         grid-template-columns: 1fr;
         gap: 24px;
     }
-    
+
     .tools-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .criteria-grid,
     .pricing-grid,
     .marketing-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .royalty-split {
         flex-direction: column;
         gap: 8px;
@@ -1288,7 +1279,6 @@ body {
     }
 }
 
-/* ── Wallet Adapter B&W overrides ──────────────────────────────────────────── */
 .wallet-adapter-modal-wrapper {
     background: #0d0d0d !important;
     border: 1px solid rgba(255, 255, 255, 0.12) !important;
@@ -1315,14 +1305,6 @@ body {
 }
 
 
-/* ── MINIMAL PAGE SYSTEM ───────────────────────────────────────────────────
-   One shared shell for every secondary page (features, computer, tournaments,
-   legal, compliance, anti-cheat, news, verification …). The site's homepage
-   was pared back to three sentences and a logo; these pages used to carry
-   walls of card-grids and numbered "how it works" columns, which read as a
-   different website. Everything below is deliberately typographic: a single
-   column, one h1 (the SEO suite asserts at most one per page), and rows that
-   are label/value pairs rather than boxes. */
 
 .mp {
     max-width: 760px;
@@ -1466,9 +1448,7 @@ body {
     opacity: 0.65;
 }
 
-/* Download rows (Play page only). The dividing rules are dropped here
-   rather than on .mp-rows, which the Features page also uses for its own
-   bordered definition rows — spacing separates the platforms instead. */
+/* Remove dividing rules only on Play download rows; Features shares mp-rows with borders. */
 .mp-downloads {
     border-top: none;
     display: flex;
@@ -1541,10 +1521,6 @@ body {
     }
 }
 
-/* ── TOURNAMENT CALENDAR ──────────────────────────────────────────────────
-   /tournaments is a live list of what the backend actually has scheduled,
-   grouped by day. Same typographic language as .mp-row, but each row is a
-   link and carries a third (money) column. */
 
 .cal-day {
     margin-top: 56px;
@@ -1655,9 +1631,6 @@ body {
     }
 }
 
-/* ── MINIMAL FOOTER ───────────────────────────────────────────────────────
-   The footer is the site's only complete index of its own pages — the top
-   nav deliberately carries five links. */
 
 .site-footer {
     margin-top: auto;
@@ -1670,9 +1643,6 @@ body {
     margin: 0 auto;
 }
 
-/* The footer link index this rule used to sit under has been removed, so
-   its divider and the 64px gap above it were separating nothing — leaving a
-   stray second rule under .site-footer's own border-top. */
 .footer-bottom {
     display: flex;
     align-items: center;

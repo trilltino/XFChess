@@ -57,11 +57,7 @@ fn settlement_game_account(
         game_type: GameType::PvP,
         match_type,
         country_fee: 0,
-        // 1800s = Classical per `elo::rating::bucket_for_time_control` —
-        // this file specifically exercises the `elo_rating` field (the
-        // Classical bucket); a Blitz/Rapid/Bullet time control here would
-        // route the K=32 update to a different field instead and break
-        // every assertion below.
+        // Use 1800s to select Classical Elo; other controls update different rating fields.
         base_time_seconds: 1800,
         increment_seconds: 0,
         bump,
@@ -147,8 +143,8 @@ async fn finalize_game_applies_k32_elo_update_to_winner_and_loser() {
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
     let game_id = 9101u64;
-    let white_elo = 120_000.0; // 1200
-    let black_elo = 120_000.0; // 1200
+    let white_elo = 120_000.0;
+    let black_elo = 120_000.0;
 
     let mut ctx = start_with_profiles(
         game_id,
@@ -216,8 +212,8 @@ async fn finalize_game_applies_elo_update_for_a_draw() {
     let game_id = 9102u64;
     // Unequal ratings so a draw's rating shift is actually observable
     // (higher-rated white should lose a little, lower-rated black gain).
-    let white_elo = 140_000.0; // 1400
-    let black_elo = 120_000.0; // 1200
+    let white_elo = 140_000.0;
+    let black_elo = 120_000.0;
 
     let mut ctx = start_with_profiles(
         game_id,

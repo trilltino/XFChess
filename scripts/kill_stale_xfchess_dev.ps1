@@ -1,9 +1,35 @@
+param([switch]$WalletOnly)
+
 $ErrorActionPreference = 'SilentlyContinue'
 
-$root = (Get-Location).Path
+# Close wallet browser windows by their title without stopping the browser.
+if (-not ('XfWinCloser' -as [type])) {
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public class XfWinCloser {
+  [DllImport("user32.dll")]
+  public static extern IntPtr FindWindow(string cls, string name);
+  [DllImport("user32.dll")]
+  public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+  public static int CloseWindows() {
+    int closed = 0;
+    for (int p = 7440; p <= 7485; p++) {
+      IntPtr h = FindWindow(null, "XFChess #" + p);
+      if (h != IntPtr.Zero && PostMessage(h, 0x0010, IntPtr.Zero, IntPtr.Zero)) closed++;
+    }
+    return closed;
+  }
+}
+'@
+}
+$closed = [XfWinCloser]::CloseWindows()
+if ($closed -gt 0) { Write-Host "Closed $closed leftover wallet-popup window(s)" }
+if ($WalletOnly) { return }
+
+$root = Split-Path $PSScriptRoot -Parent
 Write-Host "[CLEANUP] Stopping all stale XFChess dev processes..." -ForegroundColor Cyan
 
-# backend pid file
 $pidFile = Join-Path $root 'backend/.backend.pid'
 if (Test-Path $pidFile) {
     $oldPid = Get-Content $pidFile -ErrorAction SilentlyContinue
@@ -40,11 +66,6 @@ foreach ($proc in (Get-CimInstance Win32_Process -ErrorAction SilentlyContinue))
 
 foreach ($n in 'signing-server','xfchess','xfchess-tauri','xfchess-viz') {
     Stop-Process -Name $n -Force -ErrorAction SilentlyContinue
-}
-
-if (Test-Path (Join-Path $root 'scripts/kill_wallet_popups.ps1')) {
-    Write-Host '  Closing stale wallet-popup (XFChess #) windows...' -ForegroundColor Yellow
-    powershell -NoProfile -File (Join-Path $root 'scripts/kill_wallet_popups.ps1')
 }
 
 foreach ($pattern in @(

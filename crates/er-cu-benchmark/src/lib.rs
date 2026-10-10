@@ -205,8 +205,7 @@ pub fn fetch_profile_elo(
     if account.len() < 8 + 32 + 8 + 4 + 4 + 4 + 8 + 8 {
         return Err(anyhow::anyhow!("Profile account data too short"));
     }
-    // Anchor discriminator (8 bytes) + authority (32) + created_at (8) + wins (4) + losses (4) + draws (4) + games_played (4) + elo_rating (8 f64)
-    // ELO rating starts at offset 8 + 32 + 8 + 4 + 4 + 4 + 4 = 64
+    // PlayerProfile ELO offset: discriminator(8) + authority(32) + created_at(8) + four counters(16) = 64.
     let mut elo_bytes = [0u8; 8];
     elo_bytes.copy_from_slice(&account[64..72]);
     let elo = f64::from_le_bytes(elo_bytes);

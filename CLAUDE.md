@@ -89,8 +89,8 @@ npm run preview  # Preview production build
 ### Solana program
 
 ```bash
-# Build (size-optimized via anchor)
-scripts\build_program.bat
+# Build the size-optimized program binary
+just build-program
 # or directly:
 anchor build
 
@@ -101,7 +101,7 @@ anchor deploy
 solana program deploy target/deploy/xfchess_game.so
 ```
 
-`scripts\build_program.bat` (plain `cargo build-sbf`) never needs OpenSSL and always works.
+`just build-program` (plain `cargo build-sbf`) never needs OpenSSL and always works.
 `anchor build`/`anchor idl build` additionally compiles `xfchess-game`'s dev-dependency on
 `solana-program-test` (for IDL introspection), which pulls in `openssl` with the `vendored`
 feature — on Windows this tries to compile OpenSSL from source via Perl+nmake and reliably
@@ -120,14 +120,14 @@ anchor build
 ### Android
 
 ```bash
-# Cross-compile libxfchess.so + assemble the debug APK
-scripts\build_android.bat
+# Cross-compile libxfchess.so + assemble the unsigned release APK
+just build-android
 # or directly:
-cargo ndk -t arm64-v8a -P 31 -o mobile\app\src\main\jniLibs build --release --features solana
-cd mobile && gradlew.bat assembleDebug
+cargo ndk -t arm64-v8a -P 31 -o mobile\app\src\main\jniLibs build --release --lib --features solana
+cd mobile && gradlew.bat assembleRelease
 
 # Install to a connected device / emulator
-adb install -r mobile\app\build\outputs\apk\debug\app-debug.apk
+# Sign the release APK before installing, or build assembleDebug for device tests.
 ```
 
 Requires: Android SDK (`platform-tools`, `platforms;android-35`, `build-tools;35.0.0`),
@@ -161,11 +161,13 @@ regardless of which client played it.
 ### Full stack
 
 ```bash
-# Build everything (game + backend + web + Solana program)
-scripts\build.bat
+# Build the local release stack (game + backend + desktop + UIs)
+just build-all
+just build-program  # optional on-chain program build
 
-# Run local dev stack with monitoring (Prometheus, Grafana)
-scripts\run_offline.bat
+# Run local dev stack; monitoring is optional
+just dev
+just monitoring
 
 # Production deploy to Hetzner VPS (build + nginx + systemd + TLS)
 ops\scripts\deploy.ps1

@@ -8,13 +8,8 @@ use super::types::{ActiveGame, LOBBY_TTL_SECS};
 
 pub type P2PRelayState = Arc<RwLock<HashMap<String, ActiveGame>>>;
 
-/// Write-through persistence for relay rooms (migration 033).
-///
-/// The in-memory map stays the serving copy; every mutation is mirrored to
-/// SQLite so a backend restart can hydrate open lobbies, pending JOIN_ACK
-/// handshakes and undelivered mailbox messages instead of silently dropping
-/// them. Persistence failures are logged, not surfaced: the relay is advisory
-/// pre-game signalling, and move/result authority lives elsewhere.
+/// Mirror relay mutations to SQLite and hydrate rooms on startup. Persistence
+/// failures are logged; the relay is advisory pre-game signaling, not move authority.
 #[derive(Clone)]
 pub struct RelayStore {
     pool: sqlx::SqlitePool,
@@ -63,9 +58,8 @@ impl RelayStore {
         }
     }
 
-    /// Load persisted rooms into `state`. Rooms already past the TTL are
-    /// dropped (and deleted) rather than resurrected; a room already in
-    /// memory is never overwritten by its older persisted copy.
+    /// Load unexpired persisted rooms without overwriting newer in-memory copies.
+    /// Delete expired rooms.
     pub async fn hydrate(&self, state: &P2PRelayState) -> Result<usize, sqlx::Error> {
         let rows =
             sqlx::query_as::<_, (String, String)>("SELECT game_id, room_json FROM p2p_relay_rooms")

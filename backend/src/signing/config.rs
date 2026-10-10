@@ -50,9 +50,7 @@ impl SigningConfig {
             magic_router_rpc_url: env::var("MAGIC_ROUTER_RPC_URL")
                 .or_else(|_| env::var("MAGIC_ROUTER_URL"))
                 .unwrap_or_else(|_| "https://devnet-router.magicblock.app".into()),
-            // Canonical program ID — matches `declare_id!` in programs/xfchess-game
-            // and the deployed devnet program. Override with PROGRAM_ID for other
-            // clusters/deployments.
+            // Match declare_id; PROGRAM_ID overrides it for other deployments.
             program_id: env::var("PROGRAM_ID")
                 .unwrap_or_else(|_| "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into()),
             jwt_secret: env::var("JWT_SECRET")

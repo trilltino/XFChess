@@ -8,10 +8,7 @@ import {
   resolveExistingUsername,
 } from './App';
 
-// getConnectedProvider: which wallet extension to sign back through. Real
-// regression this guards — see the function's own doc comment in App.tsx —
-// is silently signing with the wrong wallet when more than one extension is
-// installed, which surfaces to the player as a confusing "not enough SOL".
+// Signing must use the connected extension when multiple wallets are installed.
 describe('getConnectedProvider', () => {
   const solflare = { name: 'solflare-provider' };
   const phantom = { name: 'phantom-provider' };
@@ -43,10 +40,7 @@ describe('getConnectedProvider', () => {
     expect(getConnectedProvider('solflare')).toBe(solflare);
   });
 
-  // An embedded wallet has no extension behind it. Falling through to the
-  // phantom-then-solflare default handed back a DIFFERENT keypair, which is how
-  // a Google user's profile-creation transaction — fee payer and profile owner
-  // both the Privy address — got routed to Phantom to sign.
+  // Embedded wallets must not fall back to an extension with a different keypair.
   it('returns null for an embedded (privy) wallet even when both extensions are installed', () => {
     localStorage.setItem('xfchess_wallet_provider', 'privy');
     (window as any).solflare = solflare;
@@ -64,10 +58,7 @@ describe('getConnectedProvider', () => {
   });
 });
 
-// resolveExistingUsername: a wallet can have a real display name recorded
-// two different ways (on-chain username_set, or the off-chain /auth/me
-// username) — and register seeds a `pubkey.slice(0, 8)` placeholder into the
-// off-chain field that must never be mistaken for a real name.
+// Recognize on-chain and off-chain names, excluding the pubkey-prefix registration placeholder.
 describe('resolveExistingUsername', () => {
   const pubkey = 'AbCdEfGh1234567890';
 
@@ -142,12 +133,7 @@ describe('resolveExistingUsername', () => {
   });
 });
 
-// isNetworkMismatchError: distinguishes the live-repro Solflare failure
-// ("current network devnet, but this transaction is for mainnet") from an
-// ordinary rejection/timeout, so it can be turned into an actionable message
-// instead of the wallet's own confusing raw text — see App.tsx's doc comment
-// above the function for the fuller context (ensureDevnet is unverifiable
-// best-effort, this is the reactive fallback).
+// Distinguish wallet network mismatch from ordinary rejection or timeout.
 describe('isNetworkMismatchError', () => {
   it('recognizes the exact live-repro Solflare message', () => {
     expect(
@@ -189,10 +175,7 @@ describe('isNetworkMismatchError', () => {
   });
 });
 
-// refreshBlockhash: closes the live-repro bug where a blockhash baked in at
-// tx-build time went stale by the time a real human finished clicking
-// through the wallet extension's approval popup, and broadcast-tx 502'd
-// with "Blockhash not found" even though signing had already succeeded.
+// Refresh blockhashes that may expire while the user approves a signature.
 describe('refreshBlockhash', () => {
   const FRESH = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin';
 
@@ -226,9 +209,7 @@ describe('refreshBlockhash', () => {
       }),
     );
 
-    // Minimal VersionedTransaction-shaped object — enough for the
-    // `instanceof` branch and the one field this function touches, without
-    // needing a fully compiled transaction message.
+    // Use a minimal versioned transaction containing only the fields this helper reads.
     const tx = Object.create(web3.VersionedTransaction.prototype) as web3.VersionedTransaction;
     (tx as any).message = { recentBlockhash: 'stale-blockhash-from-tx-build-time' };
 
@@ -260,10 +241,7 @@ describe('refreshBlockhash', () => {
   });
 });
 
-// isStaleBlockhashError: the specific rejection shape a stale/expired
-// blockhash produces on broadcast (RPC -32002, "Blockhash not found") —
-// distinguishes "safe to retry with a fresh signature" from a real
-// rejection (insufficient funds, program error) that must not be retried.
+// Retry stale blockhash errors with a fresh signature; do not retry program or funding failures.
 describe('isStaleBlockhashError', () => {
   it('recognizes the exact live-repro broadcast error', () => {
     expect(

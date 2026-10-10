@@ -101,84 +101,64 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
         Ok(())
     }
 
-    // ── Migration 001: initial schema ─────────────────────────────────────────
     let migration_001 = include_str!("../../migrations/001_initial.sql");
     run_script(&pools.session_pool, migration_001, "001 (session)").await?;
     run_script(&pools.vault_pool, migration_001, "001 (vault)").await?;
 
-    // ── Migration 002: GDPR KYC tables ────────────────────────────────────────
     let migration_002 = include_str!("../../migrations/002_kyc_gdpr.sql");
     run_script(&pools.vault_pool, migration_002, "002 (vault)").await?;
     run_script(&pools.session_pool, migration_002, "002 (session)").await?;
 
-    // ── Migration 003: wallet-first auth ──────────────────────────────────────
     let migration_003 = include_str!("../../migrations/003_wallet_first_auth.sql");
     run_script(&pools.session_pool, migration_003, "003").await?;
 
-    // ── Migration 004: performance indexes ────────────────────────────────────
     let migration_004 = include_str!("../../migrations/004_indexes_and_wal.sql");
     run_script(&pools.vault_pool, migration_004, "004 (vault)").await?;
     run_script(&pools.session_pool, migration_004, "004 (session)").await?;
 
-    // ── Migration 005: disputes table ─────────────────────────────────────────
     let migration_005 = include_str!("../../migrations/005_disputes.sql");
     run_script(&pools.session_pool, migration_005, "005").await?;
 
-    // ── Migration 006: game history + move counter ────────────────────────────
     let migration_006 = include_str!("../../migrations/006_game_history.sql");
     run_script(&pools.session_pool, migration_006, "006").await?;
 
-    // ── Migration 007: add password_hash ──────────────────────────────────────
     let migration_007 = include_str!("../../migrations/007_add_password_hash.sql");
     run_script(&pools.session_pool, migration_007, "007").await?;
 
-    // ── Migration 008: anti-cheat tables ──────────────────────────────────────
     let migration_008 = include_str!("../../migrations/008_anticheat.sql");
     run_script(&pools.session_pool, migration_008, "008").await?;
 
-    // ── Migration 009: external ELO ───────────────────────────────────────────
     let migration_009 = include_str!("../../migrations/009_external_elo.sql");
     run_script(&pools.session_pool, migration_009, "009").await?;
 
-    // ── Migration 010: CACF compliance ────────────────────────────────────────
     let migration_010 = include_str!("../../migrations/010_cacf_compliance.sql");
     run_script(&pools.session_pool, migration_010, "010").await?;
 
-    // ── Migration 011: friends/social ─────────────────────────────────────────
     let migration_011 = include_str!("../../migrations/011_friends.sql");
     run_script(&pools.session_pool, migration_011, "011").await?;
 
-    // ── Migration 012: performance indexes ────────────────────────────────────
     let migration_012 = include_str!("../../migrations/012_perf_indexes.sql");
     run_script(&pools.session_pool, migration_012, "012").await?;
 
-    // ── Migration 018: puzzle pool + bounties ──────────────────────────────────
-    // (013–017 are created idempotently by SessionStore::init; 018 is applied
-    // here because the puzzle tables have no init hook of their own.)
+    // Apply puzzle migration here; migrations 013-017 are handled by SessionStore::init.
     let migration_018 = include_str!("../../migrations/018_puzzles.sql");
     run_script(&pools.session_pool, migration_018, "018").await?;
 
-    // ── Migration 019: durable job queue (WS-A) ───────────────────────────────
     let migration_019 = include_str!("../../migrations/019_job_queue.sql");
     run_script(&pools.session_pool, migration_019, "019").await?;
 
-    // ── Migration 020: casual games + sponsored profile-creation guard ───────
     let migration_020 = include_str!("../../migrations/020_casual_games_and_sponsorship.sql");
     run_script(&pools.session_pool, migration_020, "020").await?;
 
-    // ── Migration 021: active_sessions table (disconnect recovery) ───────────
     let migration_021 = include_str!("../../migrations/021_active_sessions.sql");
     run_script(&pools.session_pool, migration_021, "021").await?;
 
-    // ── Migration 022: matchmaking queue/matches (restart survival) ──────────
     let migration_022 = include_str!("../../migrations/022_matchmaking_queue.sql");
     run_script(&pools.session_pool, migration_022, "022").await?;
 
-    // ── Migration 023: player_bans (persistent, enforced bans) ───────────────
     let migration_023 = include_str!("../../migrations/023_player_bans.sql");
     run_script(&pools.session_pool, migration_023, "023").await?;
 
-    // ── Migration 024: flagged_games (persistent flag/assign queue) ──────────
     let migration_024 = include_str!("../../migrations/024_flagged_games.sql");
     run_script(&pools.session_pool, migration_024, "024").await?;
 
@@ -209,7 +189,6 @@ pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
     let migration_032 = include_str!("../../migrations/032_casual_game_participants.sql");
     run_script(&pools.session_pool, migration_032, "032").await?;
 
-    // ── Migration 033: durable P2P relay rooms (survive backend restart) ──────
     let migration_033 = include_str!("../../migrations/033_p2p_relay_rooms.sql");
     run_script(&pools.session_pool, migration_033, "033").await?;
 

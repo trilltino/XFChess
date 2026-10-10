@@ -11,10 +11,7 @@ import { Footer } from './components/Footer';
 import './index.css';
 
 export default function App() {
-    // The website is a marketing and information surface only. Wallet
-    // connection, sign-in and account creation all live in the game client —
-    // so there is deliberately no wallet-adapter or Privy provider here, and
-    // nothing on this site ever asks a visitor for a signature.
+    // Wallet connection and account creation live in the game client.
     return (
         <Router>
             <AppContent />
@@ -69,13 +66,6 @@ function AppContent() {
                     <Route path="/play" element={<PlayPage />} />
                     <Route path="/tournaments" element={<Tournaments />} />
                     <Route path="/features" element={<Features />} />
-                    {/* The site is these four routes. Everything else —
-                        sign-in, profile, KYC, identity vault, wallet setup,
-                        player lookup, spectate, legal, compliance,
-                        anti-cheat, release notes, launch, and the
-                        per-tournament detail/standings/play pages — was
-                        removed deliberately; those paths now land here and
-                        go home rather than rendering an empty shell. */}
                     <Route path="*" element={<Navigate to="/home" replace />} />
                 </Routes>
             </div>

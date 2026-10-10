@@ -35,7 +35,7 @@ and [docs/architecture/xfchess-game-crate.md](../../docs/architecture/xfchess-ga
 ## Build, test, deploy
 
 ```bash
-scripts\build_program.bat        # or: anchor build (size-optimized, opt-level = "z")
+just build-program        # or: anchor build (size-optimized, opt-level = "z")
 cargo test -p xfchess-game       # all program tests (see tests/README.md)
 anchor deploy                    # devnet
 ```

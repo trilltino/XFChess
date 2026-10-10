@@ -1,6 +1,4 @@
-//! On-chain chess move validation: the `no_std` subset of chess logic compiled
-//! directly into the Solana program, re-exporting `nimzovich_engine`'s no_std
-//! board/move-gen types with a `validation` submodule for move-legality checks.
+//! Re-export the no_std engine types and on-chain move validation.
 
 pub use nimzovich_engine;
 pub use nimzovich_engine::{parse_uci, validate_and_apply, CompactBoard, OnChainGame};

@@ -28,7 +28,6 @@ pub fn apply_graphics_quality_camera_system(
     let bloom_enabled = settings.graphics_quality.bloom_enabled();
     let ssao_enabled = settings.graphics_quality.ambient_occlusion_enabled();
 
-    // Apply settings to all cameras
     for entity in camera_query.iter_mut() {
         if bloom_enabled {
             commands.entity(entity).insert(Bloom::NATURAL);
@@ -67,7 +66,6 @@ pub fn update_graphics_quality_camera_system(
     let bloom_enabled = settings.graphics_quality.bloom_enabled();
     let ssao_enabled = settings.graphics_quality.ambient_occlusion_enabled();
 
-    // Remove or add Bloom based on quality
     if !bloom_enabled {
         for entity in bloom_query.iter_mut() {
             commands.entity(entity).remove::<Bloom>();
@@ -76,7 +74,6 @@ pub fn update_graphics_quality_camera_system(
         // Add to cameras that don't have it (handled by apply system)
     }
 
-    // Remove or add SSAO based on quality
     if !ssao_enabled {
         for entity in ssao_query.iter_mut() {
             commands

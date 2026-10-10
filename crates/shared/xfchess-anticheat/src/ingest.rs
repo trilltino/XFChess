@@ -47,7 +47,6 @@ pub fn build_game_record(rows: &[MoveRow], meta: &GameMeta) -> AcResult<GameReco
         _ => GameResult::Draw,
     };
 
-    // Build move records with server-timestamp latencies
     let mut moves: Vec<MoveRecord> = Vec::with_capacity(rows.len());
     for (i, row) in rows.iter().enumerate() {
         let prev_ts = if i == 0 {

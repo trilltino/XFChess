@@ -39,8 +39,6 @@ pub fn load_settings_system(mut commands: Commands) {
     {
         match LocalStorage::get("xfchess_settings") {
             Ok(mut settings) => {
-                // Sync colors from serialized format (if needed, dependent on how serde handles it)
-                // Assuming serde handles the GameSettings struct cleanly, but if we need manual sync:
                 let temp_settings: GameSettings = settings;
                 // Note: GameSettings might need manual sync if dynamic lighting colors need it
                 // But for now let's assume standard deserialization covers most
@@ -92,7 +90,6 @@ pub fn load_settings_system(mut commands: Commands) {
         }
     }
 
-    // Use default settings if load failed
     commands.insert_resource(GameSettings::default());
 }
 

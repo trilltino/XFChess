@@ -30,7 +30,6 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
   const [preflight, setPreflight] = useState<any>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
 
-  // Form state
   const [formData, setFormData] = useState<CreateTournamentRequest>(() => initialConfig ?? ({
     tournament_id: generatedTournamentId(),
     name: generatedTournamentName("SingleElimination", 16),
@@ -48,18 +47,12 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
     kyc_required: false,
   }));
 
-  // Text mirrors of the two lamport fields, kept as separate string state so
-  // the input can hold in-progress text ("0.", "0.00") that parseFloat would
-  // otherwise mangle if it round-tripped through the lamport value on every
-  // keystroke. USD is the only unit shown; the inputs stay disabled until
-  // the live rate loads since there's no lamport value to compute without it.
+  // Keep editable USD text separate from lamports so partial values such as
+  // 0. survive typing. Conversion requires a loaded rate.
   const [entryFeeUsdInput, setEntryFeeUsdInput] = useState("");
   const [platformFeeUsdInput, setPlatformFeeUsdInput] = useState("");
 
-  // Populate the USD mirrors once the live rate first loads — the initial
-  // lamport defaults above were set before any rate was known. Guarded by
-  // `prev ||` so a later rate refresh doesn't clobber whatever the admin
-  // has since typed.
+  // Initialize USD amounts when the rate first loads; later refreshes preserve edited values.
   useEffect(() => {
     if (solUsdRate == null) return;
     setEntryFeeUsdInput(prev => prev || lamportsToUsdInput(formData.entry_fee_lamports, solUsdRate));
@@ -162,7 +155,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
   const renderStep1 = () => (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <SectionTitle>Tournament Setup</SectionTitle>
-      
+
       <div>
         <label style={labelStyle}>GENERATED TOURNAMENT</label>
         <div style={{ ...inputStyle, color: "var(--text-dim)", background: "rgba(255,255,255,0.03)" }}>
@@ -178,7 +171,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
   const renderStep2 = () => (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <SectionTitle>Economics & Rewards</SectionTitle>
-      
+
       <div>
         <label style={labelStyle}>ENTRY FEE (USD)</label>
         <input
@@ -215,8 +208,8 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
         <FeeEquivalent lamports={formData.platform_fee_lamports || 0} solUsdRate={solUsdRate} color="var(--primary)" />
       </div>
 
-      <div style={{ 
-        padding: "1rem", 
+      <div style={{
+        padding: "1rem",
         backgroundColor: "rgba(255,255,255,0.02)", 
         borderRadius: "16px",
         border: "1px solid var(--border)"
@@ -233,8 +226,8 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
       </div>
 
       {!formData.winner_takes_all && (
-        <div style={{ 
-          padding: "1.5rem", 
+        <div style={{
+          padding: "1.5rem",
           backgroundColor: "rgba(0,0,0,0.2)", 
           borderRadius: "16px",
           border: "1px solid var(--border)"
@@ -277,7 +270,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
   const renderStep3 = () => (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <SectionTitle>Match Parameters</SectionTitle>
-      
+
       <div>
         <label style={labelStyle}>TOURNAMENT FORMAT</label>
         <select
@@ -327,7 +320,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
   const renderStep4 = () => (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <SectionTitle>Policy & Scheduling</SectionTitle>
-      
+
       <div>
         <label style={labelStyle}>ELO FILTER</label>
         <div style={{ display: "flex", gap: "1rem" }}>
@@ -348,9 +341,9 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
         </div>
       </div>
 
-      <div style={{ 
-        padding: "1rem", 
-        backgroundColor: "rgba(255,255,255,0.02)", 
+      <div style={{
+        padding: "1rem",
+        backgroundColor: "rgba(255,255,255,0.02)",
         borderRadius: "16px",
         border: "1px solid var(--border)"
       }}>
@@ -584,9 +577,7 @@ const PreflightMetric = ({ label, value }: { label: string; value: string }) => 
   </div>
 );
 
-/** The on-chain program and backend store prize shares in basis points
- * (10000 = 100%); these three helpers keep that the wire format while the
- * UI reads/writes plain percentages. */
+/** Wire prize shares use basis points (10000 = 100%); the UI edits percentages. */
 const bpsToPercentInput = (bps: number): string => {
   const pct = bps / 100;
   return pct === 0 ? "0" : String(pct);
@@ -633,9 +624,7 @@ const inputStyle: React.CSSProperties = {
   transition: "border-color 0.2s ease"
 };
 
-/** Applied on top of inputStyle while a USD field has no rate to convert
- * against yet — visibly inert rather than a plain disabled input that reads
- * as broken. */
+/** Style USD fields as unavailable until an exchange rate loads. */
 const disabledInputStyle: React.CSSProperties = {
   opacity: 0.5,
   cursor: "not-allowed"

@@ -63,17 +63,9 @@ async fn sponsored_profile_is_owned_by_player_not_backend() {
     let profile = profile_pda(&player.pubkey());
     let username = "sponsoredplayer";
 
-    // Same rent computation the backend route performs via
-    // getMinimumBalanceForRentExemption before building this transaction.
-    // Unlike the backend (which can't depend on this crate and duplicates
-    // the size as a manually-kept-in-sync constant), this test can just use
-    // the real INIT_SPACE directly — it can never drift.
+    // Compute sponsored-profile rent from the program's actual INIT_SPACE constants.
     let rent = Rent::default();
-    let profile_rent = rent.minimum_balance(8 + PlayerProfile::INIT_SPACE); // discriminator + PlayerProfile::INIT_SPACE
-                                                                            // The account struct constraint is `space = 8 + UsernameRecord::LEN`, and
-                                                                            // UsernameRecord::LEN (48) already includes its own discriminator — so
-                                                                            // the real allocated space is 56 bytes, not 48. Caught by this test
-                                                                            // failing on-chain with "insufficient lamports" before this fix.
+    let profile_rent = rent.minimum_balance(8 + PlayerProfile::INIT_SPACE); // UsernameRecord allocation is 8 + LEN; LEN already includes its discriminator.
     let username_rent = rent.minimum_balance(8 + 48);
     let transfer_ix = system_instruction::transfer(
         &backend.pubkey(),
@@ -102,9 +94,7 @@ async fn sponsored_profile_is_owned_by_player_not_backend() {
     assert_eq!(decoded.authority, player.pubkey());
     assert_eq!(decoded.username, username);
 
-    // The player's wallet, which started at zero, ends back at zero — it
-    // received exactly the rent and immediately spent it on its own account
-    // creation, never needing to pre-fund anything itself.
+    // The zero-funded player receives and spends exactly the account-creation rent.
     let player_balance = ctx.banks_client.get_balance(player.pubkey()).await.unwrap();
     assert_eq!(
         player_balance, 0,

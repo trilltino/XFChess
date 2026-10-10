@@ -1,15 +1,5 @@
--- Migration 028: persistent admin audit log.
---
--- Previously the admin audit trail (admin.rs AUDIT_LOG) was a process-local
--- Vec capped at 500 entries, actor hardcoded to the literal string "admin",
--- and lost entirely on restart. This table backs a real, persistent,
--- per-actor audit trail. Two kinds of rows land here:
---   - "rich" entries from add_audit() calls inside specific handlers
---     (action/target/result carry a human-readable description)
---   - "generic" entries from the catch-all admin-request middleware, which
---     logs every mutating /admin/* request even if its handler never calls
---     add_audit() — this is what closes the "new endpoint forgot to log"
---     gap (method/path/status carry the description instead).
+-- Persist handler-specific audit entries and generic middleware records
+-- for mutating admin requests that have no handler-specific entry.
 
 CREATE TABLE IF NOT EXISTS admin_audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

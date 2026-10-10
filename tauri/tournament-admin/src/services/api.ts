@@ -1,20 +1,6 @@
-﻿/**
- * API client for XFChess Tournament Admin
- * Provides centralized API communication with authentication, error handling, and response formatting
- */
-
-// Rust-routed fetch, NOT the browser's. This webview is served over
-// http://localhost:7454 (embedded axum server — `frontendDist` is claimed by
-// wallet-ui), so a browser fetch to the backend on :8090/:8091 is cross-origin
-// and dies on CORS: the request succeeds, returns 200, and the browser discards
-// the response for want of an Access-Control-Allow-Origin header. It surfaces as
-// an indistinguishable "failed to fetch", which is what made a working tunnel
-// look like a dead one for hours.
-//
-// tauri-plugin-http issues the request from Rust, where there is no origin, so
-// neither CORS nor this app's CSP connect-src applies. The signature is
-// drop-in compatible with window.fetch. Scope: capabilities/admin-http.json.
-// See docs/plans/tournament-admin-connection-rearchitecture.md §3 Phase 1.
+﻿
+// Use Rust-routed fetch for the loopback webview to avoid browser CORS.
+// Access is scoped by capabilities/admin-http.json.
 import { fetch } from "@tauri-apps/plugin-http";
 import type { SwissResultRequest, CancellationResponse, TournamentOperation } from "./adminFlows";
 
@@ -70,12 +56,11 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${endpoint}`;
-    
+
     const headers = new Headers({
       "Content-Type": "application/json",
     });
 
-    // Add any additional headers from options
     if (options.headers) {
       Object.entries(options.headers).forEach(([key, value]) => {
         headers.set(key, value as string);
@@ -95,7 +80,7 @@ class ApiClient {
 
       let data: any;
       const contentType = response.headers.get("content-type");
-      
+
       if (contentType && contentType.includes("application/json")) {
         data = await response.json();
       } else {
@@ -233,9 +218,7 @@ class ApiClient {
     return this.request<any>(`/admin/tournament/${tournamentId}/transactions`);
   }
 
-  // Offline/local events persisted by the backend. These are admin-only for
-  // writes, but the backend also exposes published events at /offline-tournaments
-  // for future public surfaces.
+  // Offline-event writes require admin access; published events are publicly readable.
   async listOfflineTournaments() {
     return this.request<OfflineTournamentSummary[]>("/admin/offline-tournaments");
   }
@@ -291,10 +274,8 @@ class ApiClient {
     });
   }
 
-  // Locks the guaranteed SOL prize for a tournament in its escrow PDA. Must be
-  // called after creation but BEFORE the first registration — paid
-  // tournaments (entry_fee_lamports > 0) reject registration on-chain until
-  // this has run at least once.
+  // Fund guaranteed prizes after creation and before registration;
+  // paid tournaments reject registration until this runs.
   async fundTournamentPrize(tournamentId: number, amountLamports: number) {
     return this.request<{ ok: boolean; tournament_id: number; amount_lamports: number; signature: string }>(
       `/admin/tournament/${tournamentId}/fund-prize`,
@@ -311,9 +292,7 @@ class ApiClient {
     );
   }
 
-  // Removes a Cancelled/Completed tournament from this list — local
-  // housekeeping only, does not touch on-chain state (backend rejects this
-  // for any tournament not already in one of those terminal states).
+  // Delete only terminal tournaments from the local list, without changing chain state.
   async deleteTournament(tournamentId: number) {
     return this.request<{ ok: boolean; tournament_id: number }>(
       `/admin/tournament/${tournamentId}`,
@@ -343,9 +322,7 @@ class ApiClient {
     return this.request<any>(`/admin/games/${gameId}/flag`, { method: "POST", body: JSON.stringify({ reason }) });
   }
 
-  // Real Stockfish-derived verdict from anticheat_verdicts (aggregate per
-  // game — no move-by-move eval curve exists yet). `analysed: false` means
-  // the anti-cheat worker hasn't processed this game.
+  // Return aggregate Stockfish verdicts; analysed=false means the worker has not processed this game.
   async getGameEval(gameId: number) {
     return this.request<{
       game_id: number; analysed: boolean; analysed_at?: number;
@@ -405,7 +382,6 @@ class ApiClient {
     );
   }
 
-  // Treasury
   async getTreasuryPayouts() { return this.request<any>("/admin/treasury/payouts"); }
   async getFeeReport(period = "week") { return this.request<any>(`/admin/treasury/fee-report?period=${period}`); }
   async manualRefund(wallet: string, lamports: number, reason: string, adminToken: string) {
@@ -429,9 +405,7 @@ class ApiClient {
       er_subscription_connected: boolean;
       er_last_push_age_seconds: number | null;
       feepayer_balance_lamports: number;
-      // Worker detail. Optional so an older backend that predates these
-      // groups still type-checks and simply renders the panels empty rather
-      // than crashing the dashboard.
+      // Optional worker groups keep older backend responses compatible.
       settlement?: Record<string, number | null>;
       schedulers?: Record<string, number | null>;
       anticheat?: Record<string, number | null>;
@@ -449,9 +423,7 @@ class ApiClient {
     return this.request<any>(`/admin/disputes/${gameId}/assign`, { method: "POST", body: JSON.stringify({ reviewer }) });
   }
 
-  // Resolves a disputed game on-chain (WHITE_WINS/BLACK_WINS/DRAW/DISMISS).
-  // admin_token is a second factor (ADMIN_TOKEN env var), distinct from the
-  // X-API-Key header this client already sends on every request.
+  // Resolve disputes on chain. admin_token is a second factor distinct from X-API-Key.
   async resolveDispute(
     gameId: number,
     decision: "WHITE_WINS" | "BLACK_WINS" | "DRAW" | "DISMISS",
@@ -473,7 +445,6 @@ class ApiClient {
     });
   }
 
-  // Game history endpoints
   async getGameHistory(wallet: string) {
     return this.request<any>(`/games/history/${wallet}`);
   }
@@ -494,10 +465,7 @@ class ApiClient {
     return this.request<any>("/admin/archive/stats");
   }
  
-  // Download an archive via an authenticated fetch (X-API-Key header) and save
-  // it through a blob URL. The token is never placed in the URL â€” the download
-  // route is behind require_api_key, which only reads the header, so a plain
-  // window.open() navigation (which can't set headers) would 401 anyway.
+  // Authenticate downloads through the X-API-Key header; never place the token in a URL.
   async downloadArchive(type: "games" | "wallets"): Promise<void> {
     const res = await fetch(`${this.baseUrl}/admin/archive/download/${type}`, {
       headers: this.token ? { "X-API-Key": this.token } : {},
@@ -515,7 +483,7 @@ class ApiClient {
     a.remove();
     URL.revokeObjectURL(url);
   }
- 
+
   async getPlayers(limit: number = 50) {
     return this.request<any>(`/admin/players?limit=${limit}`);
   }
@@ -536,10 +504,7 @@ class ApiClient {
     return this.request<any>("/admin/anti-cheat/reports");
   }
  
-  // KYC verification is fully automatic at player self-registration
-  // (POST /identity/register submits the on-chain verify_profile_ix as part
-  // of that flow) — there is no separate backend concept of manual admin
-  // approval, so this is a read-only status lookup.
+  // Registration performs KYC verification automatically; this endpoint only reads status.
   async getKycStatus(wallet: string) {
     return this.request<{ verified: boolean; verified_at: number | null; country: string | null; requires_kyc: boolean }>(
       `/identity/status/${wallet}`
@@ -551,12 +516,10 @@ class ApiClient {
     return this.request<any>("/health");
   }
 
-  // Exchange rates
   async getExchangeRates() {
     return this.request<any>("/api/rates/all");
   }
 
-  // â”€â”€ Puzzles (admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async listPuzzles(q: {
     eloMin?: number; eloMax?: number; name?: string; theme?: string;
     limit?: number; offset?: number;
@@ -624,7 +587,6 @@ class ApiClient {
   }
 }
 
-// Create singleton instance
 export const apiClient = new ApiClient();
 
 export function normalizeTournamentList(data: any): TournamentSummary[] {
@@ -633,7 +595,6 @@ export function normalizeTournamentList(data: any): TournamentSummary[] {
   return Array.isArray(wrapped) ? wrapped : [];
 }
 
-// Export types for tournament data
 export interface TournamentSummary {
   tournament_id: number;
   name: string;

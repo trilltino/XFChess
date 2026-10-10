@@ -1,14 +1,5 @@
-//! Stable per-installation identifiers.
-//!
-//! * `device_id()` names this installation to the backend's seat lease
-//!   (`/game/{id}/seat/claim`): the newest device to claim a player's seat
-//!   takes it over and earlier devices become view-only.
-//! * `wallet_gossip_seed()` is the Ed25519 seed that signs this wallet's
-//!   gossip envelopes. It used to be regenerated every process start, so after
-//!   a crash/restart the opponent saw a brand-new signer whose sequence
-//!   restarted at 1 and rejected every gossip move as a causal gap. Persisting
-//!   it per wallet keeps the opponent's per-signer lane continuous across
-//!   restarts. It authorises gossip signing only — never funds.
+//! Stable installation IDs support device seat leases. Persist gossip signing
+//! seeds per wallet so sequence lanes survive restarts; these keys never authorize funds.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;

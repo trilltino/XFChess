@@ -14,7 +14,7 @@ cancel an abandoned active game. Both are fixed in source but not live until thi
 No account layout changes; no migration. In-flight games are unaffected.
 
 ## Pre-flight (read-only)
-1. Build from the exact commit being shipped: `scripts\build_program.bat`.
+1. Build from the exact commit being shipped: `just build-program`.
 2. Run the program suite against that binary (copy the `.so` to `target\deploy\`):
    `cargo test -p xfchess-game --no-fail-fast` — expect 0 failures, including
    `lifecycle_race_tests` (8) and `claim_timeout_tests`.

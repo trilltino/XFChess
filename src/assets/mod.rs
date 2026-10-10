@@ -81,10 +81,8 @@ pub fn start_asset_loading(
         return;
     }
 
-    // Load the main chess pieces GLTF
     let pieces_gltf = asset_server.load::<Gltf>("models/chess_kit/pieces.glb");
 
-    // Update GameAssets resource
     game_assets.pieces_gltf = pieces_gltf;
     game_assets.loaded = false;
     game_assets.loading_started = true;
@@ -166,7 +164,6 @@ pub fn check_asset_loading(
             }
         }
         bevy::asset::LoadState::Failed(_) => {
-            // Asset loading failed
             let error_msg = format!("Failed to load asset: models/chess_kit/pieces.glb");
             error!("[ASSETS] {}", error_msg);
 
@@ -219,9 +216,6 @@ pub fn handle_untyped_asset_loading_errors(
     }
 
     for event in failed_events.read() {
-        // Check if this is our pieces GLTF asset by comparing paths
-        // Note: We can't directly compare handles, so we check if the path matches
-        // Convert path to string for comparison
         let path_str = event.path.path().to_string_lossy().to_lowercase();
         if path_str.contains("pieces.glb") || path_str.contains("chess_kit") {
             let error_msg = format!(

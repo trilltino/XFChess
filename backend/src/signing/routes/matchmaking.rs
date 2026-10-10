@@ -8,8 +8,7 @@ pub mod handlers;
 #[path = "matchmaking/state.rs"]
 pub mod state;
 
-// Re-exports so existing call sites (e.g. `routes::matchmaking::SharedMatchmakingState`,
-// `routes::matchmaking::matchmaking_routes`) keep working unchanged.
+// Re-export for existing routes::matchmaking callers.
 pub use handlers::{join, leave, status, JoinRequest, LeaveRequest};
 pub use state::{MatchResult, MatchmakingTicket, SharedMatchmakingState};
 

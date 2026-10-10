@@ -236,10 +236,6 @@ pub fn debug_picking_setup(
     }
 
     if pieces_without > 0 || squares_without > 0 {
-        // error!(
-        //     "[SETUP] Missing PointerInteraction on {} pieces, {} squares!",
-        //     pieces_without, squares_without
-        // );
     }
 }
 

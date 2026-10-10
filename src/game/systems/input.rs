@@ -103,12 +103,8 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
         }
     }
 
-    // Gate only games that genuinely require Ephemeral-Rollup delegation
-    // (wagered lobby games, tournaments, rejoins — see
-    // `SolanaGameSync::requires_delegation`). Keying this off `game_id`
-    // alone (pre-v0.2.8) permanently locked White in stake-0 free lobby
-    // games, where `game_id` is set but delegation never completes.
-    // Another device took over this player's seat: this window is view-only.
+    // Gate delegation only when required; zero-wager lobbies may have a game_id
+    // without delegation. A displaced seat is view-only.
     #[cfg(feature = "solana")]
     if params.seat.as_ref().is_some_and(|seat| seat.superseded) {
         return false;
@@ -147,9 +143,6 @@ pub fn can_move_color(params: &InputSystemParams, piece_color: PieceColor) -> bo
     }
 }
 
-// Helper alias for Option<Res> if needed, or just use Option<Res>
-// ResWithStandard is not a thing. Just Option<Res<'w, BraidClientResource>>.
-// Bevy SystemParam macro handles Option<Res<T>>.
 
 fn is_primary(button: PointerButton) -> bool {
     matches!(button, PointerButton::Primary)
@@ -174,7 +167,6 @@ pub fn clear_selection_state(
     debug!("[INPUT] Selection cleared");
 }
 
-// === Helpers ===
 
 pub fn try_select_piece(
     params: &mut InputSystemParams,
@@ -334,7 +326,6 @@ pub fn try_move_sequence(
     }
 }
 
-// === Observers ===
 
 pub fn on_piece_click(click: On<Pointer<Click>>, mut params: InputSystemParams) {
     if !is_primary(click.event.button) {
@@ -440,7 +431,6 @@ pub fn on_piece_drag_start(drag_start: On<Pointer<DragStart>>, mut params: Input
 
     let entity = drag_start.entity;
 
-    // Get the piece data
     let piece_data = {
         let q = params.pieces.p1();
         if let Ok((_, piece, _, _)) = q.get(entity) {
@@ -508,7 +498,6 @@ pub fn on_piece_drag_end(
             world_pos, file, rank
         );
 
-        // Find square at this board position
         square_query
             .iter()
             .find(|(_, square, _)| square.x as i32 == file && square.y as i32 == rank)
@@ -537,7 +526,6 @@ pub fn on_piece_drag_end(
 
         try_move_sequence(&mut params, target_pos, capture_info, "drag_drop");
     } else {
-        // Dropped on invalid location - cancel drag
         debug!("[INPUT] Dropped on invalid location - cancelling drag");
         clear_selection_state(
             &mut params.commands,

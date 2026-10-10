@@ -1,20 +1,5 @@
-// Translated to Kotlin DSL from rust-mobile/rust-android-examples'
-// agdk-winit-wgpu-egui/app/build.gradle — the android-activity crate
-// maintainers' own reference, verified current against android-activity
-// 0.6.1 (the exact version this workspace's Cargo.lock resolves via Bevy's
-// `android-game-activity` feature).
-//
-// Deliberately NOT using `buildFeatures { prefab = true }` or linking the
-// upstream GameActivity prefab C++ package — android-activity's own README
-// is explicit that doing so links an incompatible native glue layer against
-// the one android-activity itself provides. `libxfchess.so` already contains
-// the Rust-side GameActivity glue (compiled in by android-activity's
-// build.rs); this module only needs the JAVA-side `GameActivity` class from
-// the games-activity AAR below.
-//
-// No `org.jetbrains.kotlin.android` plugin: AGP 9.0+ has Kotlin support
-// built in by default for a new module (JetBrains' migration guidance,
-// Jan 2026) — applying it separately is for pre-AGP-9 projects.
+// Use android-activity native glue from libxfchess.so; linking GameActivity
+// prefab adds incompatible glue. AGP 9 provides Kotlin support without a separate plugin.
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -22,19 +7,13 @@ plugins {
 
 android {
     namespace = "com.trilltino.xfchess"
-    // Pinned to the NDK actually installed for this workspace (r27c) rather
-    // than AGP 9.1's own default (r28c) — matches the plan's "NDK r27+"
-    // floor and the toolchain `cargo ndk` was already verified against.
+    // Match the installed NDK r27c toolchain used by cargo ndk.
     ndkVersion = "27.2.12479018"
     compileSdk = 35
 
     defaultConfig {
         applicationId = "com.trilltino.xfchess"
-        // 31 is GameActivity's floor (see android-activity's own docs) and
-        // matches the platform level `cargo ndk -P 31` targets — anything
-        // lower fails to link (`-laaudio` isn't in the NDK sysroot stub set
-        // below API 26, verified by hitting exactly that linker error at the
-        // default `cargo ndk` platform of 21).
+        // Match cargo-ndk API 31 and GameActivity's minimum; lower sysroots lack aaudio.
         minSdk = 31
         targetSdk = 35
         versionCode = 1
@@ -52,9 +31,7 @@ android {
 
     packaging {
         jniLibs {
-            // Stockfish is launched as a child process on Android. Legacy
-            // packaging extracts native libraries to nativeLibraryDir, which
-            // is required for that executable path to be usable at runtime.
+            // Legacy packaging extracts executable libraries to nativeLibraryDir for child processes.
             useLegacyPackaging = true
         }
     }
@@ -68,20 +45,10 @@ android {
         jvmTarget = "17"
     }
 
-    // `libxfchess.so` (and, later, any other native libs) lands here via
-    // `cargo ndk -o app/src/main/jniLibs build` — Gradle's default
-    // `jniLibs.srcDirs` already includes `src/main/jniLibs`, so no explicit
-    // sourceSets entry is needed for it.
+    // The default jniLibs source set already includes the cargo output.
     sourceSets {
         getByName("main") {
-            // Reference, not copy — the same 64 MB `assets/` the desktop
-            // build reads, via `bevy_asset::io::android` at runtime. Editing
-            // an asset once updates every platform. Gradle resolves this
-            // relative to the *module* directory (mobile/app/, where this
-            // build.gradle.kts lives), not src/main/ — so it's two levels up
-            // to the repo root, not four (verified against this repo's
-            // actual layout, not assumed from Bevy's own example, whose
-            // module sits one directory deeper).
+            // Reference shared assets relative to the Gradle module directory.
             assets.directories.add("../../assets")
         }
     }
@@ -89,11 +56,7 @@ android {
 
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
-    // Version pinned to exactly what android-activity 0.6.1's own README
-    // states it supports ("Your Android package should depend on
-    // androidx.games:games-activity:4.4.0") — not whatever is newest on
-    // Maven, since a mismatch here is the kind of thing that fails at
-    // runtime (JNI method-not-found), not at Gradle sync.
+    // Keep the games-activity version compatible with android-activity native glue.
     implementation("androidx.games:games-activity:4.4.0")
     implementation("com.solanamobile:mobile-wallet-adapter-clientlib-ktx:2.0.3")
     implementation("com.solanamobile:web3-solana:0.2.5")

@@ -183,10 +183,8 @@ fn p2p_announce_game_private(
     Ok(())
 }
 
-/// Announce bodies this process has sent, by game id. Kept only in memory so
-/// a heartbeat that finds its room gone (backend restarted past the room's
-/// TTL, or lost it) can re-announce the identical room; the backend treats a
-/// same-host re-announce as idempotent.
+/// Cache announced rooms by game ID so a lost room can be re-announced
+/// with the same body. Same-host re-announcements are idempotent.
 fn announced_rooms(
 ) -> &'static std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>> {
     static ROOMS: std::sync::OnceLock<

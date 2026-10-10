@@ -1,20 +1,7 @@
 @echo off
-REM Engine match: nimzovich-uci vs Rustic via cutechess-cli (SPRT).
-REM
-REM Prerequisites (one-time):
-REM   1. cutechess-cli:  https://github.com/cutechess/cutechess/releases
-REM      -> set CUTECHESS to the cutechess-cli.exe path (or put it on PATH)
-REM   2. Rustic release binary: https://codeberg.org/mvanthoor/rustic/releases
-REM      (Alpha 1 = 1675 CCRL, Alpha 2 = 1815, Alpha 3 = 1865)
-REM      -> set RUSTIC to the rustic .exe path
-REM   3. Opening book (recommended): 8moves_v3.pgn from the cutechess repo or
-REM      https://github.com/official-stockfish/books -> set BOOK to the .pgn path
-REM
-REM Usage:
-REM   scripts\engine_match.bat            (200 games, 10s+0.1s)
-REM   set ROUNDS=500 & scripts\engine_match.bat
-REM
-REM Results land in engine_match.pgn; cutechess prints a running Elo estimate.
+REM SPRT match against Rustic. Set CUTECHESS and RUSTIC executable paths;
+REM BOOK optionally supplies PGN openings. ROUNDS and TC override the defaults.
+REM Usage: just engine-match; results are written to engine_match.pgn.
 
 setlocal
 
@@ -23,8 +10,7 @@ if "%RUSTIC%"==""    set RUSTIC=rustic.exe
 if "%ROUNDS%"==""    set ROUNDS=100
 if "%TC%"==""        set TC=10+0.1
 
-REM Build the adapter first (engine was extracted 2026-08-28 into the
-REM standalone repo at ..\nimzovich, sibling of this repo).
+REM Build the adapter against the sibling nimzovich repository.
 cargo build --release --manifest-path %~dp0..\..\nimzovich\nimzovich-uci\Cargo.toml || exit /b 1
 
 set NIMZO=%~dp0..\..\nimzovich\target\release\nimzovich-uci.exe

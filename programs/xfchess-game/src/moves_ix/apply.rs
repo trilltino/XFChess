@@ -94,9 +94,8 @@ pub fn apply_recorded_move(
         }
     }
 
-    // Dev-only fallback: when `move-validation` is disabled (local iteration only),
-    // skip on-chain validation and trust the client-supplied board state. Production
-    // builds enforce `move-validation` via the compile_error! guard in lib.rs.
+    // Local builds may trust client boards without move-validation;
+    // production requires it through the lib.rs compile guard.
     #[cfg(not(feature = "move-validation"))]
     {
         let _ = move_uci;

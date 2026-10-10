@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Cargo files
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY backend ./backend
@@ -20,7 +19,6 @@ COPY programs ./programs
 COPY xfchessdotcom ./xfchessdotcom
 COPY tauri ./tauri
 
-# Build the backend
 RUN cargo build --release --bin signing-server
 
 # Runtime stage
@@ -33,10 +31,8 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy binary from builder
 COPY --from=builder /app/target/release/signing-server /app/signing-server
 
-# Create non-root user
 RUN useradd -r -u 1000 xfchess
 RUN chown -R xfchess:xfchess /app
 USER xfchess

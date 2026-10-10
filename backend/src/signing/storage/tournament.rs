@@ -477,9 +477,7 @@ impl TournamentRecord {
                 let (round, next_match, next_slot) =
                     crate::signing::solana::bracket_position(max_players, i as u16);
 
-                // Round-1 matches are seeded directly from the ELO-sorted
-                // player list (highest vs lowest); every later round starts
-                // empty and gets filled in as winners are recorded.
+                // Seed round 1 highest against lowest ELO; later rounds fill as winners are recorded.
                 let (player_white, player_black) = if i < round1_matches {
                     (
                         Some(self.players[i].clone()),
@@ -900,10 +898,7 @@ impl TournamentStore {
 
                 let final_idx = t.final_match_index();
 
-                // The final must be checked before the semifinals: a 2-player
-                // bracket has a single match, so the saturating semifinal indices
-                // would otherwise swallow the final and never complete the
-                // tournament. Semifinals only exist in brackets of 4+ players.
+                // Check final before semifinals; a two-player bracket has no semifinal matches.
                 if match_index == final_idx {
                     // Final complete - tournament done
                     t.winner = Some(winner);
@@ -911,7 +906,6 @@ impl TournamentStore {
                     t.status = TournamentStatus::Completed;
                     t.completed_at = Some(chrono::Utc::now().timestamp());
                 } else if t.matches.len() >= 3 && match_index == t.semifinal1_index() {
-                    // First semifinal - loser is 4th place
                     t.fourth_place = Some(loser);
                 } else if t.matches.len() >= 3 && match_index == t.semifinal2_index() {
                     // Second semifinal - loser is 3rd place
@@ -966,7 +960,6 @@ impl TournamentStore {
     pub async fn start_tournament(&self, id: u64) -> Result<(), String> {
         let tournament = self.get(id).await.ok_or("Tournament not found")?;
 
-        // Seed players first
         if !self.seed_players_by_elo(id).await {
             return Err("Failed to seed players".to_string());
         }
@@ -986,12 +979,10 @@ impl TournamentStore {
             }
         }
 
-        // Set status to Active
         if !self.update_status(id, TournamentStatus::Active).await {
             return Err("Failed to update tournament status".to_string());
         }
 
-        // Set start time
         self.update(id, |t| {
             t.started_at = Some(chrono::Utc::now().timestamp());
         })

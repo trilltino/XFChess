@@ -104,7 +104,6 @@ async fn lamports_of(ctx: &mut ProgramTestContext, key: Pubkey) -> u64 {
         .unwrap_or(0)
 }
 
-// ── withdraw_treasury ───────────────────────────────────────────────────────
 
 fn withdraw_ix(authority: Pubkey, destination: Pubkey, amount: u64) -> Instruction {
     let accounts = xfchess_game::__client_accounts_withdraw_treasury::WithdrawTreasury {
@@ -243,7 +242,6 @@ async fn withdraw_treasury_zero_amount_rejected() {
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidArgument)));
 }
 
-// ── close_tournament ────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
 fn tournament(

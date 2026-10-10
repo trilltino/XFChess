@@ -185,16 +185,11 @@ impl GameLogState {
             .map_err(|e| PutEventError::Db(sqlx::Error::Decode(Box::new(e))))?;
         let created_at = chrono::Utc::now().timestamp();
 
-        // Single transaction: read current head, validate, insert.
-        // Serializes concurrent writers for the same game (SQLite's writer
-        // lock already does this at the connection level; the explicit
-        // transaction makes the read-then-write atomic against a second
-        // racing PUT for the same game_id).
+        // Read the head, validate, and insert in one transaction to serialize
+        // concurrent writes to the same game.
         let mut tx = self.pool.begin().await.map_err(PutEventError::Db)?;
 
-        // A lost HTTP acknowledgement must not turn a retry into a second
-        // move. Check the version before the parent: the head may have moved
-        // since the original write, but the original result is still valid.
+        // Check duplicate versions before parents: a retry remains valid after the head advances.
         let previous: Option<(i64, String, String)> = sqlx::query_as(
             "SELECT seq, kind, payload_json FROM game_event_log WHERE game_id = ? AND version_hash = ?",
         )
@@ -211,11 +206,8 @@ impl GameLogState {
             };
         }
 
-        // Causal-chain validation (and `seq` numbering below) is a global
-        // per-`game_id` counter shared across every stream/kind — but the
-        // *head* a new event must chain off is scoped to its own stream
-        // (moves-like kinds vs. chat), since chat messages don't causally
-        // build on move content and vice versa.
+        // Sequence numbers are global per game; causal heads are per stream
+        // because chat and move events do not build on each other.
         let head_sql = if stream == "chat" {
             "SELECT version_hash FROM game_event_log WHERE game_id = ? AND kind = 'chat' ORDER BY seq DESC LIMIT 1"
         } else {
@@ -286,11 +278,8 @@ impl GameLogState {
             let roster = self.roster.read().await;
             if let Some(allowed) = roster.get(game_id) {
                 if allowed.iter().any(|p| p == player_pubkey) {
-                    // Only identities admitted through a session key (on-chain
-                    // games) are bound to it. Casual identities are admitted
-                    // by the JOIN_ACK pair; an Iroh node id also parses as a
-                    // Pubkey, so keying this on "looks like a pubkey" used to
-                    // reject every casual player's second write.
+                    // Bind on-chain identities to session keys. Casual identities come from
+                    // JOIN_ACK; an Iroh ID parsing as a Pubkey does not make it a session key.
                     let sessions = self.session_roster.read().await;
                     if let Some(bound) = sessions
                         .get(game_id)
@@ -327,11 +316,8 @@ impl GameLogState {
                 }
                 Ok(())
             }
-            // Ground truth exists (on-chain `Game` account, or a JOIN_ACK-
-            // verified casual identity pair) and this claimant matches
-            // neither of its two registered identities. Unlike the
-            // empty-roster bootstrap below, this is a definitive reject,
-            // not "not yet established."
+            // An established on-chain or JOIN_ACK roster rejects identities outside
+            // its two participants; an empty roster is handled by bootstrap below.
             OnChainCheck::Mismatch => Err(PutEventError::NotAParticipant),
             OnChainCheck::Unavailable => {
                 let roster = self.roster.read().await;
@@ -366,14 +352,9 @@ impl GameLogState {
                 }
             }
             OnChainCheck::Mismatch => {
-                // Ground truth exists (on-chain, or a JOIN_ACK-verified
-                // casual pair) and this claimant matches neither identity —
-                // do not add it just because it claimed to be one of them.
+                // Do not admit a claimant who matches neither verified participant.
             }
-            // No ground truth available at all (direct-connection game that
-            // never went through accept_join, or the narrow window before
-            // either check's data has arrived): keep the original
-            // first-two-seen bootstrap trust, unchanged.
+            // Without on-chain or JOIN_ACK ground truth, retain first-two-seen bootstrap.
             OnChainCheck::Unavailable => self.add_to_roster(game_id, player_pubkey).await,
         }
     }
@@ -511,7 +492,6 @@ fn kind_of(msg: &ChessMessage) -> &'static str {
     }
 }
 
-// ── Wire types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GameEventReq {
@@ -527,7 +507,6 @@ pub struct GameEventReq {
     pub device_id: Option<String>,
 }
 
-// ── Routes ──────────────────────────────────────────────────────────────────
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -612,7 +591,6 @@ async fn put_chat(
     put_event_handler(&state, &game_id, "chat", req, None).await
 }
 
-// ── Shared GET (subscribe) path ──────────────────────────────────────────────
 
 async fn get_stream(state: &AppState, game_id: &str, stream: &str, headers: HeaderMap) -> Response {
     if !wants_subscribe(&headers) {
@@ -622,9 +600,7 @@ async fn get_stream(state: &AppState, game_id: &str, stream: &str, headers: Head
 
     let (history, rx) = state.game_log.subscribe(game_id, stream).await;
 
-    // One chunk per historical entry, each shaped exactly like a live
-    // update body (a bare `ChessMessage`) — see the module doc comment for
-    // why this can't be a single bulk-array snapshot chunk.
+    // Replay each historical entry as a bare ChessMessage, matching live update bodies.
     let history_chunks: Vec<Bytes> = history
         .into_iter()
         .enumerate()
@@ -674,15 +650,7 @@ async fn get_stream(state: &AppState, game_id: &str, stream: &str, headers: Head
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-// The draft leaves the `Subscribe` value open — it "may be blank, set to
-// `true`, or contain arbitrary data" — and every client in this workspace
-// sends `true` (`braid-http/src/client/native_network.rs`). This check
-// previously accepted only the older `keep-alive` spelling, so every real
-// subscribe attempt from the game client silently fell through to the
-// plain-snapshot branch below (a bare `[]` for a fresh game), which the
-// subscriber's Braid parser then rejected as malformed, ended the "stream",
-// and reconnected — forever, never actually receiving live updates. Accept
-// both spellings: `keep-alive` costs nothing and older peers may still send it.
+// Accept Subscribe: true and legacy keep-alive values for Braid streaming.
 fn wants_subscribe(headers: &HeaderMap) -> bool {
     headers
         .get("Prefer")
@@ -696,7 +664,6 @@ fn wants_subscribe(headers: &HeaderMap) -> bool {
             .unwrap_or(false)
 }
 
-// ── Shared PUT (publish) path ────────────────────────────────────────────────
 
 fn is_db_locked(e: &sqlx::Error) -> bool {
     e.as_database_error()
@@ -704,9 +671,7 @@ fn is_db_locked(e: &sqlx::Error) -> bool {
         .unwrap_or(false)
 }
 
-/// Wallet named by a valid, non-revoked bearer JWT, if any. The game-log
-/// routes are public (casual games have no wallet), so this is read here
-/// rather than by the auth middleware.
+/// Read optional non-revoked JWT identity here: casual public game logs bypass auth middleware.
 async fn bearer_wallet(state: &AppState, headers: &HeaderMap) -> Option<String> {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)?
@@ -720,10 +685,8 @@ async fn bearer_wallet(state: &AppState, headers: &HeaderMap) -> Option<String> 
     Some(claims.sub)
 }
 
-/// Seat-lease gate for game-affecting events. Unclaimed seats keep the legacy
-/// behaviour. Once a device has claimed the sender's seat, a write must come
-/// from that device *and* carry a JWT for the sender's wallet — so neither a
-/// superseded device nor a third party naming the wallet can write.
+/// Unclaimed seats allow legacy writes. Claimed seats require both the
+/// current device ID and a JWT for the sender wallet.
 async fn seat_write_allowed(
     state: &AppState,
     game_id: &str,
@@ -780,16 +743,8 @@ async fn put_event_handler(
 
     let kind = kind_of(&req.message);
 
-    // `game_event_log` sees heavy concurrent traffic — every poller in the
-    // app (matchmaking, p2p, rates, tournaments, friends...) shares this
-    // same SQLite pool — and a move write can occasionally lose the
-    // SQLITE_BUSY_SNAPSHOT race despite `busy_timeout` (see `is_db_locked`).
-    // Reproduced live: a move write 500'd in 2ms (not a 5s timeout), and
-    // because this durable path is the fallback the client relies on when
-    // gossip alone doesn't land, that single dropped write meant the
-    // opponent's client never learned the move happened at all. Retrying
-    // the whole `put_event` call gets a fresh transaction/snapshot each
-    // time; any other error (or exhausting retries) falls through unchanged.
+    // Retry put_event on SQLITE_BUSY_SNAPSHOT using a fresh transaction;
+    // busy_timeout does not resolve a stale read snapshot.
     const DB_LOCK_RETRY_ATTEMPTS: u32 = 3;
     let mut outcome = None;
     for attempt in 1..=DB_LOCK_RETRY_ATTEMPTS {
@@ -835,10 +790,8 @@ async fn put_event_handler(
                 "[game-log] rejected event for game {}: parent {} != head {}",
                 game_id, req.content_parent, expected
             );
-            // Return the true head so the client can re-chain and retry
-            // instead of wedging. A publisher cannot know this head on its
-            // own: the stream is shared, so the opponent's last event — not
-            // the publisher's — is usually what it has to build on.
+            // Return the current shared head so the client can re-chain against the
+            // opponent's most recent accepted event.
             (
                 StatusCode::CONFLICT,
                 Json(ParentMismatchResp {
@@ -866,18 +819,8 @@ async fn auth_ok(state: &AppState, req: &GameEventReq) -> bool {
     use solana_sdk::signer::Signer as _;
     use std::str::FromStr;
 
-    // No caller in the game client currently sends a genuine session_token
-    // in this field — it's always an empty string (verified across every
-    // publish_move/publish_resign/publish_chat/publish_session_info call
-    // site: player_pubkey is always the Iroh node id, session_token is
-    // always String::new()). The real wallet/session identity for wagered
-    // games travels inside the SessionInfo message payload itself and is
-    // verified separately by verify_claim/on_chain_check below, which this
-    // doesn't touch. An empty token can never match a real active session's
-    // pubkey string, so the strict check below was unconditionally 401ing
-    // *every* publish for *every* player — wagered or casual — making the
-    // whole Braid durable-relay path dead weight, not a security boundary
-    // anyone was actually relying on.
+    // Clients leave session_token empty; wagered identity is carried by
+    // SessionInfo and checked by verify_claim/on_chain_check below.
     if req.session_token.is_empty() {
         return true;
     }
@@ -889,7 +832,6 @@ async fn auth_ok(state: &AppState, req: &GameEventReq) -> bool {
     matches!(active.get(&wallet), Some(kp) if kp.pubkey().to_string() == req.session_token)
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -920,13 +862,7 @@ mod tests {
         ))
     }
 
-    // Regression test: `braid_chess::ChessSubscriber` (via
-    // `braid-http/src/client/native_network.rs`) — the actual client used
-    // for `/game/:id/moves` and `/game/:id/chat` — sends `Subscribe: true`,
-    // not `Subscribe: keep-alive`. Before this fix, `wants_subscribe` only
-    // recognized the latter, so every real subscribe request silently fell
-    // through to the plain-snapshot branch, which the client's Braid parser
-    // then rejected as malformed — moves never actually synced.
+    // ChessSubscriber sends Subscribe: true; it must receive a stream, not a snapshot.
     #[test]
     fn wants_subscribe_recognizes_the_actual_client_header() {
         let mut headers = HeaderMap::new();
@@ -1031,9 +967,7 @@ mod tests {
             .await
             .unwrap();
 
-        // A second event claiming genesis as its parent (instead of v1) is
-        // an equivocation attempt — same class of check as the P2P
-        // equivocation guard and the on-chain parent_nonce check.
+        // A second genesis parent is equivocation after the first move.
         let m2 = move_message("fen2", 2);
         let v2 = braid_chess::version_hash("fen2", 2);
         let err = state
@@ -1211,12 +1145,8 @@ mod tests {
         participants.seed_session_for_test(1, bob, bob_session);
         let state = GameLogState::new(pool, Some(participants));
 
-        // Mallory races and posts HER forged SessionInfo before either real
-        // player — this is exactly the scenario that used to win the old
-        // first-two-seen roster. `SessionInfo` posting itself is never
-        // gated (that's how the roster bootstraps in the first place), so
-        // this succeeds either way — the question is whether it gets
-        // *trusted* afterward.
+        // A forged SessionInfo may arrive before either player. Bootstrap accepts
+        // the post but must not trust it as a participant identity.
         let mallory_info = ChessMessage::SessionInfo {
             player_pubkey: mallory.to_string(),
             session_pubkey: "mallory-session".to_string(),
@@ -1236,10 +1166,7 @@ mod tests {
             .await
             .unwrap();
 
-        // The actual regression check: mallory's forged claim was NOT
-        // trusted into the roster (on-chain check caught it, even though
-        // she posted first), so her next move — the thing that actually
-        // matters — is rejected.
+        // Reject the forged claimant's move even though its SessionInfo arrived first.
         let forged_move = move_message("fen1", 1);
         let vf = braid_chess::version_hash("fen1", 1);
         let err = state
@@ -1302,8 +1229,7 @@ mod tests {
             .await
             .unwrap();
 
-        // An impostor node_id races in first — this is exactly the scenario
-        // that used to win the old first-two-seen roster unconditionally.
+        // An impostor races a legitimate participant to claim a roster slot.
         let forged = move_message("fen1", 1);
         let vf = braid_chess::version_hash("fen1", 1);
         let err = state
@@ -1401,9 +1327,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Black publishes chaining off genesis — it only tracked its own
-        // moves, so it has never seen white's version. This is the exact
-        // rejection that used to be a dead end.
+        // Black chains from genesis without observing white’s version.
         let black = move_message("fen-black", 1);
         let v_black = braid_chess::version_hash("fen-black", 1);
         let err = state

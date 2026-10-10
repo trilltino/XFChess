@@ -1,23 +1,6 @@
 #!/usr/bin/env pwsh
-# Read-only check: does the program actually deployed on devnet match the
-# locally-built .so? Answers "is devnet stale" without deploying anything -
-# a mismatch is the trigger for a separate, deliberately-approved
-# "anchor deploy", not something this script does itself.
-#
-# Compares only the first min(local, remote) bytes, not full-file hashes.
-# BPFLoaderUpgradeable ProgramData accounts never shrink on upgrade - if the
-# current binary is smaller than the account's historical high-water mark,
-# `solana program dump` still returns the full allocated account length,
-# padded with trailing zero bytes. A naive whole-file hash compare flags
-# that padding as a mismatch even when the actual deployed code is exact -
-# confirmed by hand on 2026-07-31 (a real upgrade whose first N bytes hashed
-# identically to the local .so still showed a "MISMATCH" against the old,
-# whole-file version of this script because of a 2,816-byte zero tail).
-#
-# Usage:
-#   .\scripts\verify_devnet_program.ps1
-#   .\scripts\verify_devnet_program.ps1 -Build            # rebuild locally first
-#   .\scripts\verify_devnet_program.ps1 -RpcUrl https://api.devnet.solana.com
+# Compare deployed code with the local binary, allowing trailing zero padding
+# from a larger prior ProgramData allocation. Usage: just verify-program [-Build]
 
 param(
     [string]$ProgramId = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU",
@@ -27,16 +10,16 @@ param(
 )
 
 if ($Build) {
-    Write-Host "Building locally (anchor build)..."
-    anchor build
+    Write-Host "Building locally (cargo build-sbf)..."
+    cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "anchor build failed - aborting comparison."
+        Write-Error "cargo build-sbf failed - aborting comparison."
         exit 1
     }
 }
 
 if (-not (Test-Path $LocalSo)) {
-    Write-Error "$LocalSo not found. Run with -Build, or run anchor build first."
+    Write-Error "$LocalSo not found. Run with -Build, or run just build-program first."
     exit 1
 }
 

@@ -9,7 +9,6 @@ use xfchess::rendering::{PieceColor, PieceType};
 fn test_reset_game_resources_system() {
     let mut app = App::new();
 
-    // 1. Setup "dirty" state (simulating a game in progress)
     app.insert_resource(CurrentTurn {
         color: PieceColor::Black,
         move_number: 42,
@@ -40,7 +39,7 @@ fn test_reset_game_resources_system() {
     app.insert_resource(CapturedPieces::default());
     app.insert_resource(GameOverState::WhiteWon);
     app.insert_resource(TurnStateContext::default());
-    app.insert_resource(ChessEngine::default()); // Mock or default engine
+    app.insert_resource(ChessEngine::default());
     app.insert_resource(ActiveTimeControl::default()); // reset_game_resources reads this to seed GameTimer
 
     // Register types used in spawn
@@ -52,10 +51,8 @@ fn test_reset_game_resources_system() {
     // We use Update schedule and run it once
     app.add_systems(Update, reset_game_resources);
 
-    // 3. Run the app for one frame
     app.update();
 
-    // 4. Verify resources are reset
     let turn = app.world().get_resource::<CurrentTurn>().unwrap();
     assert_eq!(turn.color, PieceColor::White);
     assert_eq!(turn.move_number, 1);

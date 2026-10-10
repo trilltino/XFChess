@@ -1,20 +1,7 @@
 #!/usr/bin/env bash
-# XFChess encrypted offsite DB backup.
-#
-# Takes a consistent snapshot of each SQLite DB (safe under WAL + live writes via
-# `VACUUM INTO`), encrypts it with `age` (asymmetric — the server holds only the
-# public recipient key and CANNOT decrypt its own backups), and uploads to an
-# S3-compatible / SFTP remote via `rclone`. Old local snapshots are pruned.
-#
-# Runs as the xfchess-backup.timer (daily). Restore: see restore-db.sh + docs/DR.md.
-#
-# Required env (from /opt/xfchess/.env or the systemd unit):
-#   BACKUP_AGE_RECIPIENT   age public key, e.g. age1qz...   (keep the PRIVATE key OFFLINE)
-#   BACKUP_REMOTE          rclone target, e.g. r2:xfchess-backups/db
-# Optional env:
-#   BACKUP_DATA_DIR        default /opt/xfchess/data
-#   BACKUP_WORK_DIR        default /opt/xfchess/data/backups
-#   BACKUP_RETENTION_DAYS  default 14   (local copies; set bucket lifecycle for offsite)
+# Snapshot SQLite with VACUUM INTO, encrypt with age, and upload via rclone.
+# Required: BACKUP_AGE_RECIPIENT, BACKUP_REMOTE; keep the private age key offline.
+# Restore with restore-db.sh; see docs/DR.md.
 set -euo pipefail
 
 DATA_DIR="${BACKUP_DATA_DIR:-/opt/xfchess/data}"

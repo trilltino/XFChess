@@ -65,10 +65,8 @@ impl RateCache {
             }
         }
 
-        // Slow path: fetch both sources independently. Primary (Helius/CoinGecko
-        // SOL/USD × frankfurter.app FX) is preferred; secondary (CoinGecko's own
-        // direct multi-currency pricing, a genuinely different computation path)
-        // is both a real fallback and a cross-check on the primary.
+        // Fetch independent price sources for fallback and cross-check; prefer the
+        // primary SOL/USD and FX computation.
         let (primary, secondary) =
             tokio::join!(fetch_primary_rates(), fetch_secondary_rates_coingecko());
         let primary = primary.and_then(validate_rates);
@@ -355,11 +353,7 @@ async fn get_all_rates(
         }
         Err(e) => {
             error!("[RATES] Failed to fetch rates: {}", e);
-            // Surface the underlying fetch error in the body — callers (the
-            // game client, this admin panel) log the response body verbatim
-            // on a non-2xx status, so this is the only way to see *why* the
-            // upstream fetch failed without direct access to this process's
-            // own console.
+            // Include the upstream fetch error in the response body for client diagnostics.
             (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({ "error": e })),

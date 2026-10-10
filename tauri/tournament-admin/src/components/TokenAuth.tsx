@@ -34,11 +34,7 @@ export default function TokenAuth() {
         const fallback = cfg.isProduction
           ? "Could not authenticate. Tunnel down, or bad token — check the 'tunnel' SSH user and key."
           : "Invalid access credentials, or no local backend on 127.0.0.1:8090.";
-        // lastError carries the real exception/HTTP status from useAuth's
-        // login() — show it instead of the generic fallback whenever we have
-        // it, so a Tauri permission denial doesn't look identical to a typo'd
-        // token. Full detail (and any earlier console.error) is also in
-        // devtools: right-click -> Inspect, or Ctrl+Shift+I.
+        // Show the actual auth error so token, tunnel, and permission failures remain distinct.
         setError(lastError ? `${fallback}\n\nDetail: ${lastError}` : fallback);
       }
     } catch (err) {

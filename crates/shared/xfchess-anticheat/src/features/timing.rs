@@ -68,10 +68,7 @@ pub fn timing_anomaly(
             .map(|m| effective_latency(m, source))
             .unwrap_or(u32::MAX);
 
-        // Skip if player was in time trouble (clock below threshold)
-        // We don't have per-ply clock data from the server yet, so we proxy
-        // it: if the move was made very quickly AND it's the endgame (ply > 60),
-        // we are more lenient.
+        // Without per-ply clocks, fast endgame moves are only a proxy for time trouble.
         let endgame_leniency = eval.ply > 60;
         let effective_threshold = if endgame_leniency {
             cfg.timing_fast_threshold_ms / 2

@@ -141,7 +141,7 @@ from; `record_move`'s handler branches on it to build either
   codebase already. Cross-checked by hand against the program source; not
   compiler-verified.
 - **Not yet done**: deploying the updated program to devnet
-  (`scripts\build_program.bat` / `anchor deploy`) — that's a live-program
+  (`just build-program` / `anchor deploy`) — that's a live-program
   change, held back for explicit confirmation before running rather than
   done as part of this pass. Nothing in Track 2 takes effect on live devnet
   games until that happens; Tracks 0 and 1 are already live as soon as the

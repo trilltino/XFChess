@@ -1,20 +1,7 @@
--- Migration 027: game_event_log
---
--- Durable, ordered per-game event log backing the Braid moves/resign/chat
--- transport that replaces the old in-memory p2p_relay mailbox and chat.rs's
--- own ephemeral ChatRelayState. A backend restart previously dropped both
--- entirely (see p2p_relay/README.md and chat.rs's own doc comment); this
--- table lets the in-memory Braid AppendLog hydrate from disk instead.
---
--- One append-only table serves Move, Resign, and Chat (`kind` discriminates).
--- Ping/Pong (liveness) and SessionInfo (one-time handshake, re-derivable
--- from on-chain session delegation) are deliberately NOT persisted here —
--- they're served as ephemeral, non-durable Braid PatchedDoc resources.
+-- Persist Move, Resign, and Chat in an append-only log. Ping/Pong and
+-- SessionInfo remain ephemeral and are reconstructed on connection.
 
--- `kind` is the same discriminant `ChessMessage`'s `#[serde(tag = "type")]`
--- already produces (move / resign / offer_draw / accept_draw / decline_draw
--- on the /moves stream; chat on the /chat stream) — not constrained here so
--- adding a new ChessMessage variant never requires a migration.
+-- Store ChessMessage kind tags without a constraint so new variants need no migration.
 CREATE TABLE IF NOT EXISTS game_event_log (
     game_id TEXT NOT NULL,
     seq INTEGER NOT NULL,

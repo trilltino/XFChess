@@ -14,15 +14,9 @@ pub struct CancelGame<'info> {
     pub player: Signer<'info>,
     #[account(mut, constraint = white_authority.key() == game.white @ GameErrorCode::NotInGame)]
     pub white_authority: SystemAccount<'info>,
-    /// CHECK: must equal `game.black`. Before anyone joins, `game.black` is
-    /// `Pubkey::default()` — the System Program's own id, which is owned by
-    /// the native loader — so a `SystemAccount` here rejected every
-    /// cancellation of an unjoined game (AccountNotSystemOwned) and locked the
-    /// creator's stake until `withdraw_expired_wager` after 24h. Lamports are
-    /// only ever sent here when black has joined, i.e. to a real wallet.
-    /// Not declared `mut`: the runtime demotes that reserved id to read-only,
-    /// which an Anchor `mut` constraint rejects. Clients still pass the
-    /// account writable, so a joined black wallet receives its refund.
+    /// CHECK: must equal game.black. Before join, this is the reserved System
+    /// Program ID, so omit SystemAccount and mut constraints. Joined wallets
+    /// receive refunds only when passed writable by the client.
     #[account(constraint = black_authority.key() == game.black @ GameErrorCode::NotInGame)]
     pub black_authority: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
@@ -123,8 +117,7 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
                 ctx.accounts.black_authority.key() == game.black,
                 GameErrorCode::NotInGame
             );
-            // Not declared `mut` (see the account doc), so enforce here what
-            // the attribute used to: a joined black wallet must be writable.
+            // The black account is not declared mut; require a joined wallet to be writable here.
             require!(
                 ctx.accounts.black_authority.is_writable,
                 anchor_lang::error::ErrorCode::ConstraintMut

@@ -133,11 +133,9 @@ impl OnboardingStateMachine {
 
         match &session.state {
             OnboardingState::NoWallet => {
-                // Return wallet creation deep link
                 Some("https://phantom.app/ul/browse/https://xfchess.com".to_string())
             }
             OnboardingState::InsufficientFunds { .. } => {
-                // Return funding page
                 if let Some(wallet) = &session.wallet {
                     Some(format!(
                         "https://xfchess.com/fund?wallet={}&amount={}",
@@ -149,14 +147,12 @@ impl OnboardingStateMachine {
                 }
             }
             OnboardingState::ReadyToRegister => {
-                // Return registration endpoint
                 Some(format!(
                     "/api/actions/tournament/{}/register",
                     session.tournament_id
                 ))
             }
             OnboardingState::Registered => {
-                // Return view match endpoint
                 if let Some(wallet) = &session.wallet {
                     Some(format!(
                         "/tournament/{}/my-match?player={}",

@@ -1,13 +1,6 @@
-//! Discovery of wagered games whose escrow the player can still recover.
-//!
-//! `wagered_games.json` is only a convenience cache: the authoritative source
-//! is the Game PDA set owned by the program. A scan therefore merges two
-//! sources — `getProgramAccounts` filtered by the wallet as `white` or
-//! `black`, and the local ledger (which also covers delegated games, whose
-//! base-layer account is owned by the delegation program and so is invisible
-//! to a program-owned scan). A lost, corrupt or fresh-install ledger can hide
-//! nothing the chain still knows about, and an RPC failure is reported as an
-//! incomplete scan rather than as "nothing to recover".
+//! Find recoverable wagers from program-owned Game PDAs and the local ledger.
+//! The ledger also covers delegated accounts. Report RPC failures as incomplete
+//! scans, not an empty recovery set.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -30,9 +23,8 @@ use crate::solana::instructions::{GAME_SEED, PROGRAM_ID, WAGER_ESCROW_SEED};
 /// (`game_ix/cancel.rs`: 24 hours since `updated_at`).
 pub const ABANDONED_CANCEL_AFTER_SECS: i64 = 3600 * 24;
 
-/// Byte offsets of `white`/`black` in the Game account (8-byte discriminator,
-/// then `game_id: u64`). Used only as RPC-side `memcmp` filters; the matched
-/// accounts are then fully decoded with the program's own `Game` type.
+/// RPC memcmp offsets skip the discriminator and game ID;
+/// fully decode matched accounts with Game before using them.
 const WHITE_FILTER_OFFSET: usize = 8 + 8;
 const BLACK_FILTER_OFFSET: usize = WHITE_FILTER_OFFSET + 32;
 
@@ -46,13 +38,10 @@ pub enum RecoveryAction {
     /// Game with moves has been idle past the program's abandonment window;
     /// either player may cancel and both stakes are refunded.
     CancelAbandoned,
-    /// Game was already cancelled but the escrow still holds funds (for
-    /// example an earlier cancellation's acknowledgement was lost mid-way).
-    /// Re-running `cancel_game` is idempotent and sweeps the remainder.
+    /// Cancelled game with escrow funds remaining. cancel_game idempotently refunds the remainder.
     CompleteCancellation,
-    /// Account is still delegated to the Ephemeral Rollup; it must be
-    /// committed/undelegated (or recovered via the ER-unavailability path)
-    /// before any base-layer refund. Shown, never actionable from the client.
+    /// Delegated accounts must be undelegated or recovered before base-layer refunds.
+    /// Display them without client cancellation actions.
     UndelegationRequired,
 }
 

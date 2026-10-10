@@ -10,13 +10,7 @@ interface AuthContextType {
   login: (token: string, env: EnvId) => Promise<boolean>;
   logout: () => void;
   loading: boolean;
-  /**
-   * The real reason the last `login()` call failed — a bare bool used to
-   * collapse tunnel-spawn errors, Tauri permission denials, and bad-token
-   * 401s into one indistinguishable "Could not authenticate" message. Every
-   * `console.error` here is also visible in the window's devtools
-   * (right-click -> Inspect, or Ctrl+Shift+I) for anything cut off in the UI.
-   */
+  /** The specific failure from the last login attempt, including tunnel and ACL errors. */
   lastError: string | null;
 }
 
@@ -25,9 +19,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Per-environment token storage so a LOCAL token is never replayed at PRODUCTION.
 const tokenKey = (env: EnvId) => `admin_token_${env}`;
 
-// Set on explicit logout, cleared on successful login. Without this, the
-// auto-resume below would immediately log you back in after you deliberately
-// signed out, making logout a no-op.
+// Explicit logout disables auto-resume until successful login.
 const SIGNED_OUT_KEY = "admin_signed_out";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -40,16 +32,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [lastError, setLastError] = useState<string | null>(null);
 
-  // Auto-resume the last session on mount. Without this, every Vite HMR
-  // full-reload (and every app restart) dumps you back on the login screen —
-  // which makes iterating on the UI miserable, since a good fraction of edits
-  // trigger a full reload rather than a hot patch.
-  //
-  // Safe to do for PRODUCTION now that the tunnel is Rust-owned and
-  // idempotent: `ensureTunnel` reuses a healthy existing tunnel instead of
-  // spawning a duplicate, so resuming costs nothing when one is already up.
-  // A failure here is silent by design — it just leaves you on the login
-  // screen, exactly as before.
+  // Resume the saved session on mount using the idempotent Rust tunnel API.
+  // Failure silently leaves the login screen available.
   useEffect(() => {
     let cancelled = false;
     (async () => {

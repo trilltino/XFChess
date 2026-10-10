@@ -30,9 +30,7 @@ pub fn parse_heartbeat(value: &str) -> Result<Duration> {
 
 pub fn message_to_update(msg: Message) -> Update {
     let version = extract_version(&msg.headers).unwrap_or_else(|| {
-        // An update with no Version can't take part in causal ordering. Give it a
-        // placeholder so it is still delivered, and say so once, here — callers
-        // that care about ordering can check `Update::primary_version`.
+        // Deliver versionless updates with a placeholder; ordering callers must check primary_version.
         tracing::warn!(
             "[BraidHTTP] update from {} had no Version header — applying a placeholder, causal ordering may be affected",
             msg.url.as_deref().unwrap_or("unknown"),
@@ -80,10 +78,7 @@ fn extract_version(headers: &std::collections::BTreeMap<String, String>) -> Opti
         .and_then(|mut v| v.pop());
 
     if version.is_none() {
-        // The caller (`message_to_update`'s `unwrap_or_else`) already logs a
-        // single, human-readable warning for this — don't double-log the
-        // same event here. Headers are still useful when actually
-        // debugging a protocol mismatch, so keep them at trace level.
+        // The caller logs failures once; trace headers to avoid duplicate warnings.
         tracing::trace!(
             "[BraidHTTP] no version header found. Headers were: {:?}",
             headers

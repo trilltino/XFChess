@@ -6,7 +6,7 @@ use xfchess::rendering::pieces::PieceType;
 #[test]
 fn example_file_from_char() {
     if let Some(file) = File::from_char('e') {
-        assert_eq!(file.index(), 4); // file is File(4)
+        assert_eq!(file.index(), 4);
     } else {
         panic!("Should have parsed 'e' successfully");
     }

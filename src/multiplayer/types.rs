@@ -76,11 +76,8 @@ pub struct CausalChainState {
     pub applied_versions: HashMap<u64, std::collections::HashSet<String>>,
     pub pending_versions: HashMap<u64, std::collections::HashSet<String>>,
     pub verified_wallets: HashMap<u64, (String, String)>,
-    /// For a game resumed from the authoritative log after a restart: the
-    /// opponent's last applied gossip `seq` and head version. A first message
-    /// from an agent with no lane yet continues from here instead of from
-    /// genesis, so the opponent's next move isn't rejected as a causal gap
-    /// and a stale or forked continuation still is.
+    /// Resume the opponent's gossip lane from its last applied sequence and head,
+    /// not genesis, while retaining stale/fork rejection.
     pub resume_seeds: HashMap<u64, (u64, String)>,
 }
 

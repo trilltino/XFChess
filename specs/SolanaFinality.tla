@@ -1,27 +1,6 @@
 ------------------------------ MODULE SolanaFinality ------------------------------
-(***************************************************************************)
-(* Phase 4: the on-chain settlement layer.                                 *)
-(*                                                                         *)
-(* Models record_move in the Anchor program:                              *)
-(*   programs/xfchess-game/src/moves_ix/record.rs                          *)
-(*                                                                         *)
-(*   if let Some(pn) = parent_nonce {                                      *)
-(*       require!(pn == game.nonce, ParentNonceMismatch);                  *)
-(*   }                                                                     *)
-(*   require!(nonce == game.nonce + 1, InvalidNonce);                      *)
-(*   game.nonce = nonce;                                                   *)
-(*                                                                         *)
-(* The mempool may reorder transactions and Byzantine players may submit   *)
-(* conflicting ones. We check that the committed chain is always a single  *)
-(* linear, gap-free history (linearizable), and that the parent_nonce      *)
-(* check keeps committed parents consistent.                               *)
-(*                                                                         *)
-(* The model also answers the open question from the plan: is parent_nonce *)
-(* REQUIRED for linearizability, or does the strict nonce check carry it?  *)
-(* Setting EnforceNonce = FALSE removes the `nonce == game.nonce + 1`      *)
-(* check and shows the chain immediately forks -- i.e. the NONCE check is   *)
-(* the load-bearing guarantee; parent_nonce is defense-in-depth.           *)
-(***************************************************************************)
+(* Model on-chain record_move under mempool reordering and Byzantine submissions. *)
+(* Strict nonce checks guarantee a gap-free log; parent_nonce checks preserve parent consistency. *)
 EXTENDS Naturals, Sequences
 
 CONSTANTS
@@ -35,12 +14,8 @@ CONSTANTS
     Byzantine,     \* players that may submit arbitrary transactions
     SubmitCap,     \* bound on outstanding submissions (keeps model finite)
     EnforceNonce,  \* TRUE = real code; FALSE = nonce check removed (necessity)
-    EnforceAuth    \* TRUE = models the session-key/roster constraints in
-                   \*        record.rs (session_delegation.session_key == player,
-                   \*        .enabled). FALSE = auth check removed (necessity).
+    EnforceAuth    \* TRUE requires an enabled registered session key; FALSE disables authorization.
 
-\* All possible transaction authors: registered players plus unregistered
-\* outsiders. With Outsiders = {} this collapses to Agents (existing configs).
 Authors == Agents \cup Outsiders
 
 VARIABLES
@@ -67,8 +42,7 @@ Init ==
     /\ submits     = 0
 
 ----------------------------------------------------------------------------
-(* An honest player submits its next legitimate move: target = next nonce,  *)
-(* parent_nonce = current chain nonce, deterministic content.               *)
+(* Honest submissions use the next nonce, current parent, and deterministic content. *)
 SubmitHonest(p) ==
     /\ submits < SubmitCap
     /\ LET t == [ target |-> chain_nonce + 1, parentSet |-> TRUE,
@@ -80,8 +54,7 @@ SubmitHonest(p) ==
     /\ submits' = submits + 1
     /\ UNCHANGED <<chain_nonce, chain_log>>
 
-(* A Byzantine player submits an arbitrary transaction: any target, any     *)
-(* parent, any content -- including conflicting moves and forged parents.   *)
+(* Byzantine players may submit arbitrary nonces, parents, and content. *)
 SubmitByz(p) ==
     /\ p \in Byzantine
     /\ submits < SubmitCap
@@ -89,9 +62,7 @@ SubmitByz(p) ==
     /\ submits' = submits + 1
     /\ UNCHANGED <<chain_nonce, chain_log>>
 
-(* A forging outsider (no registered session key) submits an arbitrary       *)
-(* transaction -- e.g. a P2P-layer impersonator trying to settle a move it    *)
-(* forged. record_move must reject it on the session_delegation roster check.  *)
+(* Outsiders lack registered session keys and must fail roster authorization. *)
 SubmitOutsider(p) ==
     /\ p \in Outsiders
     /\ submits < SubmitCap
@@ -99,7 +70,6 @@ SubmitOutsider(p) ==
     /\ submits' = submits + 1
     /\ UNCHANGED <<chain_nonce, chain_log>>
 
-(* The runtime applies a transaction. This is record_move's guard set.      *)
 ApplyTx(t) ==
     /\ t \in mempool
     /\ (EnforceAuth  => t.author \in Authorized)           \* InvalidSessionKey / roster
@@ -125,24 +95,18 @@ TypeOK ==
     /\ submits \in 0..SubmitCap
     /\ \A i \in 1..Len(chain_log) : chain_log[i] \in Tx
 
-(* Linearizable: the committed history is exactly nonce 1, 2, 3, ... with   *)
-(* no gaps and no two moves at the same nonce.                              *)
+(* Committed nonces are contiguous and unique, starting at 1. *)
 ChainLinear ==
     \A i \in 1..Len(chain_log) : chain_log[i].target = i
 
-(* Every committed move that supplied a parent_nonce named the immediately   *)
-(* preceding committed nonce.                                               *)
+(* A supplied parent must equal the immediately preceding committed nonce. *)
 ChainParentConsistent ==
     \A i \in 2..Len(chain_log) :
         chain_log[i].parentSet => (chain_log[i].parent = i - 1)
 
 ChainLinearizable == ChainLinear /\ ChainParentConsistent
 
-(* On-chain authorization backstop: no transaction from an author without a   *)
-(* registered session key is ever committed. This is the property that makes  *)
-(* an accepted-but-forged P2P move harmless -- it can never settle, because    *)
-(* record_move requires the game's registered session key. Holds when         *)
-(* EnforceAuth = TRUE; violated when it is removed (SF_no_auth).               *)
+(* Only authors with registered session keys may commit moves; requires EnforceAuth. *)
 OnlyAuthorizedCommitted ==
     \A i \in 1..Len(chain_log) : chain_log[i].author \in Authorized
 

@@ -157,7 +157,6 @@ mod tests {
     fn test_clear_removes_all_moves() {
         let mut history = MoveHistory::default();
 
-        // Add several moves
         for _ in 0..5 {
             history.add_move(MoveRecord {
                 piece_type: PieceType::Pawn,
@@ -230,7 +229,6 @@ mod tests {
     fn test_iter_returns_all_moves() {
         let mut history = MoveHistory::default();
 
-        // Add 3 moves
         for i in 0..3 {
             history.add_move(MoveRecord {
                 piece_type: PieceType::Pawn,
@@ -334,7 +332,6 @@ mod tests {
     fn test_realistic_game_opening() {
         let mut history = MoveHistory::default();
 
-        // 1. e4
         history.add_move(MoveRecord {
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::White,
@@ -360,7 +357,6 @@ mod tests {
             is_checkmate: false,
         });
 
-        // 2. Nf3
         history.add_move(MoveRecord {
             piece_type: PieceType::Knight,
             piece_color: PieceColor::White,

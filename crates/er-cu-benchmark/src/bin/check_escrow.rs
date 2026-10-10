@@ -10,7 +10,7 @@ fn main() {
     let program_id: Pubkey = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
         .parse()
         .unwrap();
-    let tournament_id = 1779105119u64; // current run's tournament id
+    let tournament_id = 1779105119u64;
 
     let escrow =
         Pubkey::find_program_address(&[b"t_escrow", &tournament_id.to_le_bytes()], &program_id).0;

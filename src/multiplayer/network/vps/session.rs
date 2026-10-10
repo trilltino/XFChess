@@ -97,12 +97,6 @@ pub fn activate_session(game_id: u64, signed_tx_bytes: &[u8]) -> Result<String, 
     Ok(resp.sig)
 }
 
-// NOTE: `sign_and_submit` (POST /session/sign) was removed along with the
-// backend endpoint it called. Nothing in this crate ever invoked it —
-// delegation goes through `/game/delegate`, which builds the instruction
-// server-side — while the endpoint itself would sign *any* transaction handed
-// to it with the game's session key. See `backend/src/signing/routes/main.rs`
-// (`protected_routes`) for the full reasoning.
 
 pub fn session_status(game_id: u64) -> Result<SessionStatus, String> {
     let resp = client_fast()?
@@ -137,7 +131,6 @@ pub fn abandon_session(game_id: u64) -> Result<(), String> {
     Ok(())
 }
 
-// ── Item 8: Global session verify ─────────────────────────────────────────────
 
 pub fn verify_global_session(wallet_pubkey: &str) -> Result<Option<String>, String> {
     let resp = client_fast()?

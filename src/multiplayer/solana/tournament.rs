@@ -4,7 +4,6 @@ use solana_sdk::pubkey::Pubkey;
 use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 
-// Tournament status from backend
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TournamentStatus {
     Registration,
@@ -396,7 +395,6 @@ pub fn spawn_swiss_subscription(
                 }
             };
 
-            // Create Iroh node using BraidIrohConfig
             use braid_iroh::BraidIrohConfig;
             let node = match BraidIrohNode::spawn(BraidIrohConfig {
                 discovery: DiscoveryConfig::Real,
@@ -413,7 +411,6 @@ pub fn spawn_swiss_subscription(
                 }
             };
 
-            // Subscribe to Swiss tournament topic
             let topic = format!("/swiss/{}", tournament_id);
             let mut rx = match node.subscribe(&topic, vec![]).await {
                 Ok(r) => r,
@@ -425,7 +422,6 @@ pub fn spawn_swiss_subscription(
 
             info!("[Swiss] Subscribed to topic {}", topic);
 
-            // Process incoming messages
             use futures::StreamExt;
             use iroh_gossip::api::Event as GossipEvent;
 
@@ -434,10 +430,7 @@ pub fn spawn_swiss_subscription(
                     GossipEvent::Received(message) => message.content,
                     _ => continue,
                 };
-                // The topic carries Braid updates for every one of this
-                // tournament's resources; `SwissMessage::from_update` reads the
-                // resource path off the update and returns `None` for the ones
-                // this client has no event for (roster, meta).
+                // This topic includes every tournament resource; from_update ignores unhandled roster/meta updates.
                 let Ok(update) = serde_json::from_slice::<braid_core::Update>(&payload) else {
                     continue;
                 };
@@ -463,9 +456,7 @@ pub fn spawn_swiss_subscription(
                         result,
                         ..
                     } => {
-                        // `SwissMessage::ResultRecorded` carries only the match outcome;
-                        // white/black player identifiers are resolved from the pairing
-                        // stored alongside the round.
+                        // ResultRecorded carries the outcome; resolve player IDs from the round’s pairing.
                         let (white, black) = match &result {
                             MatchResult::Win { winner } => (winner.clone(), String::new()),
                             MatchResult::Draw => (String::new(), String::new()),
@@ -835,7 +826,6 @@ fn poll_my_tournament_status(
         return;
     };
 
-    // Collect the in-flight response before issuing another request.
     if let Some(rx) = tournament.status_rx.as_ref() {
         match rx.try_recv() {
             Ok(Ok(status)) => {
@@ -1034,15 +1024,8 @@ fn handle_tournament_match_assigned(
         let opponent_node_id = ev.opponent_node_id.clone();
 
         if let Some(ref peer_node_id) = opponent_node_id {
-            // Both tournament participants fire this event toward each other
-            // symmetrically — `is_white` is the arbitrary but consistent
-            // tie-breaker so exactly one side ends up `is_host` (whichever
-            // side auto-accepts the other's GameInvite and sends back
-            // InviteResponse). Without a consistent split here, both sides
-            // would hit the 12s Connecting timeout every time.
-            // Non-authoritative: this system already drives game-start itself
-            // below, unconditionally — this connect is purely an opportunistic
-            // dual-transport upgrade, same as the VPS-lobby flow.
+            // Use is_white as a consistent host tie-breaker. Connection upgrades transport;
+            // this system independently starts the tournament game.
             connect_events.write(crate::multiplayer::network::p2p::ConnectToPeerEvent {
                 peer_node_id: peer_node_id.clone(),
                 is_host: is_white,
@@ -1237,9 +1220,7 @@ pub fn register_tournament(
     let host_treasury =
         Pubkey::from_str(&info.host_treasury).map_err(|e| format!("bad host_treasury: {e}"))?;
 
-    // Matches the ELO the off-chain roster join call already uses (see
-    // `vps::confirm_join`) — real ELO-based seeding is a future
-    // enhancement, not something this registration tx needs to solve.
+    // Use the same ELO as the off-chain roster join.
     const DEFAULT_ELO: u32 = 1200;
 
     let ix = build_register_player_ix(

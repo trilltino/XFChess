@@ -82,7 +82,6 @@ fn render_charts(targets: &[Target], levels: &[usize], grid: &[Vec<(LatencyStats
         .unwrap_or(8)
         .min(16);
 
-    // ── Throughput chart ──────────────────────────────────────────────────────
     let max_rps = grid
         .iter()
         .flatten()
@@ -105,7 +104,6 @@ fn render_charts(targets: &[Target], levels: &[usize], grid: &[Vec<(LatencyStats
         }
     }
 
-    // ── Throttle chart ────────────────────────────────────────────────────────
     println!("   ├─ Throttled requests (% HTTP 429) ─ lower is better ───────────────");
     for (li, &conc) in levels.iter().enumerate() {
         println!("   │ concurrency {conc}");

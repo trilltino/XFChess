@@ -53,7 +53,6 @@ async fn test_initialize_and_update_config() {
         .await
         .expect("initialize_config must succeed");
 
-    // Fetch and verify initialized config
     let account = ctx
         .banks_client
         .get_account(config_key)

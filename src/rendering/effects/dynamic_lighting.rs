@@ -44,7 +44,6 @@ fn spawn_orbital_lights(mut commands: Commands, settings: Res<GameSettings>) {
     );
 
     for i in 0..light_count {
-        // Calculate initial angular position
         let angle_offset = (2.0 * std::f32::consts::PI * i as f32) / light_count as f32;
 
         // Initial position in circle
@@ -86,27 +85,21 @@ fn update_orbital_lights(
     let light_count = settings.dynamic_lighting.light_count.clamp(2, 6) as usize;
     let shadows_enabled = settings.dynamic_lighting.shadows_enabled;
 
-    // Calculate current angle based on time
     let base_angle = time.elapsed_secs() * speed;
 
     for (mut transform, mut point_light, orbital_light) in query.iter_mut() {
-        // Calculate angular offset for this light
         let angle_offset =
             (2.0 * std::f32::consts::PI * orbital_light.index as f32) / light_count as f32;
 
-        // Calculate current angle with offset
         let angle = base_angle + angle_offset;
 
-        // Update position in circular orbit
         transform.translation.x = radius * angle.cos();
         transform.translation.z = radius * angle.sin();
         transform.translation.y = height;
 
-        // Update light color from settings (allows real-time color changes)
         let color = settings.dynamic_lighting.get_color(orbital_light.index);
         point_light.color = color;
 
-        // Update shadows setting (allows real-time shadow toggling)
         point_light.shadow_maps_enabled = shadows_enabled;
     }
 }

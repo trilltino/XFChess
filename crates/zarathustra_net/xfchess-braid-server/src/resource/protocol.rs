@@ -36,11 +36,8 @@ impl From<&BraidUpdate> for Update {
     fn from(update: &BraidUpdate) -> Self {
         let body = serde_json::to_string(&update.body).unwrap_or_else(|_| "null".to_string());
 
-        // Both shapes travel as a body, so the media type is the only thing
-        // that says which one this is: a full document, or the RFC 6902 patch
-        // document that transforms the previous version into this one. A
-        // receiver that ignores it and parses every body as the resource will
-        // silently mistake a patch for the state.
+        // The media type distinguishes full documents from RFC 6902 patches;
+        // a receiver must not parse a patch as resource state.
         let content_type = if update.is_snapshot {
             "application/json"
         } else {

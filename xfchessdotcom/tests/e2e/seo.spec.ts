@@ -1,16 +1,9 @@
 import { test, expect } from '@playwright/test';
 
-// Modeled on the reference implementation's own SEO test suite:
-// js_handyman/handyman/tests/e2e/seo.spec.ts — same structure (per-route
-// title/meta/OG/JSON-LD checks, technical-SEO reachability, basic a11y),
-// adapted to XFChess's route list. See
-// docs/plans/xfchessdotcom-seo-sitemap-plan.md Phase 4.
 
 const PUBLIC_PAGES = ['/home', '/play', '/tournaments', '/features'];
 
-// Prerendered at build time by scripts/prerender.mjs (Phase 3) — these are
-// the routes whose *raw* HTML (before any JS runs) must carry the correct
-// tags, since that's what zero-JS bots and social link-preview bots see.
+// Check raw prerendered HTML so metadata works for bots that do not execute JavaScript.
 const PRERENDERED_PAGES = ['/home', '/play', '/tournaments', '/features'];
 
 test.describe('Public page SEO (client-rendered, real browser)', () => {
@@ -34,10 +27,7 @@ test.describe('Public page SEO (client-rendered, real browser)', () => {
       test('has exactly one h1', async ({ page }) => {
         await page.goto(path);
         const h1Count = await page.locator('h1').count();
-        // Some pages use h2 as their visual top-level heading instead of h1
-        // (existing content structure, not introduced by this SEO work) —
-        // assert at most one h1 rather than exactly one, since "zero" is an
-        // existing-content issue out of scope here, not an SEO regression.
+        // Allow zero h1 elements to accommodate existing pages using h2 as their top heading.
         expect(h1Count).toBeLessThanOrEqual(1);
       });
 
@@ -104,9 +94,6 @@ test.describe('Structured data (JSON-LD)', () => {
   });
 });
 
-// The "private pages are noindex" block and the /auth/login duplicate-route
-// redirect test were removed with their routes — every surviving page is
-// public and indexable, and /auth/login now falls through the catch-all.
 
 test.describe('Technical SEO', () => {
   test('robots.txt is reachable and references the sitemap', async ({ request }) => {
@@ -140,12 +127,7 @@ test.describe('Technical SEO', () => {
 });
 
 test.describe('Build-time prerendered HTML (Phase 3) — raw response, no JS', () => {
-  // These hit the actual static files scripts/prerender.mjs generated,
-  // bypassing the browser/JS entirely (via request, not page.goto) — this
-  // is what a zero-JS bot (social preview, most non-Google crawlers)
-  // actually sees. Trailing slash matches how nginx's
-  // `try_files $uri $uri/ /index.html` ultimately resolves these in
-  // production (verified live against xfchess.com during this work).
+  // Read prerendered files without browser JavaScript to test crawler-visible HTML.
   for (const path of PRERENDERED_PAGES) {
     test(`${path}/ raw HTML has the real title baked in (not the generic fallback)`, async ({ request }) => {
       const res = await request.get(`${path}/`);

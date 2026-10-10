@@ -71,7 +71,6 @@ pub async fn handle_auth_websocket(
             return;
         }
 
-        // Send initial authentication data
         let initial_data = serde_json::json!({
             "status": "connected",
             "message": "Authenticated successfully",
@@ -88,7 +87,6 @@ pub async fn handle_auth_websocket(
             match msg {
                 Ok(Message::Text(text)) => {
                     info!("[WS_AUTH] Received message from {}: {}", client_id, text);
-                    // Handle client requests for auth data
                     let response = serde_json::json!({
                         "login_status": true,
                         "token": "updated_token",

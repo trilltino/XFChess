@@ -126,9 +126,8 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
         }
     }
 
-    // Pays winner's % share of the guaranteed SOL prize the operator locked in
-    // escrow before registration opened (fund_sol_prize). Entry fees never enter
-    // this pool. Runs whether or not there is a USDC pool — both can pay out.
+    // Pay the winner’s guaranteed SOL share independently of USDC prizes.
+    // Entry fees do not fund this pool.
     if tournament.prize_pool > 0 {
         let sol_prize = ledger::prize_amount(tournament.prize_pool, prize_share_bps)?;
 

@@ -3,7 +3,6 @@ use crate::types::Version;
 
 pub fn parse_version_header(value: &str) -> Result<Vec<Version>> {
     tracing::info!("[BraidHTTP] Parsing version header: '{}'", value);
-    // 1. Try Structured Field Values (Strict Standard)
     use sfv::{BareItem, List, ListEntry, Parser};
     match Parser::new(value).parse::<List>() {
         Ok(list) => {
@@ -26,17 +25,14 @@ pub fn parse_version_header(value: &str) -> Result<Vec<Version>> {
         Err(_) => {}
     }
 
-    // 2. Fallback: Try JSON Array (Braid.org often uses ["id"])
     if let Ok(json_arr) = serde_json::from_str::<Vec<String>>(value) {
         return Ok(json_arr.into_iter().map(Version::String).collect());
     }
 
-    // 3. Fallback: Try JSON String (Quoted "id")
     if let Ok(json_str) = serde_json::from_str::<String>(value) {
         return Ok(vec![Version::String(json_str)]);
     }
 
-    // 4. Fallback: Raw String (treat as single version ID)
     let trimmed = value.trim();
     if !trimmed.is_empty() {
         // Strip quotes and escapes recursively (handles "\"id\"", '"id"', etc.)

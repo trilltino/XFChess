@@ -6,11 +6,9 @@ use crate::game::components::piece_types::PieceColor;
 use crate::game::resources::{GameOverState, MoveHistory};
 use crate::ui::styles::*;
 
-// ── Payout resource ───────────────────────────────────────────────────────────
 
 #[derive(Resource, Debug, Clone, Default)]
 pub struct GameOverPayoutInfo {
-    // Wager
     pub wager_amount: u64,
     pub country_fee: u64,
     pub elo_fee: u64,
@@ -42,7 +40,6 @@ pub struct GameOverPayoutInfo {
     pub elo_after: u32,
     pub win_streak: u32,
 
-    // Tournament
     pub tournament_id: Option<u64>,
     pub usdc_mint: Option<String>,
     pub usdc_prize_usdc: Option<u64>,
@@ -103,7 +100,6 @@ impl GameOverPayoutInfo {
     }
 }
 
-// ── PGN cache ────────────────────────────────────────────────────────────────
 
 #[derive(Resource, Default)]
 pub struct CachedGamePgn {
@@ -131,10 +127,8 @@ pub fn cache_pgn_on_game_over(
     cached.pgn_string = pgn_to_string(&pgn);
     cached.final_fen = build_final_fen(&history);
     cached.pgn = Some(pgn);
-    // Online games wait for the authoritative Braid/VPS move log (set by
-    // apply_pgn_export_result); every other mode has no such fetch coming,
-    // so the locally-built PGN above is already final — mark it ready now,
-    // otherwise Review/Save would stay disabled forever.
+    // Offline PGN is final immediately. Online games wait for the authoritative move log
+    // before enabling Review and Save.
     let is_online = matches!(
         *game_mode,
         crate::core::GameMode::OnlineMultiplayer | crate::core::GameMode::MultiplayerCompetitive
@@ -142,7 +136,6 @@ pub fn cache_pgn_on_game_over(
     cached.braid_pgn_ready = !is_online;
 }
 
-// ── PGN helpers ───────────────────────────────────────────────────────────────
 
 fn build_final_fen(history: &MoveHistory) -> String {
     use crate::game::components::PieceType;
@@ -269,7 +262,6 @@ pub fn pgn_to_string(pgn: &nimzovich_engine::ParsedPgnGame) -> String {
     out
 }
 
-// ── Full result popup ─────────────────────────────────────────────────────────
 
 fn paint_black_backdrop(ctx: &egui::Context) {
     egui::CentralPanel::default()
@@ -305,7 +297,6 @@ pub fn game_over_popup_system(
     let Ok(ctx) = contexts.ctx_mut() else { return };
     paint_black_backdrop(ctx);
 
-    // ── colour palette ────────────────────────────────────────────────────────
     let text_primary = egui::Color32::from_rgba_unmultiplied(240, 240, 240, alpha);
     let text_secondary = egui::Color32::from_rgba_unmultiplied(160, 160, 160, alpha);
     let text_gold = egui::Color32::from_rgba_unmultiplied(244, 187, 68, alpha);
@@ -315,7 +306,6 @@ pub fn game_over_popup_system(
 
     let frame = StyledPanel::popup_alpha(alpha);
 
-    // ── POV headline ──────────────────────────────────────────────────────────
     let player_color = payout_info.as_ref().and_then(|p| p.player_color);
     let (headline, headline_color) = match (game_over.winner(), player_color) {
         (Some(w), Some(pc)) if w == pc => ("You Won", text_gold),
@@ -349,7 +339,6 @@ pub fn game_over_popup_system(
         .show(ctx, |ui| {
             ui.set_width(348.0);
             ui.vertical_centered(|ui| {
-                // ── Result ───────────────────────────────────────────────────
                 ui.label(
                     TextStyle::popup_title("GAME OVER")
                         .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)),
@@ -370,7 +359,6 @@ pub fn game_over_popup_system(
                     );
                 }
 
-                // ── ELO / rating ─────────────────────────────────────────────
                 if let Some(info) = payout_info.as_ref() {
                     if !info.is_rated {
                         ui.add_space(6.0);
@@ -442,7 +430,6 @@ pub fn game_over_popup_system(
                     }
                 }
 
-                // ── Wager settlement ─────────────────────────────────────────
                 if let Some(info) = payout_info.as_ref() {
                     if info.is_wager_game() {
                         ui.add_space(10.0);
@@ -672,9 +659,7 @@ pub fn game_over_popup_system(
                             }
                         }
                     } else {
-                        // No pot to deduct from — the backend eats the ER/
-                        // undelegate operating cost outright with no clawback
-                        // (see lifecycle::settlement's wager_amount gate).
+                        // With no wager pot, the backend bears ER and undelegation costs.
                         ui.add_space(6.0);
                         ui.label(
                             egui::RichText::new("Free game — network costs covered by XFChess")
@@ -689,7 +674,6 @@ pub fn game_over_popup_system(
                 ui.add(egui::Separator::default().shrink(40.0));
                 ui.add_space(4.0);
 
-                // ── Secondary actions ─────────────────────────────────────────
                 {
                     let has_rematch = payout_info.as_ref().map(|i| i.game_id > 0).unwrap_or(false);
                     let dark_btn = egui::Color32::from_rgba_unmultiplied(40, 40, 44, 200);
@@ -735,7 +719,6 @@ pub fn game_over_popup_system(
 
                 ui.add_space(8.0);
 
-                // ── Primary actions ───────────────────────────────────────────
                 {
                     let spacing = 8.0_f32;
                     let btn_w = 130.0_f32;
@@ -793,7 +776,6 @@ pub fn game_over_popup_system(
             });
         });
 
-    // ── deferred actions ──────────────────────────────────────────────────────
     if trigger_dispute {
         commands.insert_resource(PendingDispute {
             game_id: 0,
@@ -803,15 +785,8 @@ pub fn game_over_popup_system(
 
     if save_pgn {
         let pgn_text = cached_pgn.pgn_string.clone();
-        // Save under this instance's own active profile subfolder so each
-        // profile's PGN history stays separate. Uses the in-memory
-        // `PlayerIdentity` (set once at profile pick time) rather than
-        // re-reading the shared `profiles.json` `active` field from disk —
-        // that file is shared across every local instance on the machine
-        // (e.g. two windows running a same-PC P2P match), so whichever
-        // instance last activated a profile would silently steal every
-        // other instance's save target. Falls back to the shared
-        // `Documents/xfchess/` folder if no profile is active yet.
+        // Save PGNs using this instance's in-memory profile, not the shared disk
+        // active-profile field that another local instance may change.
         let dir = match player_identity.username.as_deref() {
             Some(name) => crate::multiplayer::network::identity::profile_pgn_dir(name),
             #[cfg(target_os = "android")]
@@ -870,7 +845,6 @@ pub fn game_over_popup_system(
     }
 }
 
-// ── Spectator end-of-game overlay ────────────────────────────────────────────
 
 pub fn spectator_game_over_overlay(
     mut contexts: EguiContexts,
@@ -994,7 +968,6 @@ pub fn spectator_game_over_overlay(
     }
 }
 
-// ── Dispute system (unchanged logic) ─────────────────────────────────────────
 
 #[derive(Resource)]
 pub struct PendingDispute {
@@ -1063,7 +1036,6 @@ pub fn apply_dispute_trigger(
     });
 }
 
-// ── On-chain payout fetch ─────────────────────────────────────────────────────
 
 #[cfg(feature = "solana")]
 pub fn fetch_game_payout_info(
@@ -1085,12 +1057,8 @@ pub fn fetch_game_payout_info(
             payout_info.is_rated = true;
 
             if let Some(_comp) = competitive {
-                // Pre-finalize estimates only — `apply_finalization_result`
-                // (multiplayer::rollup::bridge) unconditionally overwrites
-                // these with the real on-chain values once `/game/finalize`
-                // responds, and flips `fee_breakdown_confirmed`. Mirrors the
-                // backend's `estimate_country_fee`/`ELO_FEE_LAMPORTS`
-                // (programs/xfchess-game/src/constants.rs) — keep in sync.
+                // Show estimates until finalization supplies confirmed fees. Keep them
+                // aligned with backend country-fee estimates and ELO_FEE_LAMPORTS.
                 const ELO_FEE_LAMPORTS_ESTIMATE: u64 = 5_000;
                 const COUNTRY_FEE_BPS_ESTIMATE: u64 = 100; // 1%
                 const OPERATING_COST_ESTIMATE: u64 = 320_000; // ~DELEGATE+UNDELEGATE+ER session fee
@@ -1116,7 +1084,6 @@ pub fn fetch_game_payout_info(
     }
 }
 
-// ── URL open helper ───────────────────────────────────────────────────────────
 
 fn open_url(url: &str) {
     let url = url.to_string();
@@ -1132,7 +1099,6 @@ fn open_url(url: &str) {
     });
 }
 
-// ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct GameOverPopupPlugin;
 

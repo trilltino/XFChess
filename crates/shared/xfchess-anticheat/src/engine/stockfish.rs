@@ -140,7 +140,6 @@ impl StockfishHandle {
     }
 }
 
-// ── UCI line parsers ────────────────────────────────────────────────────────────
 
 fn parse_cp(line: &str) -> Option<i32> {
     let mut parts = line.split_whitespace().peekable();

@@ -1,6 +1,4 @@
--- Dispute tracking table: one row per disputed game.
--- The on-chain DisputeRecord PDA is the authoritative source -
--- this table drives email notifications and admin review.
+-- The on-chain DisputeRecord is authoritative; this table supports notifications and review.
 
 CREATE TABLE IF NOT EXISTS disputes (
     game_id         INTEGER PRIMARY KEY,

@@ -161,8 +161,7 @@ impl BraidNetwork for NativeNetwork {
             request.extra_headers
         );
 
-        // For subscriptions, disable timeout (or set very long) since we're waiting for heartbeats/updates
-        // Heartbeats are every 30s, so we need timeout > 30s. Using 5 minutes for safety.
+        // Subscriptions must outlive the 30-second heartbeat interval; allow five minutes.
         let response = req_builder
             .timeout(std::time::Duration::from_secs(300))
             .send()

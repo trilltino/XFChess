@@ -34,9 +34,6 @@ impl FromWorld for SquareMaterials {
         let light_color = Color::srgb(0.97, 0.97, 0.88); // Cream
         let dark_color = Color::srgb(0.52, 0.65, 0.40); // Green
 
-        // Now get materials (mutable borrow)
-        // Note: Assets<StandardMaterial> should always be available (part of DefaultPlugins)
-        // but we handle the error case gracefully for robustness
         let mut materials = match world.get_resource_mut::<Assets<StandardMaterial>>() {
             Some(m) => m,
             None => {

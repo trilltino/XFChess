@@ -80,18 +80,15 @@ pub struct BraidIrohNode {
 
 impl BraidIrohNode {
     pub async fn spawn(config: BraidIrohConfig) -> anyhow::Result<Self> {
-        // 1. Build the iroh endpoint with discovery + Braid ALPN
         let mut builder = Endpoint::builder(presets::N0).alpns(vec![
             BRAID_H3_ALPN.to_vec(),
             iroh_gossip::net::GOSSIP_ALPN.to_vec(),
         ]);
 
-        // Apply optional secret key
         if let Some(key) = config.secret_key {
             builder = builder.secret_key(key);
         }
 
-        // Apply discovery logic
         match config.discovery {
             DiscoveryConfig::Mock(map) => {
                 builder = builder.address_lookup(map);
@@ -110,7 +107,6 @@ impl BraidIrohNode {
         // In iroh 0.96, spawning gossip is synchronous and returns the Gossip handle directly
         let gossip = Gossip::builder().spawn(endpoint.clone());
 
-        // 3. Build shared state — load from disk if data_dir is configured
         let initial_data = if let Some(ref dir) = config.data_dir {
             tokio::fs::create_dir_all(dir).await.ok();
             let loaded = load_resources(dir).await;
@@ -142,7 +138,6 @@ impl BraidIrohNode {
             .accept(iroh_gossip::net::GOSSIP_ALPN.to_vec(), gossip.clone())
             .spawn();
 
-        // 5. Start TCP Proxy if configured (Phase 4)
         #[cfg(feature = "proxy")]
         if let Some(proxy_conf) = config.proxy_config {
             let endpoint_clone = endpoint.clone();
@@ -161,9 +156,7 @@ impl BraidIrohNode {
 
         let dirty = Arc::new(AtomicBool::new(false));
 
-        // Debounced persistence flush: only clone+write the resource map
-        // when something actually changed since the last tick, instead of
-        // doing a full-map clone + disk write on every single put().
+        // Flush only changed resource maps to avoid cloning and writing on every put.
         if let Some(ref dir) = config.data_dir {
             let dir = dir.clone();
             let resources = resources.clone();

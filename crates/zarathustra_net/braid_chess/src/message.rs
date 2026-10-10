@@ -84,7 +84,6 @@ pub struct EngineHint {
     pub best_move: String,
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

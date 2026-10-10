@@ -75,9 +75,7 @@ pub async fn submit_kyc(
     // Validate tax ID format for supported countries
     if let Some(pattern) = get_tax_id_pattern(&req.country) {
         if !pattern.is_match(&req.tax_id) {
-            // Never log the raw tax ID — this module's whole premise is that
-            // it's never persisted; logging it on a validation failure would
-            // quietly violate that on every malformed submission.
+            // Never log raw tax IDs, including on validation failure.
             tracing::warn!(
                 "[kyc] Invalid tax ID format for country {} (length {})",
                 req.country,
@@ -138,9 +136,7 @@ pub async fn user_status(
     // and identity.rs write-through, so both paths are covered).
     let has_kyc = vault.has_kyc(&pubkey).await;
 
-    // has_wallet_account: a users_v2 row exists with this wallet as its primary key.
-    // Email-only registrations use wallet='' so they correctly return false here
-    // until the user links a wallet via /auth/link-wallet.
+    // Email-only users have wallet=""; they have no wallet account until linking one.
     let user_row = state.store.find_user_by_wallet(&pubkey).await;
     let has_wallet_account = user_row.is_some();
 
@@ -158,13 +154,8 @@ pub async fn user_status(
         None => true, // no country on record yet — don't block; CACF check is deferred
     };
 
-    // can_wager requires:
-    //   1. A wallet-linked account in users_v2 (proves wallet ownership was verified).
-    //   2. An active KYC record in the vault (full_name, dob, tax_id stored).
-    //   3. CACF compliance for their jurisdiction (or not a CACF-covered country).
-    // On devnet, the gate is bypassed outright — there's no real money at
-    // stake, so onboarding/KYC shouldn't block testing. Mainnet always
-    // evaluates the full check above.
+    // Mainnet wagers require wallet ownership, active KYC, and applicable CACF
+    // compliance. Devnet bypasses these checks.
     let can_wager = state.config.is_devnet() || (has_wallet_account && has_kyc && cacf_ok);
 
     let lichess_row: Option<(String, String)> = sqlx::query_as(

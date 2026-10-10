@@ -44,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File ops\scripts\rollback.ps1 -Server 178.10
 Deploy updates the VPS backend, web frontend, nginx, and monitoring config.
 
 Release publishes installable builds through GitHub Releases. The release
-pipeline is tag-driven; use `scripts\push_and_release.ps1` from the repo root
+pipeline is tag-driven; use `scripts\release.ps1` from the repo root
 to push the branch and release tag in one command.
 
 ## Secrets

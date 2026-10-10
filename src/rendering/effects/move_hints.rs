@@ -29,7 +29,6 @@ pub fn update_move_hints_system(
     }
 
     if settings.show_hints && selection.is_selected() {
-        // Build a set of occupied squares for O(1) capture detection
         let occupied: std::collections::HashSet<(u8, u8)> =
             pieces.iter().map(|p| (p.x, p.y)).collect();
 

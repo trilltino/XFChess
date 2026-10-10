@@ -54,10 +54,8 @@ pub struct CrankTimeCheck<'info> {
     )]
     pub game: Account<'info, Game>,
 
-    /// CHECK: Fully validated by the `constraint` below — its key must equal the
-    /// `white` recorded on the (seed-verified) `game` PDA. The account itself is
-    /// never read or written; the crank only needs both player keys present so
-    /// the scheduled task's account list matches what was registered.
+    /// CHECK: Must match game.white on the seed-verified Game PDA.
+    /// Included only to match the registered crank account list.
     #[account(constraint = white.key() == game.white @ crate::errors::GameErrorCode::InvalidPlayerAccount)]
     pub white: UncheckedAccount<'info>,
 

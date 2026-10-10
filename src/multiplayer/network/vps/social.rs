@@ -10,9 +10,7 @@ fn urlenc(s: &str) -> String {
         .collect()
 }
 
-// ── Types mirroring the backend's SQLite/node-ID-anchored social graph
-// (backend/src/signing/social/friends.rs, presence.rs) — not the on-chain
-// wallet-based Friendship PDA. ─────────────────────────────────────────────
+// Off-chain SQLite/node-ID social graph types, separate from wallet-based Friendship PDAs.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FriendRequest {
@@ -64,7 +62,6 @@ pub struct SocialPollResponse {
     pub next_index: usize,
 }
 
-// ── API calls ────────────────────────────────────────────────────────────────
 
 pub fn send_friend_request(
     from_node_id: &str,

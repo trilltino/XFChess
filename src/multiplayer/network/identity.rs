@@ -17,10 +17,7 @@ fn is_primary_instance() -> bool {
 }
 
 fn key_path() -> PathBuf {
-    // Override for running multiple instances on one machine (e.g. `just dev2`).
-    // Without this, both instances load the SAME persisted node key → identical
-    // node_id → the P2P relay can't tell host from joiner and misroutes JOIN_ACK,
-    // so the host never detects the joiner. Prod is unaffected (different machines).
+    // Give local instances distinct persisted node keys so the relay can distinguish peers.
     if let Ok(p) = std::env::var("XFCHESS_NODE_KEY_PATH") {
         if !p.trim().is_empty() {
             let pb = PathBuf::from(p);
@@ -88,13 +85,8 @@ pub fn node_id_b58() -> String {
 }
 
 fn guest_username_path() -> PathBuf {
-    // Documents, not config_dir — the same `Documents/xfchess/` folder the
-    // Save-PGN feature already writes to, so local player data lives in one
-    // discoverable place instead of split between a visible and a hidden dir.
-    // Android has no equivalent shared/visible Documents folder without the
-    // Storage Access Framework (out of scope for v1); `external_data_dir()`
-    // is the closest analog — still app-scoped, but visible via a file
-    // manager and where the PGN-save fallback (game_over_popup.rs) also lands.
+    // Store desktop player data beside PGNs in Documents/xfchess. Android uses
+    // app-scoped external data storage instead.
     #[cfg(target_os = "android")]
     let base = crate::core::paths::external_data_dir().unwrap_or_else(|| PathBuf::from("."));
     #[cfg(not(target_os = "android"))]
@@ -118,15 +110,8 @@ pub fn save_guest_username(name: &str) {
     }
 }
 
-// ── Multiple local profiles ─────────────────────────────────────────────────
-//
-// Several people can share one machine, each with their own name and PGN
-// history. `profiles.json` lists every profile ever created plus which one
-// is active; each profile's PGN files live in their own subfolder so games
-// never mix. The pre-existing single `guest_username` file above is kept as
-// legacy/fallback source data — on first read, if `profiles.json` doesn't
-// exist yet but a `guest_username` does, it's migrated in as the first
-// profile automatically so returning players don't see an empty picker.
+// Keep PGNs per local profile. Migrate legacy guest_username when profiles.json
+// does not yet exist.
 
 fn profiles_dir() -> PathBuf {
     #[cfg(target_os = "android")]
@@ -282,19 +267,8 @@ fn ensure_profile_pgn_dir(name: &str) {
     std::fs::create_dir_all(profile_pgn_dir(name)).ok();
 }
 
-// ── Log directory ────────────────────────────────────────────────────────────
-//
-// The game's runtime logs (game.log.<date>, crash_*.log, recovered_errors.log)
-// live inside the active profile's folder — the folder the player picked when
-// they created the profile, or the per-profile Documents/xfchess/profiles/<name>
-// default — so everything about a player (node key, PGNs, logs) stays in one
-// discoverable place they can zip up and send. Fresh installs with no profile
-// yet fall back to the app's per-user data dir until onboarding picks one.
-//
-// The directory is resolved once per process and cached: the tracing file
-// appender is created very early in startup (LogPlugin), before a profile can
-// exist, and it can't be re-pointed mid-session — so a profile created or
-// activated during the current session takes effect on the next launch.
+// Resolve and cache the log directory once per process. Profile changes take
+// effect on the next launch because the tracing appender cannot be redirected.
 
 static LOG_DIR_CACHE: OnceLock<PathBuf> = OnceLock::new();
 
@@ -329,10 +303,8 @@ fn fallback_log_dir() -> PathBuf {
         .join("logs")
 }
 
-/// The folder a player would think of as "my XFChess folder": the active
-/// profile's folder, or the Documents/xfchess default before one exists.
-/// Used as the starting point for the Export Logs save dialog so the bundle
-/// lands next to everything else the player cares about.
+/// Return the active profile folder, or Documents/xfchess before a profile exists.
+/// Used as the default location for exported logs.
 pub fn active_profile_dir() -> PathBuf {
     load_active_profile()
         .map(|name| profile_pgn_dir(&name))

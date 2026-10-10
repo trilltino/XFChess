@@ -11,7 +11,6 @@ use swiss_pairing::{MatchResult, StandingsEntry, SwissRound};
 use super::service::SwissServiceError;
 use crate::signing::AppState;
 
-// ── Request / response types ──────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct RecordResultReq {
@@ -62,7 +61,6 @@ pub struct CurrentRoundRes {
     pub is_active: bool,
 }
 
-// ── Router ───────────────────────────────────────────────────────────────────
 
 pub fn swiss_read_routes() -> Router<AppState> {
     Router::new()
@@ -85,7 +83,6 @@ pub fn swiss_admin_routes() -> Router<AppState> {
         .route("/{id}/manual-pair", delete(remove_manual_pairing))
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn parse_result(s: &str) -> Option<MatchResult> {
     match s {
@@ -115,7 +112,6 @@ fn swiss_err(e: SwissServiceError) -> StatusCode {
     }
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
 
 async fn start_round(
     Path(id): Path<u64>,

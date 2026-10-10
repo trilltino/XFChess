@@ -50,9 +50,7 @@ export function VideoGameSchema() {
   );
 }
 
-/** SportsEvent schema — mount on /tournament/:id with the real tournament's
- * own data. `startDate` should be an ISO 8601 string; omit fields that
- * aren't known rather than fabricate placeholder values. */
+/** SportsEvent for real tournament data. startDate is ISO 8601; omit unknown fields. */
 export function TournamentEventSchema({
   id,
   name,

@@ -1,7 +1,4 @@
--- Migration 002: GDPR-compliant KYC storage in vault database
--- Replaces flat-file kyc.jsonl + subscribers.jsonl with proper SQLite tables.
--- Tax IDs are NEVER stored raw - only SHA-256 blind hash is persisted.
--- All PII fields support soft-delete (deleted_at) for GDPR right-to-erasure.
+-- Persist tax IDs as blind SHA-256 hashes; soft-delete PII for erasure.
 
 -- KYC records table (vault database)
 CREATE TABLE IF NOT EXISTS kyc_records (

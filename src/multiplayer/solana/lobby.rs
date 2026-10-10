@@ -236,9 +236,6 @@ impl Plugin for SolanaLobbyPlugin {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Async helpers (called from UI via IoTaskPool / Tokio)
-// ---------------------------------------------------------------------------
 
 pub fn spawn_create_game(
     rpc_url: String,
@@ -427,9 +424,6 @@ pub fn spawn_join_game(
         .detach();
 }
 
-// ---------------------------------------------------------------------------
-// Private async implementations
-// ---------------------------------------------------------------------------
 
 async fn async_poll_opponent_joined(
     rpc_url: String,
@@ -542,7 +536,6 @@ async fn async_create_game(
         .await;
     }
 
-    // 1. Ask VPS to generate session keypair → get session_pubkey + platform fee.
     let legacy_start = Instant::now();
     info!(
         "[CREATE_GAME] legacy per-game signing path selected for game {game_id} (wager_lamports={wager_lamports}, match_type={match_type})"
@@ -577,7 +570,6 @@ async fn async_create_game(
 
     let ixs = vec![create_ix, auth_ix];
 
-    // 3. ONE wallet popup — signs everything together.
     let label = if wager_lamports > 0 {
         "Creating wagered game"
     } else {
@@ -591,7 +583,6 @@ async fn async_create_game(
         step_start.elapsed()
     );
 
-    // 4. VPS submits TX + funds session key (no more separate popups).
     let step_start = Instant::now();
     vps_client::activate_session(game_id, &signed_bytes)?;
     info!(
@@ -599,9 +590,7 @@ async fn async_create_game(
         step_start.elapsed()
     );
 
-    // `/session/activate` already waits for confirmed commitment server-side.
-    // The additional client-side get-account re-poll was redundant and added
-    // unnecessary latency to the create-game end-to-end path.
+    // Session activation already waits for server-side confirmation.
     info!(
         "[CREATE_GAME] legacy per-game create finished for game {game_id} in {:?}",
         legacy_start.elapsed()
@@ -636,18 +625,11 @@ async fn async_create_game_via_global_session(
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
-    // Catch an under-funded quick-sign session before spending a transaction
-    // fee on a doomed submit — the on-chain spending_limit/max_wager caps are
-    // self-declared, not balance-aware, so they alone don't guarantee the
-    // vault can actually cover this wager. See
-    // `check_global_session_can_afford_wager`'s doc comment.
+    // Spending caps do not establish vault balance; check the wager is affordable
+    // before paying a submission fee.
     check_global_session_can_afford_wager(&rpc_url, &session_pda, wager_lamports)?;
 
-    // Mirrors the on-chain settlement gate (`match_type != MatchType::Free`,
-    // see `lifecycle/settlement.rs`) — a Free match never gets charged the
-    // platform fee at settlement regardless of what's passed here, so don't
-    // bother fetching it (or failing game creation over a rate-fetch hiccup)
-    // for a match type that will just discard it anyway.
+    // Free matches never pay platform fees at settlement, so skip the rate fetch.
     let platform_fee_lamports = if match_type != 0 {
         crate::multiplayer::vps_client::fetch_platform_fee_lamports()
             .map_err(|e| format!("fetch platform fee: {e}"))?
@@ -687,9 +669,7 @@ async fn async_create_game_via_global_session(
         start.elapsed()
     );
 
-    // Best-effort: lets settlement_worker discover this game — see
-    // `track_global_session_game`'s doc comment. Never blocks success on
-    // this; a failure here just means this one game isn't auto-settled.
+    // Track the game for automatic settlement without blocking successful creation on this request.
     if let Err(e) = crate::multiplayer::vps_client::track_global_session_game(
         game_id,
         &wallet_pubkey.to_string(),
@@ -757,10 +737,8 @@ pub fn cancel_game_on_chain(
     match game.status {
         GameStatus::WaitingForOpponent | GameStatus::Active => {}
         GameStatus::Cancelled => {
-            // An earlier cancellation landed (possibly with its
-            // acknowledgement lost). The escrow balance says whether the
-            // refund transfers completed; the program's Cancelled branch is
-            // idempotent and only sweeps what is still held.
+            // A prior cancellation may have landed without acknowledgement.
+            // The idempotent Cancelled branch refunds only the escrow balance still held.
             let escrow = wager_recovery::escrow_pda(&program_id, game_id);
             let held = rpc
                 .get_balance(&escrow)
@@ -794,10 +772,8 @@ pub fn cancel_game_on_chain(
         }
     }
 
-    // An unjoined game past its 24h window is reclaimed with
-    // `withdraw_expired_wager`, which every deployed program version accepts.
-    // Before that, `cancel_game` is the path; programs older than the
-    // unjoined-cancel fix reject it with AccountNotSystemOwned (3011).
+    // After 24 hours, reclaim an unjoined wager with withdraw_expired_wager.
+    // Older programs may reject earlier cancel_game calls with error 3011.
     let unjoined = game.status == GameStatus::WaitingForOpponent;
     let withdrawable_at = game.created_at + 86_400;
     let now = std::time::SystemTime::now()
@@ -837,10 +813,8 @@ pub fn cancel_game_on_chain(
             "Cancelling wagered game",
         ) {
             Ok(sig) => {
-                // `submit_and_poll(SubmitConfig::fast())` returns a signature
-                // after two seconds even when confirmation is still unknown.
-                // Do not clear the wager ledger or tell the player it was
-                // refunded until the signed cancellation is confirmed.
+                // Fast submission can return an unconfirmed signature after two seconds.
+                // Keep the wager ledger until cancellation is confirmed.
                 let mut confirmed = false;
                 for _ in 0..20 {
                     match rpc
@@ -945,10 +919,7 @@ async fn async_lookup_game(
         .get_account_data(&game_pda)
         .map_err(|e| format!("get_account: {}", e))?;
 
-    // Anchor account layout: 8-byte discriminator, then Borsh fields.
-    // Game struct field order (see programs/xfchess-game/src/state/game.rs):
-    //   game_id: u64 (8)  white: Pubkey (32)  black: Pubkey (32)  status: u8 (1)
-    // disc(8) + game_id(8) + white(32) + black(32) = 80; status byte follows.
+    // Borsh Game status offset: discriminator(8) + game_id(8) + white(32) + black(32) = 80.
     const STATUS_OFFSET: usize = 8 + 8 + 32 + 32;
     if data.len() < STATUS_OFFSET + 1 {
         return Err("Account data too short for status".to_string());
@@ -975,8 +946,7 @@ async fn async_lookup_game(
         ));
     }
 
-    // wager_amount offset is pinned by a test in programs/xfchess-game/src/state/game.rs
-    // (wager_amount_offset_is_212) — that test's value + 8 (discriminator) must match this.
+    // Keep WAGER_OFFSET aligned with the on-chain wager_amount_offset_is_212 test.
     const WAGER_OFFSET: usize = 8 + 212;
     if data.len() < WAGER_OFFSET + 8 {
         return Err("Account data too short to read wager_amount".to_string());
@@ -1015,15 +985,12 @@ async fn async_join_game(
         .await;
     }
 
-    // 1. Ask VPS for a session keypair for this game.
-    // The VPS uses get-or-create semantics, so the same session pubkey that was
-    // stored in game.fee_payer during create_game is returned here.
+    // Get-or-create returns the session key already recorded in game.fee_payer.
     let (session_pubkey_str, _) = vps_client::create_session(game_id, &wallet_pubkey.to_string())?;
     let session_pubkey: Pubkey = session_pubkey_str
         .parse()
         .map_err(|e| format!("parse session_pubkey: {e}"))?;
 
-    // 2. Read the game account to get the white player pubkey for white_profile PDA.
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let rpc = solana_client::rpc_client::RpcClient::new_with_commitment(
@@ -1092,10 +1059,7 @@ async fn async_join_game_via_global_session(
 
     let rpc = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::confirmed());
 
-    // Need the white player's pubkey (via the game account) to derive their
-    // profile PDA, and a blockhash to build the tx. Neither read depends on
-    // the other, so fetch them concurrently on separate threads rather than
-    // blocking the executor on two sequential RPC round trips.
+    // Fetch the white player and blockhash concurrently; neither RPC read depends on the other.
     let game_data_result = std::thread::scope(|scope| {
         let blockhash_handle =
             scope.spawn(|| rpc.get_latest_blockhash().map_err(|e| e.to_string()));
@@ -1121,10 +1085,8 @@ async fn async_join_game_via_global_session(
     let white_profile_pda =
         Pubkey::find_program_address(&[PROFILE_SEED, white_player.as_ref()], &program_id).0;
 
-    // Same pinned offset as `WAGER_OFFSET` elsewhere in this file
-    // (`wager_amount_offset_is_212` on-chain test) — the game account we
-    // just fetched already tells us the wager this join is committing to, no
-    // extra RPC round trip needed for the affordability check below.
+    // Read the wager from the fetched account at WAGER_OFFSET (212);
+    // the on-chain wager_amount_offset_is_212 test pins this layout.
     const WAGER_AMOUNT_OFFSET: usize = 8 + 212;
     let wager_lamports = if game_data.len() >= WAGER_AMOUNT_OFFSET + 8 {
         u64::from_le_bytes(
@@ -1179,9 +1141,6 @@ async fn async_join_game_via_global_session(
     Ok(game_id)
 }
 
-// ---------------------------------------------------------------------------
-// Bevy polling system
-// ---------------------------------------------------------------------------
 
 fn poll_lobby_tasks(
     mut lobby: ResMut<SolanaLobbyState>,
@@ -1317,9 +1276,7 @@ fn poll_lobby_tasks(
             Ok(Ok(game_id)) => {
                 sync.game_id = Some(game_id);
                 sync.wager_amount = lobby.wager_lamports();
-                // Only wagered games go through the ER delegation flow that
-                // move input waits on; stake-0 free games must stay playable
-                // immediately (see `SolanaGameSync::requires_delegation`).
+                // Zero-stake games need no ER delegation and must accept moves immediately.
                 sync.requires_delegation = lobby.wager_lamports() > 0;
                 competitive.wager_lamports = lobby.wager_lamports();
                 competitive.stake_amount = lobby.wager_lamports();
@@ -1337,11 +1294,8 @@ fn poll_lobby_tasks(
                 );
 
                 if lobby.mode == LobbyMode::Create {
-                    // Every on-chain create (free or wagered) is announced to the
-                    // same P2P relay used by plain online multiplayer, so a joiner
-                    // finds it the same way regardless of stake. Free games (stake
-                    // 0) are tagged "P2P" so they surface in the normal browse
-                    // list rather than the Solana Browse tab's wagered-only filter.
+                    // Announce all on-chain games through the P2P relay; zero-stake games use
+                    // the P2P tag for the ordinary browse list.
                     let is_wagered = lobby.wager_sol > 0.0;
                     let game_type = if is_wagered { "solana_wager" } else { "P2P" };
                     let display_name = lobby
@@ -1400,13 +1354,8 @@ fn poll_lobby_tasks(
                             game_id, game_type
                         );
 
-                        // Register as a discoverable host on the same P2P relay
-                        // channel plain PvP uses (see `network::p2p_vps`). Without
-                        // this, `poll_for_joiner_messages` never watches for the
-                        // joiner's JOIN_ACK, so the host never learns the joiner's
-                        // P2P node id and no transport (Iroh gossip or the relay
-                        // fallback) ever gets wired up — the on-chain `join_game`
-                        // can succeed while the two clients stay unconnected.
+                        // Register the host with the relay so JOIN_ACK supplies the joining node ID
+                        // and establishes transport even when on-chain join succeeds first.
                         p2p_vps.hosting_game_id = Some(game_id.to_string());
                         p2p_vps.hosting_node_id = Some(host_node_id.clone());
                         p2p_vps.hosting_stake_amount = lobby.wager_sol as f64;
@@ -1504,16 +1453,8 @@ fn sync_from_solana_state(
     lobby.cached_balance = solana.balance;
     lobby.cached_rpc_url = DEVNET_RPC_URL.to_string();
     lobby.cached_elo = solana.cached_elo;
-    // Re-synced every frame (not once-and-cached like the wallet pubkey
-    // below) since authorization completes asynchronously in the background
-    // and needs to flip this from None to Some without a reconnect.
-    //
-    // Forced to always `None` for now — global-session usage is disabled
-    // (see `authorize_global_session_if_needed`'s doc comment) but
-    // `try_load_global_session` at wallet-connect can still flip
-    // `global_session_active` true from an already-valid local file/on-chain
-    // session without going through that gate, so this is the actual
-    // enforcement point every game-creation call site reads from.
+    // This field is the game-creation enforcement point for disabling cached
+    // global-session keys, regardless of wallet-level session state.
     let _ = &solana.global_session_active;
     let _ = &solana.global_session_keypair;
     lobby.cached_global_session_keypair_bytes = None;
@@ -1572,8 +1513,6 @@ pub fn spawn_check_active_game(
 ) {
     bevy::tasks::IoTaskPool::get()
         .spawn(async move {
-            // Enumerate up to 20 recent game IDs and check for an Active game owned by wallet.
-            // In practice the backend /games/active/{wallet} endpoint would be faster.
             let result = crate::multiplayer::vps_client::get_active_game_for_wallet(
                 &wallet_pubkey.to_string(),
             );

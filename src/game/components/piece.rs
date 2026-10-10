@@ -135,14 +135,12 @@ mod tests {
         assert!(!has_moved.moved);
         assert_eq!(has_moved.move_count, 0);
 
-        // Record first move
         has_moved.moved = true;
         has_moved.move_count += 1;
 
         assert!(has_moved.moved);
         assert_eq!(has_moved.move_count, 1);
 
-        // Record second move
         has_moved.move_count += 1;
 
         assert_eq!(has_moved.move_count, 2);

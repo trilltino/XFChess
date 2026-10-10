@@ -103,11 +103,9 @@ pub fn update_piece_state(
         return false;
     };
 
-    // SAN must be derived from the engine's position *before* this move is
-    // applied (engine.game is only advanced later, in execute_move's step 7).
+    // Derive SAN before applying the move to the engine.
     let san = engine.move_to_san(from_pos, target, promotion);
 
-    // Apply promotion if applicable
     if let Some(new_type) = promotion {
         debug!("[SHARED] {origin}: Promoting piece to {:?}", new_type);
         piece_component.piece_type = new_type;
@@ -127,9 +125,7 @@ pub fn update_piece_state(
     move_history.add_move_with_san(move_record, san);
     piece_component.x = target.0;
     piece_component.y = target.1;
-    // Use PIECE_ON_BOARD_Y so the animation stays on the board surface (y=0.05),
-    // matching the spawn position and the snap target in animate_piece_movement.
-    // Integer coordinates match GLB mesh design and board square positions.
+    // Keep animation height aligned with piece spawning and the board surface.
     commands.entity(entity).insert(PieceMoveAnimation::new(
         Vec3::new(7.0 - from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32),
         Vec3::new(7.0 - target.0 as f32, PIECE_ON_BOARD_Y, target.1 as f32),
@@ -296,11 +292,8 @@ pub fn execute_move(
 
     play_move_audio(commands, ctx.move_sound.clone(), resolved_capture.is_some());
 
-    // 2. Handle Capture
     if let Some(target_cap) = resolved_capture {
-        // The captured piece stands on ctx.target — derive world position
-        // using the same formula as piece spawning: X is mirrored (7 - file)
-        // so the a-file renders on White's left; Z = rank, Y = board surface.
+        // Match spawn coordinates: X=7-file, Z=rank, Y=board surface.
         let cap_world_pos = Vec3::new(
             7.0 - capture_square.0 as f32,
             PIECE_ON_BOARD_Y,
@@ -318,7 +311,6 @@ pub fn execute_move(
         );
     }
 
-    // 3. Update Piece State
     let castling = is_castling_move(ctx.piece.piece_type, from_pos, ctx.target);
     if !update_piece_state(
         ctx.origin,
@@ -338,7 +330,6 @@ pub fn execute_move(
         return false;
     }
 
-    // 4. Advance Turn
     pending_turn.request(ctx.piece.color);
 
     // 4b. Move the rook as part of castling so the windowed board animates both pieces.
@@ -346,7 +337,6 @@ pub fn execute_move(
         apply_castling_rook_move(commands, pieces_query, from_pos, ctx.target);
     }
 
-    // 5. Update Engine State (for P2P sync and FEN export)
     update_engine_state_after_move(
         engine,
         ctx.piece.piece_type,
@@ -357,7 +347,6 @@ pub fn execute_move(
         ctx.was_first_move,
     );
 
-    // 6. Broadcast Board State (for P2P sync)
     if let Some(sync) = board_sync {
         // Only broadcast local moves (not remote moves received from network)
         if !ctx.remote {
@@ -375,17 +364,9 @@ pub fn execute_move(
         }
     }
 
-    // 7. Sync ECS → engine once so the FEN for the event is correct.
-    //    Flag prevents update_game_phase from syncing a second time this frame.
-    //
-    //    Before syncing, mark the captured piece as off-board by clearing its
-    //    logical coordinates.  FadingCapture is inserted via deferred Commands
-    //    and won't be applied until after this frame, so the captured entity
-    //    still appears in pieces_query with its original (now-occupied) square.
-    //    Without this, both the capturing piece and the captured piece share the
-    //    same square in the board array — whichever is iterated last "wins" and
-    //    the engine can silently drop the capturing piece from its bitboards,
-    //    making subsequent captures appear blocked.
+    // Clear captured-piece coordinates before syncing: deferred FadingCapture
+    // commands leave it visible in the query until the frame ends. Sync once so
+    // the engine and event FEN agree without duplicate squares.
     if let Some(cap) = resolved_capture {
         if let Ok((_, mut p, _)) = pieces_query.get_mut(cap.entity) {
             p.x = u8::MAX;
@@ -395,7 +376,6 @@ pub fn execute_move(
     engine.sync_ecs_to_engine_mut(pieces_query);
     engine.synced_this_move = true;
 
-    // 8. Trigger Event with correct FEN
     if let Some(writer) = move_events {
         let fen_after = engine.current_fen().to_string();
         writer.write(MoveMadeEvent {
@@ -446,7 +426,6 @@ fn update_engine_state_after_move(
         engine.fullmove_counter += 1;
     }
 
-    // Update current turn
     engine.current_turn = match piece_color {
         PieceColor::White => PieceColor::Black,
         PieceColor::Black => PieceColor::White,
@@ -470,7 +449,6 @@ fn update_engine_state_after_move(
         engine.en_passant = None;
     }
 
-    // Update castling rights if king or rook moved
     update_castling_rights(engine, piece_type, piece_color, from, was_first_move);
 }
 
@@ -502,9 +480,6 @@ fn update_castling_rights(
             }
         }
         PieceType::Rook => {
-            // Rook moved - lose specific castling right
-            // White rooks: kingside at (7, 0), queenside at (0, 0)
-            // Black rooks: kingside at (7, 7), queenside at (0, 7)
             match (piece_color, from) {
                 (PieceColor::White, (7, 0)) => rights.retain(|&c| c != 'K'),
                 (PieceColor::White, (0, 0)) => rights.retain(|&c| c != 'Q'),

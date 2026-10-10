@@ -11,20 +11,22 @@ Install Android Studio with SDK 35, NDK `27.2.12479018`, CMake, JDK 17+,
 From the repository root:
 
 ```bat
-scripts\build_android.bat
+just build-android
 ```
 
-The script builds the Rust client for `arm64-v8a`, packages native libraries
+The recipe builds the Rust client for `arm64-v8a`, packages native libraries
 with legacy JNI extraction, and produces:
 
 ```text
-mobile\app\build\outputs\apk\release\app-release.apk
+mobile\app\build\outputs\apk\release\app-release-unsigned.apk
 ```
 
-Install on a device with:
+Sign the release APK before installing, or use a debug build for device tests:
 
 ```bat
-adb install -r mobile\app\build\outputs\apk\release\app-release.apk
+cd mobile
+gradlew.bat assembleDebug
+adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
 The device must run Android 12 or newer. The app is landscape locked.

@@ -239,7 +239,6 @@ pub fn build_app(game_config: GameConfig) -> App {
             core::persistent_camera::setup_persistent_egui_camera,
         );
 
-    // Add core plugins
     app.add_plugins(
         DefaultPlugins
             .set(AssetPlugin {
@@ -298,7 +297,6 @@ pub fn build_app(game_config: GameConfig) -> App {
     )
     .add_plugins(EguiPlugin::default());
 
-    // Add custom plugins
     app.add_plugins((
         core::CorePlugin,
         game::GamePlugin,
@@ -324,7 +322,6 @@ pub fn build_app(game_config: GameConfig) -> App {
     #[cfg(feature = "solana")]
     app.add_plugins(solana::SolanaPlugin);
 
-    // Set the OS window / taskbar icon once the winit window exists.
     app.add_systems(Startup, set_window_icon);
 
     app

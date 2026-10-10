@@ -6,9 +6,6 @@ use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Resources & Events
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Resource, Default)]
 pub struct ReplayAnnotations {
@@ -33,9 +30,6 @@ pub struct ScreenshotRequested;
 #[derive(Component)]
 pub struct ReplayAnnotation3D;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 fn sq_center_3d(file: u8, rank: u8) -> Vec3 {
     Vec3::new(file as f32, 0.20, rank as f32)
@@ -97,9 +91,6 @@ fn piece_sym(piece_type: PieceType, color: PieceColor) -> &'static str {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: 2D board + annotation overlay (egui, runs in PgnReplay + 2D mode)
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn replay_2d_annotation_system(
     mut contexts: EguiContexts,
@@ -255,7 +246,6 @@ pub fn replay_2d_annotation_system(
                     );
                 }
 
-                // ── Pieces ──
                 for piece in pieces.iter() {
                     let off = b2s(piece.x, piece.y, sq);
                     let center = board_rect.min + off + egui::Vec2::splat(sq * 0.5);
@@ -343,9 +333,6 @@ pub fn replay_2d_annotation_system(
         });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: 3D annotation meshes (Bevy entities, runs in PgnReplay + 3D mode)
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn replay_3d_annotations_system(
     mut commands: Commands,
@@ -428,7 +415,6 @@ pub fn replay_3d_annotations_system(
         let head_len: f32 = 0.30;
         let shaft_len = (len - head_len).max(0.05);
 
-        // Cylinder shaft
         let shaft_mesh = meshes.add(Cylinder {
             radius: 0.07,
             half_height: shaft_len * 0.5,
@@ -464,9 +450,6 @@ pub fn replay_3d_annotations_system(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: Screenshot
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn replay_screenshot_system(
     mut events: MessageReader<ScreenshotRequested>,
@@ -499,9 +482,6 @@ pub fn replay_screenshot_system(
     info!("[SHORTS] Screenshot saved to {}", path.display());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: Clear annotations when ply changes
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn clear_annotations_on_ply_change(
     replay: Res<PgnReplayState>,
@@ -514,9 +494,6 @@ pub fn clear_annotations_on_ply_change(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cinematic resources + events
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Resource, Default)]
 pub struct CinematicEffect {
@@ -539,9 +516,6 @@ pub struct BrilliantGlow;
 #[derive(Message, Default)]
 pub struct CheckmateFlash;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: load PGN annotations per-ply and fire cinematic events
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn load_pgn_annotations_system(
     mut replay: ResMut<PgnReplayState>,
@@ -560,7 +534,6 @@ pub fn load_pgn_annotations_system(
     }
     replay.last_annotation_ply = ply;
 
-    // Clear existing annotations before loading new ones
     annotations.arrows.clear();
     annotations.highlights.clear();
     annotations.dirty = true;
@@ -620,9 +593,6 @@ pub fn load_pgn_annotations_system(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: tick cinematic timers (Update)
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn cinematic_tick_system(
     time: Res<Time>,
@@ -684,9 +654,6 @@ pub fn cinematic_tick_system(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: cinematic flash overlay (EguiPrimaryContextPass)
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn cinematic_effect_system(
     mut contexts: EguiContexts,
@@ -727,9 +694,6 @@ pub fn cinematic_effect_system(
         });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: quality badge overlay (EguiPrimaryContextPass)
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn quality_badge_system(
     mut contexts: EguiContexts,
@@ -788,9 +752,6 @@ pub fn quality_badge_system(
         });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: hook text overlay (EguiPrimaryContextPass)
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn hook_text_system(
     mut contexts: EguiContexts,
@@ -892,9 +853,6 @@ pub fn hook_text_system(
         });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System: sequence capture (Update)
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn capture_sequence_system(
     time: Res<Time>,

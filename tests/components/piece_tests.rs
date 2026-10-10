@@ -10,7 +10,6 @@ fn example_move_piece_system() {
     assert!(!has_moved.moved);
     assert_eq!(has_moved.move_count, 0);
 
-    // Record the move
     has_moved.moved = true;
     has_moved.move_count += 1;
 
@@ -20,7 +19,6 @@ fn example_move_piece_system() {
 
 #[test]
 fn example_highlight_selected_piece() {
-    // Create a test entity
     let entity = Entity::from_bits(42);
 
     // Simulate selecting a piece
@@ -70,14 +68,12 @@ fn example_can_castle_check() {
 fn example_record_move() {
     let mut has_moved = HasMoved::default();
 
-    // Record a move
     has_moved.moved = true;
     has_moved.move_count += 1;
 
     assert!(has_moved.moved);
     assert_eq!(has_moved.move_count, 1);
 
-    // Record another move
     has_moved.move_count += 1;
     assert_eq!(has_moved.move_count, 2);
 }

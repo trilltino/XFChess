@@ -1,24 +1,7 @@
 version: '3.8'
 
-# XFChess Monitoring Stack
-# Prometheus + Grafana + Alertmanager for self-hosted observability.
-#
-# All three run with `network_mode: host` rather than Docker's default bridge
-# networking. This was NOT the original design — it replaced a bridge-network
-# + `extra_hosts: host-gateway` setup that looked correct but silently
-# doesn't work: `host-gateway` resolves to the default `docker0` bridge's
-# gateway (172.17.0.1) regardless of which custom network a container is
-# actually on, and a container on a different custom bridge (like
-# `monitoring_monitoring` below, before this fix) has no route to that
-# address at all — scrapes just hang until Prometheus marks the target down.
-# Discovered live after the first real deploy: Prometheus reported
-# xfchess-backend and node as permanently "down".
-#
-# Host networking sidesteps all of that: every service binds directly to a
-# host loopback port (each explicitly pinned to 127.0.0.1, never 0.0.0.0, to
-# preserve the "internal-only, reach via SSH tunnel" security posture), and
-# they all reach each other and the natively-run backend/node_exporter via
-# plain localhost/127.0.0.1 — no cross-network routing to get wrong.
+# Host networking lets monitoring reach the native backend and node exporter.
+# Bind each service to 127.0.0.1; access monitoring through SSH tunnels.
 
 services:
   prometheus:
@@ -60,11 +43,8 @@ services:
     depends_on:
       - prometheus
 
-  # No containerized node-exporter here on purpose: ops/scripts/deploy.ps1
-  # Step 2d already installs node_exporter natively via systemd, bound to
-  # 127.0.0.1:9100. A second one in this compose stack would either conflict
-  # on that port or silently double-count host metrics. Prometheus scrapes
-  # the native one directly via localhost:9100 (see prometheus.yml).
+  # Scrape the native systemd node_exporter on 127.0.0.1:9100; a second
+  # container exporter would conflict or duplicate host metrics.
 
   alertmanager:
     image: prom/alertmanager:v0.26.0

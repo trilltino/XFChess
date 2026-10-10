@@ -1,6 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-// ── Settlement worker ─────────────────────────────────────────────────────────
 pub static SETTLEMENT_TICKS_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static SETTLEMENT_TICK_MILLIS: AtomicU64 = AtomicU64::new(0);
 pub static SETTLEMENT_LAST_TICK_UNIX: AtomicU64 = AtomicU64::new(0);
@@ -14,45 +13,37 @@ pub static SETTLEMENT_REDELEGATE_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static FORCE_UNDELEGATED_AWAITING_RECOVERY_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static STUCK_DELEGATION_AUTO_RECOVERED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-// ── ER real-time subscription (Triton WS pubsub, see tasks/er_watch.rs) ───────
 pub static ER_SUBSCRIPTION_CONNECTED: AtomicU64 = AtomicU64::new(0);
 pub static ER_LAST_PUSH_UNIX: AtomicU64 = AtomicU64::new(0);
 
-// ── Tournament scheduler / prize distributor ──────────────────────────────────
 pub static TOURNAMENT_SCHEDULER_LAST_TICK_UNIX: AtomicU64 = AtomicU64::new(0);
 pub static PRIZE_DISTRIBUTOR_LAST_TICK_UNIX: AtomicU64 = AtomicU64::new(0);
 
-// ── Time-check crank (ER) ─────────────────────────────────────────────────────
 pub static TIME_CHECK_SCHEDULED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static TIME_CHECK_SCHEDULE_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static TIME_CHECK_CANCELLED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static TIME_CHECK_CANCEL_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-// ── Anti-cheat enqueue ────────────────────────────────────────────────────────
 pub static ANTICHEAT_ENQUEUED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static ANTICHEAT_DROPPED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static ANTICHEAT_SCREENED_OUT_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static ANTICHEAT_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
 pub static TELEMETRY_DISCARDED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-// ── Sybil / multi-accounting ──────────────────────────────────────────────────
 pub static LINKAGE_FLAGGED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static LINKAGE_HARD_BLOCKED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-// ── Prize distribution ────────────────────────────────────────────────────────
 pub static PRIZE_DISTRIBUTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static PRIZE_DISTRIBUTION_HELD_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static PRIZE_DISTRIBUTION_FLAGGED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static PRIZE_DISTRIBUTION_AWAITING_APPROVAL_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-// ── Auth ───────────────────────────────────────────────────────────────────
 pub static AUTH_UNCONFIGURED_RELAY_REJECTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 pub static SESSION_CREATE_THROTTLED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 pub static SPONSORSHIP_BUDGET_EXHAUSTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
-// ── Exchange rates (RateCache) ──────────────────────────────────────────────
 pub static RATES_FETCH_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static RATES_SANITY_REJECTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static RATES_SOURCE_DIVERGENCE_TOTAL: AtomicU64 = AtomicU64::new(0);

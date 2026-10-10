@@ -95,7 +95,7 @@ mod tests {
         let mut timer = GameTimer {
             white_time_left: 300.0,
             black_time_left: 300.0,
-            increment: 0.0, // No increment
+            increment: 0.0,
             is_running: true,
         };
 

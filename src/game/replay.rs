@@ -14,9 +14,6 @@ use nimzovich_engine::{
     do_move_with_promo, game_from_fen_no_tt, game_to_fen, new_game_no_tt, san_to_move,
 };
 
-// ---------------------------------------------------------------------------
-// Resources
-// ---------------------------------------------------------------------------
 
 #[derive(Resource, Debug, Clone)]
 pub struct ParsedPgnGameResource {
@@ -85,9 +82,6 @@ impl PgnReplayState {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Setup / Cleanup
-// ---------------------------------------------------------------------------
 
 pub fn setup_replay(
     parsed_pgn: Option<Res<ParsedPgnGameResource>>,
@@ -165,9 +159,6 @@ pub fn cleanup_replay(
     info!("[REPLAY] Cleaned up replay resources");
 }
 
-// ---------------------------------------------------------------------------
-// Playback Systems
-// ---------------------------------------------------------------------------
 
 pub fn replay_auto_advance_system(
     mut replay: ResMut<PgnReplayState>,
@@ -205,7 +196,6 @@ pub fn replay_apply_move_system(
     // Clamp to valid range
     let target_ply = replay.current_ply.min(pgn.inner.moves.len());
 
-    // Save board state BEFORE rebuilding so we can diff for tween animation
     replay.prev_board = replay.engine.board;
     // Single forward step → inject tween; jump or backward → full respawn only
     replay.animate_next_advance = target_ply == replay.engine_ply + 1;
@@ -230,9 +220,6 @@ pub fn replay_sync_engine_system(replay: Res<PgnReplayState>, mut engine: ResMut
     }
 }
 
-// ---------------------------------------------------------------------------
-// Piece Spawning from Engine Board
-// ---------------------------------------------------------------------------
 
 pub fn replay_spawn_pieces_system(
     mut commands: Commands,
@@ -260,7 +247,6 @@ pub fn replay_spawn_pieces_system(
 
     info!("[REPLAY] Spawning pieces from engine board");
 
-    // Despawn existing pieces
     for entity in existing_pieces.iter() {
         commands.entity(entity).despawn();
     }
@@ -349,9 +335,6 @@ pub fn replay_spawn_pieces_system(
     info!("[REPLAY] Pieces spawned successfully");
 }
 
-// ---------------------------------------------------------------------------
-// UI
-// ---------------------------------------------------------------------------
 
 pub fn replay_ui_system(
     mut contexts: EguiContexts,
@@ -378,7 +361,6 @@ pub fn replay_ui_system(
         replay.show_controls = !replay.show_controls;
     }
 
-    // --- Poll background file picker result ---
     if replay.pgn_load_rx.is_some() {
         let rx = replay.pgn_load_rx.take().unwrap();
         match rx.try_recv() {
@@ -386,7 +368,6 @@ pub fn replay_ui_system(
                 replay.is_loading_file = false;
                 match nimzovich_engine::parse_pgn(&text) {
                     Ok(pgn) => {
-                        // Build FEN snapshots inline
                         let mut temp = new_game_no_tt();
                         let mut snapshots =
                             vec!["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -536,7 +517,6 @@ pub fn replay_ui_system(
 
     let Some(ref pgn) = parsed_pgn else { return };
 
-    // --- Eval sparkline (shown when analyze mode active) ---
     let show_graph = pgn.show_eval_graph;
     if show_graph {
         if let Some(eh) = eval_history.as_ref() {
@@ -740,7 +720,6 @@ pub fn replay_ui_system(
             });
     }
 
-    // --- Move list panel (right side) ---
     let Some(pgn) = parsed_pgn else { return };
     let total = pgn.inner.moves.len();
     if total == 0 {
@@ -869,16 +848,10 @@ pub fn replay_ui_system(
                             .color(egui::Color32::DARK_GRAY),
                     );
 
-                    // Keep the move list panel focused: the dead content-tier and
-                    // annotation tooling is intentionally omitted so the replay UI stays
-                    // clean and the side panel has more room for actual replay controls.
                 });
         });
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 fn engine_to_fen(game: &nimzovich_engine::Game) -> String {
     game_to_fen(game)

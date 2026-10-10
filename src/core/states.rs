@@ -142,7 +142,6 @@ pub fn log_game_state_system(
         let current_state = state.get();
         let mut state_info = format!("State: {:?}", current_state);
 
-        // Log MenuState if we're in MainMenu
         if *current_state == GameState::MainMenu {
             if let Some(menu_state_res) = menu_state {
                 state_info.push_str(&format!(" | Menu: {:?}", menu_state_res.get()));
@@ -172,7 +171,6 @@ pub fn log_game_state_system(
 
 fn is_valid_state_transition(from: GameState, to: GameState) -> bool {
     match (from, to) {
-        // MainMenu can transition to InGame
         (GameState::MainMenu, GameState::InGame) => true,
         (GameState::MainMenu, GameState::MultiplayerMenu) => true,
         (GameState::MultiplayerMenu, GameState::MainMenu) => true,
@@ -186,7 +184,6 @@ fn is_valid_state_transition(from: GameState, to: GameState) -> bool {
         (GameState::Paused, GameState::InGame) => true,
         (GameState::Paused, GameState::MainMenu) => true,
 
-        // GameOver can go to MainMenu
         (GameState::GameOver, GameState::MainMenu) => true,
         (GameState::GameOver, GameState::InGame) => true, // Allow restart
 

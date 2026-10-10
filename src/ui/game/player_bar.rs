@@ -237,9 +237,7 @@ pub fn render_player_bar(ui: &mut egui::Ui, data: &PlayerBarData) {
                             .size(11.5)
                             .color(UiColors::TEXT_SECONDARY),
                     );
-                    // Reserve the capture row even before the first capture;
-                    // otherwise the bar grows after a capture and the 2D
-                    // board recalculates to a smaller square size.
+                    // Reserve capture-row height from the start so the board does not shrink after a capture.
                     ui.allocate_ui(
                         egui::Vec2::new(ui.available_width(), CAPTURE_ROW_HEIGHT),
                         |ui| {

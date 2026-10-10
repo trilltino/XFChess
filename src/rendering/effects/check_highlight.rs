@@ -34,9 +34,7 @@ pub fn update_check_highlight_system(
         return;
     }
 
-    // The side in check is the side to move in the engine position, not the
-    // stale display turn resource. This keeps replay and network states from
-    // painting the wrong king red.
+    // Read the checked side from the engine; replay or network lag can leave the display turn stale.
     let king_color = engine.side_to_move();
     let king_pos = pieces
         .iter()
@@ -46,7 +44,6 @@ pub fn update_check_highlight_system(
     let Some(pos) = king_pos else { return };
 
     if existing.is_empty() {
-        // Spawn the light
         commands.spawn((
             PointLight {
                 color: Color::srgb(1.0, 0.1, 0.1),
@@ -65,7 +62,6 @@ pub fn update_check_highlight_system(
             ),
         ));
     } else {
-        // Update position and pulse intensity
         let pulse = (time.elapsed_secs() * 4.0).sin() * 0.5 + 0.5;
         let intensity = 8_000.0 + pulse * 24_000.0;
         for (mut light, mut tf) in lights.iter_mut() {

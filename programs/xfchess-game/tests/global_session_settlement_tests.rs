@@ -181,9 +181,7 @@ async fn finalize_game_pays_the_nonzero_country_fee_to_treasury() {
         .await
         .unwrap();
 
-    // fees_advanced is 0 in this fixture, so the vault's only inflow is the
-    // country_fee itself — isolates exactly the value this regression test
-    // is guarding (see module doc).
+    // Set fees_advanced to zero to isolate the country_fee inflow.
     assert_eq!(
         treasury_after - treasury_before,
         country_fee,
@@ -327,9 +325,7 @@ async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() {
         wager_amount,
         country_fee,
     );
-    // `common::program_account` allocates every program account with a fixed
-    // 1_000_000_000-lamport balance — that full amount is what `close =
-    // fee_payer` refunds as rent once the Game account is closed.
+    // Closing the fixture Game refunds its full 1_000_000_000-lamport balance as rent.
     let game_account_rent = game_account_data.lamports;
 
     let (white_profile_pda, white_profile_data) = profile_account(white);
@@ -383,9 +379,7 @@ fn finalize_game_ix_with_spoofed_black_authority(
     let accounts = xfchess_game::__client_accounts_end_game::EndGame {
         game: game_pda(game_id).0,
         white_profile: profile_pda(&white),
-        // Correct PDA (matches the real on-chain game.black) — isolates the
-        // `black_authority` constraint from the separate `black_profile`
-        // seeds constraint, which would otherwise fail first.
+        // Use the correct profile PDA to isolate black_authority validation from seed validation.
         black_profile: profile_pda(&real_black),
         white_authority: white,
         black_authority: spoofed_black_authority, // simulates a spoofed opponent_pubkey

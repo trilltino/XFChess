@@ -168,7 +168,6 @@ pub async fn detailed_health_check(State(state): State<AppState>) -> impl IntoRe
         response_time_ms: memory_start.elapsed().as_millis() as u64,
     });
 
-    // Determine overall status
     let overall_status = if checks.iter().all(|c| c.status == "ok") {
         "healthy"
     } else if checks.iter().any(|c| c.status == "critical") {
@@ -210,10 +209,8 @@ pub async fn debug_transaction_endpoint(
         }
     };
 
-    // Create RPC client
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
 
-    // Fetch debug info
     match debug_transaction(&rpc, &sig).await {
         Ok(debug_info) => {
             let formatted = format_debug_info(&debug_info);
@@ -254,12 +251,8 @@ async fn check_database(state: &AppState) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-// Both checks below run their RPC call on a blocking thread. They are reached
-// from `/health/detailed`, which is unauthenticated: called directly on the
-// async runtime, each one parks a Tokio worker for up to the 30s RPC timeout,
-// so a handful of concurrent health probes could stall every other request the
-// server was serving — including `/health` itself. They also reuse the shared
-// `RpcClient` rather than building one (and a fresh TLS handshake) per call.
+// Run synchronous RPC health probes on the blocking pool so concurrent
+// unauthenticated probes cannot occupy async workers.
 
 async fn check_solana_rpc(state: &AppState) -> Result<u64, Box<dyn std::error::Error>> {
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
@@ -291,9 +284,7 @@ async fn check_feepayer_pool(state: &AppState) -> (Option<String>, String) {
 
     match balance {
         Ok(balance) => {
-            // key_index 0: the pool round-robins and doesn't expose which slot
-            // `.next()` picked, so this gauge tracks "whichever fee payer we
-            // most recently checked" rather than a per-key breakdown.
+            // Slot 0 tracks the most recently checked fee payer; the round-robin pool hides its index.
             state.metrics.update_feepayer_balance(0, balance);
             let sol = balance as f64 / 1_000_000_000.0;
             if balance < 10_000_000 {

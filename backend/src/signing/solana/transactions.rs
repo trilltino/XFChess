@@ -71,12 +71,8 @@ pub fn fund_account(
         }
     }
 
-    // Pre-flight the PAYER balance before building+sending, so a depleted
-    // feepayer-pool wallet fails here with an actionable message instead of
-    // on-chain with the opaque `InstructionError(0, Custom(1))` (= System
-    // Program ResultWithNegativeLamports). The runtime requires the payer to
-    // end the tx at/above its own rent-exempt reserve AND pay the signature
-    // fee, so the real floor is reserve + fee + `lamports`.
+    // The payer must cover transfer lamports, signature fees, and its own
+    // rent-exempt reserve; check this before submission.
     let payer_pubkey = payer.pubkey();
     match rpc.get_balance(&payer_pubkey) {
         Ok(payer_balance) => {
@@ -199,11 +195,7 @@ pub fn cosign_and_submit_tx(
         .send_transaction_with_config(&tx, config)
         .map_err(|e| anyhow!(e))?;
 
-    // Not routed through `send_and_poll`/`poll_confirmation` directly: on
-    // failure this appends `ix_summary` (the instruction/program list) to
-    // the error, which the shared helper's generic "{context} failed"
-    // message doesn't carry — that summary is what makes setup-TX failures
-    // diagnosable from logs alone.
+    // Retain ix_summary on failure so setup transaction errors identify their instructions.
     match poll_confirmation(rpc, sig, Duration::from_secs(30), "setup TX") {
         Ok(sig) => {
             info!(

@@ -4,7 +4,6 @@ use bevy_egui::{egui, EguiContexts};
 use crate::multiplayer::solana::addon::SolanaProfile;
 use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
 
-// ── Types ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct GameHistoryEntry {
@@ -44,7 +43,6 @@ impl ProfileViewState {
     }
 }
 
-// ── VPS fetch helper ────────────────────────────────────────────────────────
 
 fn fetch_history_blocking(wallet: String) -> Result<Vec<GameHistoryEntry>, String> {
     use crate::multiplayer::network::vps::{client, vps_base};
@@ -85,7 +83,6 @@ fn fetch_pgn_blocking(game_id: String) -> Result<String, String> {
     Ok(resp.text().map_err(|e| format!("parse pgn: {e}"))?)
 }
 
-// ── Systems ─────────────────────────────────────────────────────────────────
 
 pub fn fetch_profile_history(
     mut view: ResMut<ProfileViewState>,
@@ -204,7 +201,6 @@ pub fn profile_view_ui(
         )
         .show(ctx, |ui| {
             ui.vertical(|ui| {
-                // ── Header ──────────────────────────────────────────────
                 let username = solana_state
                     .cached_display_name
                     .as_deref()
@@ -244,7 +240,6 @@ pub fn profile_view_ui(
                 ui.separator();
                 ui.add_space(8.0);
 
-                // ── Stats row ───────────────────────────────────────────
                 let (wins, losses, draws, games) = if let Some(ref p) = profile {
                     (p.wins, p.losses, p.draws, p.games_played())
                 } else {
@@ -263,7 +258,6 @@ pub fn profile_view_ui(
 
                 ui.add_space(16.0);
 
-                // ── ELO sparkline ───────────────────────────────────────
                 if view.elo_curve.len() >= 2 {
                     ui.label(
                         egui::RichText::new("ELO Progression")
@@ -285,7 +279,6 @@ pub fn profile_view_ui(
                 ui.separator();
                 ui.add_space(8.0);
 
-                // ── Recent games ────────────────────────────────────────
                 ui.label(egui::RichText::new("Recent Games").size(13.0).strong());
                 ui.add_space(6.0);
 
@@ -373,7 +366,6 @@ pub fn profile_view_ui(
     view.open = open;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn stat_card(ui: &mut egui::Ui, label: &str, value: u32, color: egui::Color32) {
     ui.group(|ui| {

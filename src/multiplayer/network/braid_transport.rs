@@ -17,7 +17,6 @@ const GENESIS_PARENT: &str = "0";
 
 const MAX_PARENT_RETRIES: usize = 3;
 
-// ── Stream head tracking ──────────────────────────────────────────────────
 
 pub struct BraidStreamHeads {
     moves: String,
@@ -79,7 +78,6 @@ fn stream_of(message: &ChessMessage) -> &'static str {
     }
 }
 
-// ── Publish (PUT) ─────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 struct GameEventReq<'a> {
@@ -182,9 +180,7 @@ fn publish(
                 }
                 Ok(resp) => {
                     let status = resp.status();
-                    // Capture the backend's error body — it names the exact
-                    // rejection reason (e.g. `NotAParticipant`), which is
-                    // what made the v0.2.7 casual-P2P 403s diagnosable.
+                    // Preserve the backend error body so participant and other rejection reasons remain diagnosable.
                     let body = resp.text().unwrap_or_default();
                     if status == reqwest::StatusCode::FORBIDDEN
                         || status == reqwest::StatusCode::UNAUTHORIZED
@@ -314,7 +310,6 @@ pub fn publish_session_info(
     );
 }
 
-// ── Subscribe (with reconnect) ─────────────────────────────────────────────
 
 #[derive(Resource, Default)]
 pub struct BraidTransportState {
@@ -386,9 +381,7 @@ fn spawn_reconnecting_subscription(
 ) {
     rt.spawn(async move {
         let mut backoff = MIN_BACKOFF;
-        // Only true once we've actually been connected and lost it — gates
-        // the "reconnected" notice so the very first connect of a match
-        // (the common case, nothing wrong) stays quiet.
+        // Show reconnection notices only after a prior successful connection was lost.
         let mut recovering = false;
         loop {
             let sub = match ChessSubscriber::new(&base_url, &game_id) {
@@ -404,10 +397,7 @@ fn spawn_reconnecting_subscription(
                 }
             };
 
-            // Run both streams concurrently on this task; if either drops,
-            // reconnect both (simplest correct behavior — the backend
-            // replays full history on resubscribe, so this is never a
-            // silent gap, just a brief reconnect delay).
+            // Reconnect both streams if either drops; full history is replayed on resubscription.
             let moves = sub.subscribe_moves().await;
             let chat = sub.subscribe_chat().await;
             let (moves_rx, chat_rx) = match (moves, chat) {
@@ -472,12 +462,8 @@ pub fn drain_braid_messages(
         crate::multiplayer::network::online_game_session::numeric_game_id(&session.game_id);
 
     while let Ok(msg) = rx.try_recv() {
-        // Advance the shared stream head to whatever the server actually
-        // accepted, and drop the echo of our own publishes. The backend
-        // broadcasts every accepted event to all subscribers *including the
-        // publisher*, so without the `self_published` check we would re-apply
-        // our own moves as if the opponent had sent them, and re-display our
-        // own chat lines twice.
+        // Advance to the accepted stream head and discard self-published echoes
+        // so moves and chat are not applied twice.
         let mut is_self_echo = false;
         if let Some(version) = version_of(&msg) {
             if let Ok(mut h) = state.heads.lock() {
@@ -558,11 +544,7 @@ pub fn drain_braid_messages(
                     continue;
                 }
 
-                // Mirrors `handle_network_events`'s gossip-side roster
-                // building exactly (`systems.rs`) — this is the durable
-                // fallback for the same real bug described at this
-                // message's publish site (gossip alone can silently drop
-                // SessionInfo before the P2P link establishes).
+                // Build the same signer roster as gossip; Braid supplies dropped SessionInfo messages.
                 let Ok(key) = bs58::decode(&signing_pubkey).into_vec() else {
                     warn!("[braid-transport] SessionInfo had an unparseable signing_pubkey");
                     continue;
@@ -577,19 +559,8 @@ pub fn drain_braid_messages(
                     );
                 }
 
-                // The roster update above only feeds move-signer
-                // verification. `handle_session_info_from_network`
-                // (multiplayer/systems.rs) is the only place
-                // `SolanaIntegrationState::opponent_pubkey` gets set —
-                // required before `bridge.rs` can finalize a game
-                // on-chain — and it listens only for
-                // `NetworkEvent::MessageReceived(NetworkMessage::SessionInfo)`.
-                // Without re-emitting that event here too, a SessionInfo
-                // that only arrives via Braid (because gossip dropped it —
-                // the exact failure this dual-transport send exists for)
-                // never reaches that handler, and both sides get stuck
-                // logging "Opponent pubkey unavailable" forever at game
-                // end, never settling on-chain.
+                // Re-emit SessionInfo so the handler sets opponent_pubkey for finalization.
+                // Updating the signer roster alone does not update SolanaIntegrationState.
                 #[cfg(feature = "solana")]
                 {
                     use solana_sdk::pubkey::Pubkey;
@@ -619,10 +590,7 @@ pub fn drain_braid_messages(
                     }
                 }
             }
-            // OfferDraw/AcceptDraw/DeclineDraw/Clock/EngineAnalysis aren't
-            // published through this transport (draw offers stay
-            // gossip-only for now; Clock/EngineAnalysis are separate Braid
-            // streams this module doesn't subscribe to).
+            // Draw offers use gossip. Clock and EngineAnalysis use separate Braid streams.
             _ => {}
         }
     }
@@ -653,7 +621,6 @@ impl Plugin for BraidTransportPlugin {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

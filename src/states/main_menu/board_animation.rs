@@ -128,15 +128,8 @@ pub(super) fn request_game_nav(anim: &mut BoardAnimator, delta: i32) {
     anim.reset = ResetPhase::Hang(0.0);
 }
 
-// ── Ambient board auto-play (post-Enter) ──────────────────────────────────────
-//
-// Replays the current game (`famous_games::FAMOUS_GAMES[game_index]`) on the
-// full-size `MenuBg` board once the player presses Enter. Captured pieces are
-// *hidden* (not despawned) so the whole game can loop without re-spawning:
-// after the final move the board hangs on the position, then every piece
-// fades out, is moved back to its `MenuBgPieceHome` while invisible, and fades
-// back in — either for a loop of the same game or, here, for the next game in
-// the carousel.
+// Replay ambient games by hiding captured pieces. Fade and restore pieces
+// to their home positions before the next game instead of respawning them.
 
 #[inline]
 fn sq_world(file: usize, rank: usize) -> Vec3 {
@@ -275,10 +268,7 @@ pub fn animate_ambient_board(
             if t > 0.0 {
                 anim.reset = ResetPhase::FadeOut(t);
             } else {
-                // Everything is invisible now — snap pieces home at alpha 0 and
-                // fade the starting position back in. Resolve which game plays
-                // next: a manual nav request wins, otherwise advance to the
-                // next game in the list (wrapping around).
+                // Reset invisible pieces before fading in. Manual navigation overrides automatic advance.
                 let next = anim
                     .game_index_override
                     .take()

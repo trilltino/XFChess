@@ -6,10 +6,7 @@ export default function MatchManagement() {
   const [loading, setLoading] = useState(true);
   const [abortMsg, setAbortMsg] = useState<string | null>(null);
 
-  // There is no on-chain "void/abort a live game" instruction — only
-  // resolve_dispute (winner or draw) exists, and that requires the game to
-  // actually be disputed first. This button used to do nothing at all when
-  // clicked; it now says so honestly instead of silently no-oping.
+  // There is no live-game abort instruction. resolve_dispute requires a disputed game.
   const handleForceAbort = (gameId: number) => {
     setAbortMsg(`Game #${gameId}: force-abort isn't wired to an on-chain instruction. For a stuck/disputed game, use the Dashboard's dispute resolution instead.`);
   };
@@ -61,8 +58,8 @@ export default function MatchManagement() {
           </div>
         ) : (
           sessions.map(session => (
-            <div key={session.game_id} style={{ 
-              backgroundColor: "var(--surface)", 
+            <div key={session.game_id} style={{
+              backgroundColor: "var(--surface)",
               padding: "1.5rem", 
               borderRadius: "24px", 
               border: "1px solid var(--border)",
@@ -75,7 +72,7 @@ export default function MatchManagement() {
                 <span style={{ color: "var(--primary)", fontSize: "12px", fontWeight: "bold" }}>GAME #{session.game_id}</span>
                 <span style={{ fontSize: "10px", color: "#4ade80", fontWeight: "bold", padding: "2px 8px", backgroundColor: "rgba(74, 222, 128, 0.1)", borderRadius: "100px" }}>LIVE</span>
               </div>
-              
+
               <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "1rem", padding: "1rem 0" }}>
                 <div style={{ textAlign: "center", flex: 1 }}>
                   <div style={{ color: "white", fontWeight: "bold" }}>{session.white.slice(0, 4)}...{session.white.slice(-4)}</div>

@@ -21,12 +21,10 @@ use features::{accuracy, blur, complexity, timing};
 use types::{AcReport, GameRecord, PlyEval, SideAnalysis, SignalValues};
 
 pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport> {
-    // Spawn a Stockfish process for this analysis
     let sf_path = cfg.stockfish_path.clone();
     let depth = cfg.analysis_depth;
     let movetime = cfg.movetime_ms;
 
-    // Extract metadata before moving game into the blocking closure
     let game_id = game.game_id.clone();
     let context = game.context.clone();
     let result = game.result.clone();
@@ -205,9 +203,7 @@ mod tests {
 
     #[test]
     fn cpl_from_evals_is_the_difference_not_the_raw_eval() {
-        // Best move before was +50, played move leaves +10: 40 centipawns lost.
-        // (Regression guard: an earlier version of this arithmetic cancelled
-        // `best_before_cp` out algebraically and returned 10 here instead of 40.)
+        // A +50 best move followed by a +10 position loses 40 centipawns.
         assert_eq!(cpl_from_evals(50, 10), 40);
     }
 

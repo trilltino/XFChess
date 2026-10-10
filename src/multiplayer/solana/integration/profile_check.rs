@@ -22,11 +22,7 @@ pub fn check_profile_on_connect(
     }
 
     if current_wallet == *last_wallet {
-        // Same wallet as last check. Normally nothing to do — but if the
-        // profile still isn't fully set up, re-poll periodically so
-        // completing on-chain setup in the Tauri wallet-ui popup (see
-        // ProfileStep's requireOnchain branch in tauri/wallet-ui/src/App.tsx)
-        // is picked up without requiring a wallet reconnect.
+        // Recheck incomplete profiles so wallet-popup setup is picked up without reconnecting.
         if solana_state.profile_status == ProfileStatus::HasProfileWithUsername {
             return;
         }
@@ -71,11 +67,7 @@ pub fn check_profile_on_connect(
                         } else {
                             ProfileStatus::HasProfileNoUsername
                         };
-                        // `elo_rating` is stored on-chain in centiscale (1200 Elo = 120000) —
-                        // casting that raw to u16 saturates at u16::MAX (65535) for every
-                        // realistic rating, which is exactly what showed up as "65535 ELO"
-                        // in the wager-lobby browse list. Must go through the same
-                        // centiscale->display conversion the program itself defines.
+                        // Convert centiscale Elo before casting to the display rating type.
                         let elo = Some(xfchess_game::elo::rating::centiscale_to_display(
                             profile.elo_rating,
                         ) as u16);
@@ -133,11 +125,7 @@ pub fn handle_profile_check_tasks(mut solana_state: ResMut<SolanaIntegrationStat
                     if status == ProfileStatus::NoProfile
                         || status == ProfileStatus::HasProfileNoUsername
                     {
-                        // Only cache the status here. Opening the Tauri profile
-                        // popup is reserved for explicit user actions (e.g.
-                        // clicking Wagered PVP) — auto-opening from this
-                        // background check raced the wallet sign-in popup and
-                        // showed "Choose Your Handle" before auth completed.
+                        // Cache background profile checks; open setup only after an explicit user action.
                         info!(
                             "[PROFILE] Profile incomplete — will prompt when the user starts a wagered flow"
                         );

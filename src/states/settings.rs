@@ -53,7 +53,6 @@ fn setup_settings_camera(
         persistent_camera.entity
     );
 
-    // Update persistent camera transform for settings view
     if let Some(camera_entity) = persistent_camera.entity {
         info!(
             "[SETTINGS] DEBUG: Attempting to query camera entity {:?}",
@@ -65,7 +64,6 @@ fn setup_settings_camera(
                 *transform = Transform::from_xyz(0.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y);
                 info!("[SETTINGS] Updated persistent camera transform for settings");
 
-                // Add settings marker to persistent camera
                 info!("[SETTINGS] DEBUG: Adding SettingsCamera component");
                 commands.entity(camera_entity).insert(SettingsCamera);
                 info!("[SETTINGS] DEBUG: SettingsCamera component added successfully");
@@ -95,9 +93,7 @@ fn settings_ui(
 ) -> Result<(), bevy::ecs::query::QuerySingleError> {
     let ctx = contexts.ctx_mut()?;
 
-    // Set inside the egui pass when the export button is clicked; the save
-    // dialog + bundle write run after the frame so a blocking native dialog
-    // never stalls rendering. Desktop only — Android has no rfd backend.
+    // Run desktop export after the egui frame so the native dialog does not stall rendering.
     #[cfg(not(target_os = "android"))]
     let mut export_requested = false;
 
@@ -193,7 +189,6 @@ fn settings_ui(
 
                 Layout::section_space(ui);
 
-                // Back button
                 if StyledButton::secondary(ui, "Back").clicked() {
                     next_state.set(previous_state.state);
                 }

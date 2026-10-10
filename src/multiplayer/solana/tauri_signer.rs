@@ -11,10 +11,7 @@ use solana_sdk::{
 
 const SIGN_TIMEOUT_SECS: u64 = 60;
 
-// `wallet_bridge_port()` itself lives in `multiplayer::network::vps::client`
-// (pure local port-file/env-var lookup, no Solana SDK dependency) so it stays
-// reachable from callers outside the `solana`-feature-gated module tree, e.g.
-// main_menu.rs's wallet-bridge status poller.
+// wallet_bridge_port lives outside the solana feature gate so UI status polling can use it.
 use crate::multiplayer::network::vps::wallet_bridge_port;
 
 pub fn wallet_bridge_base_url() -> String {
@@ -91,7 +88,6 @@ pub fn open_wallet_browser() {
     bring_wallet_popup_to_front();
     std::thread::spawn(sync_backend_url_to_bridge);
     std::thread::spawn(|| {
-        // Send OPEN command over TCP to the Tauri wallet bridge.
         use std::io::Write;
         use std::net::TcpStream;
         for port in candidate_ports() {
@@ -175,13 +171,11 @@ pub fn sign_via_tauri_only(
     // Use legacy Transaction to match wallet UI
     let mut tx = Transaction::new_with_payer(instructions, Some(&wallet_pubkey));
 
-    // Add local signers first (if any)
     for keypair in local_signers {
         tx.try_sign(&[*keypair], blockhash)
             .map_err(|e| format!("local_sign: {}", e))?;
     }
 
-    // Partially sign with wallet as NullSigner placeholder
     tx.try_partial_sign(&[&NullSigner::new(&wallet_pubkey)], blockhash)
         .map_err(|e| format!("partial_sign: {}", e))?;
 
@@ -266,9 +260,7 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
     use std::net::TcpStream;
     use std::time::{Duration, Instant};
 
-    // Every signing request needs the popup raised, not just the initial
-    // Connect Wallet click — see `bring_wallet_popup_to_front`'s doc comment
-    // for why this has to be issued from this process, not the Tauri sidecar.
+    // Raise the popup from this process on every signature request.
     bring_wallet_popup_to_front();
 
     fn is_timeout(e: &std::io::Error) -> bool {

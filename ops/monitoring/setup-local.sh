@@ -23,7 +23,6 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Start monitoring stack
 echo "Starting monitoring stack..."
 cd "$SCRIPT_DIR"
 docker-compose -f docker-compose.local.yml up -d

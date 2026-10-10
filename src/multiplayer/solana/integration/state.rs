@@ -159,11 +159,7 @@ pub struct BalanceRefreshTimer(pub Timer);
 
 impl Default for BalanceRefreshTimer {
     fn default() -> Self {
-        // 15s: this balance feeds lobby.cached_balance, which gates whether
-        // a wager can be joined/created (see sync_from_solana_state) — it
-        // needs to track real changes (e.g. a wager just settling) during an
-        // active session, not just the initial connect (which now fetches
-        // immediately in update_wallet_balance regardless of this timer).
+        // Refresh wager-eligibility balances every 15s to observe settlements during a session.
         Self(Timer::from_seconds(15.0, TimerMode::Repeating))
     }
 }

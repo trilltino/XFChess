@@ -55,7 +55,6 @@ pub async fn join(
         return Err((StatusCode::FORBIDDEN, "This wallet is banned.".to_string()));
     }
 
-    // Fetch ELO from on-chain profile via cache
     let cached_elo = state.elo_cache.get_elo(&req.pubkey).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -63,14 +62,8 @@ pub async fn join(
         )
     })?;
 
-    // Effective ELO for matchmaking. This is the Classical/default bucket —
-    // the queue doesn't yet partition by time control (see `JoinRequest`),
-    // so it can't select `elo_bullet`/`elo_blitz`/`elo_rapid` per the
-    // requested game's pace; that's a follow-up to wire through once
-    // matchmaking itself becomes time-control-aware. Lichess ratings are no
-    // longer consulted here at all — `link_external_elo` no longer seeds
-    // `elo_rating`, so a Lichess-only fallback would just be stale/unrelated
-    // data standing in for a real (if still-default) XFChess rating.
+    // Matchmaking uses the Classical/default Elo bucket until the queue is
+    // time-control-aware; external Lichess ratings do not replace this value.
     let effective_elo = cached_elo.elo_rating;
 
     let ticket = MatchmakingTicket {

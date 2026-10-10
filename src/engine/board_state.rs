@@ -46,10 +46,7 @@ impl ToString for UciSquare {
 
 impl Default for ChessEngine {
     fn default() -> Self {
-        // No search ever runs on this Game (only move validation/legality via
-        // `is_legal_move_unchecked`/`generate_pseudo_legal_moves`/`is_in_check`
-        // and SAN via `move_to_san`) — skip the multi-GB transposition table
-        // `game_from_fen` would otherwise allocate for the app's entire lifetime.
+        // This Game only validates moves and formats SAN; skip the multi-GB search table.
         let game = game_from_fen_no_tt(STARTING_FEN);
         Self {
             fen: STARTING_FEN.to_string(),
@@ -67,7 +64,6 @@ impl Default for ChessEngine {
 }
 
 impl ChessEngine {
-    // ─── Coordinate helpers ─────────────────────────────────────────────────
 
     pub fn coords_to_uci(x: u8, y: u8) -> String {
         let file = (b'a' + x) as char;
@@ -99,7 +95,6 @@ impl ChessEngine {
         ((index % 8) as u8, (index / 8) as u8)
     }
 
-    // ─── Piece helpers ───────────────────────────────────────────────────────
 
     pub fn piece_type_to_id(piece_type: PieceType) -> i8 {
         match piece_type {
@@ -112,7 +107,6 @@ impl ChessEngine {
         }
     }
 
-    // ─── Board sync ─────────────────────────────────────────────────────────
 
     pub fn sync_ecs_to_engine_mut(
         &mut self,
@@ -147,10 +141,8 @@ impl ChessEngine {
         let mut castling = CastlingRights::all_moved();
 
         for (_, piece, has_moved) in pieces {
-            // Skip pieces that have been marked off-board (u8::MAX) — this happens
-            // immediately before sync when a piece is captured, because FadingCapture
-            // is applied via deferred Commands and the entity would otherwise appear
-            // at the destination square alongside the capturing piece.
+            // Skip off-board captures: deferred FadingCapture commands have not run yet,
+            // so the captured entity can still share the destination square.
             if piece.x > 7 || piece.y > 7 {
                 continue;
             }
@@ -205,7 +197,6 @@ impl ChessEngine {
         set_game_from_fen(&mut self.game, &self.fen);
     }
 
-    // ─── Move generation ────────────────────────────────────────────────────
 
     pub fn rebuild_legal_move_cache(&mut self) {
         self.move_cache.clear();
@@ -296,7 +287,6 @@ impl ChessEngine {
             .collect()
     }
 
-    // ─── FEN Import/Export ────────────────────────────────────────────────────
 
     pub fn to_fen(&self) -> String {
         let side = match self.current_turn {

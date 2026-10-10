@@ -41,7 +41,6 @@ fn signed_message_survives_serialization_and_still_verifies() {
     let signed = SignedNetworkMessage::sign(move_msg(), &test_key());
     assert!(signed.verify(), "freshly signed message must verify");
 
-    // Send over the wire (serialize) and reconstruct on the other side.
     let json = serde_json::to_string(&signed).expect("serialize signed");
     let received: SignedNetworkMessage = serde_json::from_str(&json).expect("deserialize signed");
 

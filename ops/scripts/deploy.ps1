@@ -1,10 +1,5 @@
-﻿# XFChess full deploy script
-# Usage: .\ops\scripts\deploy.ps1 -Server 178.104.55.19 [-Domain xfchess.example.com]
-#
-# First run: connects as root, creates deploy user, hardens server, obtains SSL cert.
-# Subsequent runs: connects as deploy (or root if -User root is passed explicitly).
-#
-# Prerequisites: ssh + scp in PATH (Windows OpenSSH or Git Bash), git in PATH
+﻿# Deploy backend, frontend, and server configuration. Requires ssh, scp, and git.
+# Usage: .\ops\scripts\deploy.ps1 -Server host [-Domain domain] [-User user]
 
 param(
     [string]$Server  = "178.104.55.19",
@@ -19,17 +14,13 @@ $DEST     = "${User}@${Server}"
 $ROOT     = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent   # repo root
 $TlsDomain = if ($Domain) { $Domain } else { $Server }
 
-# ── SSH key bootstrap ─────────────────────────────────────────────────────────
 if (-not (Test-Path $SSH_KEY)) {
     Write-Host "Generating SSH key..." -ForegroundColor Yellow
     ssh-keygen -t ed25519 -f $SSH_KEY -N '""' -C xfchess-deploy
     Write-Host "SSH key generated at $SSH_KEY" -ForegroundColor Green
 } else {
-    # Windows' bundled ssh-keygen.exe (System32\OpenSSH) rejects `-y -P ""` together
-    # ("Too many arguments") regardless of whether the key has a passphrase — that
-    # false positive was wiping a perfectly good key on every run. Piping empty
-    # stdin instead: a real passphrase prompt reads EOF and fails fast; a
-    # passphrase-less key just succeeds, ignoring stdin entirely.
+    # Pipe empty stdin to detect passphrase prompts without the Windows
+    # ssh-keygen -y -P empty-argument parsing failure.
     $testKey = "" | & ssh-keygen -y -f $SSH_KEY 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Existing key has passphrase; regenerating without passphrase for automation." -ForegroundColor Yellow
@@ -41,10 +32,7 @@ if (-not (Test-Path $SSH_KEY)) {
 
 Write-Host "`nCopying SSH key to server..." -ForegroundColor Yellow
 $authKeysCmd = 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
-# Try the bootstrapped key itself first (BatchMode=yes fails fast, no hang) — if it's
-# already trusted (e.g. installed out-of-band), this succeeds instantly and we skip
-# the password prompt entirely. Only a truly untrusted key falls through to the
-# interactive password bootstrap below (needs a real TTY — not safe to background).
+# Try trusted keys with BatchMode first; password bootstrap requires a real TTY.
 $null = & ssh @SSH_ARGS -o BatchMode=yes -o ConnectTimeout=5 $DEST "echo key_works" 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Key already trusted — skipping password bootstrap." -ForegroundColor Green
@@ -66,15 +54,8 @@ if (-not (Test-SSHKey)) {
     if ($LASTEXITCODE -ne 0) { Write-Host "SSH auth failed." -ForegroundColor Red; exit 1 }
 }
 
-# ── Safe remote execution with a watchdog ─────────────────────────────────────
-# Plain `& ssh` can hang permanently: on Windows OpenSSH there is a known race
-# where the server closes a session's channel but the ssh.exe client never
-# exits, leaving the process alive with no socket and the deploy blocked with
-# no timeout and no recovery. (That is exactly what stalled a previous run after
-# the backend build finished.) So every remote command runs through Safe-Ssh --
-# one ssh per command, started detached with output captured, waited on with a
-# hard per-command timeout, and killed + retried on a wedged/transport failure.
-# A genuine remote command failure (non-zero exit) is still surfaced unchanged.
+# Bound SSH commands with a watchdog; kill and retry wedged transport
+# clients while surfacing genuine remote-command failures.
 
 function Quote-Arg([string]$s) {
     # CommandLineToArgvW-compliant quoting: wrap in double quotes and escape
@@ -121,11 +102,8 @@ function Safe-Ssh([string]$RemoteCmd, [int]$TimeoutSec = 240, [int]$Retries = 3)
             Start-Sleep -Seconds 5
             continue
         }
-        # Drain stdout/stderr asynchronously so a verbose remote command (apt,
-        # git fetch, monitoring setup, ...) can never deadlock the pipe, then
-        # wait with a hard timeout. Timed-out clients are killed and retried;
-        # the remote command may already have completed (every command this
-        # script issues is idempotent), so re-running it is safe.
+        # Drain both output pipes asynchronously to avoid deadlock. Timed-out
+        # commands may have completed remotely, so retries require idempotent commands.
         $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
         $stderrTask = $proc.StandardError.ReadToEndAsync()
         if ($proc.WaitForExit($TimeoutSec * 1000)) {
@@ -162,15 +140,9 @@ function Upload($local, $remote) {
     if ($LASTEXITCODE -ne 0) { throw "Upload failed: $local" }
 }
 
-# ════════════════════════════════════════════════════════════════════════════════
-# GIT PREFLIGHT
-# ════════════════════════════════════════════════════════════════════════════════
 Write-Host "`n=== Git preflight checks ===" -ForegroundColor Magenta
 Push-Location $ROOT
 
-# origin is the one source of truth (no private/public repo split anymore —
-# backend/ and ops/ live directly on trilltino/XFChess), so this deploy
-# builds and ships straight from origin's tree.
 $remoteUrl = git remote get-url origin 2>&1
 if ($LASTEXITCODE -ne 0 -or $remoteUrl -notmatch "xfchess") {
     Write-Host "ABORT: This does not look like the XFChess repository." -ForegroundColor Red; exit 1
@@ -202,7 +174,6 @@ $commitDate   = git log -1 --pretty="%cd" --date=format:"%Y-%m-%d %H:%M"
 Write-Host "`n  Deploying: $commitHash — $commitMsg ($commitAuthor, $commitDate)`n" -ForegroundColor Cyan
 Pop-Location
 
-# ── Step 1: Build frontend ────────────────────────────────────────────────────
 if (-not $SkipBuild) {
     Write-Host "`n=== Building frontend ===" -ForegroundColor Green
     Push-Location "$ROOT\xfchessdotcom"
@@ -216,7 +187,6 @@ if (-not $SkipBuild) {
     Pop-Location
 }
 
-# ── Step 2: Server base setup ─────────────────────────────────────────────────
 Write-Host "`n=== Setting up server ===" -ForegroundColor Green
 Run-Remote "id xfchess 2>/dev/null || adduser xfchess --disabled-password --gecos ''"
 Run-Remote "mkdir -p /home/xfchess && chown xfchess:xfchess /home/xfchess"
@@ -224,12 +194,10 @@ Run-Remote "mkdir -p /opt/xfchess/data /opt/xfchess/web /opt/xfchess/backups /op
 Run-Remote "chown -R xfchess:xfchess /opt/xfchess"
 
 Run-Remote "apt-get update -qq && apt-get install -y -qq nginx sqlite3 git curl build-essential pkg-config libssl-dev ca-certificates certbot python3-certbot-nginx ufw logrotate" 900
-# Install rustup FOR the xfchess build user (shell overridden — xfchess is nologin),
-# with CARGO_HOME/RUSTUP_HOME under /opt/xfchess so the build in Step 3 can find cargo.
+# Install rustup for the nologin build user with CARGO_HOME/RUSTUP_HOME under /opt/xfchess.
 $rustupCmd = 'su -s /bin/bash xfchess -c ''export CARGO_HOME=/opt/xfchess/.cargo RUSTUP_HOME=/opt/xfchess/.rustup HOME=/opt/xfchess; [ -x $CARGO_HOME/bin/cargo ] || (curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh && sh /tmp/rustup.sh -y --no-modify-path --default-toolchain stable)'''
 Run-Remote $rustupCmd 900
 
-# ── Step 2a: Deploy user with restricted sudo ─────────────────────────────────
 Write-Host "`n=== Creating deploy user ===" -ForegroundColor Green
 Run-Remote "id deploy 2>/dev/null || adduser deploy --disabled-password --gecos ''"
 # Restricted sudo: only allowed to restart the backend and reload nginx — no shell escalation
@@ -245,22 +213,16 @@ Run-Remote "cat /root/.ssh/authorized_keys >> /home/deploy/.ssh/authorized_keys 
 Run-Remote "chown deploy:deploy /home/deploy/.ssh/authorized_keys && chmod 600 /home/deploy/.ssh/authorized_keys"
 Write-Host "deploy user created. After this run, use -User deploy for future deploys." -ForegroundColor DarkGray
 
-# ── Step 2a2: Locked-down SSH tunnel user (admin panel PRODUCTION mode) ────────
-# The tournament-admin panel reaches the never-public /admin/* API by forwarding
-# a local port to the backend's loopback (ssh -N -L 8091:127.0.0.1:8090). This
-# user is nologin and — via the sshd drop-in below — may ONLY forward to the
-# backend port. A leak of its key yields a port-forward, not a shell.
+# The admin tunnel user can forward only to backend loopback; nologin
+# and SSH restrictions prevent shell access.
 Write-Host "`n=== Creating SSH tunnel user ===" -ForegroundColor Green
 Run-Remote "id tunnel 2>/dev/null || adduser tunnel --disabled-password --shell /usr/sbin/nologin --gecos ''"
 Run-Remote "mkdir -p /home/tunnel/.ssh && chmod 700 /home/tunnel/.ssh && chown tunnel:tunnel /home/tunnel/.ssh"
 Run-Remote "cat /root/.ssh/authorized_keys >> /home/tunnel/.ssh/authorized_keys 2>/dev/null || true"
 Run-Remote "sort -u /home/tunnel/.ssh/authorized_keys -o /home/tunnel/.ssh/authorized_keys"
 Run-Remote "chown tunnel:tunnel /home/tunnel/.ssh/authorized_keys && chmod 600 /home/tunnel/.ssh/authorized_keys"
-# Append the forward-only policy to the END of sshd_config. It must be the LAST
-# block: a Match captures everything after it, and Ubuntu's `Include` sits ABOVE
-# the global directives, so a drop-in Match would wrongly scope those globals.
-# No ForceCommand — a forced command that exits would drop the -N port-forward;
-# the nologin shell already blocks interactive/command sessions. Idempotent via marker.
+# Append Match policy last so later global directives are not scoped by it.
+# Avoid ForceCommand: exiting would close the -N forward.
 Run-Remote @"
 if ! grep -q 'XFCHESS-TUNNEL-MATCH' /etc/ssh/sshd_config; then
 cat >> /etc/ssh/sshd_config << 'TUNEOF'
@@ -279,14 +241,12 @@ fi
 "@
 Write-Host "tunnel user created (nologin; may only forward to 127.0.0.1:8090)." -ForegroundColor DarkGray
 
-# ── Step 2b: SSH hardening (disable password auth, prohibit root password login) ──
 Write-Host "`n=== Hardening SSH ===" -ForegroundColor Green
 Run-Remote "sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config"
 Run-Remote "sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config"
 Run-Remote "sshd -t && (systemctl reload ssh 2>/dev/null || systemctl reload sshd)"
 Write-Host "Root password login disabled; key-based root access retained for this deploy." -ForegroundColor DarkGray
 
-# ── Step 2c: UFW firewall ─────────────────────────────────────────────────────
 Write-Host "`n=== Configuring UFW firewall ===" -ForegroundColor Green
 Run-Remote "ufw --force reset"
 Run-Remote "ufw default deny incoming"
@@ -300,11 +260,8 @@ Run-Remote "ufw --force enable"
 Run-Remote "ufw status verbose"
 Write-Host "UFW enabled: 22/80/443 open; 8090/9090/9100 internal only." -ForegroundColor DarkGray
 
-# ── Step 2d: node_exporter ────────────────────────────────────────────────────
 Write-Host "`n=== Installing node_exporter ===" -ForegroundColor Green
-# Single-quoted here-string: PowerShell must NOT expand ${NE_VER} — it's a remote
-# shell variable. (In a double-quoted here-string PS5.1 expands ${...}/$(...) even
-# behind a backslash, which mangled this URL and the backup cron below.)
+# Use a single-quoted here-string so PowerShell leaves remote shell variables untouched.
 Run-Remote @'
 if ! command -v node_exporter >/dev/null 2>&1; then
     NE_VER=1.8.2
@@ -336,7 +293,6 @@ systemctl daemon-reload && systemctl enable node_exporter && systemctl restart n
 "@
 Write-Host "node_exporter installed and running on 127.0.0.1:9100." -ForegroundColor DarkGray
 
-# ── Step 2e: Log rotation ─────────────────────────────────────────────────────
 Write-Host "`n=== Configuring log rotation ===" -ForegroundColor Green
 Run-Remote @"
 cat > /etc/logrotate.d/xfchess << 'LREOF'
@@ -361,21 +317,11 @@ Run-Remote "sed -i 's/^#\?RuntimeMaxUse=.*/RuntimeMaxUse=256M/' /etc/systemd/jou
 Run-Remote "systemctl restart systemd-journald"
 Write-Host "logrotate configured (14-day, daily); journald capped at 1 GB." -ForegroundColor DarkGray
 
-# ── Step 2f: Offsite backup (rclone → Backblaze B2) ──────────────────────────
 Write-Host "`n=== Setting up offsite backup ===" -ForegroundColor Green
 Run-Remote "command -v rclone >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq rclone)"
-# The rclone remote 'b2xfchess' must be configured manually once:
-#   ssh root@SERVER rclone config
-#   Choose: New remote -> name: b2xfchess -> type: b2 -> enter account/key
-# Daily 3am: SQLite .backup (online-safe) + non-SQLite data (signup/waitlist JSONL,
-# game archive) + rclone sync to B2, 7-day local retention.
-# Installed as a script rather than a crontab one-liner: a one-liner needs cron '%'
-# escaping AND survives PS5.1 here-string expansion of $()/${} — the previous
-# one-liner was silently mangled by exactly that (STAMP expanded to nothing).
-# NOTE on \" below: PS5.1 passes args to native exes (ssh) without escaping — bare
-# embedded " chars are eaten by the Windows argv parser and the command arrives
-# quote-less. Writing \" makes a literal " arrive on the server. Single-quoted
-# shell strings pass through untouched, so prefer ' where no expansion is needed.
+# Configure rclone remote b2xfchess once on the server. Install backup as
+# a script to avoid cron percent escaping and nested PowerShell expansion.
+# Escape embedded SSH quotes for Windows native argument parsing.
 Run-Remote @'
 cat > /opt/xfchess/backup.sh << 'EOF'
 #!/bin/sh
@@ -395,32 +341,16 @@ chmod +x /opt/xfchess/backup.sh
 Write-Host "Backup: 3am UTC daily via /opt/xfchess/backup.sh -> b2xfchess:xfchess-backups (db snapshots + JSONL + archive), 7-day local retention." -ForegroundColor DarkGray
 Write-Host "ACTION REQUIRED: run 'rclone config' on the server to set up the B2 remote." -ForegroundColor Yellow
 
-# ── Step 3: Sync source and build backend ─────────────────────────────────────
 if (-not $SkipBuild) {
     Write-Host "`n=== Syncing source and building backend on server ===" -ForegroundColor Green
-    # Clone into a clean dir: `git clone` fails if /opt/xfchess/src exists as a non-git
-    # dir (older layouts put the game src there), so remove a non-git dir first.
-    # A prior run's final chown leaves this owned by xfchess; root running git here
-    # otherwise trips git's dubious-ownership guard (CVE-2022-24765 protection).
+    # Root must trust this build-owned checkout to avoid Git ownership errors.
     Run-Remote "git config --global --add safe.directory /opt/xfchess/src"
     Run-Remote "if [ ! -d /opt/xfchess/src/.git ]; then rm -rf /opt/xfchess/src && git clone $remoteUrl /opt/xfchess/src; fi"
-    # -f: a prior server-side `cargo build` regenerates Cargo.lock in the worktree,
-    # which blocks a plain checkout ("local changes would be overwritten"). This
-    # checkout is disposable build state, not anyone's work — safe to force past.
-    # No --tags: the build only needs the target commit (reachable via branch refs),
-    # and fetching tags aborts the whole chain if a local tag ref (e.g. left over
-    # from a prior origin pointing at a different repo history) collides with a
-    # same-named tag pointing at a different commit upstream.
+    # The server checkout is disposable build state: force checkout past its
+    # regenerated lockfile. Fetch branch refs only to avoid unrelated tag conflicts.
     Run-Remote "cd /opt/xfchess/src && git fetch --all --prune && git checkout -f $commitHash && git reset --hard $commitHash && chown -R xfchess:xfchess /opt/xfchess/src" 900
-    # Build as the (nologin) xfchess user via -s /bin/bash, with cargo on PATH; this is a
-    # workspace, so build with -p backend from the repo root.
-    #
-    # Written to a script file and launched detached (nohup, redirected stdio,
-    # backgrounded) rather than run as a blocking foreground SSH command: a
-    # cold-cache build (new deps, e.g. after a vendored-crate swap) can run well
-    # past typical SSH/session limits, and a dropped connection SIGHUPs a
-    # foreground remote process, killing the build outright. A script file also
-    # sidesteps nested quoting through su -c / sh -c / ssh's own argv join.
+    # Build the workspace backend as xfchess with an explicit shell. Run a
+    # detached script so SSH disconnects cannot kill cold-cache compilation.
     Run-Remote @'
 cat > /opt/xfchess/build_backend.sh << 'BUILDEOF'
 #!/bin/sh
@@ -452,7 +382,6 @@ chown xfchess:xfchess /opt/xfchess/build_backend.sh
     Write-Host "Backend build succeeded (${buildElapsed}s)." -ForegroundColor Green
 }
 
-# ── Step 4: Snapshot databases + binary ──────────────────────────────────────
 Write-Host "`n=== Snapshotting databases ===" -ForegroundColor Green
 $ts = & ssh @SSH_ARGS $DEST 'date +%Y%m%d-%H%M%S'
 Run-Remote "mkdir -p /opt/xfchess/backups"
@@ -467,17 +396,12 @@ Run-Remote "cp /opt/xfchess/signing-server-http /opt/xfchess/signing-server-http
 
 if (-not $SkipBuild) {
     Write-Host "`n=== Installing Linux backend binary ===" -ForegroundColor Green
-    # Workspace target dir is at the repo root, not backend/target.
-    # Copy to a temp name + atomic rename: the target is the currently-running
-    # service's executable, and a plain in-place `cp` fails with "Text file busy"
-    # (Linux won't let you write into a busy inode). `mv` replaces the directory
-    # entry instead, which the kernel allows — the old process keeps running on
-    # its now-unlinked inode until `systemctl restart` below picks up the new one.
+    # Copy from the workspace target directory to a temporary name, then rename
+    # atomically; overwriting the running executable inode would fail.
     Run-Remote "cp /opt/xfchess/src/target/release/signing-server-http /opt/xfchess/signing-server-http.new && mv /opt/xfchess/signing-server-http.new /opt/xfchess/signing-server-http"
     Run-Remote "chmod +x /opt/xfchess/signing-server-http && chown xfchess:xfchess /opt/xfchess/signing-server-http"
 }
 
-# ── Step 5a: Upload keypair files ─────────────────────────────────────────────
 Write-Host "`n=== Uploading keypair files ===" -ForegroundColor Green
 Run-Remote "mkdir -p /opt/xfchess/keys && chmod 700 /opt/xfchess/keys"
 $keyFiles = @{
@@ -494,7 +418,7 @@ foreach ($src in $keyFiles.Keys) {
     }
 }
 
-# ── Step 5b: Upload .env (only if the server has none — never clobber prod secrets) ──
+# Upload .env only if absent; never overwrite production secrets.
 Write-Host "`n=== Checking .env ===" -ForegroundColor Green
 $envFile = "$ROOT\ops\backend\.env.production"
 $serverHasEnv = (& ssh @SSH_ARGS $DEST "test -f /opt/xfchess/.env && echo yes" 2>$null) -eq "yes"
@@ -510,9 +434,7 @@ if ($serverHasEnv) {
     Write-Host "  JWT_SECRET=<openssl rand -hex 32>"
     Write-Host "  IDENTITY_ENCRYPTION_KEY=<openssl rand -hex 32>"
     Write-Host "  IDENTITY_SALT=<openssl rand -hex 32>"
-    # Include the tournament-admin panel's Tauri origins so PRODUCTION mode (via
-    # the SSH tunnel) is not CORS-blocked. tauri.localhost = packaged WebView2;
-    # localhost:7454 = desktop panel served by the wallet bridge.
+    # Allow packaged Tauri and localhost:7454 origins for the admin panel’s SSH-tunneled API.
     Write-Host "  ALLOWED_ORIGINS=https://${TlsDomain},http://tauri.localhost,https://tauri.localhost,http://localhost:7454"
     Write-Host "  SESSION_DB_URL=sqlite:///opt/xfchess/data/sessions.db?mode=rwc"
     Write-Host "  VAULT_DB_URL=sqlite:///opt/xfchess/data/vault.db?mode=rwc"
@@ -520,27 +442,20 @@ if ($serverHasEnv) {
     Write-Host "  RUST_LOG=info,tower_http=warn"
 }
 
-# Defensive: strip a UTF-8 BOM from .env if present. systemd's EnvironmentFile
-# silently ignores the first line when it starts with a BOM (this took the backend down).
+# Strip UTF-8 BOMs: systemd otherwise ignores the first EnvironmentFile line.
 Run-Remote "sed -i '1s/^\xEF\xBB\xBF//' /opt/xfchess/.env 2>/dev/null || true"
 
-# ── Step 6: Install systemd service ──────────────────────────────────────────
 Write-Host "`n=== Installing systemd service ===" -ForegroundColor Green
 Upload "$ROOT\ops\backend\xfchess-backend.service" "/etc/systemd/system/xfchess-backend.service"
 Run-Remote "systemctl daemon-reload"
 Run-Remote "systemctl enable xfchess-backend"
 Run-Remote "systemctl restart xfchess-backend"
 
-# ── Step 7: Upload frontend ───────────────────────────────────────────────────
 Write-Host "`n=== Uploading frontend ===" -ForegroundColor Green
 Upload "$ROOT\xfchessdotcom\dist\*" "/opt/xfchess/web/"
-# scp/sftp can create subdirectories (assets/, fonts/) as owner-only (700),
-# which silently blocks nginx (runs as www-data, not xfchess) from traversing
-# them — every asset request then 404s internally and falls back to
-# index.html, served as text/html instead of the real JS/CSS MIME type.
+# SCP may create directories with mode 700; nginx needs permission to traverse them.
 Run-Remote "chmod -R o+rX /opt/xfchess/web"
 
-# ── Step 8: Configure nginx ───────────────────────────────────────────────────
 Write-Host "`n=== Configuring nginx ===" -ForegroundColor Green
 Run-Remote "mkdir -p /etc/nginx/conf.d"
 Upload "$ROOT\ops\nginx\xfchess_rate_limit.conf" "/etc/nginx/conf.d/xfchess_rate_limit.conf"
@@ -556,13 +471,8 @@ if ($Domain) {
     $certR = Safe-Ssh "test -f /etc/letsencrypt/live/$Domain/fullchain.pem && echo yes" 60 2
     $certExists = (($certR.Output + $certR.Error) -join "`n") -match 'yes'
     if (-not $certExists) {
-        # Chicken-and-egg: the just-uploaded xfchess config's HTTPS block already
-        # references /etc/letsencrypt/live/$Domain/fullchain.pem, which doesn't
-        # exist until certbot runs — so `nginx -t` on the real config fails and
-        # nothing ever reloads to serve the ACME webroot. Swap in an HTTP-only
-        # bootstrap config just for the challenge; the real config (already on
-        # disk at sites-available/xfchess) gets symlinked back and reloaded below
-        # once the cert exists.
+        # Use an HTTP-only ACME bootstrap until the certificate exists; the real
+        # HTTPS config cannot pass nginx validation before certificate creation.
         Run-Remote @"
 cat > /etc/nginx/sites-available/xfchess-bootstrap << 'BOOTEOF'
 server {
@@ -580,9 +490,7 @@ nginx -t && systemctl reload nginx
         Run-Remote "ln -sf /etc/nginx/sites-available/xfchess /etc/nginx/sites-enabled/xfchess"
     }
     Run-Remote "nginx -t && systemctl reload nginx && systemctl restart nginx"
-    # Auto-renew hook
-    # Single-quoted PS string ('' = literal '); \" becomes a literal " on the server
-    # (PS5.1 native-arg passing eats bare embedded quotes)
+    # Escape server quotes for PS5.1 native argument passing; keep remote expansion literal.
     Run-Remote '(crontab -l 2>/dev/null | grep -v certbot; echo ''0 2 * * 1 certbot renew --quiet --post-hook \"systemctl reload nginx\"'') | crontab -'
     Write-Host "Certbot renewal cron: every Monday 2am UTC." -ForegroundColor DarkGray
 } else {
@@ -601,13 +509,8 @@ test -f /etc/letsencrypt/live/${Server}/fullchain.pem || \
     Write-Host "Self-signed cert installed. For production, pass -Domain your.domain.com and rerun." -ForegroundColor Yellow
 }
 
-# ── Step 9: Deploy monitoring stack (Prometheus/Grafana/Alertmanager) ─────────
-# ops/monitoring/setup.sh is idempotent and reads from the already-checked-out
-# repo at /opt/xfchess/src (Step 3), so this always matches the commit that
-# was just deployed and never fights with itself over which copy is which.
-# Docker commands need real root (the restricted `deploy` user is
-# deliberately NOT in the docker group — that group is root-equivalent, and
-# extending it here would undo the whole point of deploy's restricted sudo).
+# Run monitoring setup from the deployed commit as root. Keep the restricted
+# deploy user out of the root-equivalent Docker group.
 Write-Host "`n=== Deploying monitoring stack ===" -ForegroundColor Green
 if ($User -eq "root") {
     Run-Remote "cd /opt/xfchess/src/ops/monitoring && chmod +x setup.sh && ./setup.sh" 1800
@@ -617,13 +520,10 @@ if ($User -eq "root") {
     Write-Host "Skipping monitoring stack update — re-run with -User root to (re)provision it." -ForegroundColor DarkGray
 }
 
-# ── Step 10: Verify ───────────────────────────────────────────────────────────
 Write-Host "`n=== Verifying deployment ===" -ForegroundColor Green
 Start-Sleep -Seconds 3
 $proto = "https"
-# -SkipCertificateCheck only exists on PS6+; on Windows PowerShell 5.1 (this
-# machine) it's a binding error and every check below "fails". Splat it on PS6+,
-# and trust-all at the ServicePoint level on 5.1 (self-signed cert deploys).
+# Use -SkipCertificateCheck on PS6+; PS5.1 requires ServicePoint configuration.
 $skipCert = @{}
 if ($PSVersionTable.PSVersion.Major -ge 6) {
     $skipCert = @{ SkipCertificateCheck = $true }
@@ -631,10 +531,7 @@ if ($PSVersionTable.PSVersion.Major -ge 6) {
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 }
-# The backend and nginx were *just* restarted. Instead of firing one request and
-# misreporting a cold-start hiccup as a failed deploy (seen: weird connection
-# errors while the service was actually coming up), wait up to ~60s for /readyz
-# to return 200, then report real status codes for every check.
+# Allow up to 60 seconds for /readyz after restarting the backend.
 $ready = $null
 for ($i = 0; $i -lt 12; $i++) {
     try {

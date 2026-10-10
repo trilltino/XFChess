@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# Assemble, sign, notarize, staple and DMG-package XFChess.app on macOS.
-# Run on a macOS runner after `cargo build --release` has produced the binaries.
-#
-# Required env (see docs/PUBLISHING.md):
-#   APPLE_SIGNING_IDENTITY   "Developer ID Application: Name (TEAMID)"
-#   APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID
-# Optional:
-#   APP_VERSION (default 0.1.0)
+# Package built release binaries, sign, and notarize XFChess.app.
+# Signing environment: APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD,
+# APPLE_TEAM_ID; see docs/PUBLISHING.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -106,9 +101,7 @@ fi
 echo "==> Building DMG"
 DMG="$ROOT/release/XFChess-${VERSION}.dmg"
 rm -f "$DMG"
-# An Applications symlink alongside the .app is what makes the mounted DMG
-# show a drag-to-install target — without it the window contains only the
-# app icon and there's nothing to drag it onto.
+# Add an Applications symlink to give the DMG a drag-to-install target.
 ln -sf /Applications "$STAGE/Applications"
 hdiutil create -volname "XFChess" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 

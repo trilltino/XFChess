@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-// Custom title bar for the borderless (decorations: false) tournament-admin
-// window — Tauri draws no OS chrome at all once decorations are off, so this
-// replaces it: a drag region plus minimize/maximize/close buttons.
+// Provide dragging and window controls because the borderless window has no OS title bar.
 export default function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const appWindow = getCurrentWindow();

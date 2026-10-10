@@ -94,10 +94,8 @@ impl SharedMatchmakingState {
     }
 }
 
-// `Default` is for tests only — it points at devnet with a placeholder
-// program id and a lazy, never-connected in-memory pool, which is fine in
-// isolation but must never be used to build the real `AppState` (use
-// `SharedMatchmakingState::new` there instead).
+// Default builds isolated test state only; construct production matchmaking
+// with SharedMatchmakingState::new.
 impl Default for SharedMatchmakingState {
     fn default() -> Self {
         let program_id = solana_sdk::pubkey::Pubkey::new_from_array([0u8; 32]);

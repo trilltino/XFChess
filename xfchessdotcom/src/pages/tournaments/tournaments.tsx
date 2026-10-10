@@ -76,9 +76,7 @@ export function Tournaments() {
         };
     }, []);
 
-    // Anything finished or cancelled is dropped. Scheduled events sort by
-    // start time; live ones sort to the top; unscheduled ones sink to the
-    // bottom under their own heading rather than being hidden.
+    // Exclude terminal events; show live first, then scheduled by time, then unscheduled.
     const { groups, unscheduled, live } = useMemo(() => {
         const rows = (tournaments ?? []).filter((t) => {
             const s = t.status.toLowerCase();
@@ -154,9 +152,7 @@ export function Tournaments() {
     );
 }
 
-// Rows are not links: /tournament/:id (detail, standings, play) was removed
-// along with the rest of the non-core pages, so there is nowhere to click
-// through to. Entry happens in the desktop client.
+// Tournament entry happens in the desktop client; rows have no detail-page links.
 function EventRow({ t, now, live }: { t: TournamentSummaryResponse; now: number; live?: boolean }) {
     const full = t.registered >= t.max_players;
     return (

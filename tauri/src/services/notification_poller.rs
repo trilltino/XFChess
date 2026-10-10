@@ -36,7 +36,6 @@ pub fn start_poller(
           None => continue,
         };
 
-        // ── Poll tournaments ─────────────────────────────────────────
         match poll_tournaments(&backend_url).await {
           Ok(tournaments) => {
             for t in tournaments {
@@ -61,7 +60,6 @@ pub fn start_poller(
           Err(e) => tracing::debug!("[Poller] Tournament poll: {}", e),
         }
 
-        // ── Poll matchmaking status ──────────────────────────────────
         match poll_matchmaking(&backend_url, &pubkey).await {
           Ok(status) => {
             let mut s = state.lock().unwrap();
@@ -84,7 +82,6 @@ pub fn start_poller(
   });
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
 
 fn notify(app: &AppHandle, title: &str, body: &str) {
   if let Err(e) = app.notification().builder().title(title).body(body).show() {

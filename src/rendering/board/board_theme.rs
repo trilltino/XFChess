@@ -20,7 +20,6 @@ pub fn update_board_theme_system(
 
     let (light_color, dark_color) = settings.board_theme.colors();
 
-    // Update material assets
     if let Some(light_mat) = materials.get_mut(&square_materials.black_color) {
         light_mat.base_color = light_color;
     }

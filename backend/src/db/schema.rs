@@ -73,7 +73,6 @@ async fn create_tables(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
-    // Create indexes for performance
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_games_start_time ON games(start_time)")
         .execute(pool)
         .await?;

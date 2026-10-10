@@ -137,9 +137,7 @@ impl SwissMessage {
                 })
             }
             TournamentResource::Results { .. } => {
-                // The results log is append-only: a live update is an
-                // `add /-` patch carrying the one new entry. A snapshot is
-                // the whole log, whose last entry is the newest result.
+                // Live results arrive as add /- patches; snapshots contain the full append-only log.
                 let entry = if is_snapshot {
                     body.as_array()?.last()?.clone()
                 } else {
@@ -280,8 +278,7 @@ mod tests {
 
     #[test]
     fn pairings_carry_round_from_the_path() {
-        // The round used to travel inside the message tag; now the path is
-        // the only thing that says which round these pairings belong to.
+        // The resource path identifies the pairing round.
         let body = json!([{ "white": "a", "black": "b", "board": 1, "game_id": 77 }]);
         let msg = SwissMessage::from_braid("tournament/9/pairings/3", &body, true)
             .expect("pairings snapshot should decode");

@@ -57,10 +57,8 @@
             frame.style.display = 'block';
         };
         
-        // Handle messages from the wallet UI
         window.addEventListener('message', function(event) {
             if (event.data === 'wallet-connected') {
-                // Close popup after wallet connection
                 setTimeout(function() {
                     if (window.__TAURI__) {
                         window.close();

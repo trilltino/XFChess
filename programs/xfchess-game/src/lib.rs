@@ -1,18 +1,7 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::cpi::undelegate_account;
-// ---------------------------------------------------------------------------
-// Solana security.txt metadata (mirrors the Raydium CLMM / CP-Swap / AMM pattern)
-// ---------------------------------------------------------------------------
-// Expands to a `#[no_mangle]` static in the `.security.txt` ELF section on BPF
-// targets, so explorers and `query-security-txt` read it straight off the
-// deployed program. Two macro constraints that already broke this build once:
-//   * the matcher is `($($name:ident: $value:expr),*)` - a trailing comma after
-//     the final field is a hard "unexpected end of macro invocation" error;
-//   * every `contacts` entry must be `<type>:<info>`, with type one of
-//     email | link | discord | telegram | twitter | other.
-// Values below are the canonical ones from SECURITY.md at the repo root.
-// `auditors` stays "None" until the external audit is signed off; then set it to
-// "<auditor>:<report url>".
+// Emit explorer-readable security.txt metadata from SECURITY.md. The macro
+// rejects a trailing comma, and contact entries require a supported type prefix.
 #[cfg(not(feature = "no-entrypoint"))]
 solana_security_txt::security_txt! {
     name: "XFChess",
@@ -89,17 +78,9 @@ pub use tournament_ix::{
     SessionJoinGame, StartTournament, SwissMatchResult,
 };
 
-// ---------------------------------------------------------------------------
-// Anchor client-account re-exports (required macro glue — DO NOT REMOVE)
-// ---------------------------------------------------------------------------
-// Anchor's `#[derive(Accounts)]` macro generates `pub(crate)` modules named
-// `__client_accounts_<instruction>` beside each accounts struct. The Anchor
-// instruction dispatcher and IDL builder expect these to be reachable from the
-// crate root. Because they are `pub(crate)`, we create thin `pub mod` wrappers
-// here that re-export their contents. This is boilerplate — not business logic.
-// These modules will appear grayed-out in the IDE because nothing in Rust code
-// calls them directly; they are consumed by Anchor's generated entrypoint.
-// See: https://github.com/coral-xyz/anchor/issues/2697 (E0365 workaround)
+// Anchor-generated client account modules must be reachable from the crate
+// root. Re-export wrappers expose their pub(crate) contents to the dispatcher
+// and IDL builder. See https://github.com/coral-xyz/anchor/issues/2697.
 pub mod __client_accounts_init_profile {
     pub use crate::account_ix::profile::__client_accounts_init_profile::*;
 }
@@ -311,37 +292,23 @@ pub mod __client_accounts_update_config {
 #[allow(unused_imports)]
 use ephemeral_rollups_sdk::anchor::MagicProgram;
 
-// ---------------------------------------------------------------------------
-// Program ID - environment-gated (mirrors the Raydium devnet/mainnet split)
-// ---------------------------------------------------------------------------
-// localnet and devnet share a single deployment address: Anchor.toml pins
-// 8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU under both [programs.localnet]
-// and [programs.devnet].
+// Localnet and devnet share the deployment address pinned in Anchor.toml.
 #[cfg(any(feature = "localnet", feature = "devnet"))]
 declare_id!("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU");
 
-// No environment feature selected (bare `cargo check`, host-side unit tests):
-// fall back to the devnet address, matching the `pda_keys` fallback in
-// constants.rs so the program ID and the authority keys can never disagree.
+// Without an environment feature, use the devnet ID to match the authority-key fallback.
 #[cfg(not(any(feature = "localnet", feature = "devnet", feature = "mainnet")))]
 declare_id!("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU");
 
-// mainnet: not deployed yet, so the address is unknown. `pubkey!` (and therefore
-// `declare_id!`) only accepts a base58 *literal* - it expands to
-// `Pubkey::from_str_const`, so it cannot be sourced from an env var at build
-// time. A syntactically valid placeholder is declared instead; it decodes to the
-// ASCII bytes "XFChessMainnetProgramIdNotSetYet" and exists only so that a
-// mainnet build fails with the single clear guard message below rather than a
-// cascade of "cannot find value `ID`" errors from every PDA derivation here.
+// declare_id requires a literal. This mainnet placeholder lets the guard
+// emit one clear error until the deployed address is configured.
 #[cfg(all(
     feature = "mainnet",
     not(any(feature = "localnet", feature = "devnet"))
 ))]
 declare_id!("6wb25gLcgp7xNXhArZrSndcJiqx6vc7oKB1MJoWhtCFd");
 
-// Hard build guard. A panicking `const` initializer is evaluated at compile
-// time, so `--features mainnet` / `--features production` cannot build until the
-// real address above is filled in and constants.rs `_MAINNET_KEY_GUARD` passes.
+// Reject mainnet builds until the program address and authority keys are configured.
 #[cfg(all(
     feature = "mainnet",
     not(any(feature = "localnet", feature = "devnet"))
@@ -396,7 +363,6 @@ pub mod xfchess_game {
         )
     }
 
-    // ── Solana Friends ────────────────────────────────────────────────────────
 
     pub fn send_friend_request(ctx: Context<SendFriendRequest>) -> Result<()> {
         crate::account_ix::friends_ix::send_request(ctx)
@@ -583,11 +549,7 @@ pub mod xfchess_game {
             &ctx.accounts.payer,
             &ctx.accounts.system_program,
         ];
-        // ephemeral_rollups_sdk::cpi::undelegate_account (0.16.2, our pinned
-        // version) already rejects a buffer that isn't this specific account's
-        // own canonical undelegate-buffer PDA internally (see
-        // is_canonical_undelegation_buffer in the SDK's cpi.rs) — no need to
-        // duplicate that check here.
+        // The SDK undelegate_account CPI validates the canonical buffer PDA.
         undelegate_account(
             delegated_account,
             &id(),
@@ -800,7 +762,6 @@ pub mod xfchess_game {
         crate::tournament_ix::matches::complete_swiss::handler(ctx, tournament_id)
     }
 
-    // ── Tournament-scoped session delegation ───────────────────────────────
 
     pub fn authorize_tournament_session(
         ctx: Context<AuthorizeTournamentSessionCtx>,
@@ -854,7 +815,6 @@ pub mod xfchess_game {
         crate::tournament_ix::session::session_join_game::handler(ctx, tournament_id, game_id)
     }
 
-    // ── Global persistent session delegation ──────────────────────────────────
 
     pub fn authorize_global_session(
         ctx: Context<AuthorizeGlobalSessionCtx>,
@@ -899,7 +859,6 @@ pub mod xfchess_game {
         crate::account_ix::treasury::handler(ctx, amount)
     }
 
-    // ── Player Session ────────────────────────────────────────────────────────
 
     pub fn create_session(
         ctx: Context<CreateSession>,
@@ -921,7 +880,6 @@ pub mod xfchess_game {
         crate::account_ix::fee_vault_ix::handler_revoke_session(ctx)
     }
 
-    // ── ELO Update ────────────────────────────────────────────────────────────
 
     pub fn update_elo(
         ctx: Context<UpdateElo>,
@@ -943,7 +901,6 @@ pub mod xfchess_game {
         )
     }
 
-    // ── Crank (Scheduled Tasks) ─────────────────────────────────────────────────
 
     #[cfg(feature = "cranks")]
     pub fn schedule_time_check(

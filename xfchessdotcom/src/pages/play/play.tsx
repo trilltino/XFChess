@@ -8,9 +8,7 @@ const GITHUB_REPO = 'trilltino/XFChess';
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 const INSTRUCTIONS_URL = `https://github.com/${GITHUB_REPO}/blob/main/docs/INSTALL.md`;
 
-// Asset filenames embed the version (e.g. XFChess-Setup-1.2.0.exe), so a
-// direct link can't be hardcoded — resolve the latest release via the GitHub
-// API and match by pattern, per docs/INSTALL.md's documented naming scheme.
+// Resolve versioned asset names from the latest GitHub release; see docs/INSTALL.md.
 const ASSET_PATTERNS: Record<'windows' | 'macos' | 'linux' | 'chromeos', RegExp> = {
   windows: /^XFChess-Setup-.*\.exe$/i,
   macos: /^XFChess-.*\.dmg$/i,
@@ -19,9 +17,7 @@ const ASSET_PATTERNS: Record<'windows' | 'macos' | 'linux' | 'chromeos', RegExp>
 };
 
 const downloadPlatform = async (platform: 'windows' | 'macos' | 'linux' | 'chromeos') => {
-  // Redirect the current page straight to the asset. GitHub serves release
-  // assets with Content-Disposition: attachment, so this triggers a direct
-  // file download in place — no new tab, no intermediate page.
+  // Navigate to the asset; GitHub’s attachment header triggers a download.
   try {
     const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
     if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);

@@ -35,7 +35,6 @@ impl ChessPublisher {
         &self.current_version
     }
 
-    // ─── Public API ──────────────────────────────────────────────────────────
 
     pub async fn publish_move(&mut self, payload: &MovePayload) -> Result<(), BraidChessError> {
         let new_version = Version::new(version_hash(&payload.fen_after, payload.move_number));
@@ -96,7 +95,6 @@ impl ChessPublisher {
             .await
     }
 
-    // ─── Internal ────────────────────────────────────────────────────────────
 
     async fn put(
         &mut self,

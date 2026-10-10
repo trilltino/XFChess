@@ -1,8 +1,4 @@
--- Migration 018: puzzle pool + per-user solve records + admin-funded bounties.
---
--- See docs/PUZZLES.md. The earn model is admin-prefunded bounties only:
--- an operator funds a puzzle (or band / daily) with the VPS authority key, and
--- a server-verified solve pays the posted reward. No staking, no ladder.
+-- Admin-prefunded bounties pay only after server-verified solves. See docs/PUZZLES.md.
 
 -- The pool. `line` is SERVER-ONLY and must never be serialised to a client
 -- response. Treat it like a secret.
@@ -49,9 +45,7 @@ CREATE TABLE IF NOT EXISTS puzzle_ratings (
     updated_at  INTEGER NOT NULL
 );
 
--- An in-progress solve the server has committed to. Makes server-side
--- verification possible: we record which puzzle we served and a nonce, so the
--- solve submission can't be forged or replayed.
+-- Bind each solve to its served puzzle and nonce to prevent forgery and replay.
 CREATE TABLE IF NOT EXISTS puzzle_challenges (
     nonce       TEXT PRIMARY KEY,        -- random, returned to client
     wallet      TEXT NOT NULL,
@@ -63,9 +57,7 @@ CREATE TABLE IF NOT EXISTS puzzle_challenges (
     progress    INTEGER NOT NULL DEFAULT 0  -- verified player moves so far (interactive /puzzle/move)
 );
 
--- Admin-funded bounties. An admin selects a puzzle (or rating band) in the
--- tournament-admin app and locks SOL against it, drawn from and signed by the
--- VPS authority key. A server-verified solve pays from this budget.
+-- Admin-funded puzzle bounties use the VPS authority key; verified solves spend this budget.
 CREATE TABLE IF NOT EXISTS puzzle_bounties (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     scope           TEXT NOT NULL,           -- 'puzzle' | 'band' | 'daily'

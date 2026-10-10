@@ -240,7 +240,6 @@ fn publish_local_move(
         let move_number = session.next_move_number;
         let nonce = session.next_nonce;
 
-        // Build UCI string.
         let from_file = (b'a' + event.from.0) as char;
         let from_rank = event.from.1 + 1;
         let to_file = (b'a' + event.to.0) as char;
@@ -262,23 +261,9 @@ fn publish_local_move(
         let new_version = braid_chess::version_hash(&event.next_fen, move_number);
         session.last_published_move_version = new_version.clone();
 
-        // signer_pubkey = the sender's gossip-signing public key (derived from
-        // `session_signing_key`, the same seed `SignedNetworkMessage::sign`
-        // uses) — NOT the iroh node id. This has to be the *claimed* value
-        // that will match what the roster (populated from
-        // `SessionInfo.signing_pubkey`, see `integration/systems.rs`)
-        // expects, because it's only overwritten with the cryptographically
-        // *verified* signer when a message arrives over gossip
-        // (`bind_identity`, in `multiplayer::systems`). Braid-delivered
-        // moves (`braid_transport`) bypass this roster/signature check
-        // entirely — they're already authenticated and causally validated
-        // by the backend (`game_log.rs`), a different, equally real trust
-        // boundary. Using the iroh node id here (as a prior version did)
-        // meant a relay-delivered move's `signer_pubkey` could never equal the
-        // gossip-signing-keyed roster, failing the "non-participant signer"
-        // check for every move that arrived via the old relay — which, per
-        // every P2P timeout observed this
-        // session, is effectively every move.
+        // Use the gossip signing key, not the Iroh node ID, for signer_pubkey. Gossip
+        // verifies it against the participant roster; Braid moves are authenticated and
+        // causally validated by the backend.
         let signer_pubkey = network_state
             .session_signing_key
             .map(|seed| {
@@ -306,11 +291,7 @@ fn publish_local_move(
             .map(|id| bs58::encode(id.as_bytes()).into_string())
             .unwrap_or_default();
 
-        // See `braid_sender_identity` — an on-chain game needs the wallet
-        // pubkey (checked against `Game.white`/`black`), a casual game needs
-        // the Iroh node id (checked against the relay's JOIN_ACK pair).
-        // Sending the wrong kind gets the move rejected with 403, silently
-        // killing the Braid fallback exactly when gossip needs it.
+        // Use wallet identity for on-chain games and Iroh identity for casual JOIN_ACK rosters.
         #[cfg(feature = "solana")]
         let braid_sender_identity =
             braid_sender_identity(solana_state.as_ref(), game_sync.as_ref(), &node_b58);
@@ -321,11 +302,8 @@ fn publish_local_move(
         #[cfg(not(feature = "solana"))]
         let braid_session_token = String::new();
 
-        // Dual transport: also PUT to the Braid moves log so the move lands
-        // (and is durably recorded) even when the Iroh gossip link isn't
-        // established. The opponent dedups cross-transport via
-        // `CausalChainState::applied_versions` — see `braid_transport`'s
-        // module doc comment.
+        // Also persist moves through Braid; receivers deduplicate transport copies
+        // using applied_versions.
         crate::multiplayer::network::braid_transport::publish_move(
             session.base_url.clone(),
             session.game_id.clone(),
@@ -440,9 +418,7 @@ fn handle_publish_resign(
             .as_ref()
             .map(|id| bs58::encode(id.as_bytes()).into_string())
             .unwrap_or_default();
-        // See the matching comment in `publish_local_move` — `resign` is
-        // also participant-checked server-side, so an on-chain game needs
-        // the wallet pubkey here and a casual game the Iroh node id.
+        // Use wallet identity for on-chain games and Iroh identity for casual participant checks.
         #[cfg(feature = "solana")]
         let braid_sender_identity =
             braid_sender_identity(solana_state.as_ref(), game_sync.as_ref(), &node_b58);

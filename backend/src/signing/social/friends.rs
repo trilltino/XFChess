@@ -227,7 +227,6 @@ impl FriendManager {
             .await?;
 
         if accept {
-            // Create bidirectional contact entries
             let now_str = now.to_rfc3339();
             let responder_display = responder_node_id; // fallback; caller can override later
             sqlx::query(

@@ -384,8 +384,7 @@ impl SwissOrchestrator {
     }
 
     fn lookup_game_id_sync(&self, tournament_id: u64, round: u8, board: u16) -> u64 {
-        // This is called in a context where we already hold references,
-        // so we use try_read to avoid deadlock.
+        // Use try_read because this context already holds references and could deadlock.
         if let Ok(inner) = self.state.inner.try_read() {
             for game in inner.games.values() {
                 if game.tournament_id == tournament_id && game.round == round && game.board == board

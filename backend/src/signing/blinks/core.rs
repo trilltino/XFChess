@@ -134,9 +134,7 @@ pub async fn build_register_transaction(
     )?;
 
     let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
-    // Finalized: a blink is signed in the user's own wallet, which will only
-    // accept it if it can find the blockhash on its selected cluster — see
-    // `solana::wallet_signable_blockhash`.
+    // Wallet signing requires a finalized blockhash visible on the selected cluster.
     let blockhash = solana::wallet_signable_blockhash(&rpc)?;
 
     use solana_sdk::{message::Message, transaction::Transaction};
@@ -188,9 +186,7 @@ pub async fn build_claim_prize_transaction(
     let instruction = claim_prize_ix(program_id, tournament_id, claimant);
 
     let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
-    // Finalized: a blink is signed in the user's own wallet, which will only
-    // accept it if it can find the blockhash on its selected cluster — see
-    // `solana::wallet_signable_blockhash`.
+    // Wallet signing requires a finalized blockhash visible on the selected cluster.
     let blockhash = solana::wallet_signable_blockhash(&rpc)?;
 
     use solana_sdk::{message::Message, transaction::Transaction};
@@ -220,11 +216,7 @@ pub async fn build_start_tournament_transactions(
         .await
         .ok_or_else(|| anyhow::anyhow!("Tournament {} not found", tournament_id))?;
 
-    // One blockhash for the whole batch, fetched once on the blocking pool.
-    // This previously called the synchronous `get_latest_blockhash` once per
-    // transaction from an async fn — for a 256-player bracket that is 14 blocking
-    // round-trips holding a Tokio worker, and every transaction is broadcast
-    // together anyway, so they may as well share a blockhash.
+    // Fetch one shared blockhash on the blocking pool for the batch.
     let bh = tokio::task::spawn_blocking(|| {
         solana::make_rpc(&solana::rpc_url_or_devnet()).get_latest_blockhash()
     })
@@ -314,7 +306,7 @@ pub async fn check_wallet_balance(
     })
     .await??;
 
-    let required = tournament.entry_fee_lamports + 5000; // Entry fee + buffer
+    let required = tournament.entry_fee_lamports + 5000;
     let sufficient = balance >= required;
 
     Ok(BalanceResult {
@@ -369,11 +361,7 @@ pub async fn validate_registration(
         });
     }
 
-    // Get player ELO. `elo_rating` is stored centiscale (1200 Elo = 120000);
-    // without the conversion this compared raw centiscale against
-    // display-scale `tournament.elo_min`/`elo_max` below, so every real
-    // player's rating (e.g. 120000) failed the `> elo_max` check and got
-    // rejected from every ELO-gated tournament registration.
+    // Convert PlayerProfile centiscale Elo to the display scale used by tournament bounds.
     let wallet_str = wallet_pubkey.to_string();
     let cached_elo = elo_cache.get_elo(&wallet_str).await;
     let player_elo = match cached_elo {

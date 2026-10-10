@@ -51,7 +51,6 @@ pub fn version_hash(fen: &str, move_number: u32) -> String {
     hex::encode(digest) // 32 bytes = 64 hex chars
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

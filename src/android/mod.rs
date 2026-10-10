@@ -9,10 +9,7 @@ pub fn main() {
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
     );
 
-    // Must happen before any HTTP client is constructed — reqwest's `rustls`
-    // feature routes Android TLS verification through a Kotlin class that
-    // needs an Android Context first. See the Cargo.toml comment on the
-    // rustls-platform-verifier dependency for why this is not optional.
+    // Initialize AndroidContext before creating clients that use the platform verifier.
     if let Err(e) = platform::init_tls_verifier() {
         log::error!("[android] rustls-platform-verifier init failed: {e}");
     }

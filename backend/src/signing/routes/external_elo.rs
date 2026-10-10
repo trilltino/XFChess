@@ -12,7 +12,6 @@ use tracing::{error, info, warn};
 
 use crate::signing::{solana, AppState};
 
-// ── Request / Response types ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct LinkStartReq {
@@ -92,7 +91,6 @@ pub fn external_elo_routes() -> Router<AppState> {
         .route("/external-elo/sync", post(link_sync))
 }
 
-// ── Handlers ─────────────────────────────────────────────────────────────────
 
 async fn link_start(
     State(_state): State<AppState>,
@@ -186,7 +184,6 @@ async fn link_confirm(
         return Err((StatusCode::BAD_REQUEST, "Link expired".to_string()));
     }
 
-    // Fetch Lichess user profile
     let lichess_url = format!("https://lichess.org/api/user/{}", pending.username);
     let client = reqwest::Client::new();
     let response = client
@@ -224,7 +221,6 @@ async fn link_confirm(
         ));
     }
 
-    // Extract ratings
     let perfs = lichess_data.get("perfs").ok_or_else(|| {
         (
             StatusCode::BAD_GATEWAY,
@@ -277,7 +273,6 @@ async fn link_confirm(
         ));
     }
 
-    // Build and submit on-chain transaction
     let player_pk = Pubkey::from_str(&pending.pubkey)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid pubkey: {}", e)))?;
     let program_id = state.program_id;
@@ -345,7 +340,6 @@ async fn link_status(
     State(state): State<AppState>,
     Path(pubkey): Path<String>,
 ) -> Result<Json<ExternalEloStatus>, StatusCode> {
-    // Fetch on-chain profile via EloCache
     let on_chain = match state.elo_cache.get_elo(&pubkey).await {
         Ok(data) => data,
         Err(_) => {
@@ -391,7 +385,6 @@ async fn link_sync(
     let player_pk = Pubkey::from_str(&req.pubkey)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid pubkey: {}", e)))?;
 
-    // Fetch current on-chain ELO
     let old_elo = state
         .elo_cache
         .get_elo(&req.pubkey)
@@ -399,7 +392,6 @@ async fn link_sync(
         .map(|e| e.elo_rating / 100.0)
         .unwrap_or(1200.0);
 
-    // Fetch from backend DB to get the username
     let pool = state.store.pool();
     let db_link = fetch_link_from_db(pool.clone(), &req.pubkey)
         .await
@@ -410,7 +402,6 @@ async fn link_sync(
             )
         })?;
 
-    // Poll Lichess API
     let lichess_url = format!("https://lichess.org/api/user/{}", db_link.username);
     let client = reqwest::Client::new();
     let response = client
@@ -478,7 +469,6 @@ async fn link_sync(
         }
     };
 
-    // Update DB
     if let Err(e) = store_link_in_db(
         pool,
         &req.pubkey,
@@ -517,7 +507,6 @@ async fn link_sync(
     }))
 }
 
-// ── DB helpers ───────────────────────────────────────────────────────────────
 
 #[derive(sqlx::FromRow)]
 struct DbExternalEloLink {

@@ -1,20 +1,5 @@
-// SSH tunnel manager for PRODUCTION mode — thin wrapper over the Rust side.
-//
-// The tunnel's actual lifetime is owned by Rust (`ensure_admin_tunnel` /
-// `kill_admin_tunnel` in tauri/src/main.rs), not by this module. That is
-// deliberate: this file used to spawn and supervise `ssh.exe` itself, and had
-// no way to guarantee the process died. Closing the admin window or rebuilding
-// the UI dropped the JS reference but left the real process running, and those
-// orphans squatted port 8091 so every later tunnel failed to bind — which
-// surfaced as "tunnel down" even though SSH auth was working perfectly.
-//
-// Rust ties the child to app state plus window-close and app-exit hooks, so
-// orphans are structurally impossible rather than something to clean up by
-// hand. It also polls /health from Rust (no CORS) instead of guessing a fixed
-// timeout, and reports precise failures ("port held by another process",
-// "ssh exited: Permission denied") instead of one generic string.
-//
-// See docs/plans/tournament-admin-connection-rearchitecture.md §3 Phase 2.
+// Rust owns the SSH child lifetime and health polling. Invoke its tunnel API
+// so closing the window or app also closes the tunnel.
 
 import { invoke } from "@tauri-apps/api/core";
 import type { EnvConfig } from "../config/environments";
@@ -45,11 +30,8 @@ export function onTunnelState(cb: (s: TunnelState) => void): () => void {
 }
 
 /**
- * Ensure a working tunnel for `env`. No-op for environments without a tunnel
- * (LOCAL). Resolves once the backend answers /health through the forward, or
- * throws with the specific reason Rust reported.
- *
- * Idempotent — a healthy existing tunnel is reused rather than duplicated.
+ * Ensure a tunnel and resolve after backend health succeeds. Reuse healthy
+ * tunnels, no-op for LOCAL, and propagate specific Rust failures.
  */
 export async function ensureTunnel(env: EnvConfig): Promise<void> {
   lastError = null;

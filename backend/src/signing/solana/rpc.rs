@@ -42,7 +42,6 @@ pub fn redact_url(url: &str) -> String {
     }
 }
 
-// ── Circuit breaker for the primary endpoint ────────────────────────────────
 static PRIMARY_FAILURES: AtomicU32 = AtomicU32::new(0);
 static PRIMARY_OPEN_UNTIL: AtomicI64 = AtomicI64::new(0);
 

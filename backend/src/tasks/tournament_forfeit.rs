@@ -23,10 +23,8 @@ pub fn spawn_tournament_forfeit_watcher(state: Arc<AppState>) {
         let mut ticker = tokio::time::interval(FORFEIT_TICK);
         ticker.tick().await; // skip the immediate first tick
 
-        // (tournament_id, player wallet pubkey) -> first observed offline.
-        // Owned by this task's loop — rebuilt fresh every tick from whoever
-        // is *still* offline and unresolved, so a reconnect or a completed
-        // pairing naturally drops out instead of needing explicit cleanup.
+        // Track first-offline time per tournament/player. Rebuild each tick so
+        // reconnected players and resolved matches drop out.
         let mut offline_since: HashMap<(u64, String), Instant> = HashMap::new();
 
         loop {
@@ -55,7 +53,6 @@ async fn run_tick(
             continue;
         }
 
-        // ── Single-elimination ────────────────────────────────────────────
         if t.format == TournamentFormat::SingleElimination {
             let Some(round) = t.current_round() else {
                 continue;
@@ -89,11 +86,8 @@ async fn run_tick(
                         continue;
                     }
 
-                    // Both offline? Forfeit only one per tick — awarding the
-                    // match to a player who is also gone would advance a
-                    // no-show and stall the *next* round instead. The
-                    // opponent gets the same treatment on a later tick if
-                    // they're still absent when they're due to play.
+                    // Forfeit one player per tick when both are offline, avoiding immediate
+                    // advancement of a second absent player.
                     info!(
                         "[tournament-forfeit] auto-forfeiting {} in single-elim tournament {} \
                          match {} round {} (offline {}s) — awarding to {}",
@@ -118,7 +112,6 @@ async fn run_tick(
             continue;
         }
 
-        // ── Swiss ─────────────────────────────────────────────────────────
         let Some(sd) = t.swiss_data.as_ref() else {
             continue;
         };
@@ -175,9 +168,7 @@ async fn run_tick(
                         );
                         still_offline.insert(key, since); // retry next tick
                     }
-                    // On success, deliberately not re-tracked: `has_result`/
-                    // `absent_players` above will exclude this pairing from
-                    // now on, so there's nothing left to retry.
+                    // Successful pairings are excluded by has_result/absent_players and need no retry.
                 } else {
                     still_offline.insert(key, since);
                 }

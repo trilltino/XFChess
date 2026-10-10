@@ -141,14 +141,9 @@ fn find_event<T: AnchorDeserialize + Discriminator>(logs: &[String]) -> Option<T
     None
 }
 
-// ── recover_stuck_delegation ────────────────────────────────────────────────
 
-// docs/PRE_MAINNET_E2E_PLAN.md §6.1: these three tests need the real
-// dispute_authority signer (`keys/dispute_authority.json`, gitignored, not
-// present on a fresh clone or CI runner) — `#[ignore]` makes that show up as
-// an explicit skip in `cargo test`'s summary ("N ignored") instead of
-// silently folding into "N passed" via an easy-to-miss `eprintln!`. Run with
-// `cargo test -- --ignored` once the keyfile is provisioned locally/in CI.
+// Ignored tests require the real dispute authority key. Provision the
+// keyfile, then run cargo test -- --ignored.
 
 #[tokio::test]
 #[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/PRE_MAINNET_E2E_PLAN.md §1.5/§6.1"]
@@ -320,14 +315,8 @@ async fn recover_stuck_delegation_rejects_wrong_authority() {
     );
 }
 
-// ── request_force_undelegate / force_undelegate_after_timeout guards ──────
-//
-// Both instructions CPI into the real MagicBlock delegation program, so
-// their happy paths need a live ER. What's covered here mirrors
-// `er_delegation_tests.rs`'s existing `undelegate_rejects_spoofed_*` tests:
-// the `address =` constraints on `owner_program` / `delegation_program`
-// reject before any CPI runs, independent of what the other (delegation-
-// program-owned) accounts contain.
+// Test owner_program and delegation_program address guards before CPI.
+// Successful recovery requires the live delegation program.
 
 #[tokio::test]
 async fn request_force_undelegate_rejects_spoofed_owner_program() {

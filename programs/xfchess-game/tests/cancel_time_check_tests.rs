@@ -46,10 +46,8 @@ async fn cancel_time_check_rejects_spoofed_magic_program() {
 
 #[tokio::test]
 async fn cancel_time_check_accepts_canonical_magic_program_account_shape() {
-    // Not a full happy-path assertion (no live MagicBlock program is loaded
-    // in-process, so the CPI itself will fail) — this only proves the
-    // instruction gets past account validation and reaches the CPI, i.e. the
-    // account list/seeds/discriminator are wired correctly end-to-end.
+    // These tests reach CPI validation; a live MagicBlock validator is required
+    // to exercise successful cancellation.
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 

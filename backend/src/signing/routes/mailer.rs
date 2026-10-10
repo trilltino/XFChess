@@ -6,7 +6,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use tracing::{error, info, warn};
 
-// ── Requests ────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize, Serialize, Default)]
 pub struct SignUpRequest {
@@ -33,7 +32,6 @@ pub struct MailJob {
     pub name: Option<String>,
 }
 
-// ── Templates ───────────────────────────────────────────────────────────────
 
 pub enum EmailKind<'a> {
     Confirmation { name: &'a str },
@@ -93,7 +91,6 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-// ── Core send (the only provider-specific code) ─────────────────────────────
 
 pub async fn send_email(to: &str, kind: EmailKind<'_>) -> Result<bool, String> {
     let api_key = match env::var("RESEND_API_KEY") {
@@ -135,7 +132,6 @@ pub async fn send_email(to: &str, kind: EmailKind<'_>) -> Result<bool, String> {
     }
 }
 
-// ── Storage (never lose a signup, even if email fails) ──────────────────────
 
 fn append_jsonl(file: &str, value: &impl Serialize) {
     let path = PathBuf::from("data").join(file);
@@ -176,7 +172,6 @@ fn valid_email(email: &str) -> bool {
             .unwrap_or(false)
 }
 
-// ── Durable delivery (job queue) ────────────────────────────────────────────
 
 async fn enqueue_email(
     pool: &sqlx::SqlitePool,
@@ -212,12 +207,10 @@ pub async fn handle_email_job(job: crate::tasks::queue::Job) -> Result<(), Strin
         },
         other => return Err(format!("unknown email template '{other}'")),
     };
-    // Ok(false) = no API key configured: logged inside send_email; treat as done so
-    // dev environments don't fill the DLQ. Provider errors → Err → bounded retries.
+    // No email key is a completed no-op in development; provider errors receive bounded retries.
     send_email(&mail.email, kind).await.map(|_| ())
 }
 
-// ── HTTP handlers ───────────────────────────────────────────────────────────
 
 pub async fn send_confirmation(
     State(app): State<crate::signing::AppState>,

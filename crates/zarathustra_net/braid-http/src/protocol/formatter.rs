@@ -41,9 +41,7 @@ pub fn format_update(update: &Update) -> Result<Bytes> {
     }
 
     match (&update.body, &update.patches) {
-        // Patched update — `Patches: N` then N patch blocks. Checked before the
-        // body arm so an update carrying both stays a patch update; `Update`'s
-        // constructors never set both.
+        // Prefer patches over body if both are present; constructors normally keep them exclusive.
         (_, Some(patches)) => {
             write_header(
                 &mut buffer,
@@ -146,8 +144,7 @@ mod tests {
 
     #[test]
     fn no_multipart_boundary_appears_anywhere() {
-        // Guards the defect this module was rewritten to fix: the old server
-        // emitted `\r\n--boundary\r\n` delimiters, which are not part of Braid.
+        // Braid subscriptions must not emit multipart boundary delimiters.
         let s = rendered(&Update::snapshot(Version::new("v1"), "data"));
         assert!(!s.contains("--"), "boundary delimiter leaked into the wire");
     }

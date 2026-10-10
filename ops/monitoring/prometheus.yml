@@ -1,10 +1,4 @@
-# Prometheus configuration for XFChess monitoring
-# Scrapes metrics from the backend application.
-#
-# All targets are plain localhost — this container runs with
-# `network_mode: host` (see docker-compose.yml's comment for why: the
-# bridge-network + host.docker.internal approach silently doesn't route
-# across custom Docker networks), so "localhost" here really is the host.
+# Targets use host loopback because this container uses host networking.
 
 global:
   scrape_interval: 15s
@@ -32,8 +26,7 @@ scrape_configs:
     metrics_path: "/metrics"
     scrape_interval: 15s
 
-  # node_exporter — native systemd install on the host, bound to
-  # 127.0.0.1:9100 (see ops/scripts/deploy.ps1 Step 2d).
+  # node_exporter listens on host loopback port 9100.
   - job_name: "node"
     static_configs:
       - targets: ["localhost:9100"]

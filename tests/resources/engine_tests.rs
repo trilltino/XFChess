@@ -1,8 +1,5 @@
 use xfchess::engine::board_state::ChessEngine;
 use xfchess::rendering::pieces::PieceColor;
-// Note: Direct dependency on chess_engine might be required for is_legal_move
-// If this fails to compile, we might need to add chess_engine as dev-dependency
-// or test via public API only.
 
 #[test]
 fn example_validate_move_helpers() {

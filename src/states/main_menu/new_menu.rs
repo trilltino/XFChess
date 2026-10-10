@@ -119,7 +119,6 @@ impl Default for MenuCameraOrbit {
     }
 }
 
-// ── Spawn systems ────────────────────────────────────────────────────────────
 
 pub fn spawn_menu_bg_board(
     mut commands: Commands,
@@ -128,9 +127,7 @@ pub fn spawn_menu_bg_board(
 ) {
     let mesh = meshes.add(Cuboid::new(1.0, 0.1, 1.0));
 
-    // Match the in-game board exactly (see `SquareMaterials` in rendering/utils.rs):
-    // lit PBR materials, Cream light squares / Green dark squares. Lit (not unlit)
-    // so the board takes the same shading + piece shadows as during a game.
+    // Use the same lit materials as gameplay to preserve board shading and piece shadows.
     let light = materials.add(StandardMaterial {
         base_color: Color::srgb(0.97, 0.97, 0.88), // Cream
         ..default()
@@ -174,9 +171,7 @@ pub fn spawn_menu_bg_pieces(
         return; // meshes not loaded yet — retry next frame
     };
 
-    // Each piece gets its OWN material instance (not a shared handle) so a
-    // captured piece can fade its own alpha without affecting the others — see
-    // `MenuPieceFade` in board_animation.rs.
+    // Give pieces separate materials so capture fading changes only the captured piece.
     let white_mat = || crate::rendering::pieces::white_piece_material();
     let black_mat = || crate::rendering::pieces::black_piece_material();
 
@@ -312,10 +307,7 @@ pub fn spawn_menu_bg_lights(
         Name::new("MenuBg-OverheadLight"),
     ));
 
-    // Camera-following fill "headlamp" — identical to the in-game fill (visual.rs).
-    // Tagged with the same `CameraFollowLight` marker so `update_board_fill_light`
-    // (registered to also run in MainMenu) keeps it at the orbiting camera's side,
-    // giving the menu the exact viewer-facing lighting a game has.
+    // CameraFollowLight gives the menu the same viewer-facing fill light as gameplay.
     commands.spawn((
         PointLight {
             intensity: 600_000.0,
@@ -332,7 +324,6 @@ pub fn spawn_menu_bg_lights(
     ));
 }
 
-// ── Camera & style systems ───────────────────────────────────────────────────
 
 pub fn setup_menu_fog(_commands: Commands, _cam: Res<crate::PersistentEguiCamera>) {}
 
@@ -429,7 +420,6 @@ pub fn menu_escape_system(
     }
 }
 
-// ── egui panel ───────────────────────────────────────────────────────────────
 
 pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     render_title_logo(ctx, cx);
@@ -440,7 +430,6 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     // from opacity 0 made every click look like a dropped or delayed frame.
     let current = *cx.new_menu_panel;
 
-    // ── Exit confirmation dialog ─────────────────────────────────────────────
     if cx.exit_confirm.visible {
         render_exit_confirm_backdrop(ctx);
         egui::Window::new("##exit_confirm")
@@ -477,11 +466,7 @@ pub fn render_new_style_panel(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                             .clicked()
                         {
                             play_click(&mut cx.commands, cx.menu_sounds.as_deref());
-                            // Writing AppExit (rather than std::process::exit) lets
-                            // Bevy run its normal shutdown pass first, giving
-                            // cleanup_p2p_lobby_on_exit a chance to tell the relay
-                            // we're leaving any hosted/joined lobby before the
-                            // process actually terminates.
+                            // Use AppExit so normal shutdown can clean up relay lobbies.
                             cx.app_exit.write(AppExit::Success);
                         }
                         ui.add_space(12.0);
@@ -772,12 +757,6 @@ fn render_welcome_panel(
                     );
 
                     ui.add_space(2.0);
-                    // ── Image slot ───────────────────────────────────────────────
-                    // Drop announcement screenshots here once their egui textures are
-                    // available (load them into a dedicated `Resource`, then render with:
-                    //   let [w, h] = tex.size();
-                    //   ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                    //       tex.id(), [width, width * h as f32 / w as f32])));
 
                     ui.add_space(6.0);
                     ui.label(
@@ -1257,7 +1236,6 @@ fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 
     let snd = cx.menu_sounds.as_deref();
 
-    // ── Play section ───────────────────────────────────────────────────────
     ui.label(
         egui::RichText::new("PLAY")
             .size(11.0)
@@ -1283,7 +1261,6 @@ fn render_puzzles_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     }
     ui.add_space(SP * 2.0);
 
-    // ── Earn section ───────────────────────────────────────────────────────
     ui.label(
         egui::RichText::new("EARN")
             .size(11.0)
@@ -1438,25 +1415,15 @@ fn render_settings_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                 sync.moves_submitted = 0;
                 sync.wager_amount = 0;
             }
-            // Reset the wallet/session/profile state too — this resource
-            // drives `initialize_solana_integration`/`authorize_global_session_if_needed`
-            // independently of `PlayerIdentity`/`WalletBridgePoller`, and it
-            // was never cleared here. Left stale, `initialize_solana_integration`
-            // sees `wallet_pubkey.is_some()` and never re-runs, so a
-            // reconnect keeps the *previous* wallet's session keypair,
-            // profile status, and cached display name — silently signing
-            // with the wrong session key and re-showing stale identity.
+            // Clear wallet-derived integration state on logout so reconnect loads the
+            // new wallet's session, profile, and name.
             #[cfg(feature = "solana")]
             if let Some(solana_state) = cx.solana_state.as_mut() {
                 **solana_state =
                     crate::multiplayer::solana::integration::state::SolanaIntegrationState::default(
                     );
             }
-            // Same gap as `SolanaIntegrationState` above: `cached_display_name`/
-            // `cached_keypair_bytes` only populate once (guarded by `is_none()`
-            // in `sync_from_solana_state`) and never re-sync after logging in
-            // as a different wallet, so the lobby UI could keep showing the
-            // previous wallet's identity/ELO.
+            // Clear lobby identity caches as well; they populate only while unset.
             #[cfg(feature = "solana")]
             if let Some(lobby) = cx.solana_lobby.as_mut() {
                 **lobby = crate::multiplayer::solana::lobby::SolanaLobbyState::default();
@@ -1497,10 +1464,7 @@ fn render_updates_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
     });
     ui.add_space(14.0);
 
-    // Wider than the other panels' 280: the download cards are three stacked
-    // lines against a 48pt mark, and asset names like
-    // `XFChess-chromeos-x86_64-1.2.3.tar.gz - 82.4 MB` need the room to sit on
-    // one line. The window auto-sizes to this, so it only widens this panel.
+    // Allow long artifact names and sizes to fit beside the download icon.
     const W: f32 = 430.0;
 
     match &cx.update_check.status {
@@ -1858,18 +1822,12 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         .clicked()
     {
         play_click(&mut cx.commands, cx.menu_sounds.as_deref());
-        // Clear stale receivers so poll fires immediately on next frame
         cx.wallet_bridge.status_rx = None;
         cx.wallet_bridge.balance_rx = None;
         cx.wallet_bridge.enabled = true;
         cx.wallet_bridge.timer = 5.0;
         cx.wallet_bridge.show_connect_overlay = true;
-        // Signal the Tauri bridge to open the wallet popup in Chrome. Must go
-        // through the shared helper, not a hand-rolled port scan here — this
-        // used to have its own inlined copy of the old top-down scan with no
-        // awareness of the port-announcement file, so it kept hitting the
-        // exact same "wrong live listener" stall that open_wallet_browser()
-        // was already fixed to avoid, completely bypassing that fix.
+        // Use shared wallet-popup discovery so the announced instance port wins over scanning.
         #[cfg(feature = "solana")]
         crate::multiplayer::solana::tauri_signer::open_wallet_browser();
     }
@@ -1884,13 +1842,8 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             play_click(&mut cx.commands, snd);
             #[cfg(feature = "solana")]
             {
-                // `create_game`/`join_game` require the wallet's on-chain
-                // PlayerProfile PDA to already exist (it's a plain
-                // `Account<'info, PlayerProfile>`, not `init_if_needed`) — if
-                // it doesn't, the on-chain call fails with AccountNotInitialized
-                // (Anchor 3012) instead of doing anything. Route through the
-                // same profile gate the "Solana Wager P2P" entry point uses
-                // (screens.rs) rather than letting that TX fail silently.
+                // create_game/join_game require an existing PlayerProfile; complete the
+                // profile gate before submitting either transaction.
                 let profile_ready = cx.solana_state.as_ref().map(|s| {
                     s.profile_status == crate::multiplayer::solana::integration::state::ProfileStatus::HasProfileWithUsername
                 }).unwrap_or(false);
@@ -1900,9 +1853,7 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                     if let Some(lobby) = cx.solana_lobby.as_mut() {
                         lobby.mode = crate::multiplayer::solana::lobby::LobbyMode::Create;
                         lobby.allow_create = true;
-                        // Fresh entry from the main menu should always show the
-                        // create-game form, not a stale WaitingForOpponent/Success
-                        // left over from an earlier create attempt this session.
+                        // Reset stale create-game status on fresh menu entry.
                         lobby.status = crate::multiplayer::solana::lobby::LobbyStatus::Idle;
                         // Always start the wager at $0 — don't carry over whatever
                         // amount was left typed in from a previous visit.
@@ -1943,10 +1894,7 @@ fn render_solana_connect_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         }
         ui.add_space(SP);
 
-        // Same tournament browser as the general "Tournaments" menu (Play
-        // Online → Tournaments → Join Tournament) — every tournament here is
-        // already Solana-escrowed on-chain, this just gives wallet-connected
-        // players a shortcut to it from the Solana submenu too.
+        // Reuse the on-chain tournament browser from the Solana submenu.
         if item(ui, "Tournaments", W) {
             play_click(&mut cx.commands, snd);
             cx.menu_state.set(MenuState::Tournaments);
@@ -2008,7 +1956,6 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         );
         ui.add_space(4.0);
 
-        // ELO
         let elo = cx.player_identity.display_elo();
         ui.horizontal(|ui| {
             ui.label(
@@ -2051,7 +1998,6 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             ui.add_space(2.0);
         }
 
-        // Country
         if let Some(ref country) = cx.player_identity.country {
             ui.horizontal(|ui| {
                 ui.label(
@@ -2068,7 +2014,6 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             ui.add_space(2.0);
         }
 
-        // Wallet pubkey (shortened)
         if let Some(ref pk) = cx.wallet_bridge.known_pubkey.clone() {
             let short = format!(
                 "{}...{}",
@@ -2119,12 +2064,8 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
             });
         }
 
-        // Connect Lichess — links the on-chain profile to a Lichess account
-        // via the backend's existing PKCE OAuth flow (backend/src/signing/routes/lichess_oauth.rs).
-        // The backend's own callback page completes the exchange server-side
-        // and this game client just needs to open the browser; the next
-        // periodic /auth/me poll picks up the new lichess_blitz/verified
-        // fields once linking finishes — no dedicated listener needed here.
+        // The backend completes PKCE linking; the regular auth/me poll picks up
+        // the result after opening the OAuth browser flow.
         if cx.player_identity.lichess_elo.is_none() {
             ui.add_space(SP);
             if ui
@@ -2146,13 +2087,7 @@ fn render_profile_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
                 if let Some(pubkey) = cx.wallet_bridge.known_pubkey.clone() {
                     let base = crate::multiplayer::network::vps::vps_base();
                     std::thread::spawn(move || {
-                        // Backend now requires the caller's JWT to match
-                        // `wallet_pubkey` here (previously unauthenticated —
-                        // see backend/src/signing/routes/lichess_oauth.rs's
-                        // doc comment on `init_oauth`), so this must go
-                        // through the shared client that attaches the
-                        // session's stored `Authorization: Bearer …` header
-                        // instead of a bare `reqwest::Client::new()`.
+                        // Use the shared authenticated client so the OAuth request carries the wallet JWT.
                         let client = match crate::multiplayer::network::vps::client_fast() {
                             Ok(c) => c,
                             Err(e) => {
@@ -2355,10 +2290,8 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
     let display_name = cx.player_identity.display_name().to_string();
     let is_guest = cx.player_identity.username.is_none();
 
-    // Read from `PlayerIdentity` rather than `solana_state` so the name stays
-    // copyable in a build without the `solana` feature — the bridge reports the
-    // pubkey over `/status` either way, and topping up from the faucet is
-    // exactly what a player does *before* they have anything on-chain.
+    // PlayerIdentity exposes the bridge pubkey even without the solana feature,
+    // so players can copy it before funding their wallet.
     let pubkey_str = cx
         .player_identity
         .pubkey_str
@@ -2458,9 +2391,6 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     match &pubkey_str {
-                        // With an address to hand, the name doubles as the
-                        // copy button — it is the only place in the menu the
-                        // player's own pubkey is on screen at all times.
                         Some(pk) => {
                             let copied_id = egui::Id::new("wallet_hud_name_copied_at");
                             let now = ctx.input(|i| i.time);
@@ -2504,9 +2434,7 @@ pub fn render_wallet_hud(ctx: &egui::Context, cx: &mut MainMenuUIContext) {
                                 ctx.data_mut(|d| d.insert_temp(copied_id, now));
                             }
 
-                            // egui only redraws on input; without this the
-                            // "Address copied!" flash would sit there until the
-                            // player happened to move the mouse.
+                            // Request redraws so the copied-address notification expires without user input.
                             if just_copied {
                                 ctx.request_repaint();
                             }

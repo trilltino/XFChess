@@ -1,15 +1,5 @@
-// Fake window.phantom.solana / window.solflare for tests. Real wallet
-// extensions can't be driven in an automated test at all (their approval UI
-// is native OS chrome, not page content) — this stands in for the injected
-// provider object so App.tsx's connect/sign paths can be exercised against
-// every failure mode that's actually been seen in the wild, without a real
-// browser extension:
-//   - hang forever (the "Could not establish connection. Receiving end does
-//     not exist" case — the relay breaks and the call never settles)
-//   - reject (user closed the approval popup, or clicked "Cancel")
-//   - resolve normally
-//   - disconnect mid-flow (connect() succeeds, then signMessage()/
-//     signTransaction() on the same provider instance starts failing)
+// Fake injected providers for connect/sign tests: resolve, reject, hang,
+// or disconnect after connection.
 export type MockMode = "resolve" | "reject" | "hang";
 
 export interface MockWalletOptions {

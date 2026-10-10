@@ -192,10 +192,5 @@ impl Plugin for BoardPlugin {
             Update,
             crate::rendering::templeos_camera_movement_system.run_if(in_state(GameState::InGame)),
         );
-        // Debug markers removed - they were showing colored spheres on the board corners
-        // app.add_systems(
-        //     OnEnter(GameState::InGame),
-        //     crate::game::systems::debug_visuals::spawn_debug_markers,
-        // );
     }
 }

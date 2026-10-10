@@ -73,9 +73,6 @@ pub(super) fn render_ai_setup_modal(
             );
             ui.add_space(6.0);
 
-            // Strength grid (1-8) - compact. Each chip's tooltip explains how
-            // that level actually plays (search depth/movetime), not just its
-            // ELO number, so the difference between e.g. 1 and 3 is legible.
             ui.vertical_centered(|ui| {
                 ui.horizontal(|ui| {
                     for lvl in 1..=8 {
@@ -112,7 +109,6 @@ pub(super) fn render_ai_setup_modal(
 
             ui.add_space(16.0);
 
-            // ── Time Control ─────────────────────────────────────────────────
             ui.label(
                 egui::RichText::new("Time Control")
                     .size(13.0)
@@ -146,7 +142,6 @@ pub(super) fn render_ai_setup_modal(
 
             ui.add_space(16.0);
 
-            // ── Engine Selection ─────────────────────────────────────────────
             ui.label(
                 egui::RichText::new("Engine")
                     .size(13.0)
@@ -154,10 +149,7 @@ pub(super) fn render_ai_setup_modal(
             );
             ui.add_space(6.0);
 
-            // Stockfish is not part of the Android build (see plan §2b) —
-            // offering it there would let a player select an engine no code
-            // path can actually run. `Vec` rather than a fixed-size array
-            // literal since the two platforms offer different counts.
+            // Android ships no Stockfish engine; offer only engines available on this platform.
             #[cfg(target_os = "android")]
             let engine_options: Vec<(&str, crate::game::ai::resource::AIEngine)> = vec![(
                 "XFChessEngine",
@@ -213,7 +205,6 @@ pub(super) fn render_ai_setup_modal(
 
             ui.add_space(24.0);
 
-            // ── START GAME BUTTON ───────────────────────────────────────────
             ui.vertical_centered(|ui| {
                 let start_btn = egui::Button::new(
                     egui::RichText::new("START GAME")

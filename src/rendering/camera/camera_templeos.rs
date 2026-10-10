@@ -26,30 +26,21 @@ pub fn setup_templeos_camera(
         return;
     }
 
-    // Board center is at (3.5, 0.0, 3.5) - middle of 8x8 board
     let board_center = Vec3::new(3.5, 0.0, 3.5);
 
-    // Determine if we should show black view
     let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
 
-    // Position camera at isometric angle matching Bevy orthographic example
-    // Use equal distances on all axes (like the example's 5.0, 5.0, 5.0)
-    // This creates a true isometric view, not a bird's eye view
-    // Offset from board center to match the example's angle
+    // Equal offsets on all axes produce an isometric view centered on the board.
     let offset = 5.0;
 
     // Adjust camera position based on player color
     let camera_position = if is_black_view {
-        // Look from +X, +Z side for Black view?
-        // Actually, for isometric, we usually look from a corner.
-        // Standard White is from (+X, +Y, +Z) looking at center.
-        // To flip 180°, we look from (-X, +Y, -Z)
+        // Negate X and Z to rotate the Black view by 180 degrees.
         Vec3::new(board_center.x - offset, offset, board_center.z - offset)
     } else {
         Vec3::new(board_center.x + offset, offset, board_center.z + offset)
     };
 
-    // Calculate initial look-at offset
     let look_at_offset = board_center - camera_position;
 
     commands.spawn((
@@ -95,7 +86,6 @@ pub fn templeos_camera_movement_system(
         // Movement speed
         let move_speed = 5.0;
 
-        // Calculate movement direction
         let mut direction = Vec3::ZERO;
 
         // Get camera's forward and right vectors
@@ -123,7 +113,6 @@ pub fn templeos_camera_movement_system(
         // Normalize to prevent faster diagonal movement
         direction = direction.normalize_or_zero();
 
-        // Apply movement
         let movement = direction * move_speed * time.delta_secs();
         transform.translation += movement;
 

@@ -53,9 +53,7 @@ pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
     let total_cu = logger.total_cu();
     let tx_count = logger.entries().len() as u64;
 
-    // Everything is paid by default on the base layer. Only transactions known to
-    // execute on ER are excluded, so adding a new base-layer instruction cannot
-    // silently make the report undercount.
+    // Charge base-layer costs by default; exclude only instructions known to run on ER.
     let er_free_instructions = ["record_move", "undelegate_game"];
 
     let mut paid_tx_count = 0u64;
@@ -103,10 +101,8 @@ pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
     let base_tx_fees_lamports = paid_tx_count * BASE_TX_FEE;
     let er_session_fees_lamports = er_session_count * ER_SESSION_FEE_LAMPORTS;
 
-    // Rough net-rent model: assume each refund event returns the average
-    // per-account rent observed this run. This is a coarse approximation
-    // (real refunds vary by which specific account closed) — flagged
-    // "modeled" throughout rather than presented as measured.
+    // Model refunds using this run's average account rent; label the result as
+    // an approximation, not a measured balance.
     let distinct_rent_accounts = paid_breakdown_map
         .keys()
         .filter(|i| modeled_rent_lamports(i) > 0)
@@ -122,8 +118,6 @@ pub fn generate_cost_report(logger: &CuLogger, scenario: &str) -> CostReport {
         .map(|(signer, lamports)| (signer, lamports as f64 / LAMPORTS_PER_SOL as f64))
         .collect();
 
-    // estimated_sol/estimated_gbp now include modeled net rent (F9.1) — this
-    // was the dominant cost previously missing from the total entirely.
     let total_lamports = base_tx_fees_lamports
         + priority_fees_lamports
         + er_session_fees_lamports

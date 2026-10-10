@@ -2,11 +2,7 @@
 
 import { request } from './client';
 
-/**
- * Row shape of `GET /api/tournaments` — the backend's `TournamentSummary`
- * (backend/src/signing/routes/tournament.rs). `scheduled_at` is unix
- * seconds and null for an unscheduled event.
- */
+/** GET /api/tournaments row. scheduled_at is Unix seconds or null when unscheduled. */
 export interface TournamentSummaryResponse {
   tournament_id: number;
   name: string;

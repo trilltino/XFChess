@@ -1,6 +1,4 @@
--- Migration 003: Wallet-first auth — no passwords
--- The wallet signature proves identity. Email is optional (notifications only).
--- Migrates existing users into the new schema and drops password_hash.
+-- Wallet signatures prove identity; email is optional. Migrate users and drop password_hash.
 
 CREATE TABLE IF NOT EXISTS users_v2 (
     wallet      TEXT PRIMARY KEY,   -- Solana pubkey is the identity

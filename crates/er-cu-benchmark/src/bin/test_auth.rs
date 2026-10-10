@@ -100,7 +100,5 @@ fn main() {
 
     let mut data = [0u8; 8];
     data.copy_from_slice(&[0x1a, 0xf6, 0x2c, 0xaf, 0xfd, 0xcf, 0x17, 0x1e]); // authorize_tournament_session discriminator
-    data = [0; 8]; // Actually compute it properly... just use hex
-                   // anchor_discriminator("authorize_tournament_session")
-                   // Let me just hardcode it: sha256("global:authorize_tournament_session")[..8]
+    data = [0; 8]; // Discriminator: sha256("global:authorize_tournament_session")[..8].
 }

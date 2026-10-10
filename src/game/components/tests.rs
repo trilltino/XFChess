@@ -1,9 +1,6 @@
 use super::*;
 use crate::rendering::pieces::{PieceColor, PieceType};
 
-// ============================================================================
-// GamePhase Tests
-// ============================================================================
 
 #[test]
 fn test_game_phase_default() {
@@ -38,9 +35,6 @@ fn test_game_phase_all_variants() {
     assert_ne!(checkmate, stalemate);
 }
 
-// ============================================================================
-// MoveRecord Tests
-// ============================================================================
 
 #[test]
 fn test_move_record_simple_move() {
@@ -169,9 +163,6 @@ fn test_move_record_clone() {
     assert_eq!(cloned.is_checkmate, original.is_checkmate);
 }
 
-// ============================================================================
-// HasMoved Component Tests
-// ============================================================================
 
 #[test]
 fn test_has_moved_default() {

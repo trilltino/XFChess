@@ -11,23 +11,14 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.google.androidgamesdk.GameActivity
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 
-/**
- * Translated from rust-mobile/rust-android-examples' agdk-winit-wgpu-egui
- * MainActivity.java (the android-activity crate maintainers' own reference)
- * — not written from scratch, since GameActivity's Java-side contract
- * (static-init loadLibrary ordering, hideSystemUI, decor-fits-system-windows)
- * is exactly the kind of thing worth copying from a verified-working source
- * rather than re-deriving.
- */
+/** GameActivity host setup follows the android-activity reference integration. */
 class MainActivity : GameActivity() {
 
     lateinit var activityResultSender: ActivityResultSender
 
     companion object {
         init {
-            // Must match both the `[lib] name` in the root Cargo.toml
-            // (produces libxfchess.so) and AndroidManifest.xml's
-            // `android.app.lib_name` meta-data value.
+            // Match Cargo’s lib name and android.app.lib_name in the manifest.
             System.loadLibrary("xfchess")
         }
     }

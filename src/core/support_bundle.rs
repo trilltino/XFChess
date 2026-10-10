@@ -1,14 +1,5 @@
-// The one-click "send us the logs" path: Settings → Help & Support →
-// "Export logs as text file". This assembles everything a dev needs to debug
-// a reported game — version/OS/arch header, today's (and yesterday's) game
-// log, crash reports, recovered errors, and the wallet bridge's log — into a
-// single plain-text file the player picks the location for and can drag into
-// a group chat. Nothing is uploaded anywhere; the player sees exactly what
-// they're sending.
-//
-// Desktop (Windows/macOS/Linux/Chrome OS) only — Android has no rfd backend,
-// so the Settings button is cfg-gated away and this module mostly stays as
-// dead code there.
+// Export local game, crash, error, and wallet logs to a user-selected text file.
+// No upload occurs. Desktop only because Android has no rfd backend.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -17,17 +8,13 @@ use std::time::SystemTime;
 
 use bevy::prelude::*;
 
-// How many lines we keep from the tail of each daily log. Enough to cover a
-// full session's worth of moves/subscriptions/errors without letting a
-// support bundle balloon to megabytes.
+// Bound each daily log tail to keep exported support bundles small.
 const LOG_TAIL_LINES: usize = 4000;
 
 // How many newest daily files (game.log.YYYY-MM-DD) to include.
 const NEWEST_DAILY_FILES: usize = 2;
 
-/// UI state for the Settings-screen export button: the last success/error
-/// message, displayed under the button so the player has a written record of
-/// where the file went.
+/// Last export success or error, displayed beneath the Settings export button.
 #[derive(Resource, Default)]
 pub struct SupportBundleUi {
     pub status: Option<String>,
@@ -86,9 +73,7 @@ fn list_files(dir: &PathBuf, pred: impl Fn(&str) -> bool) -> Vec<PathBuf> {
     out
 }
 
-/// Newest `n` files from a lexicographically sorted (ascending) list — daily
-/// names like game.log.2026-09-12 sort chronologically, so this keeps today
-/// and yesterday.
+/// Select the newest n daily logs from ascending, lexicographically ordered filenames.
 fn newest_n(files: &mut Vec<PathBuf>, n: usize) -> Vec<PathBuf> {
     if files.len() <= n {
         return files.clone();
@@ -184,9 +169,7 @@ fn build_header(log_dir: &PathBuf) -> String {
 pub fn write_support_bundle(dest: &PathBuf) -> Result<(), String> {
     let log_dir = crate::multiplayer::network::identity::log_dir();
 
-    // The wallet bridge is a separate process that still writes to the
-    // app-data base folder; fold it in when that differs from the active
-    // profile's log folder (it's the same folder on fresh installs).
+    // Include wallet-bridge logs from the app-data folder when it differs from the active profile.
     #[cfg(not(target_os = "android"))]
     let base_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -221,9 +204,7 @@ pub fn write_support_bundle(dest: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-/// Desktop only: pops the OS save dialog (defaulting to the active profile's
-/// folder), writes the bundle there, and records the result for the Settings
-/// screen to display. Android never calls this — the button is cfg-gated off.
+/// Save an exported bundle through the desktop file dialog and record its result for Settings.
 #[cfg(not(target_os = "android"))]
 pub fn run_export_dialog(mut ui: ResMut<SupportBundleUi>) {
     let default_dir = crate::multiplayer::network::identity::active_profile_dir();
