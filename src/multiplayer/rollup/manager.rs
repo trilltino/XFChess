@@ -27,13 +27,10 @@ pub struct EphemeralRollupManager {
     pub committed_fen: String,
     pub committed_turn: u16,
 
-    // Pending batch (ephemeral)
     pub pending_batch: Option<PendingBatch>,
 
-    // Status
     pub status: GameStateStatus,
 
-    // Configuration
     pub max_batch_size: usize,
     pub flush_interval: Duration,
     pub game_id: u64,
@@ -76,9 +73,7 @@ impl EphemeralRollupManager {
         )
     }
 
-    /// Point the manager at `game_id`. A different game always starts from a
-    /// fresh baseline so the previous game's position, batch or out-of-sync
-    /// flag can never gate or leak into the new one.
+    /// Select a game, resetting position, batches, and synchronization flags when the ID changes.
     pub fn assign_game(&mut self, game_id: u64) {
         if self.game_id != game_id {
             *self = Self::default_for_game(game_id);
@@ -182,15 +177,8 @@ impl EphemeralRollupManager {
         self.session_keys = Some((white_session_key, black_session_key));
     }
 
-    /// Apply a committed baseline reported by a peer (`Committed`,
-    /// `ResyncResponse`) or rebuilt from the move log (`SnapshotReceived`).
-    ///
-    /// None of those sources is the Game PDA, so they may only move the
-    /// baseline forward. Ordering uses the FEN's own ply (side to move +
-    /// fullmove number), not `committed_turn`: a stale position is ignored,
-    /// and a different position at the same ply is a conflict that marks the
-    /// game out of sync instead of overwriting ours. Returns whether the
-    /// baseline was updated.
+    /// Apply a peer or log baseline only forward by FEN ply. Ignore stale positions;
+    /// mark conflicting positions at the same ply out of sync. Return whether updated.
     pub fn accept_peer_baseline(&mut self, game_id: u64, fen: &str, turn: u16) -> bool {
         if game_id != self.game_id {
             return false;
@@ -288,22 +276,8 @@ impl Plugin for EphemeralRollupPlugin {
         app.init_resource::<EphemeralRollupManager>()
             .add_message::<RollupEvent>()
             .add_systems(Update, handle_rollup_events);
-        // Periodic auto-flush used to be driven from here too
-        // (`check_for_auto_flush`, since removed), racing
-        // `bridge::process_batch_commit_requests` — both watched the same
-        // `should_flush()`/`prepare_batch_for_commit()` state and whichever
-        // system's turn came first that frame won `pending_batch.take()`.
-        // This system's path sent the batch over the slow negotiated
-        // `BatchPropose`/`BatchAccept` P2P round-trip
-        // (`bridge::handle_rollup_to_network_events`'s `RollupEvent::BatchReady`
-        // arm); if the game ended before the peer's accept came back, the
-        // batch just sat in `bridge.pending_batches`, forever unsubmitted —
-        // reproduced live: a game's first move (`f2f3`) never reached
-        // `record_move` at all, and every move after it then failed replay
-        // validation against a backend history that still didn't include it.
-        // `process_batch_commit_requests` submits directly via the VPS with
-        // no round-trip (the same path the game-end batch already used
-        // successfully), so it's now the sole periodic-flush path.
+        // process_batch_commit_requests owns periodic flushing; a second flush path
+        // could consume the batch before direct VPS submission.
     }
 }
 
@@ -328,9 +302,7 @@ fn handle_rollup_events(
                 next_fen,
                 ..
             } if *game_id == rollup_manager.game_id => {
-                // A missed move arrived via Braid reconnection recovery; the
-                // board itself is applied by the game-logic layer. Only a
-                // strictly newer position may advance the baseline.
+                // Recovered Braid moves may advance the baseline only to a strictly newer position.
                 if rollup_manager.accept_resynced_move(*game_id, next_fen) {
                     info!(
                         "[ROLLUP] ResyncedMove {} applied, turn now {}",

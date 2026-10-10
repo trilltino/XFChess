@@ -574,7 +574,7 @@ Then, with `curl`, verify the **negative** cases first — these are the F1 regr
 
 ### Phase 3 — full local stack, 2 clients, 2-player tournament
 ```bash
-scripts\run_offline.bat                      # backend + monitoring
+just dev                      # backend + monitoring
 cargo run --features solana                  # client A
 cargo run --features solana                  # client B (second machine or profile)
 ```

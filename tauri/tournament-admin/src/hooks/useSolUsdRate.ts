@@ -1,23 +1,14 @@
 import { useEffect, useState } from "react";
 import { apiClient } from "../services/api";
 
-/** How often to re-poll the rate feed once a value has loaded — matches the
- * backend's own RateCache TTL (60s), so we never poll faster than the value
- * can actually change. */
+/** Match the backend’s 60-second rate-cache TTL. */
 const POLL_INTERVAL_MS = 60_000;
-/** Retry cadence while no rate has loaded yet — the backend may still be
- * starting up, or the one-shot CoinGecko/Helius fetch behind it may have
- * raced a cold cache; a single failed attempt shouldn't leave the UI stuck
- * on "rate loading" forever. */
+/** Retry while no rate is loaded so startup or cold-cache failures do not leave the UI waiting. */
 const RETRY_INTERVAL_MS = 5_000;
 
 /**
- * Best-effort SOL→USD rate for display-only USD equivalents next to
- * SOL-denominated inputs. Deliberately not used to gate input — the rate
- * feed (CoinGecko-backed, GET /api/rates/all) is known to go down
- * independently of the admin panel, and SOL amounts must stay enterable
- * even when it does. Polls until a rate has loaded, then keeps refreshing
- * it in the background; returns null until the first successful fetch.
+ * Display-only SOL/USD conversion; return null until a rate loads and
+ * keep SOL input available when the feed fails.
  */
 export function useSolUsdRate(): number | null {
   const [rate, setRate] = useState<number | null>(null);

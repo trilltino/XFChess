@@ -199,10 +199,8 @@ pub async fn verify_access_token(token: &str) -> Result<PrivyClaims, PrivyError>
 mod tests {
     use super::*;
 
-    // These are pure on purpose: `cargo test` runs tests in parallel threads of
-    // a SINGLE process, so any test that mutates PRIVY_APP_ID / PRIVY_JWKS_URL
-    // races every other test that reads them. An earlier version of this file
-    // did exactly that and failed intermittently.
+    // Keep tests independent of process environment mutation; parallel tests
+    // otherwise race shared Privy configuration.
 
     #[test]
     fn app_ids_parses_single_and_multi() {

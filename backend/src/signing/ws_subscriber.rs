@@ -40,7 +40,6 @@ pub struct WebSocketSubscriber {
 
 impl WebSocketSubscriber {
     pub async fn new(cluster: Cluster, er_endpoint: Option<&str>) -> Result<Self, AppError> {
-        // Spawn two L1 WebSocket connections to split subscription load
         let mut l1_connections = Vec::new();
         for i in 0..2 {
             let (tx, rx) = mpsc::channel(100);
@@ -81,7 +80,6 @@ impl WebSocketSubscriber {
                     let mut subscriptions = Vec::new();
                     let mut subscription_senders = Vec::new();
 
-                    // Handle incoming subscription requests
                     while let Some((pubkey, sender)) = rx.recv().await {
                         if subscriptions.len() >= 100 {
                             warn!("Subscription limit reached on WebSocket {}", connection_id);
@@ -102,13 +100,10 @@ impl WebSocketSubscriber {
                         subscription_senders.push(sender);
                     }
 
-                    // Handle incoming messages
                     while let Some(msg) = read.next().await {
                         match msg {
                             Ok(Message::Text(text)) => {
-                                // Parse JSON-RPC response
-                                // Extract pubkey and data, forward to the appropriate sender
-                                // This is a placeholder for actual JSON parsing logic
+                                // Placeholder JSON-RPC parsing; extract account data and forward it to the subscriber.
                                 info!("Received message on WebSocket {}: {}", connection_id, text);
                             }
                             Ok(_) => {}

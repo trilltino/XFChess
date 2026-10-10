@@ -22,10 +22,8 @@ pub fn update_game_phase(
         return;
     }
 
-    // Guard: pieces are spawned via deferred commands, so on the very first
-    // Update frame after entering InGame the query may be empty even though
-    // PiecesSpawned.spawned is already true.  Evaluating an empty board would
-    // produce a false stalemate and immediately end the game.
+    // Deferred spawning can leave the query empty on the first frame;
+    // evaluating it would falsely end the game as a stalemate.
     if pieces_query.is_empty() {
         trace!("[GAME] Skipping game phase check - pieces not yet flushed into world");
         return;
@@ -33,10 +31,8 @@ pub fn update_game_phase(
 
     let previous_phase = game_phase.0;
 
-    // If execute_move already synced ECS→engine this frame, skip the redundant
-    // second sync and only rebuild the legal-move cache.
-    // If the cache is already valid for this turn (no move happened), skip entirely —
-    // this prevents the expensive sync+rebuild from running every single frame.
+    // Skip ECS-to-engine sync if execute_move already did it this frame.
+    // Reuse the legal-move cache until the turn changes.
     if engine.synced_this_move {
         engine.synced_this_move = false;
         engine.rebuild_legal_move_cache();
@@ -50,16 +46,11 @@ pub fn update_game_phase(
 
     let in_check = engine.is_check();
     let has_legal_moves = engine.has_legal_moves();
-    // Attribute the result to the engine's side-to-move, NOT `CurrentTurn`.
-    // `in_check`/`has_legal_moves` above are both evaluated relative to the
-    // engine's position; `CurrentTurn` is advanced by a different system and
-    // lags by a frame on the remote-move path, so pairing the two flipped the
-    // verdict for whichever client received the mating move over the network.
-    // See `ChessEngine::side_to_move`'s doc comment for the reproduction.
+    // Determine the result from the engine side-to-move; CurrentTurn can lag
+    // one frame behind a remotely applied move.
     let side_to_move = engine.side_to_move();
 
     if !has_legal_moves && in_check {
-        // Checkmate
         game_phase.0 = GamePhase::Checkmate;
         *game_over = match side_to_move {
             PieceColor::White => GameOverState::BlackWon,
@@ -68,7 +59,6 @@ pub fn update_game_phase(
         info!("[GAME] ========== CHECKMATE! ==========");
         info!("[GAME] {:?} is in checkmate!", side_to_move);
     } else if !has_legal_moves {
-        // Stalemate
         game_phase.0 = GamePhase::Stalemate;
         *game_over = GameOverState::Stalemate;
         info!("[GAME] ========== STALEMATE! ==========");
@@ -118,7 +108,6 @@ pub fn update_game_timer(
             let time_before = timer.white_time_left;
             timer.white_time_left -= delta;
 
-            // Log time warnings
             if time_before > 10.0 && timer.white_time_left <= 10.0 {
                 warn!("[TIMER] White has 10 seconds remaining!");
             } else if time_before > 30.0 && timer.white_time_left <= 30.0 {
@@ -156,7 +145,6 @@ pub fn update_game_timer(
             let time_before = timer.black_time_left;
             timer.black_time_left -= delta;
 
-            // Log time warnings
             if time_before > 10.0 && timer.black_time_left <= 10.0 {
                 warn!("[TIMER] Black has 10 seconds remaining!");
             } else if time_before > 30.0 && timer.black_time_left <= 30.0 {
@@ -200,8 +188,7 @@ pub fn check_game_over_state(
     animations: Query<(), (With<PieceMoveAnimation>, Without<FadingCapture>)>,
     fades: Query<(), With<FadingCapture>>,
 ) {
-    // Only flag once we are currently InGame and the game is effectively over.
-    // Wait for active animations and capture fades to finish so the final move is visible
+    // Wait for animations and capture fades before ending the game so the last move remains visible.
     if *state.get() == crate::core::GameState::InGame
         && game_over.is_game_over()
         && animations.is_empty()

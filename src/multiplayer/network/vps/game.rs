@@ -381,9 +381,8 @@ pub fn get_seat(game_id: u64) -> Result<Option<SeatLease>, String> {
         .map_err(|e| format!("get_seat parse: {e}"))
 }
 
-/// Every event in the game's durable log (moves, resignations, draw
-/// actions, session info), in log order. Errors are returned, never folded
-/// into an empty log, so a caller can tell "no moves" from "unreachable".
+/// Return all durable game events in order. Propagate errors so unreachable logs
+/// are distinguishable from empty ones.
 pub fn fetch_game_events(game_id: u64) -> Result<Vec<braid_chess::ChessMessage>, String> {
     let response = client()?
         .get(format!("{}/game/{}/moves", vps_base(), game_id))
@@ -398,12 +397,7 @@ pub fn fetch_game_events(game_id: u64) -> Result<Vec<braid_chess::ChessMessage>,
 }
 
 pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, String> {
-    // Path and response shape must match `game_log.rs`'s registered route
-    // exactly: `GET /game/{id}/moves` (singular "game"), returning a bare
-    // JSON array of `ChessMessage`s (the plain-GET snapshot path, see
-    // `GameLogState::snapshot` — not the `{"moves": [...]}` envelope this
-    // used to assume, which never matched either the URL or the body shape
-    // the backend actually serves and made this 404 on every call).
+    // GET /game/{id}/moves returns a bare ChessMessage array.
     let response = client()?
         .get(format!("{}/game/{}/moves", vps_base(), game_id))
         .send()

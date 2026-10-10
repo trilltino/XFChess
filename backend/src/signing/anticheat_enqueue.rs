@@ -66,10 +66,8 @@ pub async fn enqueue_game_analysis(state: &AppState, game: FinalizedGame) {
         )
         .collect();
 
-    // Audit client think times against the server-observed wall clock before
-    // they reach analysis. Client timing is accurate but forgeable; a side
-    // whose claimed thinking can't fit the game's real duration has its think
-    // times stripped (reverting it to server/none timing) rather than trusted.
+    // Discard claimed think times that cannot fit the server-observed game
+    // duration; fall back to server or unavailable timing.
     let reported_at: Vec<Option<i64>> = raw_moves.iter().map(|r| r.7).collect();
     audit_think_times(&mut rows, &reported_at, &game_id_str);
 
@@ -106,9 +104,7 @@ pub async fn enqueue_game_analysis(state: &AppState, game: FinalizedGame) {
         }
     };
 
-    // T0 tier: free casual games skip Stockfish unless the timing screen
-    // finds something. Stakes-bearing games (wager or tournament) always get
-    // full engine analysis.
+    // Casual free games use engine analysis only when timing flags them; staked games always do.
     let stakes = game.wager_lamports > 0 || tournament_id.is_some();
     if !stakes {
         let screen = xfchess_anticheat::features::screen::t0_screen(&record);
@@ -140,9 +136,7 @@ pub async fn enqueue_game_analysis(state: &AppState, game: FinalizedGame) {
         );
     }
 
-    // Durable queue row first: if the in-memory queue is full or the server
-    // dies before analysis, the row marks the game as pending (the prize gate
-    // reads it) and a future re-ingest sweep can pick it up.
+    // Persist the pending row before enqueueing so queue saturation or crashes cannot bypass the prize gate.
     sqlx::query("INSERT OR IGNORE INTO anticheat_queue (game_id) VALUES (?)")
         .bind(&game_id_str)
         .execute(&pool)

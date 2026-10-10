@@ -32,7 +32,6 @@ use crate::signing::storage::vault::VaultStore;
 use crate::signing::swiss::orchestrator::OrchestratorEvent;
 use crate::signing::{AppState, TournamentTrigger};
 
-// ── Request / Response types ──────────────────────────────────────────────────
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CreateTournamentReq {
@@ -149,7 +148,6 @@ fn format_label(format: &TournamentFormat) -> String {
     }
 }
 
-// ── Handlers ─────────────────────────────────────────────────────────────────
 
 async fn subscribe_node(
     Path(id): Path<u64>,
@@ -165,13 +163,11 @@ async fn subscribe_node(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    // Get bootstrap peers for the player
     let bootstrap_peers = state
         .tournament_gossip
         .get_bootstrap_peers(id, &req.player)
         .await;
 
-    // Format peer IDs as hex strings
     let peer_strings: Vec<String> = bootstrap_peers
         .iter()
         .map(|p| hex::encode(p.as_bytes()))
@@ -206,13 +202,11 @@ async fn get_bootstrap_peers(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    // Get bootstrap peers
     let bootstrap_peers = state
         .tournament_gossip
         .get_bootstrap_peers(id, player)
         .await;
 
-    // Format peer IDs as hex strings
     let peer_strings: Vec<String> = bootstrap_peers
         .iter()
         .map(|p| hex::encode(p.as_bytes()))
@@ -231,7 +225,6 @@ async fn create_tournament(
     Json(req): Json<CreateTournamentReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = &state.tournament_store;
-    // Parse tournament format
     let format = match req.format.as_str() {
         "Swiss" => {
             let rounds = req.swiss_rounds.ok_or_else(|| {
@@ -251,9 +244,7 @@ async fn create_tournament(
         }
     };
 
-    // Validate the player count. Single-elimination needs a full power-of-2
-    // bracket (the on-chain program enforces the same list); Swiss just needs
-    // at least one pairing.
+    // Single-elimination requires a full power-of-two bracket; Swiss needs at least one pairing.
     const VALID_PLAYER_COUNTS: [u16; 8] = [2, 4, 8, 16, 32, 64, 128, 256];
     match format {
         TournamentFormat::SingleElimination => {
@@ -275,11 +266,8 @@ async fn create_tournament(
         }
     }
 
-    // Auto-calculate fees from live SOL/GBP rate if not explicitly provided.
-    // Standard: 50p platform fee + £2.50 prize contribution = £3.00 total entry.
-    // RateCache::get already degrades to a stale-but-real rate on fetch failure —
-    // None only happens on a cold cache with no successful fetch yet ever. Reject
-    // rather than silently defaulting to a free tournament in that case.
+    // Convert the standard GBP entry fee using the live rate. Reject a cold cache
+    // with no real rate rather than creating a free tournament.
     let platform_fee_lamports = match req.platform_fee_lamports {
         Some(v) => v,
         None => state.rate_cache.gbp_to_lamports(0.50).await.ok_or((
@@ -310,15 +298,8 @@ async fn create_tournament(
 
     let prize_shares = req.prize_shares.unwrap_or(default_shares);
 
-    // A tournament_id that already has a store row was already fully created
-    // (successfully or as a resumed retry, below) — including ones that have
-    // since been cancelled or completed. Reject reuse here rather than
-    // falling into the on-chain idempotency skip below, which would
-    // otherwise treat "this PDA exists" as "safe to resume" and silently
-    // write a fresh Registration-status store row while the real on-chain
-    // tournament is still whatever state (e.g. Cancelled) it was left in —
-    // an admin picking a stale ID by mistake needs a loud error, not a
-    // tournament that looks fresh in this panel but is dead on-chain.
+    // Reject existing store IDs, including completed or cancelled tournaments.
+    // On-chain PDA existence alone does not make a tournament safe to resume.
     if store.get(req.tournament_id).await.is_some() {
         warn!(
             "[tournament] Refusing to create {} — tournament_id already in use",
@@ -365,12 +346,7 @@ async fn create_tournament(
         ));
     }
 
-    // ── On-chain setup (3 sequential VPS-signed transactions) ────────────────
-    // Each step is skipped if its PDA already exists on-chain, so a retry
-    // after a partial failure (e.g. tx 1 confirmed, tx 2's RPC call dropped,
-    // before the store write below ever ran) resumes instead of permanently
-    // failing with "account already in use". This only fires for tournament
-    // IDs with no store row yet, per the guard just above.
+    // Skip existing PDAs to resume partial on-chain setup only when no store row exists.
     let program_id = Pubkey::from_str(&state.config.program_id).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -417,13 +393,8 @@ async fn create_tournament(
         &authority.pubkey(),
     );
 
-    // Three sequential confirmations, each with the synchronous client's 30 s
-    // ceiling, plus three account reads — up to a minute and a half of wall
-    // clock. Doing that inline pinned a Tokio worker for the whole span; the
-    // runtime has one worker per core, so a couple of concurrent tournament
-    // creations could stall unrelated requests outright. The entire sequence
-    // runs on the blocking pool and reports back which branch it took, so the
-    // store write below stays on the async side where it belongs.
+    // Run sequential synchronous RPC confirmations on the blocking pool; write
+    // the store result after returning to the async handler.
     let rpc_url = state.config.solana_rpc_url.clone();
     let tournament_id = req.tournament_id;
     let expected_setup = req.clone();
@@ -447,7 +418,6 @@ async fn create_tournament(
             Ok(true)
         };
 
-        // 1. initialize_tournament
         if !account_exists(&tournament_pda, "Tournament")? {
             sign_and_submit(&rpc, &authority, &[ix1])
                 .map_err(|e| format!("initialize_tournament tx failed for {tournament_id}: {e}"))?;
@@ -457,15 +427,12 @@ async fn create_tournament(
             );
         }
 
-        // 2. initialize_escrow
         if !account_exists(&escrow_pda, "TournamentEscrow")? {
             sign_and_submit(&rpc, &authority, &[ix2])
                 .map_err(|e| format!("initialize_escrow tx failed for {tournament_id}: {e}"))?;
         }
 
-        // 3. initialize_shards (variant chosen by max_players) — a single
-        // atomic tx creates every required shard, so checking shard 0 alone
-        // tells us whether this step landed.
+        // Shard initialization is atomic; existence of shard 0 proves every required shard was created.
         if account_exists(&shard0_pda, "TournamentPlayersShard")? {
             for index in 1..crate::signing::solana::required_shards(expected_setup.max_players) {
                 let shard = Pubkey::find_program_address(&[b"tourney_players", &[index], &tid_bytes], &program_id).0;
@@ -497,7 +464,6 @@ async fn create_tournament(
 
     // Resumed and fresh creation share privacy handling and persistence.
 
-    // ── Store write (only after all 3 txs confirmed) ──────────────────────────
     let record = TournamentRecord::with_config(
         req.tournament_id,
         req.name.clone(),
@@ -799,9 +765,7 @@ async fn get_tournament_games(
             let finished = m.status == MatchStatus::Completed
                 || summary.is_some_and(|s| s.status == "completed");
 
-            // A match is watchable when it is running *and* somebody has
-            // actually moved. `Active` alone only means the game account
-            // exists.
+            // Active means the account exists; watchability also requires a move.
             let (state_label, watchable, reason) = if finished {
                 ("finished", false, Some("game finished"))
             } else if m.status != MatchStatus::Active {
@@ -949,7 +913,6 @@ async fn record_result(
         );
     }
 
-    // ── Mirror result on-chain (best-effort — store is already updated) ───────
     if let (Ok(program_id), Ok(winner_pk), Ok(loser_pk)) = (
         Pubkey::from_str(&state.config.program_id),
         Pubkey::from_str(&req.winner),
@@ -1144,7 +1107,6 @@ async fn initialize_swiss_tournament(
     seeded_tournament.status = TournamentStatus::Active;
     seeded_tournament.started_at = Some(chrono::Utc::now().timestamp());
 
-    // Initialize Swiss data
     seeded_tournament.swiss_data = Some(crate::signing::storage::tournament::SwissStorageData {
         current_round: 0,
         total_rounds: rounds,
@@ -1183,13 +1145,8 @@ async fn initialize_swiss_tournament(
             .await;
     }
 
-    // Fire the same on-chain start sequence the single-elimination auto-start
-    // path uses (start_tournament_ix + initialize_match batches) — without
-    // this, Swiss tournaments showed Active in the store while on-chain they
-    // stayed in Registration forever, so entry fees never got swept to
-    // host_treasury. Async/fire-and-forget on the scheduler task, same
-    // pattern already used for TournamentTrigger::PlayerJoined below —
-    // failures are logged server-side rather than surfaced in this response.
+    // Start Swiss tournaments on-chain through the scheduler so store state and
+    // fee sweeping agree. Submission failures are logged asynchronously.
     let mut on_chain_started = false;
     if let Some(ref trigger_tx) = state.tournament_trigger {
         if let Err(e) = trigger_tx
@@ -1238,7 +1195,6 @@ async fn join_tournament(
     // Load tournament early so we can check kyc_required before mutating state.
     let tournament = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
 
-    // ── Ban gate ─────────────────────────────────────────────────────────────
     let bans = crate::db::repository::BanRepository::new(state.store.pool());
     if bans.is_banned(player).await.unwrap_or(false) {
         info!(
@@ -1252,16 +1208,7 @@ async fn join_tournament(
         })));
     }
 
-    // ── CACF KYC gate ────────────────────────────────────────────────────────
-    // When kyc_required is true every entrant must have an active kyc_records
-    // row, written by POST /api/kyc/submit (the live KYC flow — see kyc.rs).
-    // Previously this checked `vault_users`, which is only ever written by
-    // POST /identity/register; that handler had a table-name bug (inserted
-    // into a differently-shaped `users` table) and so vault_users was never
-    // actually populated, meaning this gate rejected every entrant
-    // unconditionally. Fixed to use the same VaultStore::has_kyc check that
-    // /api/user/status already relies on.
-    // Bypassed on devnet, same as the profile-sponsorship and can_wager gates.
+    // Require active kyc_records when kyc_required is set; bypass this on devnet.
     if tournament.kyc_required && !state.config.is_devnet() {
         let vault = VaultStore::new((*state.vault_pool).clone(), state.store.pool());
         let has_kyc = vault.has_kyc(player).await;
@@ -1300,9 +1247,7 @@ async fn join_tournament(
         &state.vps_authority.pubkey(),
     );
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
-    // Finalized: the player signs this in their own wallet extension, which
-    // only accepts it if it can find the blockhash on its selected cluster —
-    // see `solana::wallet_signable_blockhash`.
+    // Wallet signing requires a finalized blockhash visible on the selected cluster.
     let blockhash = crate::signing::solana::wallet_signable_blockhash(&rpc)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let message = Message::new(&[instruction], Some(&player_pubkey));
@@ -1463,9 +1408,8 @@ async fn confirm_join(
         return Err(StatusCode::CONFLICT);
     }
 
-    // Private-tournament gate. Deliberately checked *after* the on-chain
-    // verification above so a wrong password can't be used to probe which
-    // signatures are valid, and before any roster mutation.
+    // Check the password after chain verification to avoid revealing valid signatures,
+    // and before mutating the roster.
     if let Some(ref hash) = tournament.password_hash {
         let supplied = req.password.as_deref().unwrap_or("");
         if !verify_join_password(hash, supplied) {
@@ -1559,10 +1503,7 @@ async fn build_leave_transaction(
     caller: RequireWallet,
     Json(req): Json<BuildLeaveTxReq>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // The returned transaction still needs the player's own signature to do
-    // anything, so this is only an information leak rather than an action — but
-    // it sits on the leave path and there is no reason to build one for a wallet
-    // the caller does not control.
+    // Build leave transactions only for wallets the caller controls.
     caller
         .require_is(&req.player)
         .map_err(|(status, _)| status)?;
@@ -1583,7 +1524,6 @@ async fn build_leave_transaction(
         &player_pubkey,
     );
 
-    // 2. Fetch latest blockhash
     let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
     // Finalized so the player's wallet can confirm this is a devnet
     // transaction — see `solana::wallet_signable_blockhash`.
@@ -1592,7 +1532,6 @@ async fn build_leave_transaction(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // 3. Build the unsigned transaction — the player signs it client-side
     let message = Message::new(&[instruction], Some(&player_pubkey));
     let mut transaction = Transaction::new_unsigned(message);
     transaction.message.recent_blockhash = blockhash;
@@ -1619,10 +1558,7 @@ async fn leave_tournament(
     caller: RequireWallet,
     Json(req): Json<ConfirmLeaveReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // A player may only remove themselves. Unauthenticated, this removed any
-    // named entrant from any tournament — and entry fees are paid on-chain
-    // before `confirm_join` records the roster, so eviction stranded a player
-    // who had already paid, or corrupted a live bracket outright.
+    // Only the authenticated entrant may remove themselves from a tournament.
     caller.require_is(&req.player)?;
     let player = Pubkey::from_str(&req.player).map_err(|_| {
         (
@@ -1757,11 +1693,7 @@ fn seed_players_by_elo(t: &mut TournamentRecord) {
     t.player_elos = seeded_elos;
 }
 
-// NOTE: prize funding lives at POST /admin/tournament/{id}/fund-prize in
-// admin.rs (`fund_tournament_prize`) — that one actually signs+submits
-// `fund_sol_prize_ix`. A dead duplicate stub used to live here
-// (`/fund-prize-tx`, returned a literal "placeholder" transaction) and has
-// been removed to avoid anyone wiring the wrong route.
+// Prize funding is submitted by /admin/tournament/{id}/fund-prize.
 
 async fn build_cancel_transaction(
     Path(id): Path<u64>,
@@ -2149,7 +2081,6 @@ pub fn admin_tournament_routes() -> Router<AppState> {
         .route("/{id}/approve-prize-release", post(approve_prize_release))
 }
 
-// ── Item 7: Tournament session routing ───────────────────────────────────────
 
 #[derive(Deserialize)]
 struct TournamentSessionReq {
@@ -2558,7 +2489,6 @@ mod tests {
 
     #[test]
     fn test_tournament_id_validation() {
-        // Test valid tournament IDs
         let valid_ids = vec![0, 1, 100, u64::MAX];
         for id in valid_ids {
             let req = CreateTournamentReq {
@@ -2594,7 +2524,6 @@ mod tests {
 
     #[test]
     fn test_match_index_validation() {
-        // Test valid match indices
         let valid_indices = vec![0, 1, 10, 100];
         for index in valid_indices {
             let req = RecordResultReq {
@@ -2609,7 +2538,6 @@ mod tests {
 
     #[test]
     fn test_game_id_validation() {
-        // Test valid game IDs
         let valid_ids = vec![0, 1, 12345, u64::MAX];
         for id in valid_ids {
             let req = SetMatchGameIdReq {
@@ -2656,7 +2584,6 @@ mod tests {
     }
 }
 
-// ── Schedule Status ─────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
 struct ScheduleStatusResponse {

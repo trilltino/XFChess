@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-// ── Input types ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameRecord {
@@ -61,7 +60,6 @@ pub enum GameResult {
     Draw,
 }
 
-// ── Per-ply evaluation ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlyEval {
@@ -82,7 +80,6 @@ pub enum Complexity {
     Complex,
 }
 
-// ── Per-side signal values ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalValues {
@@ -97,7 +94,6 @@ pub struct SignalValues {
     pub timing_source: TimingSource,
 }
 
-// ── Verdict ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Verdict {
@@ -126,7 +122,6 @@ impl Verdict {
     }
 }
 
-// ── Full analysis output ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SideAnalysis {

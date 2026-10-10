@@ -5,7 +5,6 @@ use clap::Parser;
 use xfchess::{build_app, GameConfig, PlayerColor};
 
 fn main() {
-    // Initialize telemetry / crash reporting
     xfchess::core::crash::setup_enhanced_panic_hook();
 
     // Check wallet mode (Tauri vs standalone)
@@ -33,7 +32,6 @@ fn main() {
     // Parse Game configuration from CLI + environment variables
     let mut game_config = GameConfig::parse();
 
-    // Load session config from file if specified
     if game_config.session_config.is_some() {
         if let Err(e) = game_config.load_session_config() {
             eprintln!(" Failed to load session config: {}", e);
@@ -72,7 +70,6 @@ fn main() {
         }
     }
 
-    // Print game configuration if joining a game
     if let Some(ref game_id) = game_config.game_id {
         println!(" Game ID: {}", game_id);
         println!(" Player: {:?}", game_config.player_color);
@@ -91,7 +88,6 @@ fn main() {
         println!();
     }
 
-    // Build and run the Bevy application
     let mut app = build_app(game_config);
     app.run();
 }

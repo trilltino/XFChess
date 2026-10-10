@@ -31,14 +31,11 @@ fn parse_game_account(data: &[u8]) -> Option<GameSnapshot> {
 
 const RPC_BATCH_SIZE: usize = 100;
 
-/// A missing Game PDA is only treated as resolved once the session is older
-/// than this, so a lagging RPC node that has not yet seen a just-created game
-/// (and its escrow) cannot retire the session.
+/// Wait this long before resolving a missing Game PDA, allowing RPC creation lag.
 const MISSING_GAME_GRACE_SECS: i64 = 10 * 60;
 
-/// `finalize_game` closes the Game PDA after paying the pot out of the escrow
-/// PDA; a draw split can leave at most a lamport or two behind. Anything above
-/// this means a stake is still held without a Game account to settle it.
+/// Finalization closes the Game PDA; only rounding dust should remain in escrow.
+/// A larger balance indicates an unsettled stake.
 const ESCROW_DUST_LAMPORTS: u64 = 5_000;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -53,9 +50,7 @@ enum MissingGameResolution {
     Grace,
 }
 
-/// Decide what a missing Game PDA means. `finalize_game` closes the account
-/// (`close = fee_payer`), so absence is the normal post-settlement state —
-/// but absence alone does not prove the stake left the escrow.
+/// Finalization closes the Game PDA, but absence alone does not prove escrow was paid.
 fn resolve_missing_game(
     escrow: &Fetched,
     session_created_at: Option<i64>,
@@ -332,10 +327,8 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
                     STATUS_SETTLED | STATUS_EXPIRED => {
                         state.store.deactivate(game_id).await;
                     }
-                    // Nobody joined: `cancel_game` refunded the creator's
-                    // stake in the same transaction that set Cancelled, and
-                    // `finalize_game` needs a black profile that never
-                    // existed — retrying it would fail forever.
+                    // Unjoined cancellation already refunded the creator; finalize requires
+                    // a nonexistent black profile and must not be retried.
                     STATUS_CANCELLED if !snap.is_delegated && snap.black == Pubkey::default() => {
                         info!(
                             "[settlement] game {}: cancelled before an opponent joined; refund was part of the cancellation",
@@ -377,11 +370,8 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
                                 game_id,
                                 STALE_DELEGATION_SECS / 60
                             );
-                            // Fire the (idempotent, safe) forced-undelegation
-                            // request once, shortly after crossing the
-                            // staleness threshold — not on every tick
-                            // thereafter. See MAGICBLOCK.md's "Failure Mode:
-                            // ER Unavailability" section.
+                            // Request forced undelegation once after the staleness threshold. See
+                            // MAGICBLOCK.md for ER-unavailability recovery.
                             if stale_for
                                 < STALE_DELEGATION_SECS + SETTLEMENT_TICK.as_secs() as i64 * 2
                             {
@@ -392,12 +382,8 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
                                 )
                                 .await;
                             }
-                            // Once the ~60min request window has elapsed,
-                            // complete the recovery without the ER at all,
-                            // and release the escrow in the same breath —
-                            // `snap.white`/`snap.black` are read here, before
-                            // the wipe, since the escrow-release step can't
-                            // recover them from the (by then empty) account.
+                            // After the request window, recover without the ER and release escrow.
+                            // Read both players before wiping the account.
                             force_undelegate_if_request_expired(
                                 state,
                                 game_id,
@@ -508,9 +494,7 @@ async fn undelegate_from_er(
         game_id, sig
     );
 
-    // Cancel the time-check crank as a best-effort follow-up so a finished
-    // game doesn't leave a dangling scheduled task on the ER. Never let this
-    // affect the undelegate result already recorded above.
+    // Crank cancellation is best effort and must not change the recorded undelegation result.
     let cancel_kp = entry.keypair();
     let cancel_pk = cancel_kp.pubkey();
     let cancel_program_id = *program_id;
@@ -881,9 +865,7 @@ async fn finalize_on_chain(
         Some(_) => Some("black"),
         None => None, // draw
     };
-    // finalize now requires the passed fee_payer to equal the recorded
-    // game.fee_payer (rent + reimbursement go there); the tx is still signed by
-    // session_kp, but fee_payer is a non-signer account.
+    // Pass recorded game.fee_payer for rent reimbursement; session_kp still signs the transaction.
     let ix = solana::finalize_game_ix(
         &program_id,
         game_id,
@@ -960,9 +942,7 @@ async fn finalize_on_chain(
         );
     }
 
-    // Same PGN assembly as the HTTP finalize route (routes::main::finalize_game)
-    // — most games settle through this auto-worker, not the manual route, so
-    // this is the path that actually needs to produce a tagged PGN.
+    // Use the same tagged PGN assembly as the HTTP finalization route.
     crate::signing::game_pgn::assemble_and_store_pgn(
         &repo,
         &state.elo_cache,
@@ -1137,13 +1117,11 @@ mod tests {
         d.extend_from_slice(&[0u8; 68]); // board_state
         d.extend_from_slice(&10u16.to_le_bytes()); // move_count
 
-        // halfmove_clock — omitted here originally, which shifted every
-        // field below it by two bytes and made the fixture disagree with the
-        // real on-chain layout (see `signing::solana::game_account`).
+        // Include halfmove_clock to keep the fixture aligned with the on-chain layout.
         d.extend_from_slice(&0u16.to_le_bytes());
         d.extend_from_slice(&1u16.to_le_bytes()); // turn (u16)
         d.extend_from_slice(&0i64.to_le_bytes()); // created_at
-        d.extend_from_slice(&updated_at.to_le_bytes()); // updated_at
+        d.extend_from_slice(&updated_at.to_le_bytes());
         d.extend_from_slice(&1_000u64.to_le_bytes()); // wager_amount
         match wager_token {
             Some(m) => {

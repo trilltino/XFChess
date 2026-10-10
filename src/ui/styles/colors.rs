@@ -3,7 +3,6 @@ use bevy_egui::egui;
 pub struct UiColors;
 
 impl UiColors {
-    // === Background Colors ===
 
     pub const BG_DARK: egui::Color32 = egui::Color32::from_rgb(20, 20, 25);
 
@@ -13,7 +12,6 @@ impl UiColors {
 
     pub const BG_OVERLAY: egui::Color32 = egui::Color32::from_black_alpha(150);
 
-    // === Accent Colors ===
 
     pub const ACCENT_GOLD: egui::Color32 = egui::Color32::from_rgb(218, 165, 32);
 
@@ -25,7 +23,6 @@ impl UiColors {
 
     pub const SUCCESS: egui::Color32 = egui::Color32::from_rgb(40, 180, 40);
 
-    // === Text Colors ===
 
     pub const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_rgb(220, 220, 225);
 
@@ -35,7 +32,6 @@ impl UiColors {
 
     pub const BORDER: egui::Color32 = egui::Color32::from_rgb(60, 60, 65);
 
-    // === Popup / Modal tokens ===
 
     pub const TEXT_POPUP_BODY: egui::Color32 = egui::Color32::from_rgb(155, 158, 175);
 

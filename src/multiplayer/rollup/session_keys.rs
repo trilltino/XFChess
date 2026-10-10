@@ -63,7 +63,6 @@ impl HandshakeOrderingKeyManager {
             return Ok(keypair);
         }
 
-        // Create new keypair if none exists
         let keypair = Keypair::new();
         self.save_keypair_to_disk(&keypair)?;
         self.session_keypair = Some(keypair.insecure_clone());
@@ -81,12 +80,10 @@ impl HandshakeOrderingKeyManager {
         let keypair_bytes = keypair.to_bytes();
         let key_path = self.get_key_path()?;
 
-        // Create parent directories synchronously
         if let Some(parent) = key_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        // Write file synchronously
         let mut file = fs::File::create(&key_path)?;
         file.write_all(&keypair_bytes)?;
         file.sync_all()?; // Ensure data is written to disk
@@ -185,17 +182,14 @@ mod tests {
     fn test_keypair_roundtrip() {
         let mut manager = HandshakeOrderingKeyManager::new(999999); // Use unlikely game ID
 
-        // Clear any existing keypair
         manager.clear_session_keypair();
         manager.session_keypair = None;
 
-        // Create a new keypair
         let keypair = manager
             .load_or_create_keypair()
             .expect("Failed to create keypair");
         let pubkey = keypair.pubkey();
 
-        // Create a new manager with the same game ID
         let mut manager2 = HandshakeOrderingKeyManager::new(999999);
         let loaded_keypair = manager2
             .load_or_create_keypair()
@@ -205,7 +199,6 @@ mod tests {
         assert_eq!(keypair.pubkey(), loaded_keypair.pubkey());
         assert_eq!(pubkey, loaded_keypair.pubkey());
 
-        // Cleanup
         manager.clear_session_keypair();
     }
 

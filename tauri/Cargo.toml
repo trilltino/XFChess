@@ -20,21 +20,14 @@ all = ["dev", "wallet", "tournament-admin"]
 
 [dependencies]
 base64 = "0.22"
-# Loose "2.11" (allows 2.x patch/minor drift) is intentional here, unlike the
-# workspace root's exact pins: the desktop wrapper isn't money/consensus-
-# adjacent, and Tauri 2.x has stayed additive across minors so far. Revisit
-# if a Tauri upgrade ever breaks the wallet-adapter bridge.
+# Allow Tauri 2.x version drift; revisit if an upgrade breaks the wallet bridge.
 tauri = { version = "2.11", features = ["devtools", "unstable", "image-png"] }
 tauri-build = { version = "2.6", features = [] }
 tauri-plugin-deep-link = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
-# Routes the admin panel's HTTP calls through Rust instead of the webview.
-# The webview is served over http://localhost:7454 (embedded axum server, since
-# `frontendDist` is claimed by wallet-ui), which made every backend call a
-# cross-origin request — subject to CORS and to this app's own CSP connect-src.
-# Requests issued from Rust have no browser origin, so neither applies. See
-# docs/plans/tournament-admin-connection-rearchitecture.md §3 Phase 1.
+# Proxy admin HTTP through Rust so the loopback webview is not constrained
+# by browser CORS or CSP for backend requests.
 tauri-plugin-http = "2"
 tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }

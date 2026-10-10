@@ -9,7 +9,6 @@ fn example_execute_move_flow() {
     // ... execute move ...
     current_turn.switch();
 
-    // Expect Black's turn
     assert_eq!(current_turn.color, PieceColor::Black);
 }
 

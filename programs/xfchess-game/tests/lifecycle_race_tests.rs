@@ -1,10 +1,5 @@
-//! Lifecycle race drills (BanksClient, real program binary).
-//!
-//! Solana serialises transactions that write the same Game account, so a
-//! "race" is two orderings of the same pair of instructions. Each test runs
-//! one ordering and asserts the system reaches exactly one valid outcome:
-//! the losing instruction fails, the game state does not change, and no
-//! lamports move.
+//! Test both serialized instruction orderings against the real program.
+//! The losing instruction must leave state and lamports unchanged.
 
 mod common;
 

@@ -13,14 +13,7 @@ pub fn flush_pending_turn(
         let before = (current_turn.color, current_turn.move_number);
         game_timer.apply_increment(pending.mover);
         current_turn.switch();
-        // Cheap enough to leave on permanently — this is the single place
-        // `CurrentTurn` ever changes, so if a player is ever stuck unable to
-        // move, this line (or its absence) says immediately whether the
-        // turn genuinely never advanced, versus advancing correctly while
-        // something else (input gating, network delivery) blocked play.
-        // warn! (not info!): the release build's log filter is
-        // "xfchess=warn", so an info! here would be silently dropped in
-        // exactly the shipped builds where this diagnostic matters most.
+        // Use warn for turn-change diagnostics so shipped log filters retain them.
         warn!(
             "[TURN] {:?} move {} -> {:?} move {} (mover was {:?})",
             before.0, before.1, current_turn.color, current_turn.move_number, pending.mover
@@ -46,7 +39,6 @@ pub fn highlight_possible_moves(
         commands.entity(entity).despawn();
     }
 
-    // Spawn new markers based on current selection.
     for (square, _children) in squares_query.iter() {
         let pos = (square.x, square.y);
         let is_selected = selection.selected_position == Some(pos);
@@ -136,9 +128,6 @@ pub fn animate_capture_fade(
         // t ∈ [0, 1]
         let t = fading.timer.fraction();
 
-        // 1. Position: Slide horizontally and sink vertically
-        //    Horizontal slide: 0.6 units along knockback_dir
-        //    Vertical sink: start at board height, end at -0.8 (fully submerged)
         let slide_dist = 0.6 * t;
         let sink_y = PIECE_ON_BOARD_Y - (1.0 * t * t); // Quadratic sink for weight
 
@@ -151,7 +140,6 @@ pub fn animate_capture_fade(
         let tilt_angle = 0.43 * t * (1.0 - t) * 4.0;
         transform.rotation = Quat::from_axis_angle(fading.tilt_axis, tilt_angle);
 
-        // 3. Scale: Slight shrink to emphasize the 'vanishing'
         let scale = 1.0 - (0.3 * t);
         transform.scale = Vec3::splat(scale);
 
@@ -187,7 +175,6 @@ pub fn setup_game_scene(
     global_ambient.color = Color::srgb(0.9, 0.92, 1.0);
     global_ambient.brightness = 95.0;
 
-    // Set background color based on view mode
     if view_mode.is_templeos() {
         // Vibrant solid yellow background matching reference image (#FFFF00)
         commands.insert_resource(ClearColor(Color::srgb(1.0, 1.0, 0.0))); // Pure yellow #FFFF00
@@ -196,21 +183,14 @@ pub fn setup_game_scene(
         commands.insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0))); // Black
     }
 
-    // Setup camera based on view mode
-    // TempleOS camera is set up by the board plugin, so we only create standard camera here
-    // UPDATE: We now reuse the PersistentEguiCamera for standard view (in setup_game_camera system)
-    // so we ONLY need to handle TempleOS specific setup or lights here.
+    // Standard mode reuses PersistentEguiCamera; only TempleOS needs setup here.
 
     // lights...
 
     // Skip lights for TempleOS mode (unlit rendering)
     if !view_mode.is_templeos() {
-        // Key light is the overhead "Angel Light" (2M, shadows on, spawned in
-        // `game_init`) — camera-independent. This is the *fill*: a camera-following
-        // "headlamp" so the viewer-facing side of every piece stays evenly lit no
-        // matter how the player orbits/zooms. Its position is updated each frame by
-        // `update_board_fill_light`. No fixed directional/fill (those over-brightened
-        // the board and lit unevenly as the camera moved).
+        // The camera-following fill light complements the fixed overhead key light
+        // and keeps viewer-facing pieces lit while orbiting.
         commands.spawn((
             PointLight {
                 intensity: 600_000.0,

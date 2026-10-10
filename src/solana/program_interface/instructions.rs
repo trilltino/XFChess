@@ -83,9 +83,6 @@ fn borsh_string(s: &str) -> Vec<u8> {
     buf
 }
 
-// ---------------------------------------------------------------------------
-// create_game
-// ---------------------------------------------------------------------------
 
 pub fn create_game_ix(
     program_id: Pubkey,
@@ -127,9 +124,6 @@ pub fn create_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// join_game
-// ---------------------------------------------------------------------------
 
 pub fn join_game_ix(
     program_id: Pubkey,
@@ -165,9 +159,6 @@ pub fn join_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// cancel_game
-// ---------------------------------------------------------------------------
 
 pub fn cancel_game_ix(
     program_id: Pubkey,
@@ -198,9 +189,7 @@ pub fn cancel_game_ix(
     })
 }
 
-/// `withdraw_expired_wager`: the creator reclaims the stake of a game nobody
-/// joined within 24h. SOL wagers only — the four optional SPL-token accounts
-/// are passed as Anchor's `None` sentinel (the program id).
+/// Reclaim an unjoined SOL wager after 24 hours. Optional SPL accounts use the program-ID sentinel.
 pub fn withdraw_expired_wager_ix(
     program_id: Pubkey,
     creator: Pubkey,
@@ -230,9 +219,6 @@ pub fn withdraw_expired_wager_ix(
     }
 }
 
-// ---------------------------------------------------------------------------
-// record_move
-// ---------------------------------------------------------------------------
 
 pub fn record_move_ix(
     program_id: Pubkey,
@@ -282,9 +268,6 @@ pub fn record_move_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// finalize_game
-// ---------------------------------------------------------------------------
 
 pub fn finalize_game_ix(
     program_id: Pubkey,
@@ -323,9 +306,6 @@ pub fn finalize_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// offer_draw / accept_draw
-// ---------------------------------------------------------------------------
 
 pub fn offer_draw_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Result<Instruction> {
     let game_pda =
@@ -378,9 +358,6 @@ pub fn claim_timeout_ix(program_id: Pubkey, game_id: u64, caller: Pubkey) -> Res
     })
 }
 
-// ---------------------------------------------------------------------------
-// authorize_session_key
-// ---------------------------------------------------------------------------
 
 pub fn authorize_session_key_ix(
     program_id: Pubkey,
@@ -1022,11 +999,8 @@ pub fn get_program_id() -> Result<Pubkey> {
         .map_err(|e| anyhow::anyhow!("Invalid program ID: {}", e))
 }
 
-// ── Solana Friends ────────────────────────────────────────────────────────────
-//
-// Mirrors `programs/xfchess-game/src/account_ix/friends_ix.rs`. The `Friendship`
-// PDA is addressed by the two wallets in canonical (sorted) order, so both sides
-// derive the same account. Callers pass any two wallets; we sort them here.
+// Sort the two wallets before deriving the Friendship PDA so both sides
+// address the same account.
 
 fn friendship_pair(a: Pubkey, b: Pubkey, program_id: &Pubkey) -> (Pubkey, Pubkey, Pubkey) {
     let (lo, hi) = if a < b { (a, b) } else { (b, a) };

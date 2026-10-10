@@ -1,6 +1,4 @@
--- Migration 004: Performance indexes
--- WAL mode is set at connection time (not via SQL), but we add the
--- remaining indexes here so queries on large audit/deletion tables stay fast.
+-- Add performance indexes here; WAL is configured on connection.
 
 -- Fast lookup of all audit events for a wallet
 CREATE INDEX IF NOT EXISTS idx_audit_log_pubkey     ON audit_log (pubkey);

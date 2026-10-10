@@ -11,14 +11,10 @@ name = "xfchess_game"
 
 [features]
 default = ["cranks", "move-validation", "devnet"]
-# `production` feature for audit / mainnet builds. When enabled, the
-# `move-validation` feature is mandatory — production builds can never
-# ship with the client-side-only board-state validation path.
+# Production builds require move-validation; client-supplied board validation is development-only.
 production = ["move-validation", "mainnet"]
-# Environment feature gates — exactly one should be active at build time.
-# `localnet`   : unit tests, program-test, ephemeral-rollups dev.
-# `devnet`      : current devnet deployment keys and program ID.
-# `mainnet`     : mainnet deployment keys (must be rotated before launch).
+# Enable exactly one environment: localnet for tests, devnet for development,
+# mainnet with production keys.
 localnet = []
 devnet = []
 mainnet = []
@@ -29,22 +25,15 @@ move-validation = ["dep:nimzovich_engine"]
 cranks = ["magicblock-magic-program-api", "bincode"]
 game-tests = []
 legacy-game-tests = []
-# Library builds (the host `xfchess` crate and `backend` both link this crate
-# for its types) can enable this to suppress the `#[no_mangle]` security.txt
-# static and the program entrypoint. Off by default so the deployable SBF build
-# always carries both. Declared explicitly so the `cfg(not(feature =
-# "no-entrypoint"))` guard in src/lib.rs is a real feature, not an undeclared
-# cfg tolerated only by the `unexpected_cfgs = allow` lint below.
+# Host library builds may suppress the entrypoint and security.txt static;
+# deployable SBF builds retain both by default.
 no-entrypoint = []
 
 [dependencies]
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 solana-program = { workspace = true }
-# nimzovich_engine: no_std chess move validation. Compiled into the program
-# behind the `move-validation` feature (see src/chess_logic_on_chain.rs).
-# default-features = false keeps it no_std; the `std` feature is only used
-# in dev-dependencies for host-side tests.
+# The on-chain engine disables default features; std is enabled only in dev tests.
 nimzovich_engine = { workspace = true, default-features = false, features = [], optional = true }
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"], optional = true }
 ephemeral-rollups-sdk = { workspace = true }
@@ -54,9 +43,7 @@ solana-security-txt = { workspace = true }
 magicblock-magic-program-api = { version = "=0.13.11", default-features = false, optional = true }
 bincode = { workspace = true, optional = true }
 
-# Ephemeral-Rollups move-path suite. Runs the real on-chain `record_move`
-# logic in-process via solana-program-test (loads target/deploy/xfchess_game.so).
-# Requires `cargo build-sbf` first. See docs/ER_TESTING.md.
+# Run record_move against target/deploy/xfchess_game.so; build with cargo build-sbf first.
 [[test]]
 name = "config_tests"
 path = "tests/config_tests.rs"
@@ -65,14 +52,11 @@ path = "tests/config_tests.rs"
 name = "er_move_tests"
 path = "tests/er_move_tests.rs"
 
-# Delegation/undelegation account-constraint suite (negative paths that don't
-# need a live ER — e.g. the magic_program/magic_context address constraints).
+# Test delegation account constraints without a live ER validator.
 [[test]]
 name = "er_delegation_tests"
 path = "tests/er_delegation_tests.rs"
 
-# Treasury-withdrawal and close_tournament fixes. Seeds account state directly
-# and runs the built .so via solana-program-test.
 [[test]]
 name = "treasury_tests"
 path = "tests/treasury_tests.rs"
@@ -135,8 +119,7 @@ path = "tests/cancel_time_check_tests.rs"
 name = "er_recovery_tests"
 path = "tests/er_recovery_tests.rs"
 
-# Session-signed create-game path where a PDA (not a wallet) fronts rent +
-# wager — regression coverage for the "signer privilege escalated" CPI bug.
+# Exercise session-signed rent and wager transfers from a PDA.
 [[test]]
 name = "global_create_game_tests"
 path = "tests/global_create_game_tests.rs"
@@ -147,9 +130,7 @@ path = "tests/global_create_game_tests.rs"
 name = "tournament_swiss_completion_tests"
 path = "tests/tournament_swiss_completion_tests.rs"
 
-# Regression coverage for the platform-fee-lamports=0 bug found while
-# auditing the signing/popup architecture — guards `finalize_game` actually
-# pays a nonzero `country_fee` to `treasury_vault` at settlement.
+# Assert finalization pays a nonzero country_fee to treasury_vault.
 [[test]]
 name = "global_session_settlement_tests"
 path = "tests/global_session_settlement_tests.rs"
@@ -160,17 +141,11 @@ path = "tests/global_session_settlement_tests.rs"
 name = "claim_timeout_tests"
 path = "tests/claim_timeout_tests.rs"
 
-# Proves finalize_game's K=32 ELO update actually mutates the right
-# PlayerProfile accounts through the real instruction, not just that the
-# pure calculate_elo_update formula is correct in isolation — previously
-# untested at every level above the math itself.
 [[test]]
 name = "elo_settlement_tests"
 path = "tests/elo_settlement_tests.rs"
 
-# Proves LichessUsernameRecord enforces one-Lichess-username-per-wallet
-# through the real instruction — link_external_elo previously had no
-# on-chain uniqueness protection at all.
+# Verify one Lichess username can be linked to only one wallet.
 [[test]]
 name = "link_external_elo_tests"
 path = "tests/link_external_elo_tests.rs"
@@ -183,9 +158,7 @@ solana-system-interface = { version = "3", features = ["bincode"] }
 # Decodes the "Program data: <base64>" log line to verify `emit!`ed events
 # (e.g. StuckDelegationRecovered) actually fire with correct fields.
 base64 = { workspace = true }
-# Reused to craft board state and compute expected next-boards exactly as the
-# program does (zero divergence between test oracle and on-chain validator).
-# nimzovich_engine with std feature unlocks helpers like `game_from_fen`.
+# Use the same engine board logic as the program; std enables game_from_fen in tests.
 nimzovich_engine = { workspace = true, features = ["std"] }
 
 [lints.rust]

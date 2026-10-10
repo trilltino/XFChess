@@ -66,7 +66,6 @@ fn main() {
     println!("log PDA  : {}", move_log_pda);
     println!();
 
-    // --- Game account ---
     match rpc.get_account(&game_pda) {
         Ok(acc) => {
             println!(
@@ -124,7 +123,6 @@ fn main() {
 
     println!();
 
-    // --- MoveLog account (devnet) ---
     match rpc.get_account(&move_log_pda) {
         Ok(acc) => {
             println!(

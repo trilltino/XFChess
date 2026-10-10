@@ -127,9 +127,7 @@ mod tests {
         let map = MockDiscoveryMap::new();
 
         for i in 0..5 {
-            // Not every 32-byte pattern decompresses to a valid Edwards point (e.g. [0u8; 32]
-            // doesn't), so derive a real public key from a secret key seed instead of treating
-            // arbitrary bytes as a public key directly.
+            // Derive a public key from a seed; arbitrary 32-byte values may not be valid Edwards points.
             let id = iroh::SecretKey::from_bytes(&[i as u8; 32]).public();
             let data = EndpointData::default();
             map.add_node(id, data);

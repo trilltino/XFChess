@@ -50,7 +50,6 @@ impl ConnectionManager {
 
     #[instrument(skip(self, peer_id))]
     pub async fn get_sender(&self, peer_id: EndpointId) -> Result<Sender, Error> {
-        // Try cached sender first
         if let Some(sender) = self.try_get_cached_sender(peer_id).await {
             return Ok(sender);
         }

@@ -419,7 +419,7 @@ All three code fixes (1, 2, 3) and any key rotation (4) ship in one program upgr
 
 1. **Build**:
    ```bash
-   scripts\build_program.bat        # or: anchor build
+   just build-program        # or: anchor build
    ```
    Confirm the program size still fits and `opt-level = "z"` is intact.
 2. **Test locally**:

@@ -1,6 +1,4 @@
--- Migration 006: game history tables + move counter
--- Adds persistent game records, full move log, and per-session move counter.
--- All tables live on the session pool (sessions.db).
+-- Game history and move counters live in sessions.db.
 
 -- Track move number per game inside the existing sessions row
 ALTER TABLE sessions ADD COLUMN move_count INTEGER NOT NULL DEFAULT 0;

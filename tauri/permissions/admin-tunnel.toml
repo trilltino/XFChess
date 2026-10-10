@@ -1,14 +1,5 @@
-# App-level (non-plugin) command permissions.
-#
-# Commands registered via `generate_handler!` are allowed implicitly for
-# windows loaded from Tauri's own asset protocol, but a webview served from a
-# *remote* origin — which the tournament-admin window is, since it loads over
-# the embedded axum server at http://localhost:7454 — must have every command
-# explicitly permitted. Without a file here, tauri-build emits no app ACL
-# manifest at all and any invoke() fails with "not allowed. Plugin not found".
-#
-# Granted to the tournament-admin window only, via capabilities/admin-tunnel.json.
-# See docs/plans/tournament-admin-connection-rearchitecture.md §3 Phase 2.
+# The loopback-served admin webview needs explicit app-command ACLs. Grant
+# these only to the tournament-admin window via its capability file.
 
 [[permission]]
 identifier = "allow-admin-tunnel"

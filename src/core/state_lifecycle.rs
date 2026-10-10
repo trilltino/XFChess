@@ -27,7 +27,6 @@ pub fn audit_despawn_markers(
             current_state, count
         );
 
-        // Log first few entities for debugging
         for (entity, name, _) in entities.iter().take(5) {
             let entity_name = name.map(|n| n.as_str()).unwrap_or("unnamed");
             debug!(
@@ -73,7 +72,6 @@ macro_rules! create_cleanup_system {
     };
 }
 
-// Create cleanup systems for each state
 create_cleanup_system!(cleanup_main_menu, GameState::MainMenu);
 create_cleanup_system!(cleanup_paused, GameState::Paused);
 create_cleanup_system!(cleanup_game_over, GameState::GameOver);
@@ -83,10 +81,8 @@ pub fn cleanup_in_game(
     mut commands: Commands,
     state: Res<State<GameState>>,
 ) {
-    // During OnExit, `state.get()` already reports the *new* state (see the
-    // macro comment above). Heading into GameOver keeps the board/pieces/camera
-    // alive so the game-over screen isn't a black void — they get torn down by
-    // `cleanup_gameplay_scene_on_game_over_exit` whenever GameOver is actually left.
+    // OnExit reports the new state. Keep the scene for GameOver;
+    // cleanup_gameplay_scene_on_game_over_exit removes it when GameOver is left.
     if *state.get() == GameState::GameOver {
         return;
     }

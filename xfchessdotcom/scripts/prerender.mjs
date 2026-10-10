@@ -1,23 +1,5 @@
-// Build-time prerender for the public marketing routes (Phase 3 of
-// docs/plans/xfchessdotcom-seo-sitemap-plan.md).
-//
-// Why this exists: xfchessdotcom is pure CSR (no SSR framework), served as flat
-// static files by nginx. React 19's native <title>/<meta> hoisting (used by
-// SeoHead.tsx) only ever runs client-side here, so zero-JS bots (social
-// link-preview bots, most non-Google crawlers) never see it — only real
-// browsers and Google's second-wave JS render do. This script closes that
-// gap for the routes that matter most for SEO by rendering them to real
-// static HTML at build time, via Vite's own SSR module loader (no extra
-// framework, no routing migration) — see the plan's Option B / §5.
-//
-// Deliberately scoped to the 11 public routes that don't touch
-// @solana/wallet-adapter-react: those libraries reach for `window`/storage
-// at module scope and are not safe to execute in this Node render pass.
-// Players.tsx and TournamentDetail.tsx stay CSR-only — their client-side
-// SeoHead still covers real browsers and Googlebot's JS pass, just not
-// zero-JS bots. That's a documented trade-off, not an oversight.
-//
-// Run after `vite build` (needs the hashed dist/index.html as a template).
+// Prerender public routes after vite build using its hashed HTML template.
+// Exclude routes importing wallet adapters: they access browser globals at module scope.
 
 import { createServer } from 'vite';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -38,10 +20,7 @@ const ROUTES = [
   { path: '/features', file: 'src/pages/marketing/features.tsx', name: 'Features' },
 ];
 
-// React 19 hoists <title>/<meta>/<link> to the front of the rendered string
-// (verified empirically against the installed react-dom version — see plan
-// §5 notes). <script type="application/ld+json"> does NOT hoist and stays
-// in place, which is fine: JSON-LD is valid anywhere in the document.
+// React hoists title/meta/link; JSON-LD scripts remain in place and are valid there.
 const HEAD_TAG = /^(?:<title>.*?<\/title>|<meta[^>]*\/?>|<link[^>]*\/?>)/;
 
 function splitHoistedHead(html) {
@@ -88,22 +67,12 @@ async function main() {
           ),
         ),
       );
-      // framer-motion's `initial={{ opacity: 0, y: 20 }}` page-transition
-      // wrapper renders its literal initial values as an inline style with
-      // no animation loop running server-side — left as-is, the static
-      // snapshot would show content at opacity:0, which Google's renderer
-      // can flag as intentionally hidden text. Neutralize it so crawlers
-      // see the fully-visible, settled state (client JS animates in from
-      // this same state on real page loads, so nothing user-visible changes).
+      // Neutralize server-rendered animation opacity so static content is visible
+      // without a client animation loop.
       rendered = rendered.replace(/style="opacity:0;transform:translateY\(20px\)"/g, '');
       const { head, body } = splitHoistedHead(rendered);
 
-      // index.html deliberately ships with only a bare <title> (see its own
-      // comment — no default description/OG/canonical, to avoid duplicate
-      // tags on non-prerendered routes once SeoHead hoists client-side).
-      // Replace that bare title with this route's real hoisted tags, and
-      // drop the rendered body into #root so crawlers get actual content,
-      // not just an empty shell (client JS still remounts over it on load).
+      // Replace the template title with route metadata and render its body into root.
       let out = template.replace(/<title>.*?<\/title>/, '');
       out = out.replace('</head>', `${head}</head>`);
       out = out.replace('<div id="root"></div>', `<div id="root">${body}</div>`);

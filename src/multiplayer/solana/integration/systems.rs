@@ -62,7 +62,6 @@ pub fn initialize_solana_integration(
                         }
                     }
                 } else {
-                    // 2. Attempt to parse as real Solana Pubkey
                     match trimmed.parse::<Pubkey>() {
                         Ok(pubkey) => {
                             info!("[WALLET] Phantom wallet connected. Pubkey: {}", pubkey);
@@ -82,28 +81,11 @@ pub fn initialize_solana_integration(
                                 w.pubkey = Some(pubkey);
                             }
 
-                            // Pick up an already-authorized global session from
-                            // a previous run, if one's saved on disk — lets
-                            // `authorize_global_session_if_needed` skip
-                            // straight to "active" instead of re-prompting.
-                            // This is optimistic (local file only); the
-                            // backend registration below is what actually
-                            // confirms it against on-chain state, and can
-                            // still flip `global_session_active` back off.
+                            // Load saved sessions optimistically; backend registration validates them
+                            // against on-chain state and may deactivate a stale key.
                             solana_state.try_load_global_session(&pubkey);
-                            // Re-register with the backend on every connect
-                            // (off this thread) — its registry is in-memory
-                            // only and forgets everything on restart, so this
-                            // is what recovers finalize/undelegate/settlement
-                            // for this wallet without needing a fresh popup.
-                            // Its result now feeds back into
-                            // `global_session_active` (via
-                            // `poll_global_session_register_result`) instead
-                            // of only being logged — a locally-decryptable
-                            // but on-chain-mismatched key (lost/stale file,
-                            // wrong instance, different machine) was
-                            // previously trusted as "active" until the first
-                            // real use failed against the wrong session PDA.
+                            // Register global sessions on every connect to restore the backend's
+                            // in-memory registry and verify the locally saved key.
                             if let Some(ref kp) = solana_state.global_session_keypair {
                                 let kp_bytes = kp.to_bytes();
                                 let (tx, rx) = crossbeam_channel::bounded(1);
@@ -115,13 +97,6 @@ pub fn initialize_solana_integration(
                                 commands.insert_resource(GlobalSessionRegisterPending { rx });
                             }
 
-                            // Gossip-signing keypair generation lives entirely in
-                            // `sync_session_key_to_network` now (gated on
-                            // `wallet_pubkey.is_some()`, not on this specific branch
-                            // running) — this code path loses the race against
-                            // `main_menu.rs`'s faster WalletBridge poll almost every
-                            // time in practice, so generating the key here too would
-                            // just be dead code most runs.
                         }
                         Err(e) => {
                             warn!(
@@ -163,11 +138,7 @@ pub fn query_wallet_pubkey_from_tauri() -> Option<String> {
     use std::io::{Read, Write};
     use std::net::TcpStream;
 
-    // Announced port first, full scan only as a fallback — same discovery
-    // path as open_wallet_browser()/send_to_tauri_blocking(), not a
-    // hand-rolled copy of it (see the wallet-bridge port-discovery audit:
-    // this used to have its own inline scan that never got the port-file
-    // fast path and would drift out of sync with the canonical one).
+    // Prefer the announced bridge port; scan only as a fallback through the shared helper.
     for port in candidate_ports() {
         let mut stream = match TcpStream::connect(("127.0.0.1", port)) {
             Ok(s) => s,
@@ -224,14 +195,8 @@ pub fn update_wallet_balance(
         return;
     }
 
-    // Fetch immediately on a fresh connect instead of waiting for the next
-    // periodic tick (up to `BalanceRefreshTimer`'s full interval away, since
-    // a freshly-constructed `Timer` doesn't fire on its first tick) — this
-    // is the balance `lobby.cached_balance`/wager-eligibility checks read
-    // (see `sync_from_solana_state`), so a stale `0.0` here was blocking
-    // "join wager" right after connecting even though the separately-tracked
-    // `WalletBridgeData.sol_balance` shown in the HUD (refreshed every 5s by
-    // `poll_wallet_bridge`) already had the real value.
+    // Fetch balance immediately on connection so wager eligibility does not
+    // wait for the periodic timer's first tick.
     let just_connected = solana_state.wallet_pubkey != *last_pubkey;
     *last_pubkey = solana_state.wallet_pubkey;
 
@@ -343,18 +308,8 @@ pub fn sync_session_key_to_network(
         return;
     }
     if solana_state.wallet_pubkey.is_none() {
-        // No wallet connected — casual/local play still needs every gossip
-        // message signed (see this function's doc comment above: an
-        // unsigned message is silently dropped by any peer without
-        // allow-unsigned-p2p, which meant every P2P message — every Move,
-        // Clock, Ping — in every non-wallet game was always dropped, with
-        // the board never updating for either player). Fall back to the
-        // device's persistent node identity key — already loaded at startup
-        // (`identity::load_or_create`), already the stable per-device
-        // identity used for friends/presence (see social.rs's doc comment:
-        // "node ID is the stable identity; Solana pubkey is optional") —
-        // rather than waiting forever for a wallet a casual player never
-        // connects.
+        // Casual play still requires signed gossip. Use the persistent device key
+        // when no wallet is connected.
         let node_key = crate::multiplayer::network::identity::load_or_create();
         let sk: [u8; 32] = node_key.to_bytes();
         network_state.session_signing_key = Some(sk);
@@ -447,38 +402,14 @@ pub fn authorize_session_key_on_game_start(
         }
 
         let msg_sender = network_state.message_sender.clone();
-        // `SessionInfo` (which populates `opponent_pubkey`, required before
-        // `bridge.rs` can finalize the game on-chain) previously went out
-        // over Iroh gossip only. Moves and resignation already learned this
-        // lesson (see `online_game_session.rs`'s "dual transport" comment) —
-        // gossip alone silently drops this message whenever the direct P2P
-        // link hasn't established (a real, reproduced failure: "[P2P]
-        // Connection timed out after 12s"), leaving both sides stuck logging
-        // "Opponent pubkey unavailable" forever and the game never settling.
+        // Send SessionInfo through both transports so opponent identity survives
+        // a missing gossip link and remains available for finalization.
         let node_b58 = network_state
             .node_id
             .as_ref()
             .map(|id| bs58::encode(id.as_bytes()).into_string());
-        // The pubkey that actually signs this connection's outgoing gossip
-        // envelopes (see `sync_session_key_to_network`) — distinct from
-        // `session_pubkey` below. The per-game participant roster
-        // (`multiplayer::systems`'s causal-broadcast check) is keyed off
-        // *this* value, since that's what a received move's verified signer
-        // is compared against, not the VPS session-delegation key.
-        //
-        // `session_signing_key` stores the 32-byte Ed25519 *seed*, not the
-        // public key — `SignedNetworkMessage::sign`/`verify` derive the real
-        // verifying key from it via `SigningKey::from_bytes(seed)
-        // .verifying_key()`. This MUST use the same derivation: an earlier
-        // version of this code passed the raw seed bytes straight into
-        // `Pubkey::new_from_array`, which just reinterprets 32 arbitrary
-        // bytes as if they were already a public key — not a valid Ed25519
-        // public-key derivation, and never equal to what `bind_identity`
-        // actually verifies and sets as `signer_pubkey`. That bug meant the
-        // roster was still populated with a value no real move's verified
-        // signer could ever match, silently reproducing the exact
-        // "non-participant signer" rejection the `signing_pubkey` field was
-        // added to fix in the first place.
+        // Derive the gossip signer public key from the 32-byte Ed25519 seed. The
+        // participant roster must match verified message signers, not session delegation keys.
         let signing_pubkey_bytes = network_state.session_signing_key;
         let braid_heads = braid.heads();
 
@@ -525,15 +456,8 @@ pub fn authorize_session_key_on_game_start(
                                 expires_at,
                             };
 
-                            // Dual transport, same reasoning as moves/resign:
-                            // gossip alone can silently drop this before the
-                            // P2P link establishes — a real, previously
-                            // reproduced bug ("Opponent pubkey unavailable"
-                            // forever, game never settles). SessionInfo is
-                            // Both players post one of these into the same
-                            // shared moves stream, so the parent comes from
-                            // the tracked stream head rather than being
-                            // assumed to be genesis.
+                            // Publish SessionInfo on both transports and chain it from the shared
+                            // stream head; both players write to that stream.
                             crate::multiplayer::network::braid_transport::publish_session_info(
                                 crate::multiplayer::network::vps::vps_base(),
                                 game_id.to_string(),
@@ -597,14 +521,7 @@ pub fn spawn_verified_participants_fetch(
             continue;
         }
 
-        // `fetch_verified_participants` builds and uses a *blocking*
-        // reqwest client internally — calling it from inside a plain
-        // `.spawn(async move { ... })` task runs it directly on the async
-        // runtime's own worker thread, and reqwest::blocking constructing
-        // its own nested runtime in that context panics ("Cannot drop a
-        // runtime in a context where blocking is not allowed"). Must go
-        // through `spawn_blocking` instead, same as `update_wallet_balance`'s
-        // RPC call — moves it to a dedicated blocking-pool thread.
+        // fetch_verified_participants uses blocking reqwest; run it on spawn_blocking.
         let handle = tokio_runtime.0.spawn_blocking(move || {
             crate::multiplayer::vps_client::fetch_verified_participants(game_id)
         });
@@ -705,7 +622,6 @@ fn load_or_create_hot_wallet() -> Option<Keypair> {
     info!("[WALLET] Generating new local hot wallet...");
     let new_kp = Keypair::new();
 
-    // Save to disk
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -798,15 +714,10 @@ pub fn sync_player_profiles(
             *last_game_id = competitive.game_id;
             *last_opp_pk = competitive.opponent_pubkey;
 
-            // Fetch own
             if let Some(pk) = solana_state.wallet_pubkey {
                 let (tx, rx) = crossbeam_channel::bounded(1);
                 let pk_str = pk.to_string();
-                // fetch_player_profile is a blocking reqwest call — it must run via
-                // spawn_blocking, not directly inside this async task. reqwest::blocking
-                // builds (and later drops) its own nested Tokio runtime internally, which
-                // panics ("cannot drop a runtime in a context where blocking is not
-                // allowed") when called from a task already driven by this outer runtime.
+                // Run blocking profile fetches on spawn_blocking, outside the async runtime.
                 tokio_runtime.0.spawn(async move {
                     let result = tokio::task::spawn_blocking(move || {
                         crate::multiplayer::network::vps::fetch_player_profile(&pk_str).ok()
@@ -818,7 +729,6 @@ pub fn sync_player_profiles(
                 *own_rx = Some(rx);
             }
 
-            // Fetch opponent
             if let Some(pk) = competitive.opponent_pubkey {
                 let (tx, rx) = crossbeam_channel::bounded(1);
                 let pk_str = pk.to_string();
@@ -972,46 +882,8 @@ pub fn authorize_global_session_if_needed(
     mut attempted_for: Local<Option<Pubkey>>,
     mut failed_attempts: Local<u32>,
 ) {
-    // Disabled 2026-08-11. Status of the three original blockers, re-checked
-    // 2026-08-23 while wiring up social-login embedded wallets:
-    //
-    //  1. FIXED (on-chain). "Revoke never reclaims the old deposit" — there is
-    //     now a `withdraw_global_session` instruction
-    //     (`account_ix::global_session_ix::handler_withdraw_global_session`,
-    //     exposed in lib.rs) that returns the unspent vault balance to the
-    //     player while keeping the account rent-exempt.
-    //
-    //  2. NOT APPLICABLE to embedded wallets. The Solflare "network mismatch:
-    //     current network devnet, but this transaction is for mainnet"
-    //     rejection is an artifact of an extension having its own
-    //     user-selected cluster that `ensureDevnet` has to nudge. A Privy
-    //     embedded wallet has no such setting, so this failure mode cannot
-    //     occur on that path. Still unresolved for extension wallets.
-    //
-    //  3. FIXED IN SOURCE, NOT YET DEPLOYED. `global_create_game` hitting
-    //     `InsufficientFunds` (6060) because only the soft
-    //     `spending_limit`/`max_wager` caps were checked, never the vault's
-    //     real balance. `game_ix::global_create` and `game_ix::global_join`
-    //     now both verify the vault covers rent + wager and stays rent-exempt,
-    //     returning `GlobalSessionVaultUnderfunded` with an actionable message
-    //     instead. **That guard only takes effect once the program is
-    //     redeployed to devnet.**
-    //
-    // (3) was deployed to devnet on 2026-08-23 (slot 486887670, sig
-    // 25ZoXVbwUx9Z4HB13GLDpqEKsMXmL7oE2vucgfYTqq6BahLJgXs7cH1xzVcxmFJAuxpBcH9xaGXqo67GV1AcDAzi),
-    // and `global_create_game_tests` proves the guard both rejects an
-    // underfunded vault and still accepts an adequately funded one.
-    //
-    // So the blanket disable is lifted — but only for embedded wallets, since
-    // (2) is still open for extensions. Everyone else keeps the proven per-game
-    // Tauri wallet-bridge signing path (`cached_global_session_keypair_bytes`
-    // stays `None` — see `sync_from_solana_state` in lobby.rs), which is the
-    // documented fallback in docs/plans/social-login-embedded-wallet-plan.md
-    // §8.4: play works fully without this, it just costs a popup per
-    // transaction.
-    //
-    // To extend this to extension wallets, root-cause (2) first — reproducing
-    // it needs Solflare with a non-devnet cluster selected.
+    // Enable global sessions only for embedded wallets; extension wallets still
+    // fall back to per-game signing because cluster selection can mismatch.
     if !solana_state.wallet_is_embedded {
         return;
     }
@@ -1114,14 +986,8 @@ pub fn authorize_global_session_if_needed(
         }
     }
 
-    // Mirrors `establish_global_session`'s DEPOSIT_LAMPORTS (0.1 SOL) +
-    // SESSION_KEY_FUND_LAMPORTS (0.01 SOL), plus a small fee/rent buffer.
-    // A wallet below this can never complete the authorize+fund transaction
-    // — Phantom will show a real "Confirm Transaction" popup that fails
-    // simulation with "funds may be lost if submitted," and the client sits
-    // blocked on that popup for up to `SIGN_TIMEOUT_SECS` (60s) per attempt
-    // with nothing telling the player why. Check first and skip straight to
-    // the labeled unavailable-reason instead of opening a doomed popup.
+    // Check the wallet covers the session deposit, key funding, and rent/fees
+    // before opening an authorization prompt.
     const MIN_BALANCE_FOR_GLOBAL_SESSION_SOL: f64 = 0.115;
     if solana_state.balance < MIN_BALANCE_FOR_GLOBAL_SESSION_SOL {
         solana_state.global_session_unavailable_reason = Some(format!(
@@ -1192,12 +1058,8 @@ fn establish_global_session(
         },
     );
 
-    // The session keypair is freshly generated client-side and holds zero
-    // SOL — with no backend involved to fund it (unlike the per-game flow's
-    // `activate_session`, which funds its session key from the fee-payer
-    // pool), it can't even pay its own transaction fee. Bundle a direct
-    // transfer into this same, already-necessary signature: 0.01 SOL covers
-    // ~2000 future tx fees, same margin `activate_session` uses.
+    // Fund the fresh client-side session key in the same authorization transaction
+    // so it can pay subsequent fees.
     const SESSION_KEY_FUND_LAMPORTS: u64 = 10_000_000;
     let fund_ix = solana_system_interface::instruction::transfer(
         &wallet_pubkey,
@@ -1205,17 +1067,8 @@ fn establish_global_session(
         SESSION_KEY_FUND_LAMPORTS,
     );
 
-    // A `GlobalSessionDelegation` that's still enabled on-chain but has no
-    // matching local key (the local file was lost, overwritten by another
-    // instance pre-dating the storage-path fix, or the wallet authorized
-    // from a different machine) makes the program reject *every* plain
-    // re-authorize attempt with `GlobalSessionAlreadyActive`, identically,
-    // forever. Check for that case up front so the common repro doesn't pay
-    // for a doomed first popup before revoking — see
-    // `global_session_is_live_onchain`'s doc comment for exactly what this
-    // mirrors. The reactive fallback below (retry on a real
-    // `GlobalSessionAlreadyActive` error) stays as defense-in-depth in case
-    // this pre-flight read is stale or races a concurrent authorize.
+    // Revoke a live on-chain delegation with no matching local key before reauthorizing.
+    // Retain reactive retry in case this preflight read is stale.
     let needs_revoke_first = global_session_is_live_onchain(rpc_url, &session_pda);
     if needs_revoke_first {
         info!(
@@ -1223,16 +1076,8 @@ fn establish_global_session(
         );
     }
 
-    // Fund-leak fix: an account that exists but is no longer "live" (past
-    // its 30-day duration, or `games_remaining` hit 0) is NOT caught by
-    // `needs_revoke_first` above — the on-chain re-auth guard happily lets a
-    // plain re-authorize through in that state. Before this check, that meant
-    // every natural re-auth silently deposited a fresh amount on top of
-    // whatever balance the expired/exhausted session left behind, with no
-    // withdraw ever firing — an unbounded, compounding stranded balance.
-    // Reclaim it in the same signature as the fresh authorize whenever the
-    // account exists at all and doesn't already need a revoke first (the
-    // `needs_revoke_first` branch below handles reclaiming for the live case).
+    // Reclaim expired or exhausted session balances before fresh authorization
+    // to avoid accumulating stranded deposits.
     let stale_balance_to_reclaim =
         !needs_revoke_first && global_session_account_exists(rpc_url, &session_pda);
     if stale_balance_to_reclaim {
@@ -1274,14 +1119,7 @@ fn establish_global_session(
             }
             let revoke_ix =
                 build_revoke_global_session_ix(&program_id, &wallet_pubkey, &session_pda);
-            // Bundled with the revoke (one signature, no extra popup): a
-            // stale session's leftover deposit is otherwise permanently
-            // stranded — `revoke_global_session` only flips `enabled`, it
-            // never returns lamports, and the fresh authorize below deposits
-            // a brand new amount on top instead of reusing it. Confirmed
-            // live 2026-08-11: a wallet whose local key file went missing
-            // once ended up with a `GlobalSessionDelegation` vault at 2x the
-            // expected balance from exactly this path.
+            // Bundle withdrawal with revoke: revoke disables the session without returning lamports.
             let withdraw_ix =
                 build_withdraw_global_session_ix(&program_id, &wallet_pubkey, &session_pda);
             sign_and_send_via_tauri(

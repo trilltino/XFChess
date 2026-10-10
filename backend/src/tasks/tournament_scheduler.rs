@@ -268,7 +268,6 @@ impl TournamentScheduler {
 
     const GRACE_SECS: i64 = 10 * 60;
 
-    // ── helpers ──────────────────────────────────────────────────────────────
 
     fn abort_fill_timer(&mut self, tournament_id: u64) {
         if let Some(handle) = self.fill_timers.remove(&tournament_id) {
@@ -280,7 +279,6 @@ impl TournamentScheduler {
         }
     }
 
-    // ── event handlers ───────────────────────────────────────────────────────
 
     async fn handle_player_joined(&mut self, tournament_id: u64, player_count: usize) {
         let tournament = match self.store.get(tournament_id).await {
@@ -397,7 +395,6 @@ impl TournamentScheduler {
         }
     }
 
-    // ── start ─────────────────────────────────────────────────────────────────
 
     async fn start_tournament(&self, tournament_id: u64) {
         if let Ok(operations) = crate::signing::tournament_operations::list(self.store.pool(), tournament_id).await {
@@ -407,7 +404,6 @@ impl TournamentScheduler {
         } else {
             return;
         }
-        // ── On-chain: start_tournament + initialize_match × N ────────────────
         if let Some(cfg) = &self.on_chain {
             let record = self.store.get(tournament_id).await;
             let max_players = record.as_ref().map(|t| t.max_players).unwrap_or(0);
@@ -435,7 +431,6 @@ impl TournamentScheduler {
                     .map_err(|e| format!("bad program_id: {e}"))?;
                 let rpc = make_rpc(&rpc_url);
 
-                // Tx 1: start_tournament
                 let ix = start_tournament_ix(
                     &program_id,
                     tournament_id,
@@ -446,11 +441,8 @@ impl TournamentScheduler {
                 sign_and_submit(&rpc, &authority, &[ix])
                     .map_err(|e| format!("start_tournament tx: {e}"))?;
 
-                // Tx batches: initialize_match (20 per batch). Linear bracket
-                // layout: round 1 first, final at the last index — must match
-                // the store's generate_bracket and on-chain final_match_index.
-                // Round-1 matches carry their seeded players; record_match_result
-                // rejects matches with empty player slots.
+                // Initialize matches in batches of 20, round one through final. Indices must
+                // match the store and program; round-one player slots must be populated.
                 let mut idx = 0u16;
                 while (idx as usize) < total_matches {
                     let end = ((idx as usize + 20).min(total_matches)) as u16;
@@ -504,7 +496,6 @@ impl TournamentScheduler {
             }
         }
 
-        // ── Store update ──────────────────────────────────────────────────────
         if let Err(e) = self.store.start_tournament(tournament_id).await {
             warn!(
                 "[tournament-scheduler] Failed to start tournament {}: {}",
@@ -535,13 +526,7 @@ impl TournamentScheduler {
             tournament_id, player_count
         );
 
-        // Publish the start so connected players know to fetch their match.
-        //
-        // This used to be a fire-and-forget `BracketFired` gossip message,
-        // which reached only the peers already subscribed at that instant —
-        // anyone joining a second later had no way to learn the bracket had
-        // fired. As a resource, the transition is durable: a late subscriber
-        // reads `status: "started"` straight out of the snapshot.
+        // Publish the started state as a durable resource so late subscribers see it.
         let Some(hub) = &self.braid_hub else {
             warn!(
                 "[tournament-scheduler] No Braid hub — tournament {} start not published",
@@ -922,7 +907,6 @@ mod tests {
         assert!(round1_pairings(&t).is_empty());
     }
 
-    // ── anticheat_gate ──────────────────────────────────────────────────────
 
     async fn anticheat_migrated_pool() -> sqlx::SqlitePool {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();

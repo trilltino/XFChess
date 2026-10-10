@@ -132,13 +132,7 @@ fn draw_profile_onboarding(
                     );
                     ui.add_space(12.0);
 
-                    // `ui.horizontal` spans the full available width of its
-                    // parent, so a two-button row inside `vertical_centered`
-                    // still renders flush left — only a leaf widget's own
-                    // rect gets centered. `allocate_ui` with the row's real
-                    // content width turns the row into a leaf-sized block
-                    // that centers correctly, matching the "+ New profile"
-                    // button below it.
+                    // Allocate the button row at content width so vertical_centered can center it.
                     const ROW_WIDTH: f32 = 208.0 + 8.0 + 34.0;
                     for name in &existing {
                         ui.allocate_ui(egui::vec2(ROW_WIDTH, 34.0), |ui| {
@@ -211,15 +205,7 @@ fn draw_profile_onboarding(
         } else if existing.iter().any(|n| n == trimmed) {
             state.error = Some("That name is already taken on this device.".to_string());
         } else {
-            // `rfd` has no Android backend (every dialog trait is simply
-            // unimplemented for that target — confirmed by attempting the
-            // cross-compile, not assumed). `create_profile`'s `save_path:
-            // None` is already a first-class state elsewhere in this module
-            // (PGN saves fall back to `profile_pgn_dir`/the documents
-            // default), so on Android this just always takes that path
-            // instead of offering a custom location — matching the "default
-            // to `documents_dir()`" plan for a v1 that has no
-            // Storage-Access-Framework picker yet.
+            // Android has no rfd directory picker; use the profile's default PGN location.
             #[cfg(not(target_os = "android"))]
             let folder = rfd::FileDialog::new()
                 .set_title("Choose Save Location")

@@ -52,7 +52,6 @@ struct MatchResult {
     game_id: u64,
 }
 
-// -- Main -----------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -62,7 +61,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let rpc = RpcClient::new_with_commitment(DEVNET_RPC, CommitmentConfig::confirmed());
 
-    // Load admin keypair
     let admin_keypair = read_keypair_file(&args.keypair)
         .map_err(|_| format!("Failed to read admin keypair from {}", args.keypair))?;
 
@@ -79,24 +77,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("?  Admin balance low - please fund with devnet SOL");
     }
 
-    // Create 4 test players
     let players = create_players().await?;
 
-    // Airdrop SOL to each player
     println!("\n Airdropping 1 SOL to each player...");
     for player in &players {
         airdrop_sol(&rpc, &player.pubkey).await?;
         println!("   {} got 1 SOL", player.name);
     }
 
-    // Create player profiles
     println!("\n Creating player profiles...");
     for player in &players {
         create_player_profile(&rpc, &admin_keypair, &player.pubkey).await?;
         println!("   {} profile created", player.name);
     }
 
-    // Initialize tournament
     println!("\n Initializing tournament...");
     initialize_tournament(&rpc, &admin_keypair).await?;
     println!("   Tournament {} initialized", TOURNAMENT_ID);
@@ -116,12 +110,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Play matches
     let mut results = Vec::new();
 
-    // SF1: Magnus vs Vidit
     println!("\n SF1: Magnus vs Vidit");
     let sf1_result = play_match(&rpc, &players[0], &players[3], "SF1").await?;
     results.push(sf1_result);
 
-    // SF2: Fabiano vs Anish
     println!("\n SF2: Fabiano vs Anish");
     let sf2_result = play_match(&rpc, &players[1], &players[2], "SF2").await?;
     results.push(sf2_result);
@@ -180,7 +172,6 @@ async fn create_players() -> Result<Vec<Player>, Box<dyn std::error::Error>> {
         },
     ];
 
-    // Set the actual pubkeys
     let mut result = Vec::new();
     for mut player in players {
         player.pubkey = player.keypair.pubkey();
@@ -253,7 +244,6 @@ async fn play_match(
     // Simulate match play
     sleep(Duration::from_secs(3)).await;
 
-    // Determine winner (simplified - higher ELO wins)
     let winner = if player1.elo > player2.elo {
         &player1.name
     } else {

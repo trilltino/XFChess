@@ -53,9 +53,7 @@ fn report_move_blur(
         let now = Instant::now();
         telemetry.ply_count += 1;
 
-        // Think time for the move just made: elapsed since the turn began
-        // (the previous move applied, or game start). Resets for the next turn
-        // regardless of who moved.
+        // Measure time since turn start and reset after every move, regardless of player.
         let think_ms = telemetry.turn_started_at.map(|t| {
             now.saturating_duration_since(t)
                 .as_millis()

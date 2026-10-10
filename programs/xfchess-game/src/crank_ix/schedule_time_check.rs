@@ -64,6 +64,4 @@ pub struct ScheduleTimeCheck<'info> {
     pub magic_program: UncheckedAccount<'info>,
 }
 
-// Crank-specific small error enums removed; use the central `GameErrorCode`
-// in `crate::errors` (e.g. `GameErrorCode::InvalidArgument`) to avoid
-// multiple #[error_code] enums in the crate which the IDL builder rejects.
+// Use central GameErrorCode; the IDL builder rejects multiple error_code enums.

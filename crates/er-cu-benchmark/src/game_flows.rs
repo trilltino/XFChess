@@ -195,7 +195,7 @@ pub async fn run_1v1_game_flow(
     let suffix = game_id & 0xFFFF; // last 4 hex digits of timestamp
     println!("\n   Setting up 1v1 game #{}", game_id);
 
-    // Step 1: Init profiles (swallow UsernameTaken/AlreadyInitialized — profile exists from prior run)
+    // Existing profiles may return UsernameTaken or AlreadyInitialized on repeated runs.
     println!("   Step 1: Initializing player profiles...");
     let profile_data = [
         (white, format!("w_{:04x}", suffix)),
@@ -240,7 +240,6 @@ pub async fn run_1v1_game_flow(
         }
     }
 
-    // Step 2: Create game
     println!("   Step 2: Creating game...");
     let mut create_ixs = vec![ix::create_game_ix(
         program_id,
@@ -274,7 +273,6 @@ pub async fn run_1v1_game_flow(
     .0;
     println!("   Game PDA: {}", game_pda);
 
-    // Step 3: Black joins
     println!("   Step 3: Black joining game...");
     let mut join_ixs = vec![ix::join_game_ix(
         program_id,
@@ -301,7 +299,6 @@ pub async fn run_1v1_game_flow(
         Some(sig.to_string()),
     );
 
-    // Step 4: Authorize session keys
     println!("   Step 4: Authorizing session keys...");
     let session_white = Keypair::new();
     let session_black = Keypair::new();
@@ -368,7 +365,6 @@ pub async fn run_1v1_game_flow(
     with_retry(|| base_rpc.send_and_confirm_transaction(&tx_white)).await?;
     with_retry(|| base_rpc.send_and_confirm_transaction(&tx_black)).await?;
 
-    // Step 5: Delegate game to ER
     println!("   Step 5: Delegating game to ER...");
     let mut delegate_ixs = vec![ix::delegate_game_ix(
         program_id,
@@ -396,13 +392,9 @@ pub async fn run_1v1_game_flow(
         Some(sig.to_string()),
     );
 
-    // Give MagicBlock ER validator time to pick up the delegation from the
-    // base layer — 3s was too tight in practice (observed "Transaction loads
-    // a writable account that cannot be written" on the first ER move
-    // immediately after delegating).
+    // Allow the ER validator to observe L1 delegation before the first write.
     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
 
-    // Step 6: Schedule time check crank
     println!("   Step 6: Scheduling time check crank...");
     if let Ok(schedule_ix) = ix::schedule_time_check_ix(
         program_id,
@@ -440,18 +432,10 @@ pub async fn run_1v1_game_flow(
         }
     }
 
-    // Step 7: Play 100 moves on MagicBlock ER
     println!("   Step 7: Playing 100 moves on MagicBlock ER...");
     let sequence = generate_100_move_sequence();
     let mut move_latencies: Vec<std::time::Duration> = Vec::with_capacity(100);
-    // Cache the blockhash instead of fetching fresh via getBlockhashForAccounts
-    // on every single move: each fetch is its own ~200ms network round trip
-    // (confirmed empirically — see fast_send_and_confirm's [timing] output),
-    // and a blockhash stays valid for many seconds, far longer than the gap
-    // between moves in this loop. Refetching every ~3s (well under the
-    // ~60-90s typical validity window) trades a small "blockhash not found"
-    // risk at the boundary for cutting one whole round trip out of nearly
-    // every move.
+    // Reuse blockhashes for about three seconds to avoid one RPC round trip per move.
     let mut cached_blockhash: Option<(solana_sdk::hash::Hash, std::time::Instant)> = None;
     let mut get_cached_blockhash =
         |er_rpc: &RpcClient,
@@ -466,16 +450,8 @@ pub async fn run_1v1_game_flow(
             cached_blockhash = Some((hash, std::time::Instant::now()));
             Ok(hash)
         };
-    // Batch moves instead of send-then-wait-for-confirm one at a time: the
-    // confirm round trip (~200ms) was the other half of the per-move floor
-    // alongside the send round trip. Nonce/uci/next_board for all 100 moves
-    // are fully precomputed client-side (`sequence`), so nothing about move
-    // i+1 depends on move i having confirmed yet — only on it having been
-    // *sent* in order, which a single sequential client loop already
-    // guarantees. So: fire off a whole batch of sends back-to-back with no
-    // per-move wait, then confirm the whole batch with one
-    // `get_signature_statuses` call (it accepts many signatures per call),
-    // instead of one confirm round trip per move.
+    // Send precomputed moves in order without per-move confirmation, then
+    // confirm their signatures in one batch.
     const BATCH_SIZE: usize = 10;
     let mut i = 0usize;
     while i < 100 {
@@ -544,13 +520,7 @@ pub async fn run_1v1_game_flow(
         for (k, sig) in batch_sigs.iter().enumerate() {
             move_latencies.push(per_move);
             let move_no = i + k + 1;
-            // Not calling simulate_transaction here for a "real" CU reading:
-            // it's a full extra ~200ms network round trip against the router
-            // per move, and empirically every single one of hundreds of
-            // moves across every run this session reported exactly this same
-            // fallback value — strong evidence the simulate call was never
-            // actually returning units_consumed via this endpoint, just
-            // silently hitting the `Err`/`None` fallback path every time.
+            // Report the fallback CU estimate rather than adding per-move simulation RPCs.
             let cu_consumed = 40_000;
             logger.log(
                 "gameplay",
@@ -583,7 +553,6 @@ pub async fn run_1v1_game_flow(
         );
     }
 
-    // Step 8: Crank time check on ER
     println!("   Step 8: Running time check crank...");
     if let Ok(crank_ix) =
         ix::crank_time_check_ix(program_id, game_pda, white.pubkey(), black.pubkey())
@@ -618,7 +587,6 @@ pub async fn run_1v1_game_flow(
         }
     }
 
-    // Step 9: Commit move batch (Bypassed in event-based architecture)
     println!("   Step 9: Committing move batch (Bypassed)...");
 
     println!("\n=========================================================================================");
@@ -626,7 +594,6 @@ pub async fn run_1v1_game_flow(
     println!("=========================================================================================\n");
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
-    // Step 10: Undelegate game
     println!("   Step 10: Undelegating game...");
     let mut undelegate_ixs = vec![ix::undelegate_game_ix(
         program_id,
@@ -652,15 +619,8 @@ pub async fn run_1v1_game_flow(
         Some(sig.to_string()),
     );
 
-    // Poll devnet until the game PDA's owner actually returns to the program
-    // (not a fixed sleep) — the ER relays the undelegation to L1
-    // asynchronously, and a resign/finalize sent before that commit lands
-    // reads stale base-layer state (still owned by the delegation program),
-    // which fails with GameNotActive even though the game genuinely finished
-    // on the ER. Same pattern the production game client already uses for
-    // this exact wait — see `src/multiplayer/rollup/bridge.rs`'s
-    // `spawn_finalization_task` ("Item 2: Polls the Game PDA owner on devnet
-    // instead of a fixed sleep").
+    // Poll until L1 Game ownership returns to the program before finalization;
+    // undelegation commits asynchronously from the ER.
     println!("   Waiting for ER relay to land on L1 (polling game PDA owner)...");
     let undelegate_wait_start = std::time::Instant::now();
     let mut fees_advanced_after_undelegate: Option<u64> = None;
@@ -693,11 +653,7 @@ pub async fn run_1v1_game_flow(
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 
-    // Step 10.75: Verify the fee-accounting fix — Game.fees_advanced must now
-    // include UNDELEGATE_COST + ER_SESSION_FEE_LAMPORTS from mark_undelegated,
-    // not just create/join/delegate/record_move. Skipped (warn, not fail) if
-    // the 60s wait above gave up before ownership actually returned, since
-    // then the base-layer read wouldn't reflect the undelegate yet.
+    // Check undelegation costs are included in fees_advanced after ownership returns.
     println!("   Step 10.75: Verifying fees_advanced accounting...");
     match fees_advanced_after_undelegate {
         Some(fees_advanced) => verify_fees_advanced(fees_advanced, 100)?,
@@ -706,22 +662,14 @@ pub async fn run_1v1_game_flow(
         ),
     }
 
-    // Step 10.5: Resign game to mark status as Finished — but the scripted
-    // 100-move sequence is a genuine checkmate, and `moves_ix/apply.rs`
-    // already transitions the game to `Finished` on-chain the moment
-    // checkmate is detected (move 100 here). Resign then correctly fails
-    // with `GameNotActive` since the game already ended — that's expected,
-    // not a bug, so treat it as a benign skip rather than a hard failure.
+    // The scripted final move is checkmate, so GameNotActive on resign is expected.
     println!("   Step 10.5: Resigning game (skipped if already finished by checkmate)...");
     let mut resign_ixs = vec![ix::resign_game_ix(program_id, game_id, white.pubkey())?];
     apply_compute_budget(&mut resign_ixs, 100_000, 10_000, 262_144);
     let blockhash = base_rpc.get_latest_blockhash()?;
     let tx =
         Transaction::new_signed_with_payer(&resign_ixs, Some(&white.pubkey()), &[white], blockhash);
-    // No with_retry here: GameNotActive is deterministic (the game is
-    // already finished), not transient, so retrying just burns 5 attempts
-    // before with_retry replaces the real error with a generic "Max retries
-    // exceeded" that no longer contains "GameNotActive" for this match to see.
+    // Do not retry deterministic GameNotActive failures; preserve the original error.
     match base_rpc.send_and_confirm_transaction(&tx) {
         Ok(sig) => logger.log(
             "game_setup",
@@ -744,20 +692,11 @@ pub async fn run_1v1_game_flow(
         }
     }
 
-    // Note: there is no standalone `claim_prize` instruction on the current
-    // program — 1v1 wager payout happens automatically inside `finalize_game`
-    // (`lifecycle::settlement::settle_finished_game`), which is Step 11 below.
-    // An older `claim_prize_ix` call used to sit here; it built an
-    // instruction discriminator that matches nothing on-chain today
-    // (`InstructionFallbackNotFound`), silently swallowed because the result
-    // was `match`ed rather than propagated.
+    // 1v1 wager payout occurs inside finalize_game; no separate claim instruction is needed.
 
-    // Step 11: Finalize game
     println!("   Step 11: Finalizing game...");
 
-    // Capture pre-finalize ELOs and balances — the balances let us verify
-    // afterward that the escrow actually paid the winner (see
-    // verify_winner_payout), not just that finalize_game's tx confirmed.
+    // Capture balances before finalization to verify actual payout, not just transaction confirmation.
     let white_elo_before =
         fetch_profile_elo(base_rpc, program_id, white.pubkey()).unwrap_or(1200.0);
     let black_elo_before =
@@ -768,11 +707,7 @@ pub async fn run_1v1_game_flow(
         solana_sdk::pubkey::Pubkey::find_program_address(&[b"treasury_vault"], &program_id).0;
     let treasury_before = with_retry(|| base_rpc.get_balance(&treasury_vault)).await?;
 
-    // fee_payer must be `game.fee_payer` exactly (game_ix/finalize.rs:39
-    // constrains `fee_payer.key() == game.fee_payer`) — Step 2 created this
-    // game with `create_game_ix(..., white.pubkey(), white.pubkey(), ...)`
-    // (player = fee_payer = white), so that's what has to go here, not
-    // `master` (which just happens to be the transaction's fee payer).
+    // Use the game's recorded fee payer (white here), not the benchmark master key.
     let mut finalize_ixs = vec![ix::finalize_game_ix(
         program_id,
         game_id,
@@ -828,8 +763,7 @@ pub async fn run_1v1_game_flow(
     )
     .await?;
 
-    // Step 12: Verify the treasury reimbursement matches the fee-accounting
-    // fix — 1_000_000 lamports is the wager passed to create_game_ix in Step 2.
+    // Verify treasury reimbursement against the 1_000_000-lamport wager.
     println!("   Step 12: Verifying treasury_vault reimbursement...");
     if let Some(fees_advanced) = fees_advanced_after_undelegate {
         verify_treasury_reimbursement(
@@ -863,7 +797,7 @@ pub async fn run_global_session_1v1_game_flow(
     let suffix = game_id & 0xFFFF;
     println!("\n   Setting up global-session 1v1 game #{}", game_id);
 
-    // Step 1: Init profiles (swallow UsernameTaken/AlreadyInitialized — profile exists from prior run)
+    // Existing profiles may return UsernameTaken or AlreadyInitialized on repeated runs.
     println!("   Step 1: Initializing player profiles...");
     let profile_data = [
         (white, format!("gw_{:04x}", suffix)),
@@ -907,11 +841,7 @@ pub async fn run_global_session_1v1_game_flow(
         }
     }
 
-    // Step 2: Authorize the global session for each player. `deposit_lamports`
-    // pre-funds the vault that global_create_game/global_join_game will draw
-    // rent + wager from — enough here for one game's rent plus the wager with
-    // plenty of headroom, since it's the only wallet-signed step for either
-    // player.
+    // Prefund each global-session vault for game rent and wager during authorization.
     println!("   Step 2: Authorizing global sessions...");
     let session_white = Keypair::new();
     let session_black = Keypair::new();
@@ -948,9 +878,7 @@ pub async fn run_global_session_1v1_game_flow(
         println!("     {} global session authorized: {}", label, sig);
     }
 
-    // Step 3: Create game via the global session — no wallet popup, fee paid
-    // by white's own wallet but the rent + wager come out of white's
-    // GlobalSessionDelegation vault, signed by session_white.
+    // The wallet pays fees; the session-signed delegation vault fronts rent and wager.
     println!("   Step 3: Creating game via global session...");
     let mut create_ixs = vec![ix::global_create_game_ix(
         program_id,
@@ -988,7 +916,6 @@ pub async fn run_global_session_1v1_game_flow(
     .0;
     println!("   Game PDA: {}", game_pda);
 
-    // Step 4: Black joins via the global session.
     println!("   Step 4: Black joining game via global session...");
     let mut join_ixs = vec![ix::global_join_game_ix(
         program_id,
@@ -1015,9 +942,6 @@ pub async fn run_global_session_1v1_game_flow(
         Some(sig.to_string()),
     );
 
-    // From here on it's the same per-game session + ER lifecycle as the plain
-    // 1v1 flow: authorize per-game session keys, delegate, play moves,
-    // undelegate, resign, claim, finalize.
     println!("   Step 5: Authorizing per-game session keys (for ER moves)...");
     let er_session_white = Keypair::new();
     let er_session_black = Keypair::new();
@@ -1192,9 +1116,7 @@ pub async fn run_global_session_1v1_game_flow(
         Some(sig.to_string()),
     );
 
-    // Poll devnet until the game PDA's owner actually returns to the program
-    // — see run_1v1_game_flow's identical block for why a fixed sleep isn't
-    // reliable here.
+    // Poll until the Game PDA returns to program ownership; a fixed sleep is unreliable.
     println!("   Waiting for ER relay to land on L1 (polling game PDA owner)...");
     let undelegate_wait_start = std::time::Instant::now();
     loop {
@@ -1225,20 +1147,14 @@ pub async fn run_global_session_1v1_game_flow(
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 
-    // The scripted move sequence is a genuine checkmate — `moves_ix/apply.rs`
-    // already finished the game on-chain, so resign correctly (and
-    // harmlessly) fails with GameNotActive. See run_1v1_game_flow's identical
-    // comment for the full explanation.
+    // Checkmate may have ended the game already; GameNotActive on resign is benign.
     println!("   Step 9: Resigning game (skipped if already finished by checkmate)...");
     let mut resign_ixs = vec![ix::resign_game_ix(program_id, game_id, white.pubkey())?];
     apply_compute_budget(&mut resign_ixs, 100_000, 10_000, 262_144);
     let blockhash = base_rpc.get_latest_blockhash()?;
     let tx =
         Transaction::new_signed_with_payer(&resign_ixs, Some(&white.pubkey()), &[white], blockhash);
-    // No with_retry here: GameNotActive is deterministic (the game is
-    // already finished), not transient, so retrying just burns 5 attempts
-    // before with_retry replaces the real error with a generic "Max retries
-    // exceeded" that no longer contains "GameNotActive" for this match to see.
+    // Do not retry deterministic GameNotActive failures; preserve the original error.
     match base_rpc.send_and_confirm_transaction(&tx) {
         Ok(sig) => logger.log(
             "game_setup",
@@ -1261,8 +1177,7 @@ pub async fn run_global_session_1v1_game_flow(
         }
     }
 
-    // No standalone `claim_prize` instruction exists on the current program —
-    // 1v1 wager payout happens automatically inside `finalize_game`, Step 10 below.
+    // finalize_game pays 1v1 wagers automatically; no separate claim_prize instruction exists.
 
     println!("   Step 10: Finalizing game...");
     let white_elo_before =
@@ -1272,10 +1187,7 @@ pub async fn run_global_session_1v1_game_flow(
     let white_balance_before = with_retry(|| base_rpc.get_balance(&white.pubkey())).await?;
     let black_balance_before = with_retry(|| base_rpc.get_balance(&black.pubkey())).await?;
 
-    // fee_payer must be `game.fee_payer` exactly (game_ix/finalize.rs:39).
-    // This game was created via global_create_game_ix(session_white.pubkey(),
-    // ...) above, whose handler records `fee_payer: session_signer.key()` —
-    // i.e. session_white, not master.
+    // Use session_white as fee payer to match the game session, not the master wallet.
     let mut finalize_ixs = vec![ix::finalize_game_ix(
         program_id,
         game_id,
@@ -1349,7 +1261,6 @@ pub async fn run_swiss_tournament_flow(
         tournament_id, size
     );
 
-    // Step 1: Initialize tournament
     println!("   Step 1: Initializing tournament...");
     let rounds = (size as f64).log2().ceil() as u8 + 1;
     let mut init_ixs = vec![ix::initialize_tournament_ix(
@@ -1384,7 +1295,7 @@ pub async fn run_swiss_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 1b: Initialize tournament player shards (separate tx to avoid BPF stack overflow)
+    // Initialize shards in a separate transaction to avoid BPF stack overflow.
     println!("   Step 1b: Initializing tournament player shards...");
     let mut shard_ixs = vec![ix::initialize_shards_for_size_ix(
         program_id,
@@ -1410,7 +1321,7 @@ pub async fn run_swiss_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 1c: Initialize tournament escrow (required before registration)
+    // Initialize escrow before registration.
     println!("   Step 1c: Initializing tournament escrow...");
     let mut escrow_ixs = vec![ix::initialize_tournament_escrow_ix(
         program_id,
@@ -1435,11 +1346,8 @@ pub async fn run_swiss_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 1d: Fund a guaranteed SOL prize pool — must land before the first
-    // registration (fund_sol_prize.rs rejects once prize_pool != 0 or
-    // num_registered_players > 0). Without this the tournament has nothing to
-    // pay out and distribute_tournament_prizes/close_tournament both become
-    // no-ops that never actually exercise the payout path.
+    // Fund the guaranteed prize before registration; the instruction rejects
+    // existing prize pools and tournaments with registered players.
     println!("   Step 1d: Funding guaranteed SOL prize pool...");
     let mut fund_ixs = vec![ix::fund_sol_prize_ix(
         program_id,
@@ -1461,7 +1369,6 @@ pub async fn run_swiss_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 2: Initialize player profiles (required before registration)
     println!("   Step 2: Initializing player profiles...");
     for (i, player) in players.iter().enumerate() {
         let username = format!("bot_{:04x}_{}", i, tournament_id);
@@ -1486,7 +1393,6 @@ pub async fn run_swiss_tournament_flow(
         }
     }
 
-    // Step 3: Register players with varied ELOs (1200-1500 range)
     println!(
         "   Step 3: Registering {} players with ELO ratings...",
         size
@@ -1505,11 +1411,7 @@ pub async fn run_swiss_tournament_flow(
         )?];
         apply_compute_budget(&mut reg_ixs, 200_000, 10_000, 262_144);
         let blockhash = base_rpc.get_latest_blockhash()?;
-        // register_player_ix's host_treasury account isn't a signer
-        // (register.rs constrains it == tournament.host_treasury, doesn't
-        // require its signature) — including `master` as an extra signer
-        // here panics with KeypairPubkeyMismatch since its pubkey doesn't
-        // appear in the instruction's signer set at all. Only `player` signs.
+        // Only player signs; host_treasury is constrained but not a signer.
         let tx = Transaction::new_signed_with_payer(
             &reg_ixs,
             Some(&player.pubkey()),
@@ -1536,22 +1438,14 @@ pub async fn run_swiss_tournament_flow(
         }
     }
 
-    // Step 3: Authorize tournament sessions
     println!("   Step 3: Authorizing tournament sessions...");
     let mut sessions = Vec::new();
     for (i, player) in players.iter().enumerate() {
         let session = Keypair::new();
         let session_pubkey = session.pubkey();
         sessions.push(session);
-        // Each round this player is "white" draws a fresh Game account's
-        // rent-exemption (~0.003 SOL) + the 1_000_000-lamport wager from this
-        // same vault (session_create_game_ix's `wager` param) — and the vault
-        // persists across every round of the tournament, not just one game.
-        // 3_000_000 was only ever enough for a single round; with `rounds`
-        // rounds in a Swiss tournament (up to 4+ here) it ran out and
-        // session_create_game failed with InsufficientFunds. 30_000_000
-        // (0.03 SOL) comfortably covers the worst case (white every round)
-        // while staying well inside CHILD_FUNDING_AMOUNT (0.05 SOL/child).
+        // The same vault funds rent and wagers across all rounds; size it for the
+        // worst case where the player creates every round's game.
         let deposit_lamports = 30_000_000u64;
         let mut auth_ixs = vec![ix::authorize_tournament_session_ix(
             program_id,
@@ -1582,8 +1476,7 @@ pub async fn run_swiss_tournament_flow(
             Some(sig.to_string()),
         );
 
-        // Fund the session keypair with gas for session_create_game / session_join_game TXs.
-        // 2_000_000 lamports covers ~40 priority-fee transactions at 50_000 each.
+        // Fund 2_000_000 lamports for roughly 40 session transactions at 50_000 each.
         let fund_ix = system_instruction::transfer(&player.pubkey(), &session_pubkey, 2_000_000);
         let fund_tx = Transaction::new_signed_with_payer(
             &[fund_ix],
@@ -1598,7 +1491,6 @@ pub async fn run_swiss_tournament_flow(
         }
     }
 
-    // Step 4: Start tournament
     println!("   Step 4: Starting tournament...");
     let mut start_ixs = vec![ix::start_tournament_ix(
         program_id,
@@ -1625,7 +1517,6 @@ pub async fn run_swiss_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 5: Simulate Swiss rounds
     let rounds = (size as f64).log2().ceil() as u8 + 1;
     println!("   Step 5: Simulating Swiss rounds ({} rounds)...", rounds);
     for round in 0..rounds as usize {
@@ -1642,7 +1533,6 @@ pub async fn run_swiss_tournament_flow(
 
             let game_id = unique_id() + match_idx as u64;
 
-            // Create game via session (white creates)
             let mut create_ixs = vec![ix::session_create_game_ix(
                 program_id,
                 tournament_id,
@@ -1699,7 +1589,6 @@ pub async fn run_swiss_tournament_flow(
                 Some(sig.to_string()),
             );
 
-            // Record result (white wins for simplicity)
             let mut result_ixs = vec![ix::record_swiss_result_ix(
                 program_id,
                 tournament_id,
@@ -1729,10 +1618,7 @@ pub async fn run_swiss_tournament_flow(
             );
         }
 
-        // Every board for this round is in — crank the round forward. The
-        // final call here (round == rounds - 1) pushes current_round to
-        // total_rounds, which is what makes complete_swiss_tournament below
-        // eligible to run (see complete_swiss.rs's precondition).
+        // Advance current_round to total_rounds so CompleteSwissTournament can run.
         let mut advance_ixs = vec![ix::advance_round_ix(
             program_id,
             master.pubkey(),
@@ -1757,10 +1643,7 @@ pub async fn run_swiss_tournament_flow(
         );
     }
 
-    // Step 6: Finalize Swiss standings — sorts score/Buchholz/Sonneborn and
-    // marks the tournament Completed. Without this, distribute/close below
-    // would both fail: both are gated on TournamentStatus::Completed, and
-    // nothing else ever sets it for a Swiss tournament (see complete_swiss.rs).
+    // Complete the final Swiss round before distributing prizes or closing accounts.
     println!("   Step 6: Completing Swiss tournament (finalizing standings)...");
     let mut complete_ixs = vec![ix::complete_swiss_tournament_ix(
         program_id,
@@ -1786,9 +1669,6 @@ pub async fn run_swiss_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 7: Distribute prizes to the top 3 places and verify the escrow
-    // actually paid them — the whole point of funding a real prize pool in
-    // Step 1d instead of leaving it at zero.
     println!("   Step 7: Distributing and verifying tournament prizes...");
     let (status, places) = crate::fetch_tournament_places(base_rpc, program_id, tournament_id)?;
     anyhow::ensure!(
@@ -1806,9 +1686,7 @@ pub async fn run_swiss_tournament_flow(
     )
     .await?;
 
-    // Step 8: Close tournament — now that every funded place has been paid,
-    // sweep the remainder (bps rounding + unallocated shares + rent) to the
-    // platform treasury.
+    // After paying funded places, sweep rounding, unallocated shares, and rent to treasury.
     println!("   Step 8: Closing tournament...");
     let mut close_ixs = vec![ix::close_tournament_ix(
         program_id,
@@ -1823,11 +1701,7 @@ pub async fn run_swiss_tournament_flow(
         &[master],
         blockhash,
     );
-    // Every funded place was just paid in Step 7, so — unlike the old version
-    // of this flow, where an unfunded tournament made this fail every single
-    // run — a failure here now indicates a real bug (see
-    // close_tournament.rs's `PrizesOutstanding` guard), so it's propagated
-    // instead of swallowed as an expected warning.
+    // All funded places have been paid; propagate close failure as an error.
     let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
     logger.log(
         "tournament_payout",
@@ -1874,7 +1748,6 @@ pub async fn run_single_elimination_tournament_flow(
         [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0]
     };
 
-    // Step 1: Initialize tournament (rounds = None -> TournamentType::SingleElimination).
     println!("   Step 1: Initializing tournament...");
     let mut init_ixs = vec![ix::initialize_tournament_ix(
         program_id,
@@ -1908,8 +1781,7 @@ pub async fn run_single_elimination_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 1b: Player shards — same PDA layout single-elimination shares with
-    // Swiss (registration writes into these regardless of tournament type).
+    // Single-elimination registration uses the same player shard layout as Swiss.
     println!("   Step 1b: Initializing tournament player shards...");
     let mut shard_ixs = vec![ix::initialize_shards_for_size_ix(
         program_id,
@@ -1935,7 +1807,7 @@ pub async fn run_single_elimination_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 1c: Escrow (required before registration and before fund_sol_prize).
+    // Initialize escrow before registration and fund_sol_prize.
     println!("   Step 1c: Initializing tournament escrow...");
     let mut escrow_ixs = vec![ix::initialize_tournament_escrow_ix(
         program_id,
@@ -1960,7 +1832,7 @@ pub async fn run_single_elimination_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 1d: Fund the guaranteed SOL prize pool before anyone registers.
+    // Fund guaranteed prizes before registration.
     println!("   Step 1d: Funding guaranteed SOL prize pool...");
     let mut fund_ixs = vec![ix::fund_sol_prize_ix(
         program_id,
@@ -1982,8 +1854,7 @@ pub async fn run_single_elimination_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 2: Profiles + registration, highest ELO first so seed[0] (and the
-    // `seeded` vec order below) is the top seed.
+    // Register in descending ELO order so player order matches seeding.
     println!(
         "   Step 2: Initializing profiles and registering {} players...",
         size
@@ -2015,11 +1886,7 @@ pub async fn run_single_elimination_tournament_flow(
         )?];
         apply_compute_budget(&mut reg_ixs, 200_000, 10_000, 262_144);
         let blockhash = base_rpc.get_latest_blockhash()?;
-        // register_player_ix's host_treasury account isn't a signer
-        // (register.rs constrains it == tournament.host_treasury, doesn't
-        // require its signature) — including `master` as an extra signer
-        // here panics with KeypairPubkeyMismatch since its pubkey doesn't
-        // appear in the instruction's signer set at all. Only `player` signs.
+        // Only player signs; host_treasury is constrained but not a signer.
         let tx = Transaction::new_signed_with_payer(
             &reg_ixs,
             Some(&player.pubkey()),
@@ -2037,7 +1904,6 @@ pub async fn run_single_elimination_tournament_flow(
         );
     }
 
-    // Step 3: Start — locks registration, seeds by ELO.
     println!("   Step 3: Starting tournament...");
     let mut start_ixs = vec![ix::start_tournament_ix(
         program_id,
@@ -2064,9 +1930,7 @@ pub async fn run_single_elimination_tournament_flow(
         Some(sig.to_string()),
     );
 
-    // Step 4: Initialize every bracket slot. Seeding is ELO-descending = our
-    // player order; round-1 match i pairs seed i vs seed size-1-i (same
-    // layout `bracket_position`/on-chain `final_match_index` assume).
+    // Round-1 match i pairs seed i with size-1-i, matching the on-chain bracket layout.
     println!("   Step 4: Initializing bracket matches...");
     let total_matches = size - 1;
     let seeded: Vec<Pubkey> = players.iter().map(|p| p.pubkey()).collect();
@@ -2111,10 +1975,7 @@ pub async fn run_single_elimination_tournament_flow(
         );
     }
 
-    // Step 5: Play the bracket — higher seed (earlier in `seeded`) always
-    // wins, mirroring tournament_e2e.rs's convention. The final match's
-    // result auto-completes the tournament on-chain (record_result.rs:70-76)
-    // — no separate "complete" instruction needed, unlike Swiss.
+    // The higher seed wins. The final match automatically completes the tournament.
     println!("   Step 5: Playing the bracket...");
     let mut slots: Vec<(Option<Pubkey>, Option<Pubkey>)> = (0..total_matches)
         .map(|i| {
@@ -2203,8 +2064,6 @@ pub async fn run_single_elimination_tournament_flow(
         }
     }
 
-    // Step 6: Verify the final match actually auto-completed the tournament,
-    // then distribute and verify payout to every placed player.
     println!("   Step 6: Verifying tournament completion and distributing prizes...");
     let (status, places) = crate::fetch_tournament_places(base_rpc, program_id, tournament_id)?;
     anyhow::ensure!(
@@ -2222,9 +2081,7 @@ pub async fn run_single_elimination_tournament_flow(
     )
     .await?;
 
-    // Step 7: Close tournament — every funded place was just paid, so a
-    // failure here indicates a real bug (see close_tournament.rs's
-    // `PrizesOutstanding` guard), not an expected condition.
+    // PrizesOutstanding on close indicates a failure: every funded place has been paid.
     println!("   Step 7: Closing tournament...");
     let mut close_ixs = vec![ix::close_tournament_ix(
         program_id,

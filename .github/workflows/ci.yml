@@ -76,10 +76,7 @@ jobs:
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-      # programs/xfchess-game/tests/{er_delegation,er_move,init_profile_sponsored,
-      # tournament_round_advancement,treasury}_tests.rs spin up a simulated
-      # validator (solana-program-test) and load the compiled on-chain program —
-      # they need target/deploy/xfchess_game.so to exist before `cargo test`.
+      # Program-test suites load target/deploy/xfchess_game.so; build it before cargo test.
       - name: Build on-chain program (.so for solana-program-test)
         run: |
           export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
@@ -87,9 +84,7 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
-  # The nimzovich chess engine (unit + perft tests and the cutechess self-play
-  # sanity match) was extracted 2026-08-28 into the standalone repo at
-  # ../nimzovich — its CI now lives there (.github/workflows/ci.yml).
+  # Engine tests run in the sibling nimzovich repository.
 
   wasm-build:
     name: WASM Build
@@ -104,9 +99,7 @@ jobs:
         run: cargo build --target wasm32-unknown-unknown -p xfchess
         continue-on-error: true
 
-  # ── Security & supply chain (WS-F) ──────────────────────────────────────────
-  # RustSec advisory scan. Informative first (large Solana/Iroh tree has advisories
-  # without upstream fixes); flip continue-on-error → false once triaged to gate.
+  # RustSec is advisory until findings without upstream fixes are triaged.
   cargo-audit:
     name: Security Audit (cargo)
     runs-on: ubuntu-latest
@@ -119,11 +112,7 @@ jobs:
         run: cargo audit
         continue-on-error: true
 
-  # Tauri desktop sub-apps (tournament-admin, wallet-ui, viz): each is a
-  # separate npm project with no build/e2e gate in CI at all today. Runs each
-  # one's Vitest unit suite — logic/hooks only (config, sol conversions,
-  # wallet-provider selection, topology graph building), not a full Tauri
-  # shell smoke test (would need the native binary + WebDriver stack).
+  # Run the separate desktop UI unit suites; these do not exercise the native Tauri shell.
   tauri-apps-test:
     name: Tauri Apps (unit tests)
     runs-on: ubuntu-latest

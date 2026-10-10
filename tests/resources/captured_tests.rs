@@ -5,7 +5,6 @@ use xfchess::rendering::pieces::{PieceColor, PieceType};
 fn example_captured_pieces_usage() {
     let mut captured_pieces = CapturedPieces::default();
 
-    // Add a capture
     captured_pieces.add_capture(PieceColor::Black, PieceType::Queen);
 
     // Check advantage

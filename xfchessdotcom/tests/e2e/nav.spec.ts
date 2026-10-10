@@ -1,9 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Golden-path nav: the links that get a signed-out visitor from the
-// homepage into the app, plus the wallet-connect entry point. Wallet
-// connection itself isn't exercised — no extension is installed in this
-// browser context — only that the picker modal opens and closes.
+// No extension is installed in this browser context; exercise only opening and closing the picker.
 
 test.describe('Top nav', () => {
   test('Play link navigates to /play', async ({ page }) => {

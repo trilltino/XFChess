@@ -30,10 +30,8 @@ pub struct CorePlugin;
 
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
-        // Initialize window configuration
         app.init_resource::<WindowConfig>();
 
-        // Initialize core state management resources
         app.init_state::<GameState>()
             .add_sub_state::<MenuState>()
             .add_computed_state::<InMenus>()
@@ -46,10 +44,8 @@ impl Plugin for CorePlugin {
         app.init_resource::<GameStatistics>()
             .init_resource::<super::states::GameMode>();
 
-        // Set default clear color to pure black for opening scene
         app.insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)));
 
-        // Initialize state lifecycle auditing
         app.init_resource::<StateAuditTimer>();
 
         // Register types for reflection
@@ -66,7 +62,6 @@ impl Plugin for CorePlugin {
         // bundle) is self-describing: version, OS, arch, build mode, log path.
         app.add_systems(Startup, log_runtime_banner);
 
-        // Add state logging and validation systems
         app.add_systems(
             Update,
             (
@@ -80,15 +75,10 @@ impl Plugin for CorePlugin {
             ),
         );
 
-        // Android app-backgrounding handling (pause/resume audio) — see
-        // android::handle_app_lifecycle's doc comment for why this is the
-        // only piece of "don't burn battery/CPU backgrounded" that needs an
-        // explicit system, rather than falling out of WinitSettings::mobile()
-        // for free like the render loop does.
+        // Pause and resume Android audio explicitly; WinitSettings handles background rendering.
         #[cfg(target_os = "android")]
         app.add_systems(Update, crate::android::handle_app_lifecycle);
 
-        // Add state lifecycle logging (OnEnter/OnExit for all states)
         app.add_systems(OnEnter(GameState::MainMenu), log_state_entry);
         app.add_systems(OnEnter(GameState::InGame), log_state_entry);
         app.add_systems(OnEnter(GameState::Paused), log_state_entry);
@@ -139,11 +129,9 @@ impl Plugin for CorePlugin {
 }
 
 fn setup_panic_hook() {
-    // Initialize the state tracker
     PANIC_STATE_TRACKER.get_or_init(|| Mutex::new(PanicStateInfo::default()));
 
     panic::set_hook(Box::new(|panic_info| {
-        // Collect panic information
         let panic_msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
             s.to_string()
         } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
@@ -175,7 +163,6 @@ fn setup_panic_hook() {
         let backtrace = std::backtrace::Backtrace::capture();
         let backtrace_str = format!("{}", backtrace);
 
-        // Format panic report
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -195,12 +182,9 @@ fn setup_panic_hook() {
             timestamp, panic_msg, location, game_state_str, menu_state_str, backtrace_str
         );
 
-        // Print to stderr (console)
         eprintln!("\n{}", panic_report);
 
-        // Write to log file — next to game.log in the active profile's log
-        // folder (see identity::log_dir), where the Support-bundle export
-        // and the release smoke test both pick it up.
+        // Write beside game.log so support bundles include this log.
         let logs_dir = crate::multiplayer::network::identity::log_dir();
 
         let log_file = logs_dir.join(format!("crash_{}.log", timestamp));

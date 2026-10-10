@@ -39,10 +39,8 @@ pub fn setup_enhanced_panic_hook() {
             env!("CARGO_PKG_VERSION")
         );
 
-        // Write to log file — inside the active profile's log folder, next
-        // to game.log and wallet-bridge.log, so an exported support bundle
-        // always picks the crash up. (The historical CWD-relative `logs/`
-        // path was silently unwritable for installed builds.)
+        // Write inside the active profile so support bundles include crashes
+        // and installed builds have a writable destination.
         let logs_dir = crate::multiplayer::network::identity::log_dir();
 
         let filename = format!("crash_{}.log", timestamp);
@@ -57,7 +55,6 @@ pub fn setup_enhanced_panic_hook() {
             let _ = writeln!(file, "{}", report);
         }
 
-        // Print user instructions
         eprintln!("\n");
         eprintln!("========================================");
         eprintln!("XFChess has encountered an error.");
@@ -72,9 +69,7 @@ pub fn record_recovered_error(source: &str, error: &dyn std::fmt::Display) {
         .unwrap_or_default()
         .as_secs();
 
-    // Same folder as game.log / crash_*.log so nothing about a session is
-    // scattered across multiple locations (the old CWD-relative path failed
-    // silently on installed builds).
+    // Keep session logs in the writable profile folder alongside game.log.
     let logs_dir = crate::multiplayer::network::identity::log_dir();
 
     let filepath = logs_dir.join("recovered_errors.log");

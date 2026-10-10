@@ -35,7 +35,6 @@ pub fn handle_network_moves(
             event.from, event.to
         );
 
-        // 1. Find Source Entity and Piece Data
         let source_data = pieces_query
             .iter()
             .find(|(_, piece, _)| piece.x == event.from.0 && piece.y == event.from.1)
@@ -76,7 +75,6 @@ pub fn handle_network_moves(
                 continue;
             }
 
-            // 3. Validate move legality using the engine
             let legal_dests = engine.get_legal_moves_for_square(event.from, piece.color);
             if !legal_dests.iter().any(|d| *d == event.to) {
                 warn!(
@@ -87,7 +85,6 @@ pub fn handle_network_moves(
                 continue;
             }
 
-            // 4. Find Potential Capture
             let capture_data = pieces_query
                 .iter()
                 .find(|(_, p, _)| p.x == event.to.0 && p.y == event.to.1)
@@ -109,17 +106,14 @@ pub fn handle_network_moves(
                 None
             };
 
-            // 5. Determine first-move status before execute_move borrows the query
             let was_first_move = if let Ok((_, _, has_moved)) = pieces_query.get(entity) {
                 !has_moved.moved
             } else {
                 false
             };
 
-            // 6. Map Promotion Piece
             let promotion_type = event.promotion.and_then(PieceType::from_char);
 
-            // 7. Execute Move
             let ctx = MoveContext {
                 origin: "network_move",
                 entity,
@@ -148,8 +142,7 @@ pub fn handle_network_moves(
             );
             release_pending(&mut causal, &event.dedup_version, true);
 
-            // Emit RemoteMoveApplied so the rollup can record the opponent's move on-chain.
-            // The engine is fully updated by execute_move above, so current_fen() is correct.
+            // Record the remote move after execute_move updates the engine’s FEN.
             {
                 let from_col = (b'a' + event.from.0) as char;
                 let from_row = event.from.1 + 1;
@@ -194,7 +187,6 @@ pub fn handle_network_moves(
                 });
             }
 
-            // 6. Update Selection (Clear if we moved selected piece)
             if let Some(selected_entity) = selection.selected_entity {
                 if selected_entity == entity {
                     selection.selected_entity = None;
@@ -265,10 +257,8 @@ pub fn handle_draw_response_events(
             );
             *game_over = GameOverState::Stalemate; // Stalemate is the closest "draw" variant
 
-            // Only the client that actually clicked Accept submits the
-            // on-chain tx (it's the only one who can sign as the accepting
-            // player) — the offerer's own client just receives this same
-            // event back over P2P with `remote: true` and must not re-fire it.
+            // Only the accepting client can sign the on-chain transaction;
+            // the remote echo must not submit it again.
             #[cfg(feature = "solana")]
             if !ev.remote {
                 if let (Some(wallet_pubkey), Some(game_id), Some(rpc_url)) = (

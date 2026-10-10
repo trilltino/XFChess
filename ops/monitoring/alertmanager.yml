@@ -1,10 +1,5 @@
-# AlertManager configuration for XFChess
-# Routes alerts to a Telegram bot. The bot token is never committed — it's
-# mounted from a secrets file (see docker-compose.yml's alertmanager volume)
-# that setup.sh creates on the server from ops/monitoring/.env, which you
-# fill in once. chat_id is substituted by setup.sh from the same .env (it's
-# not a secret, but Alertmanager has no env-var interpolation of its own, so
-# it can't read it directly — see setup.sh's sed step).
+# Mount the Telegram token from a secrets file. setup.sh substitutes chat_id
+# because Alertmanager does not interpolate environment variables.
 
 global: {}
 

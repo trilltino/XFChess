@@ -1,13 +1,3 @@
--- Distinguishes a `sessions` row created for the original per-game session
--- flow (`create()`, via /session/create + /session/activate) from one
--- created for the newer global-session flow (`create_with_keypair()`, via
--- /global-session/track-game — see routes::global_session::track_game).
---
--- Both flows now populate the same `sessions` table so existing consumers
--- (finalize_game, undelegate_game, settlement_worker) work unchanged for
--- either kind of game via a single `SessionStore.get()` lookup. But
--- move-recording needs to call a *different* on-chain instruction depending
--- on which flow a game used (`record_move` vs `global_record_move` — the
--- former hard-requires a per-game `SessionDelegation` account the global
--- flow never creates), so it needs this column to tell the two apart.
+-- Select record_move or global_record_move using is_global; global games
+-- do not create the per-game SessionDelegation required by record_move.
 ALTER TABLE sessions ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0;

@@ -119,10 +119,6 @@ fn process_gossip_messages(
     mut result_recorded_events: MessageWriter<ResultRecorded>,
     mut standings_updated_events: MessageWriter<StandingsUpdated>,
 ) {
-    // Drain all pending messages first so we release the mutable borrow on
-    // `client_state.gossip_rx` before touching other fields of `client_state`
-    // below. Without this, the borrow checker complains about overlapping
-    // mutable/immutable borrows of `client_state` inside the loop.
     let mut pending: Vec<SwissMessage> = Vec::new();
     {
         let Some(rx) = client_state.gossip_rx.as_mut() else {
@@ -150,7 +146,6 @@ fn process_gossip_messages(
 
                 client_state.current_round = round;
 
-                // Find the player's pairing
                 let my_pairing = player_id
                     .as_ref()
                     .and_then(|pid| find_player_pairing(pid, round, &pairings));
@@ -210,7 +205,6 @@ fn process_gossip_messages(
                     })
                     .collect();
 
-                // Find player's rank
                 let my_rank = player_id
                     .as_ref()
                     .and_then(|pid| entries.iter().find(|e| e.player_id == *pid).map(|e| e.rank));

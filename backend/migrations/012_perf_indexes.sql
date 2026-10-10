@@ -1,8 +1,3 @@
--- Migration 012: Performance indexes for hot query paths
---
--- games.start_time is used by ORDER BY in /games/history and /ratings/history.
--- games.status is already indexed (with created_at) but start_time is not.
--- moves.timestamp is used for per-game move reconstruction ordering.
 
 CREATE INDEX IF NOT EXISTS idx_games_start_time
     ON games(start_time DESC);

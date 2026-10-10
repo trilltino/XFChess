@@ -4,7 +4,6 @@ use bevy_egui::egui;
 use crate::multiplayer::network::{OnlineChatMessage, OnlineGameSession, PublishOnlineChat};
 use crate::multiplayer::traits::MessageReader;
 
-// ── State ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct ChatEntry {
@@ -34,7 +33,6 @@ impl ChatState {
     }
 }
 
-// ── Systems ───────────────────────────────────────────────────────────────────
 
 pub fn drain_chat_messages(
     session: Option<Res<OnlineGameSession>>,

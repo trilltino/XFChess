@@ -7,57 +7,21 @@ import { connectExtension } from "./wallet/extension";
 import { privyWalletSource } from "./wallet/privy";
 import { PRIVY_ENABLED, SOLANA_CHAIN } from "./privy/config";
 
-// ---------------------------------------------------------------------------
-// REST API bridge — works in Chrome AND Tauri webview
-// ---------------------------------------------------------------------------
-// In dev (`npm run dev`), this page is served by Vite's own dev server
-// (port 5174) — window.location.port would be *that*, not the bridge's, so
-// dev needs the explicit override/default below. In every real build,
-// though, the bridge serves this page itself (see wallet_ui_dist_path in
-// tauri/src/main.rs), so window.location.port IS the bridge's actual port —
-// and it must be read from there, not hardcoded at build time. A second
-// local instance (different XFCHESS_WALLET_PORT, e.g. two windows open at
-// once) binds its bridge to a *different* port than the first; a
-// build-time constant here would make every instance's popup talk to
-// whichever one happened to grab the shared default port first — wrong
-// wallet, wrong pending signature, no error, just silently talking to the
-// other window's bridge.
+// Production popups use their page port to address the owning bridge. Vite
+// dev pages need an explicit bridge override because their port belongs to Vite.
 const BRIDGE_PORT = import.meta.env.DEV
   ? (import.meta.env.VITE_BRIDGE_PORT ?? "7454")
   : (window.location.port || "7454");
-// The bridge's axum server binds IPv4 loopback ONLY (see bind_http_port in
-// tauri/src/main.rs: `([127, 0, 0, 1], port)`), so `localhost` must not be
-// used here: on Windows Chrome resolves `localhost` to `::1` FIRST and only
-// falls back to IPv4 after the attempt is refused. Every EventSource
-// connect/reconnect then logs `ERR_CONNECTION_REFUSED` on
-// `:7454/pending/stream` + `[SIGNER] SSE connection error` even though the
-// stream eventually succeeds over IPv4 — the exact console spam that made
-// this look broken. Hitting 127.0.0.1 directly skips the doomed `::1` hop.
-// The page origin stays `http://localhost:PORT` (Privy/extension trust and
-// the Tauri CSP connect-src list are all keyed to that), and the bridge's
-// CORS predicate already permits `http://127.0.0.1:` origins.
+// Call the IPv4-only bridge at 127.0.0.1 to avoid failed ::1 attempts.
+// The popup page origin stays localhost for wallet and Privy trust.
 const API_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
 
-// Every instance's popup window is otherwise titled the same static
-// "XFChess" (see index.html) — indistinguishable to Windows' EnumWindows.
-// tauri/src/main.rs's kill_wallet_popup() closes a popup by finding a
-// chrome.exe/msedge.exe top-level window with this exact title; without a
-// per-port suffix, running two local instances (e.g. `just dev2`) means
-// either instance closing its own popup closes *both* players' popups,
-// since the match is desktop-wide by title text alone, not scoped to which
-// Tauri sidecar spawned it. main.rs must match this exact format.
+// Include the bridge port in the window title; Rust popup lookup uses
+// the same format to distinguish concurrent instances.
 document.title = `XFChess #${BRIDGE_PORT}`;
 
-// Phantom/Solflare's page-injected `provider` proxies every call through a
-// content script to the extension's background service worker. When that
-// relay is broken (MV3 background asleep and failing to wake, or the
-// content script itself never injected into this specific popup window —
-// surfaces in DevTools as "Could not establish connection. Receiving end
-// does not exist") the injected provider methods don't reject, they just
-// never resolve. Without this wrapper `provider.connect()` hangs forever:
-// the "Connect" button's spinner never clears and no error ever reaches
-// setError, so the user has no signal anything went wrong and no way to
-// retry short of closing and reopening the whole popup.
+// Bound injected provider calls because broken extension background relays
+// can leave promises pending indefinitely.
 export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
@@ -69,16 +33,8 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
   });
 }
 
-// ---------------------------------------------------------------------------
-// Session correlation — a fresh `sid` is minted by Tauri every time it opens
-// this popup (see begin_session/open_wallet_popup_with_step in
-// tauri/src/main.rs) and passed in the URL. Reading it back here and
-// stamping it on every request (as X-Session-Id, forwarded by the bridge to
-// the backend as x-request-id) means one login/sign attempt's Chrome-spawn
-// log lines, this page's own console output, and the backend's request logs
-// all carry the same id end to end. A direct `npm run dev` load (or an old
-// cached page with no `sid`) falls back to a locally-minted id so logging
-// still works, it just won't correlate with anything outside this page.
+// Read sid from the popup URL and attach X-Session-Id to bridge calls.
+// Direct dev loads mint a local fallback ID.
 const SESSION_ID =
   new URLSearchParams(window.location.search).get("sid") ||
   `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -96,12 +52,8 @@ async function apiGet<T = unknown>(path: string): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
-// Closing the popup: we always run as a real OS-level Chrome window (never an
-// embedded Tauri webview — see open_wallet_popup in tauri/src/main.rs), so
-// `window.close()` is unreliable — Chrome blocks scripts from closing windows
-// they didn't open themselves. Ask the Tauri sidecar to kill the process it
-// spawned instead; that's the only reliable way to close this window. Only
-// fall back to window.close() if the bridge itself is unreachable.
+// Ask the bridge to close its popup; Chrome may reject window.close for
+// windows not opened by script.
 async function closePopup() {
   try {
     const pending = await fetch(`${API_BASE}/pending`, {
@@ -123,34 +75,21 @@ async function closePopup() {
   }
 }
 
-// Which wallet extension the user actually authenticated with, persisted at
-// connect time (see WalletStep.handleConnect). Signing must always go back
-// through this SAME extension — if both Phantom and Solflare are installed,
-// blindly preferring one (Phantom used to always win) silently signs with
-// the wrong wallet: the popup shows a real "Confirm Transaction" dialog with
-// a valid-looking fee, but for an account the player never funded, which
-// surfaces as a confusing "not enough SOL" even though their actual wallet
-// has plenty.
+// Sign through the same extension used for authentication, even when
+// multiple providers are installed.
 export function getConnectedProvider(expectedKind?: string | null): any {
   const kind = expectedKind ?? localStorage.getItem("xfchess_wallet_provider");
   if (kind === "solflare") return (window as any).solflare;
   if (kind === "phantom") return (window as any).phantom?.solana;
-  // An embedded wallet has no extension to hand back, and the fallback below
-  // would return Phantom — which is a *different keypair*. That is how profile
-  // creation for a Google user ended up asking Phantom to sign a transaction
-  // whose fee payer and profile owner were the Privy address: the signature
-  // could never be valid for it. Callers must take their Privy branch.
+  // Embedded-wallet sessions must use Privy; extension fallback would select
+  // a different signing key.
   if (kind === "privy") return null;
   // Unknown (e.g. state from before this was tracked) — fall back to the old
   // best-effort behavior rather than refusing to sign at all.
   return (window as any).phantom?.solana ?? (window as any).solflare;
 }
 
-/// Best-effort switch the connected wallet to devnet so that transactions
-/// built against the devnet RPC are not rejected as "mainnet" txs.
-/// Solflare in particular infers the transaction cluster from the dApp's
-/// declared network; if none is declared it can default to mainnet and
-/// refuse to sign devnet blockhashes.
+/// Best-effort switch the extension wallet to devnet before signing.
 async function ensureDevnet(provider: any, kind: string | null): Promise<void> {
   if (!provider) return;
   // Phantom >=0.16 supports switchNetwork via request()
@@ -177,35 +116,9 @@ async function ensureDevnet(provider: any, kind: string | null): Promise<void> {
   }
 }
 
-// `ensureDevnet` above is best-effort (neither wallet exposes a documented
-// readback to verify the switch actually took), but it is NOT what the
-// "network mismatch" repro was about, despite what this comment used to say.
-//
-// Root cause, measured: a wallet extension cannot tell which cluster a
-// transaction targets from the transaction bytes — the only cluster-specific
-// thing in there is the recent blockhash — so it looks that blockhash up on
-// whichever cluster it is currently set to. That lookup (`isBlockhashValid`)
-// defaults to `finalized` commitment, and we were handing it blockhashes
-// fetched at `confirmed`, i.e. younger than the ~32 slot (~13s) finalization
-// lag. Against our own devnet endpoint, checked from a second devnet node:
-//
-//   getLatestBlockhash{confirmed} -> isBlockhashValid{finalized} = false
-//   getLatestBlockhash{finalized} -> isBlockhashValid{finalized} = true
-//
-// So Solflare could not confirm the blockhash existed on devnet, concluded the
-// transaction must belong to the other cluster, and refused to sign with "your
-// current network is set to devnet, but this transaction is for mainnet" —
-// while the user was already correctly on devnet, which is why the old advice
-// to go switch networks was useless. Fixed at the source: every blockhash that
-// goes into a wallet-signed transaction is now fetched at `finalized` — see
-// `/api/fresh-blockhash` in tauri/src/main.rs, `wallet_signable_blockhash` in
-// the backend's signing/solana/rpc.rs, and the same-named helper in
-// src/multiplayer/solana/tauri_signer.rs.
-//
-// The reactive detection below stays as a safety net — it still catches the
-// genuine case (the wallet really is on mainnet) and any wallet whose own RPC
-// lags further behind than finalization — but the message it maps to no longer
-// assumes the user did something wrong.
+// Wallets may report a cluster mismatch when their finalized blockhash lookup
+// cannot find a newer blockhash. Wallet-signed transactions use finalized
+// blockhashes; retain this detection for actual network mismatches or lagging RPCs.
 export function isNetworkMismatchError(e: any): boolean {
   const msg = String(e?.message ?? e ?? "").toLowerCase();
   const mentionsNetwork = msg.includes("network") || msg.includes("cluster");
@@ -220,16 +133,8 @@ export const NETWORK_MISMATCH_MESSAGE =
   "keeps happening, check that the extension's network is set to Devnet " +
   "(extension → network/cluster settings → Devnet).";
 
-// `token` is optional because most `apiPost` call sites hit unauthenticated
-// bridge routes (e.g. `/token`, `/api/game/launch`) — but any route proxied
-// through to a `authed_wallet`-gated backend endpoint (init-profile-tx,
-// broadcast-tx, ...) needs a Bearer token forwarded, or the Tauri bridge's
-// `forward_client_headers` (tauri/src/main.rs) has nothing to forward and
-// the backend 401s with "Missing Authorization header." Omitting it here was
-// a real, reproduced bug for `init-profile-tx`/`broadcast-tx` specifically —
-// every other authenticated call site in this file already builds its own
-// raw `fetch` with the header by hand (see the `/api/auth/username` PATCH
-// above `ProfileStep.submit`) rather than going through this helper.
+// Pass Bearer auth for proxied wallet-protected routes; local bridge routes
+// may omit the token.
 async function apiPost<T = unknown>(path: string, body?: unknown, token?: string | null): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json", "X-Session-Id": SESSION_ID };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -247,31 +152,16 @@ async function apiPost<T = unknown>(path: string, body?: unknown, token?: string
   return null as T;
 }
 
-// Detects the specific on-chain rejection a stale blockhash produces
-// ("Blockhash not found" from simulation, RPC error -32002) so a broadcast
-// failure caused by *that* — as opposed to a real rejection (insufficient
-// funds, program error, network down) — can be retried instead of just
-// failing outright. `refreshBlockhash` closes most of this gap by fetching
-// as late as possible, but it can't do anything about a human who takes
-// their time approving inside the wallet extension itself: that delay
-// happens strictly *after* the refresh, so the freshly-fetched blockhash can
-// still expire before the signed transaction is actually broadcast.
+// Retry stale-blockhash rejection separately from funds, program, network,
+// or user-rejection errors; approval may outlast a freshly fetched hash.
 export function isStaleBlockhashError(e: any): boolean {
   const msg = String(e?.message ?? e ?? "").toLowerCase();
   return msg.includes("blockhash not found") || msg.includes("-32002");
 }
 
 /**
- * Overwrites `tx`'s blockhash with a freshly-fetched one, in place, right
- * before signing. The blockhash a backend route baked in at build time
- * (e.g. /api/auth/init-profile-tx) can go stale by the time a real human
- * finishes clicking through the wallet extension's own approval popup —
- * Solana blockhashes are only valid ~60-90s, with no upper bound on how
- * long that click takes. Reproduced live: broadcast-tx 502ing with "RPC
- * response error -32002: Transaction simulation failed: Blockhash not
- * found" even though signing itself had already succeeded. Best-effort: on
- * any failure, leaves `tx` untouched and lets the caller's existing
- * error/retry path handle it exactly as before this existed.
+ * Refresh the blockhash in place immediately before signing. On fetch
+ * failure, leave the transaction untouched for the caller's retry/error path.
  */
 export async function refreshBlockhash(tx: web3.Transaction | web3.VersionedTransaction): Promise<boolean> {
   try {
@@ -292,26 +182,13 @@ export async function refreshBlockhash(tx: web3.Transaction | web3.VersionedTran
     }
     return true;
   } catch (e: any) {
-    // Best-effort by design — caller proceeds with whatever blockhash it
-    // already had rather than blocking the sign flow entirely — but this
-    // used to be completely silent even on failure, which is exactly the
-    // kind of gap that made the original stale-blockhash bug hard to
-    // distinguish from "refreshed, but the user still took too long to
-    // approve in their wallet extension." Now both failure modes are
-    // distinguishable from the Tauri console.
+    // Log refresh failure while preserving best-effort signing with the existing hash.
     apiPost("/api/debug-log", { msg: `refreshBlockhash: threw ${e?.message || e}` }).catch(() => {});
     return false;
   }
 }
 
-/**
- * A wallet's on-chain profile status — the single source of truth for
- * whether the connect flow needs to show the profile step. Mirrors
- * programs/xfchess-game's PlayerProfile account (decoded server-side in
- * POST /api/auth/sync-profile). KYC (`is_verified`) is intentionally not
- * gated on here — that's checked later, at wager time, same as the
- * existing CACF compliance flow.
- */
+/** On-chain username setup determines the profile step; KYC is checked at wager time. */
 interface ProfileStatus {
   has_profile: boolean;
   username_set: boolean;
@@ -337,19 +214,9 @@ async function fetchMe(token: string): Promise<{ username: string }> {
 }
 
 /**
- * Whether this wallet already has a real, user-chosen display name — checked
- * two ways because "profile" means two different things here:
- *  - on-chain PlayerProfile.username_set (ProfileStatus) — only becomes true
- *    once the player's first wager creates the on-chain profile.
- *  - the off-chain account username (GET /auth/me) — set immediately by
- *    ProfileStep's PATCH /api/auth/username, with no wager required.
- * A player who already completed ProfileStep but hasn't wagered yet has a
- * real off-chain name and an unset on-chain one — checking sync-profile
- * alone would re-show "Choose Your Handle" on every reconnect. Wallet
- * registration also seeds a throwaway `pubkey.slice(0, 8)` placeholder
- * (see WalletStep's /api/auth/register call) into that same off-chain
- * field, so it must be excluded here or every fresh wallet would look like
- * it already has a name.
+ * Resolve a chosen handle from on-chain profile or off-chain auth/me.
+ * Exclude registration pubkey-slice placeholders; an unwagered user may have
+ * a real off-chain handle before on-chain setup.
  */
 export async function resolveExistingUsername(
   token: string,
@@ -365,9 +232,6 @@ export async function resolveExistingUsername(
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 type Step = "wallet" | "profile" | "splash" | "sign";
 
 interface AuthResponse {
@@ -376,9 +240,6 @@ interface AuthResponse {
   wallet?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Design tokens — matches xfchessdotcom color scheme
-// ---------------------------------------------------------------------------
 const PRIMARY    = "#ffffff";
 const PRIMARY_DIM    = "rgba(255,255,255,0.08)";
 const PRIMARY_BORDER = "rgba(255,255,255,0.30)";
@@ -396,9 +257,6 @@ const RED        = PRIMARY;
 const RED_DIM    = PRIMARY_DIM;
 const RED_BORDER = PRIMARY_BORDER;
 
-// ---------------------------------------------------------------------------
-// Keyframes
-// ---------------------------------------------------------------------------
 const KEYFRAMES = `
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;800;900&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -419,18 +277,12 @@ const KEYFRAMES = `
   ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
 `;
 
-// ---------------------------------------------------------------------------
-// Layout helpers
-// ---------------------------------------------------------------------------
 const page: CSSProperties = {
   width: "100vw", minHeight: "100vh", display: "flex", flexDirection: "column",
   alignItems: "center", justifyContent: "center", background: BG,
   position: "relative", overflowY: "auto", padding: "24px 0",
 };
 
-// ---------------------------------------------------------------------------
-// Navbar — matches xfchessdotcom pill style; links back to /
-// ---------------------------------------------------------------------------
 function SiteNav() {
   const HOME = window.location.origin + "/";
   return (
@@ -512,10 +364,10 @@ function Card({ children, style, showClose = true, onClose }: { children: React.
       animation: "fadeUp 0.4s ease", position: "relative", zIndex: 1, ...style,
     }}>
       {showClose && (
-        <button 
+        <button
           onClick={close}
           style={{
-            position: "absolute", top: 12, right: 12, 
+            position: "absolute", top: 12, right: 12,
             background: "rgba(255,255,255,0.1)", border: "none", color: "#ffffff",
             fontSize: 16, cursor: "pointer", width: 32, height: 32, borderRadius: "50%",
             display: "flex", alignItems: "center", justifyContent: "center",
@@ -605,24 +457,11 @@ function StepDots({ step }: { step: Step }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Step 1 — Wallet Connection (Tauri Embedded)
-// ---------------------------------------------------------------------------
 import * as web3 from "@solana/web3.js";
 
 /**
- * "Continue with Google" block.
- *
- * Privy authenticates the user and creates a Solana embedded wallet
- * (`createOnLogin: 'users-without-wallets'`). Once that wallet shows up in
- * `useWallets()`, this hands it to `onWallet` as a `WalletSource`, and it goes
- * through the *same* `authenticateWithBackend` flow every extension wallet
- * goes through — there is no privileged shortcut for social users.
- *
- * For a player with no wallet extension installed, this is the only path in the
- * popup that works at all: the Phantom/Solflare rows both render as
- * "not installed" for them, which was the dead end this whole feature exists to
- * remove.
+ * After explicit Google login, pass its embedded wallet through the same
+ * signature-verified backend auth flow as extension wallets.
  */
 function SocialLoginBlock({
   onWallet,
@@ -644,33 +483,13 @@ function SocialLoginBlock({
   const provisionTried = useRef(false);
 
   /**
-   * Whether the player actually picked "Continue with Google" in THIS popup.
-   *
-   * Privy persists an authenticated session in the popup's Chrome profile, so a
-   * player who used Google once came back to `authenticated === true` with a
-   * populated `useWallets()` on the very first render. Both effects below then
-   * fired unprompted: the wallet was handed to `onWallet`, which runs the full
-   * `authenticateWithBackend` flow and raises a signature prompt. The player
-   * never got to choose between Google, Phantom and Solflare — the popup had
-   * already committed them to Google, and declining that prompt left "The user
-   * rejected the request." sitting above three buttons, none of which had been
-   * pressed.
-   *
-   * Nothing on the Privy path may run until the player has pressed the button.
-   * A persisted session is still used — clicking Google skips straight past
-   * `login()` — it just no longer acts on its own.
-   *
-   * Counted rather than a boolean because a boolean cannot express "pressed it
-   * again": a second press would leave state and every effect dependency
-   * unchanged, so nothing would re-run and a retry would be silently ignored.
+   * Persisted Privy authentication must not trigger signing until Google is clicked.
+   * Use a counter so repeated clicks retrigger the effects and permit retries.
    */
   const [attempt, setAttempt] = useState(0);
   const chosen = attempt > 0;
 
-  // Hand the embedded wallet over exactly once per address. Privy re-renders
-  // this array on many state transitions, and re-firing would start a second
-  // login/register round-trip (and a second signature prompt) for a wallet
-  // already being processed.
+  // Hand over each embedded address once; rerenders must not start duplicate login/signing flows.
   useEffect(() => {
     if (!chosen || !authenticated) return;
     const wallet = wallets[0];
@@ -685,13 +504,8 @@ function SocialLoginBlock({
   }, [attempt, authenticated, wallets, signMessage, signTransaction]);
 
   /**
-   * Whether this Privy session already has a Solana embedded wallet.
-   *
-   * `useWallets()` is empty for a moment after login while it hydrates, so an
-   * empty array on its own is not evidence of "no wallet" — provisioning off
-   * that alone races the hydration and asks Privy for a second wallet. The
-   * user object's `linkedAccounts` is the authoritative record and settles
-   * first, so it is the one that decides.
+   * Use linkedAccounts to determine wallet existence; useWallets can be empty
+   * during hydration and must not trigger duplicate provisioning.
    */
   const hasEmbeddedWallet =
     wallets.length > 0 ||
@@ -703,19 +517,8 @@ function SocialLoginBlock({
     );
 
   /**
-   * Create the embedded wallet ourselves rather than leaving it to Privy's
-   * `createOnLogin`.
-   *
-   * `createOnLogin` only fires inside the login flow, and the screen it drives
-   * (`EmbeddedWalletOnAccountCreateScreen`) silently does nothing at all if
-   * `user`, the access token, or the wallet proxy is missing — no error, no
-   * navigation, no close, just the "Creating your wallet" spinner forever.
-   * Worse, it leaves an authenticated session with no wallet, and `login()`
-   * then refuses to run ("user is already logged in"), so the button becomes
-   * inert and there is no way out of the popup.
-   *
-   * `createWallet()` is the headless equivalent: it either resolves or throws
-   * something we can show the user, and it can be retried from the button.
+   * Provision with createWallet so failures are surfaced and retryable,
+   * including authenticated sessions whose login flow created no wallet.
    */
   const provision = async () => {
     if (provisioning) return;
@@ -734,10 +537,7 @@ function SocialLoginBlock({
     }
   };
 
-  // A session that came back authenticated but wallet-less — either from a
-  // previous run that hung, or from `createOnLogin` no-opping — is repaired
-  // on sight rather than waiting for the user to work out that the button
-  // needs pressing again.
+  // Repair authenticated sessions missing a wallet without requiring another login click.
   useEffect(() => {
     if (!chosen || !ready || !authenticated || !user) return;
     if (hasEmbeddedWallet || provisionTried.current) return;
@@ -758,9 +558,7 @@ function SocialLoginBlock({
   // but log "user is already logged in" to a console nobody was watching.
   const needsWallet = authenticated && !hasEmbeddedWallet;
 
-  // Chosen, signed in, Privy says a wallet exists — but `useWallets()` has not
-  // produced it yet. Both effects above bail in this window by design; without
-  // a label for it the button reads as broken.
+  // Show wallet hydration status while Privy reports a wallet but useWallets is still empty.
   const awaitingWallet =
     chosen && authenticated && hasEmbeddedWallet && !wallets[0]?.address;
 
@@ -772,19 +570,10 @@ function SocialLoginBlock({
         style={btnStyle}
         disabled={!ready || busy || provisioning}
         onClick={() => {
-          // Recording the choice is what releases the two effects above; for a
-          // persisted session that alone is enough to continue, with no second
-          // trip through Google.
+          // The recorded choice enables effects to resume a persisted session without another Google login.
           setAttempt((n) => n + 1);
-          // An explicit click means "do it now", so the duplicate-suppression
-          // latch is dropped here. `handedOff` exists only to stop the effect
-          // above starting a SECOND hand-off for a wallet already in flight; it
-          // was never meant to be permanent. Nothing cleared it when a hand-off
-          // failed, so after one declined signature prompt the effect saw an
-          // address it had already handed off and returned on every subsequent
-          // click — the button did nothing, with no error, for the rest of the
-          // popup's life. This cannot race a live hand-off: the button is
-          // disabled while `busy`, which is exactly when one is in flight.
+          // Clear hand-off suppression on explicit retry. The busy state prevents
+          // a second concurrent hand-off.
           handedOff.current = null;
           if (!authenticated) { login({ loginMethods: ["google"] }); return; }
           if (!hasEmbeddedWallet) { void provision(); }
@@ -849,24 +638,8 @@ function WalletStep({
   };
 
   /**
-   * The XFChess half of connecting: prove ownership, get a JWT, tell the bridge.
-   *
-   * Shared by every provider — extension or Privy — so the invariants below
-   * exist once instead of once per provider. Each of them is a fixed bug:
-   *
-   *  1. `POST /wallet` happens only AFTER a signature verifies. Posting it
-   *     earlier (right after `provider.connect()`) let a rejected sign-message
-   *     prompt still leave the game client believing a wallet was connected,
-   *     which unlocked wagered play.
-   *  2. `username` comes from THIS call's auth response, never from
-   *     localStorage. The popup's Chrome profile is shared across wallets, so a
-   *     previous unrelated wallet's cached name leaked through here and was
-   *     adopted by the game client's poller as authoritative (see
-   *     `sync_bridge_pubkey_to_solana` in src/states/main_menu.rs, which
-   *     explicitly trusts this POST).
-   *  3. Ownership is always proven by a real signature. There used to be a
-   *     "hot" local-keypair path that self-signed silently with no prompt at
-   *     all; nothing may reintroduce that.
+   * Prove wallet ownership with a signature before POST /wallet. Use the username
+   * from this auth response: the popup profile and localStorage are shared across wallets.
    */
   const authenticateWithBackend = async (src: WalletSource) => {
     const { pubkey, signRaw, kind } = src;
@@ -900,14 +673,8 @@ function WalletStep({
       });
     }
 
-    // Invariants 1 and 2 from this function's doc comment land here. On (2):
-    // `auth.username` is not yet the fully on-chain-aware answer — that is
-    // `handleAuth`'s job, which posts its own resolved value once it has one —
-    // but it is guaranteed to be about THIS wallet, unlike the old
-    // localStorage read.
-    // `provider` lets the game client tell an embedded wallet from an
-    // extension. It gates the no-popup global-session flow, which is enabled
-    // only for `privy` — see WalletProvider in tauri/src/main.rs.
+    // Post this auth response's username and provider; handleAuth later refines
+    // the profile-aware name, and provider gates embedded-session setup.
     await apiPost("/wallet", { pubkey, username: auth.username, provider: kind });
 
     logLifecycle("TX_COMPLETE", { pubkey });
@@ -916,11 +683,8 @@ function WalletStep({
   };
 
   /**
-   * Provider errors (Phantom/Solflare, and Privy's) are usually plain
-   * `{code, message}` objects rather than real Errors, so `console.error(e)`
-   * alone often prints "Unexpected error" with no stack. Log every own property
-   * so a failure is diagnosable from DevTools instead of only surfacing the
-   * same generic string in the UI.
+   * Log provider error properties; SDK failures may be plain objects rather
+   * than Error instances with stacks.
    */
   const reportFailure = (e: any) => {
     console.error("[WalletStep] connect failed:", e, JSON.stringify(e, Object.getOwnPropertyNames(e)));
@@ -936,14 +700,8 @@ function WalletStep({
       const src = await connectExtension(walletName);
       logLifecycle("WALLET_CONNECTED", { pubkey: src.pubkey });
 
-      // Nudge cluster as early as possible in the session — the first automatic
-      // signing popup for a fresh wallet is usually the global quick-sign
-      // authorize (`authorize_global_session_if_needed` in
-      // integration/systems.rs, which fires the moment a profile is detected),
-      // so by the time that popup exists this has already had its one
-      // best-effort chance to run instead of racing it.
-      //
-      // Extension-only: an embedded wallet has no user-selected cluster.
+      // Attempt extension cluster switching before automatic signing. Embedded
+      // wallets have no selected cluster to change.
       await ensureDevnet(src.provider, walletName);
 
       await authenticateWithBackend(src);
@@ -1033,9 +791,6 @@ function WalletStep({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Splash — shown after login is complete
-// ---------------------------------------------------------------------------
 function SplashStep({ username, onComplete }: { username: string; onComplete: () => void }) {
   // Auto-close a couple seconds after showing the welcome message — the
   // game is already running, nothing further needs the popup open.
@@ -1078,18 +833,13 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
 }
 
 
-// ---------------------------------------------------------------------------
-// Background Transaction Signer
-// ---------------------------------------------------------------------------
 function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   const [pendingTx, setPendingTx] = useState<string | null>(null);
   const [pendingLabel, setPendingLabel] = useState<string | null>(null);
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Privy hooks are safe to call unconditionally: PrivyProviderWrapper renders
-  // a passthrough when VITE_PRIVY_APP_ID is unset, and these return empty
-  // state rather than throwing.
+  // Privy hooks return empty state safely when the provider wrapper is a passthrough.
   const { ready: privyReady, authenticated: privyAuthenticated } = usePrivy();
   const { wallets: privyWallets } = useWallets();
   const { signTransaction: privySignTransaction } = useSignTransaction();
@@ -1097,14 +847,10 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   const [bridgeProvider, setBridgeProvider] = useState<string | null>(null);
   const [bridgeStatusLoaded, setBridgeStatusLoaded] = useState(false);
   const isPrivySession = bridgeProvider === "privy";
-  // Tracks which pending tx we've already auto-attempted, so the polling
-  // effect doesn't re-fire signTransaction() every second while the user is
-  // busy approving (or rejecting) it inside Phantom's own popup.
+  // Attempt each pending transaction once to avoid duplicate wallet prompts during polling.
   const autoAttempted = useRef<string | null>(null);
 
-  // The Tauri bridge owns the authenticated wallet session. Reading its
-  // provider here prevents a stale browser localStorage value from routing a
-  // Google/Privy transaction to Phantom or Solflare.
+  // Read provider identity from the bridge; stale localStorage could route signing to the wrong wallet.
   useEffect(() => {
     let cancelled = false;
     void withTimeout(apiGet<{ pubkey?: string; provider?: string | null }>("/status"), 5000, "Wallet session lookup")
@@ -1149,10 +895,7 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
     await closePopup();
   };
 
-  // tauri_signer::sign_via_tauri_only (used by create_game and most other
-  // signing calls) sends legacy `Transaction` bytes, not `VersionedTransaction`
-  // — try versioned first since that's what most wallet-adapter code expects,
-  // then fall back to legacy. Both branches used by every signing path here.
+  // Accept versioned and legacy transaction bytes; tauri_signer sends legacy transactions.
   const deserializeTx = (txBytes: Buffer): web3.VersionedTransaction | web3.Transaction => {
     try {
       return web3.VersionedTransaction.deserialize(txBytes);
@@ -1185,19 +928,8 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
     }
   };
 
-  // Signs via Privy's embedded wallet. Bytes in, bytes out — the same raw
-  // transaction the Rust side serialized, straight back to the bridge — so this
-  // path never has to reconcile Privy's `@solana/kit` types with this app's
-  // `@solana/web3.js` ones.
-  //
-  // In practice this fires rarely for a social user: it covers the onboarding
-  // transactions (`init_profile`, `authorize_global_session`) and any moment no
-  // session key is active. Once a global session is authorized, gameplay goes
-  // through `handleAutoSign` and never wakes this window at all.
-  //
-  // `ensureDevnet` is deliberately NOT called here: an embedded wallet has no
-  // user-selected cluster to nudge, so there is nothing to correct and
-  // `isNetworkMismatchError` is unreachable on this path.
+  // Privy signs raw serialized bytes. Skip extension cluster switching because
+  // embedded wallets have no user-selected network.
   const signWithPrivy = async (requestId: string, txB64: string) => {
     setSigning(true);
     setError(null);
@@ -1236,28 +968,16 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
     }
   };
 
-  // Signs via the connected browser-extension wallet (Phantom/Solflare) —
-  // this itself triggers the extension's own native popup. Called
-  // automatically the moment a pending tx shows up (see the poll loop
-  // below) so the user lands straight on Phantom's popup instead of having
-  // to click "Sign with Extension" on this page first. The button stays as
-  // a manual retry for when no provider was connected yet, or the user
-  // dismissed/rejected the extension popup and wants to try again.
+  // Automatically prompt the connected extension for a pending transaction;
+  // keep the button for retry after rejection or late connection.
   const signWithExtension = async (requestId: string, txB64: string) => {
     setSigning(true);
     setError(null);
     try {
       const provider = getConnectedProvider(bridgeProvider);
       if (!provider) throw new Error("No Phantom/Solflare extension detected");
-      // `getConnectedProvider()` only checks a persisted preference plus
-      // whether the extension object exists on `window` — it says nothing
-      // about whether *this* page/window actually has a live session with
-      // it. Popups are real OS-level browser windows (see closePopup's
-      // comment above), so a freshly (re)opened one hasn't run `.connect()`
-      // in its own JS context yet even though the extension remembers this
-      // origin as trusted — calling `signTransaction` straight away then
-      // fails with "Not connected". Silently reconnect first, same as
-      // `handleConnect` and `ProfileStep` already do.
+      // Reconnect this popup's provider before signing; stored preference and
+      // extension presence do not establish a live page session.
       if (!provider.publicKey) {
         try {
           await withTimeout(provider.connect({ onlyIfTrusted: true }), 15000, "Wallet reconnect");
@@ -1287,12 +1007,7 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
     }
   };
 
-  // Pushed via SSE instead of polled: the Tauri bridge emits the current
-  // pending-tx state immediately on connect, then again the instant it
-  // changes (see /pending/stream in tauri/src/main.rs), so a new signing
-  // request is picked up right away instead of up to 1s later on average.
-  // EventSource retries the connection natively on drop, so no manual
-  // reconnect/backoff logic is needed here.
+  // SSE pushes pending state immediately and on changes; EventSource reconnects natively.
   useEffect(() => {
     const handleUpdate = (data: { tx?: string | null; label?: string | null; request_id?: string | null }) => {
       if (data.tx && data.tx !== pendingTx) {
@@ -1308,16 +1023,8 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
           label: data.label ?? null,
         });
         const secret = sessionStorage.getItem("xfchess_session_key");
-        // Persisted (not just the in-memory ref) so a popup reload mid-sign
-        // — the exact "browser refresh during signing" case — doesn't
-        // forget an attempt already made: the bridge's SSE stream re-emits
-        // the SAME still-pending tx immediately on reconnect (see
-        // get_pending_stream in tauri/src/main.rs), and a fresh mount's
-        // useRef would read that as brand new, firing a second competing
-        // signTransaction() call while the extension might already have a
-        // native approval prompt open for the first one. Cleared once the
-        // tx actually resolves (see resolveAndHide) or a fresh, different
-        // tx shows up.
+        // Persist attempted transaction identity across reloads so reconnecting SSE
+        // cannot create a competing wallet prompt. Clear it on resolution or a new tx.
         const alreadyAttempted = sessionStorage.getItem("xfchess_auto_attempted_tx") === data.tx;
         if (secret) {
           handleAutoSign(data.request_id, data.tx, secret);
@@ -1331,11 +1038,8 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         ) {
           autoAttempted.current = data.tx;
           sessionStorage.setItem("xfchess_auto_attempted_tx", data.tx);
-          // Privy first: if an embedded wallet is present it is definitionally
-          // the wallet this session authenticated with, whereas
-          // `getConnectedProvider()` only checks a persisted preference plus
-          // whether an extension object exists on `window` — it can be true for
-          // an extension that has nothing to do with the current session.
+          // Prefer the embedded wallet for its authenticated session; an installed
+          // extension or stored preference may belong to another wallet.
           if (hasPrivyWallet) signWithPrivy(data.request_id, data.tx);
           else signWithExtension(data.request_id, data.tx);
         }
@@ -1364,9 +1068,7 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingTx, hasPrivyWallet, isPrivySession, bridgeProvider, bridgeStatusLoaded]);
 
-  // SSE may deliver a transaction while Privy's wallet list is still empty.
-  // In that case the transaction is already in state when the wallet hydrates,
-  // so there is no new SSE event to trigger the normal handler above.
+  // Retry pending SSE transactions when the embedded wallet finishes hydrating.
   useEffect(() => {
     if (
       !pendingTx ||
@@ -1424,19 +1126,8 @@ function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Step 3 — Choose a username handle.
-//
-// Two invocations, distinguished by `requireOnchain`:
-//  - Normal first-login (requireOnchain=false): off-chain handle only.
-//    On-chain Solana profile creation stays deferred to first wager attempt.
-//  - Deep-linked via `open_profile_step()`/`?step=profile` (requireOnchain=
-//    true): the game client is blocking a wager on a missing on-chain
-//    PlayerProfile, so this must actually submit the on-chain `init_profile`
-//    transaction (via /api/auth/init-profile-tx + broadcast-tx), not just
-//    PATCH the off-chain username — otherwise this popup resurfaces on every
-//    future wager attempt, forever.
-// ---------------------------------------------------------------------------
+// Normal login chooses an off-chain handle. requireOnchain also submits
+// init_profile when the game blocks a wager on a missing PlayerProfile.
 function ProfileStep({
   onComplete,
   onClose,
@@ -1459,12 +1150,8 @@ function ProfileStep({
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Privy hooks are safe to call unconditionally — PrivyProviderWrapper renders
-  // a passthrough when VITE_PRIVY_APP_ID is unset, and these return empty state
-  // rather than throwing. Read here rather than threaded down from the parent's
-  // `walletProvider`, which is `null` for an embedded wallet by design (see
-  // WalletSource.provider) and is also lost entirely when the popup is reopened
-  // straight onto this step via the needs-profile-step flag.
+  // Read Privy hooks here for embedded wallets and reopened profile steps;
+  // the extension-provider prop is null for this flow.
   const { wallets: privyWallets } = useWallets();
   const { signTransaction: privySignTransaction } = useSignTransaction();
   const privyWallet = PRIVY_ENABLED ? privyWallets[0] : undefined;
@@ -1534,17 +1221,8 @@ function ProfileStep({
         const txBytes = Buffer.from(built.tx_b64, "base64");
         const tx = web3.Transaction.from(txBytes);
 
-        // Up to 2 attempts total: `refreshBlockhash` already fetches as late
-        // as possible (right before signing), but it can't account for how
-        // long the user themselves takes to click "Approve" inside the
-        // wallet extension — that delay happens strictly after the refresh,
-        // so the freshly-fetched blockhash can still expire before broadcast
-        // by the time a slower approval comes back. A stale-blockhash
-        // rejection specifically (not a real one — insufficient funds,
-        // program error, actual rejection) gets exactly one automatic retry:
-        // fetch a new blockhash and ask for a fresh signature again, rather
-        // than failing outright and forcing the player to close and restart
-        // the whole ProfileStep form from scratch.
+        // Retry one stale-blockhash failure with a new hash and signature. Do not
+        // retry program errors, insufficient funds, or user rejection.
         const MAX_ATTEMPTS = 2;
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
           let signedB64: string;
@@ -1555,9 +1233,7 @@ function ProfileStep({
               wallet: signWithEmbedded ? "privy" : "extension",
             });
             if (signWithEmbedded) {
-              // `ensureDevnet` is deliberately skipped: an embedded wallet has
-              // no user-selected cluster to nudge, so `isNetworkMismatchError`
-              // is unreachable on this path.
+              // Embedded wallets have no user-selected cluster; skip ensureDevnet.
               const { signedTransaction } = await withTimeout(
                 privySignTransaction({
                   transaction: new Uint8Array(
@@ -1606,15 +1282,8 @@ function ProfileStep({
 
       if (token) {
         if (requireOnchain) {
-          // The on-chain init_profile submitted above already set this exact
-          // handle as PlayerProfile.username — PATCH /auth/username now
-          // rejects with 409 once an on-chain username is set (it would
-          // otherwise write a redundant off-chain copy that could later
-          // diverge from the on-chain value on some future rename, which
-          // neither surface would ever display again — see the backend's
-          // doc comment on `set_username`). Force the SQLite mirror via
-          // sync-profile instead, which reads the value we just wrote
-          // on-chain rather than re-asserting it off-chain.
+          // Mirror the confirmed on-chain handle through sync-profile; off-chain
+          // PATCH rejects usernames already set on-chain.
           await fetchProfileStatus(token).catch(() => { /* best-effort mirror */ });
         } else {
           const r = await fetch(`${API_BASE}/api/auth/username`, {
@@ -1677,27 +1346,14 @@ function ProfileStep({
 }
 
 
-// ---------------------------------------------------------------------------
-// Root orchestrator
-// ---------------------------------------------------------------------------
 function Onboarding() {
-  // A signing request (see tauri/src/main.rs's open_wallet_popup_for_signing)
-  // reopens this popup from scratch — a brand new page load with no React
-  // state carried over from whatever window handled the original login. If
-  // there's already a session on disk, `?step=sign` must skip straight past
-  // consent/entry/wallet/profile so the pending-transaction prompt (rendered
-  // unconditionally below via <TransactionSigner>) is what the user actually
-  // sees, instead of being asked to log in or pick a handle all over again.
+  // A reopened sign popup with a stored session skips onboarding and displays
+  // the pending transaction directly.
   const hasExistingSession = () =>
     !!(localStorage.getItem("xfchess_wallet_pubkey") || localStorage.getItem("xfchess_wallet"));
 
-  // Computed once, at mount — a reconnect (skip Wallet-Sign-In's manual
-  // button click, skip the Splash screen) vs. a genuine first-time login
-  // (show both, they're the only feedback the user gets that anything
-  // happened). Must not flip mid-flow: a brand-new login writes the same
-  // localStorage keys hasExistingSession() reads, so re-evaluating it after
-  // handleAuth runs would wrongly reclassify a first-timer as "returning"
-  // for the rest of this same session.
+  // Determine returning-session status once at mount; a new login writes
+  // storage keys that must not reclassify the current flow.
   const [wasReturningSession] = useState<boolean>(hasExistingSession);
 
   const [step, setStep] = useState<Step>(() => {
@@ -1705,30 +1361,12 @@ function Onboarding() {
     const s = params.get("step");
     if (s === "connect_wallet") return "wallet";
     if (s === "profile") return "profile";
-    // No legal/consent gate on devnet — every entry point (fresh login,
-    // returning session, or a signing deep link) goes straight to "wallet"
-    // so Connect Wallet always lands directly on Phantom/Solflare.
+    // Devnet skips consent and opens wallet selection directly.
     if (s === "sign") return "sign";
     return "wallet";
   });
-  // Only the `?step=profile` deep link (opened by open_profile_step() when
-  // the game client is blocking a wager on a missing on-chain profile) needs
-  // to actually submit the on-chain init_profile tx here — the normal
-  // first-login path reaches "profile" via handleAuth/handleWalletContinue
-  // with no such param, and stays off-chain-only by design.
-  //
-  // This is mutable (not the one-shot `useState` it used to be) because the
-  // URL alone can't be trusted as the ongoing signal: `open_profile_step`
-  // re-shows an *already-open* popup window without navigating it (see
-  // `open_in_browser`'s reuse path in tauri/src/main.rs) specifically so a
-  // signing request doesn't cost a full respawn — which means a popup that
-  // was first opened via a plain `?sid=...` URL and is later re-shown for a
-  // `?step=profile` request never actually sees that URL change.
-  // `handleAuth` and the needs-profile-step poll below both flip this to
-  // `true` directly (via `setRequireOnchain`) once they learn — from the
-  // server's one-shot `needs_profile_step` flag, not the stale URL — that
-  // *this* session needs the on-chain submission, regardless of what the
-  // popup's address bar still says.
+  // Require on-chain setup for profile deep links and bridge profile-step requests.
+  // A reused popup may keep its old URL, so the bridge flag also updates this state.
   const [requireOnchain, setRequireOnchain] = useState<boolean>(
     () => new URLSearchParams(window.location.search).get("step") === "profile",
   );
@@ -1742,45 +1380,21 @@ function Onboarding() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [walletProvider, setWalletProvider] = useState<any>(null);
 
-  // No consent gate to check on devnet (see `step` above) — nothing left to
-  // await before rendering. `ready` stays purely to gate the spinner frame
-  // that used to cover this async check.
   useEffect(() => {
     setReady(true);
-    // Tells Tauri this page has actually mounted and can respond to
-    // anything — see api_ready/mark_session_ready in tauri/src/main.rs.
-    // Before this, the only readiness signal was the OS window-title poll,
-    // which proves the Chrome window exists but says nothing about whether
-    // React has taken over the page yet.
+    // Report mounted React readiness; a discovered OS window alone cannot prove it.
     logLifecycle("REACT_READY");
     apiPost("/api/ready", { sid: SESSION_ID }).catch(() => { /* bridge unreachable — nothing to report to */ });
-    // A fresh log line every time this effect runs, i.e. every time the App
-    // component actually mounts — proves whether a given popup show/hide
-    // cycle was a real reuse (no new mount) or a hidden respawn (React state
-    // reset even though the OS-level window handle looked "reused").
     apiPost("/api/debug-log", {
       msg: `App mounted — initial step="${step}", url="${window.location.href}"`,
     }).catch(() => {});
-    // Surfaces which backend this session is actually talking to, in this
-    // page's own console, so a prod/local mismatch (see get_backend_url's
-    // doc comment in tauri/src/main.rs) is visible here instead of only
-    // showing up as an unexplained 502 later.
     apiGet<{ url: string; explicit: boolean }>("/api/backend-url")
       .then((r) => logLifecycle("BACKEND_TARGET", r))
       .catch(() => { /* bridge unreachable */ });
   }, []);
 
-  // Fallback when this popup has no wallet in its own localStorage yet the
-  // bridge's in-memory /status already knows one (set by the earlier
-  // Connect Wallet popup's POST /wallet) — this is exactly the gap that
-  // left TransactionSigner permanently un-rendered (it's gated on `pubkey`)
-  // even though a real pending signature was sitting in /pending the whole
-  // time: nothing on screen ever showed a way to approve it. Whatever the
-  // root cause of the popup not sharing localStorage this time around
-  // (fresh process, cleared storage, etc.), the bridge's own state is the
-  // one thing that's always current for *this* connected wallet, so fall
-  // back to asking it directly instead of assuming an empty localStorage
-  // means "no wallet connected".
+  // Fall back to bridge wallet state when popup storage is empty so pending
+  // transactions can still render their signer.
   useEffect(() => {
     if (pubkey) return;
     apiGet<{ connected: boolean; pubkey: string | null }>("/status")
@@ -1794,24 +1408,8 @@ function Onboarding() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Poll for profile-step requests from the game client (e.g. "Wagered PVP" clicked).
-  //
-  // Used to only run while `step === "splash"`, on the assumption that's the
-  // only state a popup could be sitting idle in. Real bug this caused: a
-  // returning-session `handleAuth` call that resolves an existing off-chain
-  // username closes the popup directly (see the `needsProfile === false`
-  // branch above) WITHOUT ever moving `step` off its initial `"wallet"` —
-  // there was no reason to, since at that moment nothing needed ProfileStep.
-  // If the game client's `open_profile_step()` request (setting this same
-  // flag) arrives *after* that — a real, common race, since the game client
-  // only learns it needs an on-chain profile once the wallet is already
-  // connected — the flag gets set correctly, but this poll was never running
-  // (step stuck at "wallet", not "splash"), so it just sat there forever,
-  // unread, and every future re-show of the reused popup landed back on the
-  // plain Wallet Sign-In screen with no way to ever reach ProfileStep again.
-  // Only genuinely unsafe to run this poll during "sign" (an in-progress
-  // transaction signature shouldn't be yanked away mid-flow); every other
-  // step is safe to redirect out of the instant the flag says to.
+  // Poll for profile-step requests in every step except sign; a reused popup
+  // can be idle on wallet or splash, but an active signature must not be interrupted.
   useEffect(() => {
     if (step === "sign") return;
     const interval = setInterval(async () => {
@@ -1821,11 +1419,7 @@ function Onboarding() {
           apiPost("/api/debug-log", {
             msg: `needs-profile-step poll: flag was set (was on step="${step}") — setStep(profile), requireOnchain=true`,
           }).catch(() => {});
-          // Same fix as handleAuth's flag check: this poll only running means
-          // the game client specifically needs the on-chain profile created,
-          // not just the off-chain handle this session may already have —
-          // without this, ProfileStep would render in its off-chain-only mode
-          // and never actually submit init_profile.
+          // Profile-step requests require on-chain initialization, not just an off-chain handle.
           setRequireOnchain(true);
           setStep("profile");
         }
@@ -1834,21 +1428,8 @@ function Onboarding() {
     return () => clearInterval(interval);
   }, [step]);
 
-  // The `?step=profile` deep link (see requireOnchain above) jumps straight to
-  // ProfileStep without ever going through handleAuth, so `username` here is
-  // whatever was last cached in this browser's localStorage — potentially
-  // from a completely different wallet that was logged into on this machine
-  // at some earlier point (localStorage for this popup is intentionally the
-  // user's real, persistent Chrome profile, not an isolated one — see
-  // tauri/src/main.rs's kill_wallet_popup comment). Re-resolve against the
-  // backend for the wallet that's ACTUALLY active right now before letting
-  // ProfileStep prefill the handle field with it, so a stale name from a
-  // prior wallet never gets submitted into a new on-chain profile. Gated on
-  // `handleResolved` (not just re-running on every render) because
-  // ProfileStep seeds its own input state from `defaultHandle` exactly once,
-  // at mount — updating `username` after it has already mounted wouldn't
-  // reach the visible field, so ProfileStep must not mount until this
-  // resolves (see the `handleResolved` check around its render below).
+  // Resolve the current wallet's handle before mounting ProfileStep; shared
+  // localStorage may contain another wallet's name, and the form seeds its input once.
   const [handleResolved, setHandleResolved] = useState(!requireOnchain);
   useEffect(() => {
     if (step !== "profile" || !requireOnchain || handleResolved) return;
@@ -1878,47 +1459,11 @@ function Onboarding() {
     // Push JWT to bridge so the game client can pick it up via GET /token
     apiPost("/token", { token }).catch(() => {});
 
-    // `user` here may just be the throwaway pubkey-slice placeholder
-    // WalletStep sends as a required-but-unchosen value on first
-    // registration (see handleConnect's register call) — never treat it
-    // as a real display name directly.
-    //
-    // There used to be a "fast path" here that skipped straight to
-    // closePopup/splash whenever `user` (the off-chain username /api/auth/login
-    // returns) was already a real, non-placeholder value — on the assumption
-    // that an off-chain username implies the player is fully set up. That
-    // assumption is wrong: a player can have an off-chain username (set by a
-    // prior ProfileStep attempt) while the ON-CHAIN PlayerProfile was never
-    // actually created — e.g. if the on-chain init_profile transaction failed
-    // partway (auth/blockhash issues, rejected signature, closed popup mid-flow).
-    // The fast path never checked on-chain state at all, so it closed the
-    // popup immediately every time, the player never saw ProfileStep again,
-    // and the on-chain profile was permanently stuck at "missing" — a wallet
-    // in that state could never complete setup again. Confirmed live via
-    // debug-log instrumentation: `user="val"`, a real off-chain username, was
-    // hitting the fast path on every single reconnect while the game client
-    // kept reporting NoProfile forever. Always resolving through the
-    // on-chain-aware path below (same one that already existed for the
-    // placeholder case) is the only version of this check that's actually
-    // correct — the extra network round trip is a fully acceptable cost
-    // compared to silently soft-locking an account.
+    // An off-chain username does not prove an on-chain PlayerProfile exists.
+    // Check on-chain setup even for returning users so failed initialization can be retried.
 
-    // resolveExistingUsername checks both the on-chain PlayerProfile
-    // (sync-profile) and the off-chain account username (auth/me, set by a
-    // prior ProfileStep completion that hasn't been followed by a wager
-    // yet), excluding that same placeholder — so a returning player with a
-    // chosen handle but no on-chain profile isn't asked to pick a new one.
-    // That's the right behavior for an ordinary reconnect (on-chain profile
-    // creation is deliberately deferred to first-wager-attempt by design —
-    // see ProfileStep's module doc). It is NOT the right behavior when the
-    // game client specifically opened this popup because it's blocking a
-    // wager on that exact missing on-chain profile — closing the popup here
-    // would silently strand the player in the exact soft-locked state this
-    // fix exists for. `needsOnchainRightNow` below is the one-shot
-    // server-side signal (`s.needs_profile_step`, set by
-    // `POST /api/open-profile-step`) that distinguishes the two: unlike the
-    // popup's own URL, it reflects what THIS specific open was actually for,
-    // regardless of whether the window was freshly navigated or reused.
+    // A known off-chain handle can finish normal login, but needs_profile_step
+    // requires on-chain setup even in a reused popup with a stale URL.
     let resolvedUser = user;
     let needsProfile = true;
     try {
@@ -1941,15 +1486,8 @@ function Onboarding() {
         }
       }
     } catch {
-      // The on-chain lookup itself failed (e.g. a flaky devnet RPC call inside
-      // sync-profile) — that says nothing about whether this wallet actually
-      // has a profile. `login`/`register` (just above, in
-      // WalletStep.handleConnect) already returned a real username for this
-      // exact pubkey; falling through to needsProfile=true unconditionally
-      // here re-shows "Choose Your Handle" to an already-registered player
-      // every time devnet RPC hiccups, even though their pubkey checked out
-      // fine. Trust that already-known username instead, unless it's the
-      // throwaway registration placeholder (see resolveExistingUsername).
+      // RPC failure does not prove a profile is missing. Keep the username verified
+      // by this wallet's auth response unless it is a registration placeholder.
       const registrationPlaceholder = nextPubkey.slice(0, 8);
       if (user && user !== registrationPlaceholder) {
         resolvedUser = user;
@@ -1959,17 +1497,8 @@ function Onboarding() {
       }
     }
 
-    // Push the fully-resolved (on-chain + off-chain aware) answer back to
-    // the bridge — `handleConnect`'s earlier POST /wallet only had the raw
-    // login/register response to go on, not this deeper check. Explicitly
-    // clearing to "" when `needsProfile` is true matters just as much as
-    // setting the real value when it's false: without it, a stale username
-    // from an earlier wallet/session that happened to still be sitting in
-    // the bridge's cache (see WalletStep.handleConnect's doc comment on the
-    // exact bug this closes) would keep being shown as "already known" by
-    // the game client's poller while this popup is correctly asking for a
-    // fresh handle — the two would visibly disagree, which is exactly what
-    // made this bug obvious from the player's side.
+    // Mirror the resolved handle to the bridge; explicitly clear it when setup
+    // is required so a prior wallet's cached name is not retained.
     apiPost("/wallet", { pubkey: nextPubkey, username: needsProfile ? "" : resolvedUser }).catch(
       () => {},
     );
@@ -1978,14 +1507,8 @@ function Onboarding() {
       apiPost("/api/debug-log", { msg: "handleAuth: needsProfile=true — setStep(profile)" }).catch(
         () => {},
       );
-      // No real username yet — make sure nothing (this session's state,
-      // or a stale value from a previous wallet's session) pre-fills the
-      // handle field with something that looks chosen but isn't. Clearing
-      // localStorage alone isn't enough: `username` state was already read
-      // from it at mount time, and ProfileStep's defaultHandle prop is
-      // derived from that stale in-memory value, not from localStorage
-      // again — so it must be reset here too, or the old value leaks
-      // straight through into the "Choose Your Handle" field.
+      // Clear both localStorage and React username state before an unchosen handle
+      // can seed ProfileStep.
       localStorage.removeItem("xfchess_username");
       setUsername("Player");
       setStep("profile");
@@ -2006,17 +1529,7 @@ function Onboarding() {
     localStorage.setItem("xfchess_wallet", pk);
     setPubkey(pk);
     setWalletProvider(provider);
-    // Do NOT set step here. `WalletStep.handleConnect` calls `onAuth(...)`
-    // immediately followed by `onContinue(...)` (this function) — always,
-    // unconditionally, every connect. `handleAuth` already routes to
-    // "splash" (known username, most of the fast synchronous path) or
-    // "profile" (no username yet) correctly; a `setStep("profile")` here
-    // used to run right after and clobber that decision back to "profile"
-    // every single time, since both calls land in the same synchronous
-    // tick when `handleAuth` takes its fast path. That's why a wallet with
-    // an already-known handle still got asked "Choose Your Handle" on every
-    // reconnect — this function's only remaining job is the wallet/provider
-    // bookkeeping above.
+    // handleAuth owns step routing; onContinue must not overwrite its decision.
   };
 
   const handleProfileComplete = (handle: string) => {
@@ -2080,9 +1593,7 @@ function Onboarding() {
           welcome message; "View Profile Hub" also closes immediately. */}
       {step === "splash"  && <SplashStep username={username} onComplete={closePopup} />}
 
-      {/* Reopened purely to approve a pending transaction (see hasExistingSession
-          above) — no login walkthrough, just wait for <TransactionSigner> below
-          to pick up the pending tx from /pending and show the sign prompt. */}
+      {/* A signing deep link with an existing session skips login and waits for the pending transaction. */}
       {step === "sign" && (
         <Card showClose={true} onClose={closePopup}>
           <div style={{ textAlign: "center" as const }}>
@@ -2094,23 +1605,15 @@ function Onboarding() {
         </Card>
       )}
 
-      {/* The signer mounts ONLY when this popup was actually opened at
-          ?step=sign. The game's signing path (open_wallet_popup_for_signing
-          in tauri/src/main.rs) always kills any existing popup and spawns a
-          fresh ?step=sign window for a signing request, so every legitimate
-          signature lands here — while a popup sitting on the connect/login or
-          splash step can never be hijacked by a pending tx (e.g. one left
-          over from an earlier, unrelated session) the way the old
-          unconditional render did. That hijack is exactly the "I clicked
-          Connect wallet and it asked me to sign" confusion. */}
+      {/*
+       * Mount the signer only for step=sign so pending transactions cannot
+       * interrupt a connect or onboarding popup.
+       */}
       {step === "sign" && pubkey && <TransactionSigner pubkey={pubkey} />}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// App root (no wallet adapter library — direct connections only)
-// ---------------------------------------------------------------------------
 export default function App() {
   return (
     <>

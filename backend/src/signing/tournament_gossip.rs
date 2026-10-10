@@ -96,12 +96,10 @@ impl TournamentGossipService {
 
         let mut peers = Vec::with_capacity(5);
 
-        // Add VPS as reliable bootstrap
         if let Some(ref vps) = self.vps_node_id {
             peers.push(vps.clone());
         }
 
-        // Add tournament host (first registered player)
         if let Some(host) = tournament.players.first() {
             if host != requesting_player {
                 if let Some(node_id_str) = tournament.node_ids.get(host) {
@@ -112,7 +110,6 @@ impl TournamentGossipService {
             }
         }
 
-        // Add random subset of other players (max 4)
         let other_players: Vec<_> = tournament
             .players
             .iter()
@@ -264,10 +261,8 @@ mod tests {
 
     #[test]
     fn test_format_and_parse_node_id() {
-        // Create a test node ID string
         let node_id: EndpointId = "test_node_id_12345".to_string();
 
-        // Format and parse
         let formatted = format_node_id(&node_id);
         let parsed = parse_node_id(&formatted).expect("parse_node_id should succeed");
 
@@ -276,7 +271,6 @@ mod tests {
 
     #[test]
     fn test_parse_invalid_node_id() {
-        // Empty string is now valid since we use String
         assert!(parse_node_id("").is_ok());
         assert!(parse_node_id("valid_node_id").is_ok());
     }

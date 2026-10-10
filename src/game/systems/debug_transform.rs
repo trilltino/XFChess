@@ -14,7 +14,6 @@ pub fn debug_log_transforms(
     } // Log every 5 seconds
     *timer = 0.0;
 
-    // Log White King Position
     for (piece, transform) in pieces.iter() {
         if piece.piece_type == PieceType::King && piece.color == PieceColor::White {
             debug!(

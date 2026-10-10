@@ -1,10 +1,4 @@
-/**
- * Browser-extension providers (Phantom, Solflare) → `WalletSource`.
- *
- * This is a straight extraction of what `WalletStep.handleConnect` used to do
- * inline. Behaviour is deliberately unchanged; the notes below record why each
- * odd-looking bit is the way it is, because every one of them was a fix.
- */
+/** Adapt Phantom and Solflare providers to WalletSource. */
 import bs58 from 'bs58';
 import type { WalletSource, WalletKind } from './types';
 import { detectSolanaTxCapabilities, WALLET_LABEL } from './types';
@@ -37,15 +31,8 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
 }
 
 /**
- * Connects an extension and returns a `WalletSource`.
- *
- * Always issues a real approval prompt — no `onlyIfTrusted` fast path. That
- * fast path resolved with no popup at all once an extension had trusted this
- * origin once, which is what made "Connect Wallet" silently reuse whichever
- * wallet was approved first instead of asking every time. Especially confusing
- * across multiple windows sharing one real browser profile: each window is its
- * own bridge origin by port, but the extension's own trust memory is not
- * necessarily scoped that finely.
+ * Connect with a real approval prompt rather than onlyIfTrusted so shared
+ * browser trust cannot silently select a previous wallet.
  */
 export async function connectExtension(kind: ExtensionKind): Promise<WalletSource> {
   const meta = EXTENSION_META[kind];
@@ -69,9 +56,7 @@ export async function connectExtension(kind: ExtensionKind): Promise<WalletSourc
     pubkey,
     provider,
     txCapabilities: detectSolanaTxCapabilities(kind, provider),
-    // Signs raw bytes with no "utf8" argument, to avoid the off-chain message
-    // prefix Phantom >= 0.16 applies in that mode. The backend verifies a bare
-    // ed25519 signature over the message, so a prefixed one fails.
+    // Sign raw bytes without utf8 mode: Phantom’s message prefix would invalidate backend verification.
     signRaw: async (msg: string) => {
       const bytes = new TextEncoder().encode(msg);
       const { signature } = await withTimeout<{ signature: Uint8Array }>(
@@ -82,11 +67,8 @@ export async function connectExtension(kind: ExtensionKind): Promise<WalletSourc
       return bs58.encode(signature);
     },
     signTransaction: async () => {
-      // Extensions sign typed transaction objects, not bytes, and the signing
-      // path in TransactionSigner already handles that shape directly (it needs
-      // the deserialized tx anyway, to refresh the blockhash). Routing it
-      // through here would mean deserializing, re-serializing and deserializing
-      // again for no gain.
+      // Extension signing uses typed transactions in TransactionSigner to refresh
+      // blockhashes; do not add a redundant bytes conversion here.
       throw new Error(
         'signTransaction is not used for extension wallets — see TransactionSigner.signWithExtension'
       );

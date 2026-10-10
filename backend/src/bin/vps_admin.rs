@@ -96,7 +96,6 @@ fn client() -> reqwest::blocking::Client {
         .expect("Failed to build HTTP client - check system configuration")
 }
 
-// ── API Types ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct TournamentSummary {
@@ -162,7 +161,6 @@ struct SetMatchGameIdReq {
     game_id: u64,
 }
 
-// ── Console UI ─────────────────────────────────────────────────────────────────
 
 fn print_header() {
     println!("\n╔══════════════════════════════════════════════════════════════════╗");
@@ -249,7 +247,6 @@ fn confirm(prompt: &str) -> bool {
     input == "y" || input == "yes"
 }
 
-// ── API Functions ─────────────────────────────────────────────────────────────
 
 fn list_tournaments() {
     println!("\n[LIST] Fetching tournaments...\n");
@@ -326,7 +323,6 @@ fn create_tournament() {
         println!("  Invalid choice. Must be 2, 4, 8, 16, 32, 64, or 128.");
     };
 
-    // Default prize shares
     let prize_shares: [u16; 4] = if is_free {
         println!("\n[FREE] No prize distribution for free tournaments.");
         [0, 0, 0, 0]
@@ -404,7 +400,6 @@ fn view_tournament() {
         Ok(resp) if resp.status().is_success() => {
             match resp.json::<TournamentDetail>() {
                 Ok(t) => {
-                    // Calculate actual prize pool from entry fees (on-chain model)
                     let actual_prize_pool = t.entry_fee_lamports * t.players.len() as u64;
                     let is_free = t.entry_fee_lamports == 0;
 
@@ -816,7 +811,6 @@ fn fund_prize() {
     }
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
     print_header();

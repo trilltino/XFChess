@@ -99,7 +99,6 @@ fn example_last_move_en_passant_check() {
 #[test]
 fn example_ply_count() {
     let mut history = MoveHistory::default();
-    // Add dummy moves
     for _ in 0..3 {
         history.add_move(MoveRecord {
             piece_type: PieceType::Pawn,
@@ -153,7 +152,6 @@ fn example_clear_history() {
 #[test]
 fn example_get_move() {
     let mut history = MoveHistory::default();
-    // 1. e4
     history.add_move(MoveRecord {
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,

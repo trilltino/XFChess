@@ -95,12 +95,8 @@ fn on_chain_validator_matches_engine() {
             }
         }
 
-        // No false accepts: every (from, to) transition the engine considers
-        // ILLEGAL must be rejected on-chain — under any promotion suffix. We key
-        // on (from, to) rather than exact UCI so a benign redundant promo suffix
-        // on an otherwise-legal move (e.g. "b1a3q") is not counted: it yields the
-        // same legal board transition. A genuinely illegal transition accepted
-        // here would be an on-chain exploit.
+        // Every illegal (from, to) transition must be rejected for all promotion
+        // suffixes; redundant suffixes on legal transitions are not false accepts.
         for &src in &from_squares(fen) {
             for dst in 0..64i8 {
                 if src == dst || legal_from_to.contains(&(src, dst)) {

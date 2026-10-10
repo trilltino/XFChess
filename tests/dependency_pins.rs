@@ -1,10 +1,5 @@
-// Regression guard for docs/PRE_MAINNET_E2E_PLAN.md §4.2: `iroh-gossip`'s own
-// Cargo.toml used to declare a loose `iroh = "1"` instead of inheriting the
-// workspace's exact `=1.0.3` pin, so a `cargo update` inside that one crate
-// could silently drift it away from what the rest of the workspace resolves
-// to (e.g. mid-game gossip re-sync breaking against a newer/older `iroh`).
-// This parses `Cargo.lock` directly (no `cargo` subprocess) so it's fast and
-// has no network dependency.
+// Keep iroh-gossip aligned with the workspace pin. Read Cargo.lock directly
+// without invoking Cargo or requiring the network.
 
 use std::fs;
 

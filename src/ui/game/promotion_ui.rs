@@ -27,7 +27,6 @@ pub fn promotion_ui_system(
         return;
     };
 
-    // Create a modal overlay
     egui::Area::new(egui::Id::new("promotion_overlay"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {

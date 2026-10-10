@@ -54,7 +54,6 @@ fn start_auth_websocket(mut auth_ws: ResMut<AuthWebSocket>) {
                 info!("WebSocket connection to backend established");
                 let (mut write, mut read) = ws_stream.split();
 
-                // Send authentication token if available
                 let auth_token = env::var("XFCHESS_AUTH_TOKEN").unwrap_or_else(|_| "placeholder_token".to_string());
                 let initial_data = serde_json::json!({
                     "token": auth_token

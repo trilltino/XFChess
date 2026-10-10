@@ -72,7 +72,6 @@ impl EloCache {
         let (profile_pda, _bump) =
             Pubkey::find_program_address(&[b"profile", pk.as_ref()], &self.program_id);
 
-        // Fetch account from RPC
         let account = self
             .rpc
             .get_account(&profile_pda)
@@ -82,15 +81,9 @@ impl EloCache {
             return Err("Player profile not found".to_string());
         }
 
-        // Deserialize PlayerProfile
-        // Offsets based on PlayerProfile struct (disc 8 + authority 32 = 40):
-        // 40: country (4+2)
-        // 46: wins (4), 50: losses (4), 54: draws (4), 58: games_played (4)
-        // 62: elo_rating (8)
-        // 70: rd (8)
-        // ...
-        // username at variable offset after earlier fields
-        // lichess fields are at the very end of the account data
+        // PlayerProfile offsets after discriminator and authority: country 40, wins 46,
+        // losses 50, draws 54, games_played 58, Elo 62, RD 70. Username and Lichess
+        // fields follow variable-length data.
         let country = self
             .deserialize_string(&account.data, 40, 2)
             .unwrap_or_default();
@@ -100,7 +93,6 @@ impl EloCache {
             .deserialize_string(&account.data, 183, 20)
             .unwrap_or_default();
 
-        // Read lichess fields from the tail of the account data if present
         let data_len = account.data.len();
         let lichess_verified = if data_len >= 243 {
             account.data[242] != 0
@@ -162,7 +154,6 @@ impl EloCache {
             cached_at: Instant::now(),
         };
 
-        // Update cache
         {
             let mut cache = self
                 .cache
@@ -244,7 +235,6 @@ impl EloCache {
             return Err("Offset out of bounds".to_string());
         }
 
-        // Read length prefix (u32 in Anchor)
         let len_bytes: [u8; 4] = data[offset..offset + 4]
             .try_into()
             .map_err(|_| "Failed to read length: slice length mismatch".to_string())?;

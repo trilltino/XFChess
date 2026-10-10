@@ -138,11 +138,6 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
                     egui::ComboBox::from_label("")
                         .selected_text(&state.country)
                         .show_ui(ui, |ui| {
-                            // Matches the four jurisdictions CLAUDE.md's legal
-                            // review actually covers (UK/Brazil/Germany/
-                            // Canada) — the previous list offered "United
-                            // States" (uncovered by that review) and omitted
-                            // Germany (which the review does cover).
                             ui.selectable_value(&mut state.country, "United Kingdom".to_string(), "United Kingdom");
                             ui.selectable_value(&mut state.country, "Brazil".to_string(), "Brazil");
                             ui.selectable_value(&mut state.country, "Germany".to_string(), "Germany");
@@ -246,11 +241,8 @@ fn submit_identity(state: &mut ComplianceState) {
                     &message,
                     "Identity verification",
                 )?;
-                // MWA bridge (plan §4/§5b) isn't built yet — this is the same
-                // seam `sign_message_via_tauri` fills on desktop
-                // (`signMessages` in MWA terms), not a separate design. Fail
-                // honestly rather than fabricate a signature the backend
-                // would reject anyway.
+                // Android MWA signing is not implemented; return an error rather than
+                // a fabricated ownership signature.
                 #[cfg(any(target_os = "android", not(feature = "solana")))]
                 let signature_bytes: Vec<u8> = {
                     return Err(
@@ -260,10 +252,6 @@ fn submit_identity(state: &mut ComplianceState) {
 
                 let signature = bs58::encode(&signature_bytes).into_string();
 
-                // Already-typed, already-correct client helper — same
-                // struct the backend deserializes, same URL, same error
-                // handling. It existed the whole time; this UI just never
-                // called it, building its own raw untyped payload instead.
                 let payload = crate::multiplayer::network::vps::IdentityPayload {
                     pubkey,
                     full_name,

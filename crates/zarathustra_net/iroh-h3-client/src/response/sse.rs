@@ -100,7 +100,6 @@ impl SseStream {
                 let line = String::from_utf8_lossy(&buf);
                 self.process_line(line.trim_end());
 
-                // return buffer to struct for reuse
                 buf.clear();
                 self.line_buf = buf;
 
@@ -176,7 +175,6 @@ impl Stream for SseStream {
             return Poll::Pending;
         };
 
-        // Process the new bytes.
         self.append_frame(data);
 
         // If new events were constructed, emit them.
@@ -222,9 +220,6 @@ mod tests {
         Ok(Bytes::from_static(bytes))
     }
 
-    // -------------------------------
-    // Basic event parsing
-    // -------------------------------
 
     #[tokio::test]
     async fn simple_event() {
@@ -242,9 +237,6 @@ mod tests {
         assert!(sse.next().await.is_none());
     }
 
-    // -------------------------------
-    // Split frames should recombine
-    // -------------------------------
 
     #[tokio::test]
     async fn split_frames_into_one_event() {
@@ -261,9 +253,6 @@ mod tests {
         assert_eq!(event.data(), "hello");
     }
 
-    // -------------------------------
-    // Multiple events in a single frame
-    // -------------------------------
 
     #[tokio::test]
     async fn multiple_events_one_frame() {
@@ -278,9 +267,6 @@ mod tests {
         assert_eq!(ev2.data(), "two");
     }
 
-    // -------------------------------
-    // id: field
-    // -------------------------------
 
     #[tokio::test]
     async fn event_id_updates_last_event_id() {
@@ -303,9 +289,6 @@ mod tests {
         assert_eq!(sse.last_event_id(), Some("456"));
     }
 
-    // -------------------------------
-    // event: field
-    // -------------------------------
 
     #[tokio::test]
     async fn event_type_parsed() {
@@ -321,9 +304,6 @@ mod tests {
         assert_eq!(event.data(), "hi");
     }
 
-    // -------------------------------
-    // Multiline data
-    // -------------------------------
 
     #[tokio::test]
     async fn multiple_data_lines() {
@@ -339,9 +319,6 @@ mod tests {
         assert_eq!(event.data(), "a\nb\nc");
     }
 
-    // -------------------------------
-    // Ignore unknown fields
-    // -------------------------------
 
     #[tokio::test]
     async fn ignore_unknown_fields() {
@@ -353,9 +330,6 @@ mod tests {
         assert_eq!(event.data(), "hi");
     }
 
-    // -------------------------------
-    // Blank event should still produce event
-    // -------------------------------
 
     #[tokio::test]
     async fn blank_event() {
@@ -371,9 +345,6 @@ mod tests {
         assert_eq!(event.event(), None);
     }
 
-    // -------------------------------
-    // Trailing newline removed
-    // -------------------------------
 
     #[tokio::test]
     async fn trailing_newline_removed() {
@@ -389,9 +360,6 @@ mod tests {
         assert_eq!(event.data(), "x\ny");
     }
 
-    // -------------------------------
-    // Stream ends mid-event → no event emitted
-    // -------------------------------
 
     #[tokio::test]
     async fn incomplete_event_on_eof_is_discarded() {
@@ -405,9 +373,6 @@ mod tests {
         assert_eq!(sse.last_event_id(), None);
     }
 
-    // -------------------------------
-    // Error propagation
-    // -------------------------------
 
     #[tokio::test]
     async fn propagate_stream_error() {

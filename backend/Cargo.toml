@@ -63,7 +63,6 @@ bs58 = "0.5"
 anyhow = "1.0.75"
 borsh = { workspace = true }
 
-# Braid/Iroh dependencies
 braid-iroh = { path = "../crates/zarathustra_net/braid-iroh" }
 iroh-gossip = { workspace = true }
 braid_chess = { path = "../crates/zarathustra_net/braid_chess" }
@@ -78,8 +77,7 @@ solana-compute-budget-interface = "3"
 sysinfo = "0.33"
 solana-system-interface = { version = "3", features = ["bincode"] }
 solana-commitment-config = "3"
-# For deriving MagicBlock delegation bookkeeping PDAs (buffer/record/metadata)
-# when building `delegate_game` server-side — same version the game client uses.
+# Match the client’s SDK version for MagicBlock delegation PDA derivation.
 ephemeral-rollups-sdk = { workspace = true }
 aes-gcm = "0.10.3"
 hex = "0.4.3"
@@ -90,9 +88,7 @@ urlencoding = "2.1"
 # Pure-Rust X.509 parsing for /admin/tls/expiry (real NotAfter, not a stub)
 x509-parser = "0.18"
 
-# Only a transitive dependency before — needed directly to install a process-
-# level CryptoProvider explicitly at startup (see server.rs::run). Version
-# pinned to match what's already resolved in Cargo.lock.
+# Install the process CryptoProvider explicitly at startup; match the resolved lockfile version.
 rustls = "0.23.37"
 
 # Engine revision is pinned to match the workspace dependency.
@@ -101,7 +97,6 @@ nimzovich_engine = { git = "https://github.com/trilltino/xfchess-contracts.git",
 # Anti-cheat analysis engine
 xfchess-anticheat = { path = "../crates/shared/xfchess-anticheat" }
 
-# Swiss pairing engine
 swiss-pairing = { path = "../crates/shared/swiss-pairing" }
 
 # Braid HTTP-209 subscribe server

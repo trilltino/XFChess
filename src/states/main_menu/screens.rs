@@ -53,9 +53,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             if let Some(game_id) = active_game_id {
                 begin_solana_lobby_cancel(ctx, &mut lobby, game_id);
             } else if matches!(lobby.status, LobbyStatus::Pending) {
-                // A create/join transaction has not produced a game id yet;
-                // keep the user here until its result is known so a late
-                // confirmation cannot create an untracked lobby behind them.
+                // Wait for the create/join result so late confirmation cannot create an untracked lobby.
             } else if !matches!(lobby.status, LobbyStatus::Cancelling { .. }) {
                 ctx.menu_state.set(crate::core::MenuState::ModeSelect);
                 lobby.status = LobbyStatus::Idle;
@@ -71,10 +69,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 .strong(),
         );
 
-        // An on-chain game this wallet is still in. Resume restores it from
-        // the verified chain state + move log (`multiplayer::resume`), never
-        // from a fresh board/nonce; a game that can't be verified or already
-        // ended says so instead.
+        // Resume only from verified chain state and move history, retaining board and nonce.
         if let Some(rejoin_id) = lobby.rejoin_game_id {
             use crate::multiplayer::resume::ResumeStatus;
             let wallet = ctx.solana_state.as_ref().and_then(|s| s.wallet_pubkey);
@@ -124,9 +119,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         Layout::item_space(ui);
 
-        // Wallet / balance header. USD is the primary display currency (see
-        // wager_rate.rs) — fall back to raw SOL only if the live rate hasn't
-        // been fetched yet, matching render_wallet_hud's top-right badge.
+        // Display USD when a live rate is available; otherwise show SOL.
         let balance = lobby.cached_balance;
         let wallet_ready = lobby.cached_keypair_bytes.is_some();
         if wallet_ready {
@@ -148,12 +141,8 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
         Layout::item_space(ui);
 
-        // Only show the create/join form while not in a post-transaction state.
-        // These statuses only ever originate from the Create flow (see
-        // render_create_tab), so they should only hide the tab bar while
-        // Create is the active tab — otherwise a stale WaitingForOpponent
-        // left over from an earlier create attempt hides Join/Browse too
-        // when the user re-enters the lobby from the main menu.
+        // Hide forms for post-transaction Create states only while Create is active;
+        // stale Create status must not hide Join or Browse.
         let in_post_state = lobby.mode == LobbyMode::Create
             && matches!(
                 lobby.status,
@@ -266,11 +255,8 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 lobby.opponent_poll_rx = Some(rx);
                 lobby.status = LobbyStatus::WaitingForOpponent { game_id };
             } else if lobby.mode == LobbyMode::Join {
-                // Our own join_game transaction landing on-chain only means
-                // WE are ready — it mirrors the free P2P flow's JOIN_ACK, not
-                // the host's GAME_START. Wait for the host to click "Host
-                // Game" before actually entering the match (see
-                // `LobbyStatus::EnterGame` below and `spawn_poll_game_start`).
+                // A confirmed join means this player is ready. Wait for the host GAME_START
+                // before entering the match.
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 spawn_poll_game_start(game_id, tx);
                 lobby.game_start_poll_rx = Some(rx);
@@ -325,11 +311,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             }
 
             LobbyStatus::WaitingForOpponent { game_id } => {
-                // Heartbeat: keep the post-create P2P-relay announce (the
-                // thing that makes this game show up in Browse Games) alive
-                // every 25s — well under the backend's 90s stale-lobby TTL.
-                // Without this the listing silently expires while the host
-                // is still very much waiting, with no on-screen indication.
+                // Refresh announcements every 25s, below the relay's 90s stale-lobby TTL.
                 let should_heartbeat = lobby
                     .last_lobby_heartbeat
                     .map(|t| t.elapsed().as_secs() >= 25)
@@ -357,11 +339,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
                 // Game ID with copy button
                 if game_id > 0 {
-                    // The on-chain game_id itself has to stay a raw u64 —
-                    // it's the literal PDA seed the Solana program derives
-                    // the game account from, not a cosmetic label — but the
-                    // display can still carry the same type+length hint the
-                    // casual P2P room codes do.
+                    // Keep the on-chain game_id as a raw u64 PDA seed; formatting is display-only.
                     let base_minutes = lobby.time_control_base / 60;
                     let (_, category) = time_control_category(base_minutes);
                     ui.horizontal(|ui| {
@@ -431,12 +409,8 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
             }
 
             LobbyStatus::OpponentJoined { game_id } => {
-                // Only the on-chain join is confirmed at this point (no
-                // pubkey/profile lookup has happened yet) — labeled clearly
-                // as Solana rather than showing a name we don't actually
-                // have. The real on-chain name does show correctly once the
-                // match starts (resolve_player_names' Solana branch,
-                // game_ui.rs:520-535).
+                // Until profile lookup completes, identify the opponent as Solana rather
+                // than displaying an unverified name.
                 ui.label(
                     egui::RichText::new("Opponent joined (Solana)!")
                         .color(egui::Color32::from_rgb(100, 255, 100))
@@ -450,10 +424,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
                 );
                 Layout::small_space(ui);
                 if ui.button("Host Game").clicked() {
-                    // Flip the relay's durable per-game status to InProgress
-                    // so the joiner's `spawn_poll_game_start` sees it — see
-                    // that function's doc comment for why this is a status
-                    // flip rather than a one-shot message.
+                    // Persist InProgress on the relay so joiners can poll it without missing a one-shot message.
                     if let Some(our_node_id) = lobby.cached_node_id.clone() {
                         let gid = game_id.to_string();
                         std::thread::spawn(move || {
@@ -574,10 +545,7 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
 
             LobbyStatus::Fetched { .. } => {}
 
-            // Both Create and Join resolve this away in the auto-transition
-            // above before this match ever renders it (Create -> WaitingForOpponent,
-            // Join -> WaitingForHostStart) — kept only so the match stays
-            // exhaustive over `LobbyStatus`.
+            // Auto-transition resolves this state before rendering; retained for exhaustiveness.
             LobbyStatus::Success(_) => {}
 
             // Resolved (back to Idle) in the auto-transition above before this
@@ -596,10 +564,8 @@ pub(super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
     ctx.solana_lobby = Some(lobby);
 }
 
-/// Stakes found on chain (not just in the local ledger) that this wallet can
-/// still recover, plus wagered games that are in play or awaiting ER
-/// undelegation. Only states the program's `cancel_game` accepts are offered
-/// as actions; the list is refreshed from chain after each cancellation.
+/// List on-chain recoverable stakes and games awaiting ER undelegation.
+/// Offer only cancel_game-compatible actions and refresh after cancellation.
 #[cfg(feature = "solana")]
 fn render_stake_recovery(
     ui: &mut egui::Ui,
@@ -789,15 +755,8 @@ pub(super) fn render_spectator_popup(
             ui.separator();
             ui.add_space(8.0);
 
-            // Only games with both seats filled are actually being played —
-            // an Open lobby waiting for a second player has nothing to watch
-            // yet. `players_joined`/`capacity` are populated from
-            // `joiner_node_id.is_some()` independently of the relay's
-            // Open/Connecting/InProgress status label (see
-            // `backend/src/signing/p2p_relay/routes.rs::list_games`), so this
-            // stays correct for both the casual GAME_START flow and
-            // tournament matches, which never go through an explicit
-            // "accept" step.
+            // Spectate only games with both seats occupied; relay status alone does
+            // not establish this for tournament and casual start flows.
             let live_games: Vec<_> = cached_games
                 .iter()
                 .filter(|g| g.status == "InProgress" && g.players_joined >= g.capacity)
@@ -825,11 +784,7 @@ pub(super) fn render_spectator_popup(
                                     ui.label(egui::RichText::new(host).size(13.0).color(egui::Color32::WHITE).strong());
                                     let type_badge = match game.game_type.as_str() {
                                         "solana_wager" => " Wager",
-                                        // Tournament matches announce themselves as
-                                        // "tournament_match" (see
-                                        // announce_or_join_tournament_relay in
-                                        // multiplayer/solana/tournament.rs) — "tournament"
-                                        // alone never actually gets sent by anything.
+                                        // Tournament relay announcements use tournament_match.
                                         "tournament" | "tournament_match" => " Tournament",
                                         _ => " Free",
                                     };
@@ -983,11 +938,8 @@ fn render_create_tab(
         lobby.wager_sol = 0.0;
     }
 
-    // SOL (`lobby.wager_sol`) stays the on-chain source of truth. The player
-    // either picks one of the preset USD wagers or types a custom amount —
-    // converted live via usd_per_sol. Falls back to a plain SOL entry field
-    // when no rate has loaded yet (startup, or the backend rate fetch is
-    // down) so hosting a game is never blocked on a third-party price feed.
+    // SOL is authoritative for the wager. Convert USD input when rates exist;
+    // otherwise offer SOL input so price-feed failure does not block hosting.
     let live_rate = usd_per_sol.filter(|r| *r > 0.0);
     const PRESET_WAGERS_USD: [f32; 3] = [2.0, 5.0, 10.0];
 
@@ -1000,9 +952,7 @@ fn render_create_tab(
             let input_id = egui::Id::new("wager_custom_amount_usd");
             let editing = ui.memory(|m| m.has_focus(input_id));
             if !editing {
-                // Not being typed into right now, so it's safe to resync the
-                // display from the canonical wager_sol (preset clicks, or
-                // wager_sol changed elsewhere, e.g. the browse/join flow).
+                // Resync from wager_sol only while the user is not editing.
                 lobby.wager_amount_input = format!("{:.2}", wager_usd);
             }
 
@@ -1086,7 +1036,6 @@ fn render_create_tab(
 
     Layout::small_space(ui);
 
-    // Time control selector
     ui.label(egui::RichText::new("Time Control").size(13.0));
     ui.horizontal_wrapped(|ui| {
         for (label, base, inc) in [
@@ -1143,19 +1092,13 @@ fn render_create_tab(
 
     let is_free_casual = lobby.wager_sol == 0.0 && lobby.match_type == 0;
     let is_free_rated = lobby.wager_sol == 0.0 && lobby.match_type == 1;
-    // Free games now go through the same signed on-chain create_game call as
-    // wagered games (wager_amount = 0 is a valid, zero-cost path on-chain), so
-    // they all require a connected wallet to sign.
+    // Free games still require a wallet signature for on-chain creation.
     let has_global_session = lobby.cached_global_session_keypair_bytes.is_some();
-    // One-time session signing is still being set up (a few seconds after
-    // wallet connect, normally) — block instead of racing the click into the
-    // per-game wallet-popup fallback just because it hasn't resolved yet.
+    // Wait for session setup before allowing a per-game signing fallback.
     let global_session_pending = global_session_setup_in_progress
         && !has_global_session
         && global_session_unavailable_reason.is_none();
-    // Free games fall back to per-game signing just like wagered games do
-    // when no cached global session is available — a global session is a
-    // nice-to-have latency optimization, never a hard requirement to play.
+    // Without a cached global session, free games may use per-game signing.
     let can_create = !matches!(lobby.status, LobbyStatus::Pending)
         && wallet_connected
         && !global_session_pending
@@ -1172,9 +1115,7 @@ fn render_create_tab(
         );
         Layout::small_space(ui);
     } else if wallet_connected && !has_global_session {
-        // Legacy per-game path — label the platform fee here, before the
-        // wallet popup, instead of letting it show up as an unexplained
-        // number inside Phantom's own transaction breakdown.
+        // Show the platform fee before opening the wallet signature prompt.
         ui.colored_label(
             egui::Color32::from_rgb(160, 160, 160),
             if let Some(reason) = global_session_unavailable_reason {
@@ -1236,9 +1177,7 @@ fn render_create_tab(
         );
     }
     if create_clicked && can_create {
-        // Free and wagered games both go through the same signed on-chain
-        // create_game call (wager_amount = 0 for free) — only an actual wager
-        // on mainnet needs CARF compliance first.
+        // Require CARF compliance only for mainnet wagers; free games use wager_amount=0.
         let needs_compliance = !is_free_casual
             && !is_devnet
             && compliance.status != crate::ui::compliance_modal::SubmissionStatus::Success;
@@ -1299,14 +1238,8 @@ fn render_join_tab(
     let looking_up = matches!(lobby.status, LobbyStatus::Pending);
     let is_idle = matches!(lobby.status, LobbyStatus::Idle);
 
-    // Auto-lookup if pre-filled but not yet looked up. Gated on Idle rather
-    // than "not Pending/Fetched" — otherwise this refires on every frame
-    // once a join transaction resolves (Success or Error is neither Pending
-    // nor Fetched), re-triggering a lookup that clobbers that status back to
-    // Pending and then Error (the game is now Active, no longer joinable).
-    // That loop is what makes "Confirm Join" look permanently stuck: the
-    // real join transaction lands once, but its Success status never
-    // survives the next frame's auto-lookup to be shown to the user.
+    // Auto-lookup only from Idle; rerunning after join success would overwrite
+    // the transaction result with a lookup of an already-active game.
     if game_id_valid && is_idle && !lobby.game_id_input.is_empty() {
         if let Ok(game_id) = lobby.game_id_input.trim().parse::<u64>() {
             let (tx, rx) = tokio::sync::oneshot::channel();
@@ -1429,12 +1362,7 @@ fn render_join_tab(
                                 "[SOLANA_LOBBY] Relay join accepted for game {} (host {})",
                                 game_id, host_id
                             );
-                            // Tell the host who joined — this is what lets the
-                            // host's `poll_for_joiner_messages` (see
-                            // network::p2p_vps) discover our node id and wire up
-                            // the actual move transport (Iroh gossip / relay
-                            // fallback). Without it the on-chain join can land
-                            // while the two clients stay completely unconnected.
+                            // Send JOIN_ACK with the node ID so the host can establish move transport.
                             let display = lobby
                                 .cached_display_name
                                 .clone()
@@ -1606,15 +1534,7 @@ fn render_solana_browse_tab(
         return;
     }
 
-    // Includes both free and wagered on-chain games — `poll_solana_browse`
-    // already fetches both ("P2P" and "solana_wager" tagged). Free games used
-    // to be filtered out here (stake_amount > 0.0), which meant a host who
-    // created a free game via this same Solana Multiplayer panel had no way
-    // to see it listed anywhere inside that panel — the only remaining
-    // listing for it was the unrelated top-level "Join Lobby" screen, which
-    // a joiner has no reason to check after hosting through Solana
-    // Multiplayer. See `poll_lobby_tasks`' announce comment for the other
-    // half of this split.
+    // Include zero-stake and wagered on-chain games in Solana browse results.
     let games = lobby.browse_games.clone();
     if games.is_empty() {
         ui.label(
@@ -1676,12 +1596,7 @@ fn render_solana_browse_tab(
                                 egui::RichText::new(if full { "Full" } else { "Join" }).size(12.0).strong()
                             ).fill(if can_join { egui::Color32::from_rgb(140, 80, 0) } else { egui::Color32::from_rgb(60, 60, 60) }).corner_radius(4.0).min_size(egui::vec2(60.0, 28.0))).clicked() {
                                 if let Some(pk) = wallet_pubkey_from_cached(&lobby.cached_keypair_bytes) {
-                                    // Solana wager game ids are always plain
-                                    // on-chain numeric ids (the PDA seed) — a
-                                    // strict parse, not `numeric_game_id`'s
-                                    // hash fallback, since a wrong value here
-                                    // would target a real transaction at the
-                                    // wrong (or no) on-chain account.
+                                    // Parse on-chain game IDs strictly as u64 PDA seeds; never use a hash fallback.
                                     if let Ok(game_id) = game.game_id.parse::<u64>() {
                                         if let Some(node_id) = lobby.cached_node_id.clone() {
                                             match crate::multiplayer::vps_client::p2p_join_game(game.game_id.clone(), &node_id) {
@@ -2104,7 +2019,6 @@ pub(super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
     });
     ui.add_space(8.0);
 
-    // ── Filter + sort bar ────────────────────────────────────────────────────
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("Filter:")
@@ -2581,8 +2495,6 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                     ui.add_space(12.0);
                 }
 
-                // Terminal states — previously the player just fell back to
-                // the menu with no indication of how the tournament ended.
                 let terminal = matches!(
                     tc.my_state,
                     Some(crate::multiplayer::network::vps::PlayerState::Eliminated)
@@ -2729,9 +2641,7 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                     let join_btn = ui.add_enabled(can_join && !is_password_prompt, egui::Button::new(
                                         egui::RichText::new("Join").size(12.0).color(egui::Color32::WHITE).strong()
                                     ).fill(if can_join { egui::Color32::from_rgb(50, 140, 50) } else { egui::Color32::from_rgb(60, 60, 60) }).corner_radius(4.0).min_size(egui::vec2(60.0, 28.0)));
-                                    // Expand/collapse toggle. Plain ASCII on purpose — the custom
-                                    // Cinzel/OpenSans font stack doesn't cover the Geometric Shapes
-                                    // block, so "▲"/"▼" rendered as a hollow tofu box here.
+                                    // Use ASCII arrows because the bundled fonts lack these geometric glyphs.
                                     let expand_icon = if is_expanded { "^" } else { "v" };
                                     if ui.add(
                                         egui::Button::new(egui::RichText::new(expand_icon).size(11.0).color(egui::Color32::from_gray(180)))
@@ -2832,10 +2742,7 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                     }
                                 });
 
-                                // ELO requirement display. `max_elo` is u32::MAX when the
-                                // tournament has no upper cap (backend sentinel for "unset") —
-                                // treat that (and 0) as "no cap" rather than printing the raw
-                                // sentinel value.
+                                // Zero and u32::MAX both mean no upper ELO cap.
                                 let has_max_elo = t.max_elo > 0 && t.max_elo != u32::MAX;
                                 if t.min_elo > 0 || has_max_elo {
                                     ui.horizontal(|ui| {
@@ -2876,11 +2783,7 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                     }
                                 }
 
-                                // Games of this tournament, in three tabs:
-                                // what's on now, what's next, and what you can
-                                // replay. Only the *expanded* card fetches, so
-                                // this is one request every 3s rather than the
-                                // old walk of every advertised tournament.
+                                // Fetch only the expanded tournament card, every three seconds.
                                 if is_expanded {
                                     let (games, tab) = ctx.tournament_client.as_ref()
                                         .map(|tc| (tc.detail_games.clone(), tc.detail_tab))
@@ -2927,9 +2830,6 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                     };
                                     let shown: Vec<_> = games.iter().filter(|g| g.state == want).collect();
 
-                                    // The playlist handed to the spectator: the
-                                    // games it makes sense to hop between, so
-                                    // Next/Prev in the HUD needs no round-trip.
                                     let playlist: Vec<crate::multiplayer::spectator::SpectatorPlaylistEntry> = games
                                         .iter()
                                         .filter(|g| g.watchable)
@@ -2986,10 +2886,7 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
                                                         ));
                                                     }
                                                 } else {
-                                                    // Watchability is the backend's call — a
-                                                    // bracket match flips to Active when its game
-                                                    // account is created, which is not the same
-                                                    // as anyone having moved.
+                                                    // Use backend watchability: an Active account does not imply any moves have been made.
                                                     let btn = ui.add_enabled(
                                                         game.watchable,
                                                         egui::Button::new(
@@ -3382,9 +3279,6 @@ pub(super) fn render_tournament_browser_screen(ui: &mut egui::Ui, ctx: &mut Main
         ui.label(egui::RichText::new("Tournament browser requires the solana feature.").size(13.0).color(egui::Color32::GRAY).italics());
     });
 
-    // Replay a finished tournament game: pull its PGN and hand it to the
-    // replay player the PGN-paste modal already drives, so a tournament game
-    // replays through exactly the same path as any other game.
     #[cfg(feature = "solana")]
     if let Some((game_id, white, black)) = replay_request {
         ctx.menu_state.set(crate::core::MenuState::Main);
@@ -3542,10 +3436,7 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
                 ctx.p2p_host.game_id = Some(game_id.clone());
                 ctx.p2p_host.last_heartbeat = Some(std::time::Instant::now());
 
-                // Firing events for internal systems. Only a Direct Connection host
-                // (no VPS relay behind it) should let the legacy Iroh handshake drive
-                // game-start on its own — a public lobby host's start is owned by the
-                // explicit "Start Game" button below / the relayed GAME_START.
+                // Only direct hosts let the Iroh handshake start the game; public lobbies require GAME_START.
                 if let Some(host_events) = &mut ctx.host_game_events {
                     host_events.write(crate::multiplayer::network::p2p::HostGameEvent {
                         drive_game_start: ctx.p2p_host.direct_mode,
@@ -3566,9 +3457,7 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
                             .map(|id| bs58::encode(id.as_bytes()).into_string())
                     })
                     .unwrap_or_default();
-                // Direct Connection hosts skip the VPS-backed public lobby
-                // directory entirely — nothing is announced or discoverable;
-                // the host shares their raw node ID out of band instead.
+                // Direct hosts share node IDs out of band and never announce to the public lobby directory.
                 if !ctx.p2p_host.direct_mode {
                     // Register with the host-side relay poller so we detect joiners via HTTP
                     if let Some(ref mut vps) = ctx.p2p_vps_state {
@@ -3636,23 +3525,15 @@ pub(super) fn render_host_p2p_config_screen(ui: &mut egui::Ui, ctx: &mut MainMen
 }
 
 pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
-    // This popup is shared by both sides of a P2P lobby: the host (waiting for
-    // someone to join) and a joiner (waiting for the host to start). `p2p_host`
-    // is only populated on the hosting side, so its absence means we got here
-    // by joining someone else's game.
+    // This popup serves both peers; p2p_host is populated only for the host.
     let is_joiner = ctx.p2p_host.game_id.is_none();
     if is_joiner {
         render_p2p_joiner_waiting_screen(ui, ctx);
         return;
     }
 
-    // Heartbeat: keep the lobby alive on the backend every 25 seconds — well
-    // under the backend's 90s stale-lobby TTL (`LOBBY_TTL_SECS`) so a couple
-    // of missed beats don't get a live host evicted, but tight enough that a
-    // host who actually vanished (crash, force-quit) stops looking joinable
-    // within roughly a TTL window. Direct Connection hosts were never
-    // announced to the VPS lobby directory in the first place, so there's
-    // nothing to keep alive there.
+    // Refresh relay lobbies every 25s, below their 90s TTL. Direct Connection
+    // hosts have no relay announcement to refresh.
     let should_heartbeat = !ctx.p2p_host.direct_mode
         && ctx
             .p2p_host
@@ -3743,9 +3624,7 @@ pub(super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                     .color(egui::Color32::WHITE)
                     .strong(),
             );
-            // This waiting screen is only ever reached via the free/casual
-            // VPS-relay P2P flow — never wallet-backed — so the qualifier is
-            // unconditional here, unlike the Solana lobby's equivalent below.
+            // This screen is always the casual relay flow, without a wallet-backed wager.
             ui.label(
                 egui::RichText::new("(local)")
                     .size(11.0)
@@ -3946,9 +3825,7 @@ fn render_p2p_joiner_waiting_screen(ui: &mut egui::Ui, ctx: &mut MainMenuUIConte
                 .color(egui::Color32::GRAY),
         );
 
-        // If this drags on, say so — otherwise a dropped GAME_START relay
-        // message (host sent it, backend never got it / joiner never polled
-        // it) looks identical to the host simply not having clicked Start yet.
+        // Explain delayed GAME_START delivery so lost messages do not resemble an idle host.
         let waited_secs = ctx
             .p2p_vps_state
             .as_ref()
@@ -4036,19 +3913,13 @@ fn start_p2p_host_game(ctx: &mut MainMenuUIContext) {
         .network_state
         .as_ref()
         .and_then(|ns| ns.secret_key_bytes);
-    // Carries the host's real name to the joiner — GAME_START previously had
-    // no payload at all, so the joiner never learned who they were playing
-    // (see initialize_players/opponent_display_name).
     let game_start_msg = format!("GAME_START:1|{}", ctx.player_identity.display_name());
     {
         let gid = game_id.clone();
         let nid = node_id.clone();
         std::thread::spawn(move || {
-            // The host transitions into the game locally right after this thread
-            // is spawned (see below) — it doesn't wait on this send. So a single
-            // dropped/timed-out HTTP call here would silently strand the joiner
-            // on "Waiting for host" forever, with nothing else ever re-sending
-            // GAME_START. Retry a handful of times before giving up.
+            // Retry GAME_START delivery because the host enters locally without
+            // waiting for this send; a dropped request would strand the joiner.
             let mut delivered = false;
             for attempt in 1..=5u32 {
                 let send_result = match secret_key_bytes {
@@ -4081,13 +3952,8 @@ fn start_p2p_host_game(ctx: &mut MainMenuUIContext) {
                     gid
                 );
             }
-            // Flips the relay's own listing status from Connecting to
-            // InProgress — nothing else in the client ever called this, so
-            // the game never left "Connecting" as far as GET /p2p/games was
-            // concerned. Best-effort: a failure here doesn't block the game,
-            // it just means the listing status stays stale (visibility is
-            // still correct via players_joined/capacity — see
-            // render_spectator_popup).
+            // Mark the relay listing InProgress as best-effort bookkeeping; failure
+            // must not block play.
             if let Err(e) = crate::multiplayer::vps_client::p2p_accept_join(gid.clone(), &nid) {
                 warn!("[LOBBY] p2p_accept_join failed for {}: {}", gid, e);
             }
@@ -4142,9 +4008,7 @@ fn generate_room_code(base_time_minutes: u32) -> String {
 }
 
 fn enter_p2p_host_game(ctx: &mut MainMenuUIContext, game_id: &str) {
-    // Pure casual P2P entry: clear any stale on-chain game context from a
-    // previous Solana lobby / tournament match, or the old `game_id` leaks
-    // into this game (see `clear_on_chain_game_state`).
+    // Clear prior on-chain context before entering a casual game.
     #[cfg(feature = "solana")]
     crate::multiplayer::solana::addon::clear_on_chain_game_state(
         ctx.solana_sync.as_deref_mut(),

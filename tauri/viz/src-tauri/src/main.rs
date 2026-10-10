@@ -1,10 +1,8 @@
 // Prevents an extra console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! XFChess Network Visualiser — native backend.
-//!
-//! Runs the read-RPC load benchmark in Rust (no browser CORS, token stays native)
-//! and streams per-level results to the webview via the `bench-level` event.
+//! Run native RPC benchmarks and stream results through bench-level.
+//! Tokens stay native and browser CORS does not apply.
 
 use std::time::{Duration, Instant};
 

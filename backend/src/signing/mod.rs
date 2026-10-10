@@ -74,7 +74,6 @@ pub struct AppState {
     pub game_log: Arc<routes::game_log::GameLogState>,
     pub metrics: Arc<crate::telemetry::metrics::Metrics>,
 
-    // ── Global session management ──────────────────────────────────────────────
     pub active_global_sessions: Arc<Mutex<HashMap<Pubkey, Keypair>>>,
 
     pub er_write_locks: Arc<Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
@@ -84,15 +83,12 @@ pub struct AppState {
     pub solana_rpc: Arc<solana_client::rpc_client::RpcClient>,
     pub game_participants: solana::game_participants::GameParticipantsCache,
 
-    // ── Anti-cheat ─────────────────────────────────────────────────────────────
     pub anticheat_queue: Option<AnalysisQueue>,
 
-    // ── Social (friends + presence) ────────────────────────────────────────────
     pub friends: Arc<FriendManager>,
     pub presence: Arc<PresenceStore>,
     pub invite_store: Arc<std::sync::RwLock<HashMap<String, Vec<social::routes::LobbyInvite>>>>,
 
-    // ── SIWS nonce store — one-time nonces keyed by nonce string ───────────────
     pub siws_nonces: Arc<Mutex<HashMap<String, (String, u64)>>>,
 }
 
@@ -113,9 +109,7 @@ pub fn load_keypair_from_env_value(val: &str) -> Result<Keypair, String> {
         Keypair::try_from(bytes.as_slice())
             .map_err(|e| format!("keyfile '{val}' does not contain a valid ed25519 keypair: {e}"))
     } else {
-        // Panics on malformed base58, same as before this function returned a
-        // Result — the JSON-keyfile path above is what previously swallowed
-        // errors silently, so that's the one that needed a graceful Result.
+        // Malformed base58 panics; keyfile errors return Result.
         Ok(Keypair::from_base58_string(val))
     }
 }
@@ -127,10 +121,8 @@ impl AppState {
         vault_pool: sqlx::SqlitePool,
         tournament_store: Arc<TournamentStore>,
     ) -> Self {
-        // Built before `store` — session keypairs are encrypted at rest using
-        // the same AES-256-GCM vault as KYC PII (see `storage::SessionStore`'s
-        // doc comment for why a stolen SQLite backup shouldn't also be a
-        // stolen signing key).
+        // Initialize the encryption vault before the store so persisted session keys
+        // are encrypted at rest.
         let identity_vault =
             identity::IdentityVault::new(&config.identity_encryption_key, &config.identity_salt)
                 .expect("Failed to initialize IdentityVault from env config");
@@ -148,7 +140,6 @@ impl AppState {
         let p2p_relay_store = p2p_relay::RelayStore::new(pool.clone());
         let p2p_relay = Arc::new(p2p_relay::create_relay_state(Some(p2p_relay_store.clone())));
 
-        // Initialize ELO cache with 5-minute TTL
         let program_id =
             Pubkey::from_str(&config.program_id).expect("Invalid program_id in config");
         let elo_cache = Arc::new(EloCache::new(
@@ -156,21 +147,12 @@ impl AppState {
             std::time::Duration::from_secs(300),
             program_id,
         ));
-        // Matchmaking shares the same ELO cache rather than standing up its
-        // own separate, devnet-hardcoded one. It also gets the session pool
-        // so its queue/matches survive a backend restart (migration 022).
+        // Share the ELO cache and persist matchmaking state in the session pool.
         let matchmaking =
             routes::matchmaking::SharedMatchmakingState::new(elo_cache.clone(), pool.clone());
 
-        // Parse authority keys — accepts either a JSON file path or a base58 string.
-        // `config.validate()` (called before `AppState::new` — see server.rs) already
-        // hard-exits in production when any of these env vars is unset, so by the
-        // time we're here a production process is guaranteed to have all four set.
-        // This helper is the second line of defense: a *malformed* keyfile (present
-        // but unparseable) would slip past that presence check, so it's fatal here
-        // too under `is_production()` rather than silently becoming a fresh random
-        // key. Outside production, both "unset" and "malformed" remain a
-        // warn-and-generate dev convenience.
+        // Accept JSON keyfiles or base58 keys. Malformed authority keys are fatal
+        // in production; development may generate temporary keys.
         let is_production = config.is_production();
         let resolve_authority = |name: &str, key: &Option<String>| -> Keypair {
             match key.as_deref().map(load_keypair_from_env_value) {
@@ -215,13 +197,8 @@ impl AppState {
                 )
             });
 
-        // Log which pubkey each authority key actually resolved to. These
-        // must match the corresponding hardcoded `Pubkey` constants in
-        // programs/xfchess-game/src/constants.rs exactly, or every
-        // privileged instruction that constrains on them (tournament
-        // creation, fee collection, treasury withdrawal, ...) fails on-chain
-        // with UnauthorizedAccess — a mismatch here is otherwise invisible
-        // until a real transaction hits the RPC.
+        // Resolved authority pubkeys must match the program constants or privileged
+        // instructions fail with UnauthorizedAccess.
         tracing::info!(
             "[VPS] Authority pubkeys — vps: {}, kyc: {}, link: {}, treasury: {} (pubkey only, \
              signing key never loaded here — see bin/treasury_signer.rs)",
@@ -231,27 +208,22 @@ impl AppState {
             treasury_authority_pubkey,
         );
 
-        // Initialize Swiss service and attach Braid hub
         let braid_hub = Arc::new(ResourceHub::new());
         let mut _swiss = swiss::SwissService::new((*tournament_store).clone());
         _swiss.set_braid_hub(Arc::clone(&braid_hub));
         let swiss_service = Arc::new(_swiss);
 
-        // Initialize tournament gossip service (VPS node ID will be set later)
         let tournament_gossip = Arc::new(TournamentGossipService::new(
             (*tournament_store).clone(),
             None,
         ));
 
-        // Parse host treasury and USDC mint pubkeys
         let tournament_fee_recipient = Pubkey::from_str(&config.tournament_fee_recipient)
             .expect("Invalid tournament_fee_recipient in config");
         let usdc_mint_pubkey =
             Pubkey::from_str(&config.usdc_mint_pubkey).expect("Invalid usdc_mint_pubkey in config");
 
-        // Live SOL/fiat rate cache for GBP-denominated fees (tournament entry,
-        // session platform fee) — dual-sourced with a background refresh so
-        // payment-critical requests never block on a live external fetch.
+        // Refresh fee exchange rates in the background so payment requests do not wait on external feeds.
         let rate_cache = routes::rates::RateCache::default();
         rate_cache.spawn_background_refresh();
         let metrics = Arc::new(crate::telemetry::metrics::Metrics::new());
@@ -340,10 +312,8 @@ impl AppState {
                     }
                 }
 
-                // A per-game lock is only worth keeping while something might
-                // still contend for it. `Arc::strong_count == 1` means the map
-                // holds the only reference, so no request or worker is inside
-                // the critical section and dropping it cannot orphan a waiter.
+                // Remove a game lock only when the map holds its sole Arc reference;
+                // no caller then owns or waits on that critical section.
                 {
                     let mut locks = state.er_write_locks.lock().await;
                     let before = locks.len();
@@ -396,7 +366,6 @@ impl AppState {
 pub fn build_router(state: AppState) -> Router<AppState> {
     let base = Router::new().with_state(state.clone());
     base
-        // Debug and health routes
         .merge(crate::signing::routes::debug::debug_routes())
         // Core game session and move routes (These were missing from build_app_router)
         .merge(crate::signing::routes::main::routes())
@@ -430,11 +399,7 @@ pub fn build_router(state: AppState) -> Router<AppState> {
             "/api",
             crate::signing::routes::rpc_proxy::rpc_proxy_routes(),
         )
-        // Lobby-level P2P connection setup (announce/join/JOIN_ACK
-        // handshake, region lookup) — NOT move sync, see p2p_relay's doc
-        // comment. Load-bearing for basic game connectivity across
-        // p2p_vps.rs/screens.rs; do not remove without migrating those
-        // call sites first.
+        // Lobby handshake and region lookup; moves use a separate transport.
         .merge(p2p_relay::p2p_routes())
         .nest(
             "/identity",
@@ -442,15 +407,8 @@ pub fn build_router(state: AppState) -> Router<AppState> {
         )
         // WebSocket route for authentication sync
         .route("/ws/auth", get(handle_auth_websocket))
-        // Global persistent session delegation. The read-only `verify` probe is
-        // public; everything that mutates a wallet's session key sits behind the
-        // same dual-accept guard as the per-game session routes, and each of
-        // those handlers additionally requires a JWT proving control of the
-        // wallet it acts on (`RequireWallet`).
-        //
-        // This nest previously had no middleware at all despite the router being
-        // named "protected", which left `track-game` and `revoke` reachable by
-        // anyone — see `routes::global_session`'s module docs.
+        // Session mutations require the shared transport guard and a wallet-bound JWT.
+        // The read-only verify endpoint remains public.
         .nest(
             "/api/global-session",
             crate::signing::routes::global_session::global_session_public_routes(),

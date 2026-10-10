@@ -107,9 +107,7 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
     finally { setCancellingId(null); }
   };
 
-  // Local housekeeping only — removes a Cancelled/Completed tournament from
-  // this list. Does not touch on-chain state (nothing left to manage once a
-  // tournament is terminal); the backend rejects this for any other status.
+  // Remove only terminal tournaments from the local list; on-chain state is unchanged.
   const handleDelete = async (e: React.MouseEvent, tournament: TournamentSummary) => {
     e.stopPropagation();
     const confirmed = window.confirm(`Remove "${tournament.name}" (#${tournament.tournament_id}) from this list? This only clears it from the admin panel — it doesn't touch on-chain state.`);
@@ -179,7 +177,7 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
             }}
           />
         </div>
-        
+
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -361,14 +359,14 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
               </div>
 
               <div style={{ width: "100%", height: "4px", backgroundColor: "rgba(0,0,0,0.2)", borderRadius: "100px", marginBottom: "8px", overflow: "hidden" }}>
-                <div style={{ 
+                <div style={{
                   width: `${(tournament.registered / tournament.max_players) * 100}%`, 
-                  height: "100%", 
+                  height: "100%",
                   backgroundColor: "var(--primary)", 
-                  borderRadius: "100px" 
+                  borderRadius: "100px"
                 }} />
               </div>
-              
+
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-dim)" }}>
                 <span>REGISTRATION LOAD</span>
                 <span>{tournament.registered} / {tournament.max_players} PLAYERS</span>

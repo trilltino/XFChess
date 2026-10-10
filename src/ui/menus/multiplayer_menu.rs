@@ -168,7 +168,6 @@ pub fn multiplayer_menu_system(
                     ui.label("Play against an AI opponent");
 
                     if ui.button("Start Game vs AI").clicked() {
-                        // Transition to game state with AI
                         multiplayer_menu.game_states.set(GameState::InGame);
                     }
                 }
@@ -218,13 +217,9 @@ pub fn multiplayer_menu_system(
                                                         std::thread::spawn(move || {
                                                             let vps_url = crate::multiplayer::network::vps::vps_base();
 
-                                                            // 1. Build Leave Transaction
                                                             let build_url = format!("{}/api/tournament/{}/build-leave-tx", vps_url, t_id);
-                                                            // A fast, bounded timeout — this is a plain instruction build,
-                                                            // not on-chain work, so an unreachable/hung backend should
-                                                            // fail quickly instead of leaving this thread (and the leave
-                                                            // flow it feeds) stuck indefinitely (reqwest has no default
-                                                            // timeout at all otherwise).
+                                                            // Bound instruction-building HTTP requests so backend failure cannot
+                                                            // indefinitely block the leave flow.
                                                             let client = reqwest::blocking::Client::builder()
                                                                 .timeout(std::time::Duration::from_secs(15))
                                                                 .build()
@@ -237,11 +232,9 @@ pub fn multiplayer_menu_system(
                                                                 if r.status().is_success() {
                                                                     if let Ok(data) = r.json::<serde_json::Value>() {
                                                                         if let Some(tx_b64) = data["transaction"].as_str() {
-                                                                            // 2. Sign and Send via Tauri bridge
                                                                             let sign_res = crate::multiplayer::solana::tauri_signer::sign_and_send_b64_via_tauri(&crate::multiplayer::solana::integration::state::DEVNET_RPC_URL, tx_b64, "Leaving tournament");
 
                                                                             if let Ok(sig) = sign_res {
-                                                                                // 3. Confirm with backend
                                                                                 let leave_url = format!("{}/api/tournament/{}/leave", vps_url, t_id);
                                                                                 let confirmed = client.post(&leave_url)
                                                                                     .json(&serde_json::json!({
@@ -252,7 +245,6 @@ pub fn multiplayer_menu_system(
                                                                                     .map(|r| r.status().is_success())
                                                                                     .unwrap_or(false);
 
-                                                                                // 4. Refresh tournaments list
                                                                                 if confirmed {
                                                                                     let refresh_url = format!("{}/api/tournament/my?player={}", vps_url, pubkey_str);
                                                                                     if let Ok(refresh_resp) = reqwest::blocking::get(&refresh_url) {
@@ -336,7 +328,6 @@ pub fn multiplayer_menu_system(
                 ui.label("Searching for opponents...");
             }
 
-            // Back button
             if ui.button("Back").clicked() {
                 multiplayer_menu.game_states.set(GameState::MainMenu);
             }

@@ -121,16 +121,12 @@ impl Middleware for CookieJar {
         let peer_id = peer_id(request.uri())?;
         debug!(?peer_id, "handling request with cookie jar");
 
-        // 1. Attach cookies (extracted)
         self.attach_request_cookies(&peer_id, &mut request);
 
-        // 2. Forward to next middleware/service
         let response = next.handle(request).await?;
 
-        // 3. Parse cookies (extracted)
         let parsed = self.parse_response_cookies(&response);
 
-        // 4. Store them (extracted)
         self.store_new_cookies(peer_id, parsed);
 
         Ok(response)
@@ -149,9 +145,6 @@ mod tests {
         EndpointId::from_bytes(&[1u8; 32]).unwrap()
     }
 
-    // -------------------------------
-    // Tests
-    // -------------------------------
 
     #[test]
     fn update_and_get_cookies_for() {

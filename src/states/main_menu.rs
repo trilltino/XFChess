@@ -102,13 +102,7 @@ impl Plugin for MainMenuPlugin {
             .init_resource::<PlayerColorChoice>()
             .init_resource::<NewsBannerState>()
             .init_resource::<PlayerIdentity>()
-            // No startup system pre-fills PlayerIdentity.username from the
-            // locally-cached profile name (identity::load_active_profile) —
-            // that used to mean every launch silently skipped straight past
-            // picking a profile with no prompt at all. Leaving `username`
-            // unset here is exactly the condition the first-run onboarding
-            // modal already gates on, so every launch now shows the profile
-            // picker fresh instead.
+            // Leave username unset at startup so the profile picker runs on each launch.
             .init_resource::<crate::assets::GameAssets>()
             .init_resource::<crate::assets::LoadingProgress>()
             .init_resource::<crate::assets::AssetLoadingTimer>()
@@ -146,20 +140,10 @@ impl Plugin for MainMenuPlugin {
                     try_setup_fonts,
                     // Slide tween for the ambient board pieces.
                     board_animation::animate_menu_pieces,
-                    // Slow opacity fade for captured/reset ambient pieces, then
-                    // the carousel's reset-phase state machine. Order matters:
-                    // a piece's own fade must finish (component removed,
-                    // Visibility set) before the phase logic decides whether to
-                    // overwrite it with a fresh fade for the next game — run
-                    // unordered, both systems can race on the same entity in
-                    // the same frame (their timers expire together, since both
-                    // use the same crossfade duration) and the fresh fade gets
-                    // silently dropped.
+                    // Finish piece fades before the carousel phase installs a new fade; both
+                    // may expire on the same frame.
                     (
                         board_animation::animate_menu_piece_fades,
-                        // Ambient famous-games carousel replay on the full-size
-                        // MenuBg board. Self-arms once `spawn_menu_bg_pieces`
-                        // populates the animator.
                         board_animation::animate_ambient_board,
                     )
                         .chain(),
@@ -228,9 +212,7 @@ pub fn wallet_connect_overlay_system(
         ..egui::Frame::NONE
     };
 
-    // Escape always dismisses the overlay, even if a fresh popup's
-    // force-focus (see tauri's open_in_browser) races a click on Cancel and
-    // eats it as a mere refocus — keyboard input isn't subject to that.
+    // Escape dismisses the overlay even if popup refocusing consumes a Cancel click.
     let mut cancelled = keyboard.just_pressed(KeyCode::Escape);
     let mut retry = false;
     let message = wallet_connect_overlay_message(&poller);
@@ -240,11 +222,7 @@ pub fn wallet_connect_overlay_system(
         "Cancel"
     };
 
-    // `ui.horizontal` allocates the full available width of its parent, so a
-    // single centered button inside it still renders flush left — only a
-    // leaf widget's own rect gets centered by `vertical_centered`. Wrapping
-    // it in `allocate_ui` with the row's real content width turns the row
-    // itself into a leaf-sized block that centers correctly.
+    // Allocate the row at its content width so vertical_centered can center it.
     let button_row_width = if poller.bridge_status_error.is_some() {
         120.0 + 8.0 + 120.0
     } else {
@@ -433,10 +411,7 @@ impl Default for CompetitiveMenuState {
             show_controls_popup: false,
             show_join_popup: false,
             join_game_id: String::new(),
-            // Stockfish is not part of the Android build (see the AiEngine
-            // picker in modals.rs, which hides the option there too) —
-            // XFChessEngine (nimzovich) is the only engine that ships, so it
-            // must also be the default, not just the picker's fallback.
+            // Android ships only XFChessEngine, so it must be the default.
             #[cfg(target_os = "android")]
             ai_engine: crate::game::ai::resource::AIEngine::XFChessEngine,
             #[cfg(not(target_os = "android"))]
@@ -540,9 +515,6 @@ impl Default for P2PHostState {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Wallet bridge polling — syncs PlayerIdentity from the Tauri HTTP bridge
-// ---------------------------------------------------------------------------
 
 #[derive(Default, Clone)]
 pub struct WalletBridgeData {
@@ -593,7 +565,6 @@ fn poll_wallet_bridge(
         return;
     }
 
-    // --- drain /auth/me response (JWT-authenticated full profile) ---
     if let Some(ref rx) = poller.me_rx {
         match rx.try_recv() {
             Ok(Ok(me)) => {
@@ -612,9 +583,7 @@ fn poll_wallet_bridge(
                 }
                 player_identity.can_wager = me.can_wager;
                 player_identity.has_onchain_profile = me.has_onchain_profile;
-                // Lichess Elo — a distinct, second stat, synced via the
-                // existing external-ELO link flow. Never merged with `elo`
-                // (the on-chain rating). 0/unset when not linked.
+                // Keep Lichess ELO separate from the on-chain rating; zero means unlinked.
                 player_identity.lichess_elo = if me.lichess_blitz > 0 {
                     Some(me.lichess_blitz / 100)
                 } else {
@@ -645,7 +614,6 @@ fn poll_wallet_bridge(
         }
     }
 
-    // --- drain fallback VPS profile fetch (no JWT path) ---
     if let Some(ref rx) = player_identity.pending_profile_rx {
         match rx.try_recv() {
             Ok(Ok(profile)) => {
@@ -676,7 +644,6 @@ fn poll_wallet_bridge(
         }
     }
 
-    // --- receive status response ---
     if let Some(ref rx) = poller.status_rx {
         match rx.try_recv() {
             Ok(Ok((pubkey_opt, username_opt, provider_opt))) => {
@@ -685,16 +652,8 @@ fn poll_wallet_bridge(
                 poller.wallet_provider = provider_opt;
                 if let Some(pk) = pubkey_opt {
                     poller.show_connect_overlay = false;
-                    // The bridge only ever holds a username from two trustworthy
-                    // sources: wallet-connect (`POST /wallet`) or a rename that
-                    // just succeeded against the backend (`PATCH
-                    // /api/auth/username`, mirrored into the bridge's cache at
-                    // the point it's confirmed to have taken effect — see
-                    // api_set_username in tauri/src/main.rs). So it's safe to
-                    // adopt whenever it differs, not just while `username` is
-                    // still `None` — that used to mean an in-game rename never
-                    // showed up until the whole game restarted and re-primed
-                    // this from scratch.
+                    // Adopt bridge usernames after verified connect or confirmed rename, even
+                    // when the local name is already set.
                     if player_identity.username.as_deref() != username_opt.as_deref() {
                         if let Some(ref uname) = username_opt {
                             if !uname.is_empty() {
@@ -704,7 +663,6 @@ fn poll_wallet_bridge(
                         }
                     }
 
-                    // Handle pubkey changes and kick off profile/balance fetches
                     let is_new_pubkey = poller.known_pubkey.as_deref() != Some(&pk);
                     if is_new_pubkey {
                         info!("[WalletBridge] New pubkey detected: {}", pk);
@@ -796,7 +754,6 @@ fn poll_wallet_bridge(
         }
     }
 
-    // --- receive balance response ---
     if let Some(ref rx) = poller.balance_rx {
         if let Ok((sol, usd_per_sol, gbp_per_sol)) = rx.try_recv() {
             poller.balance_rx = None;
@@ -813,7 +770,6 @@ fn poll_wallet_bridge(
         }
     }
 
-    // --- poll every 5 seconds ---
     poller.timer += time.delta_secs();
     if poller.timer >= 5.0 && poller.status_rx.is_none() {
         poller.timer = 0.0;
@@ -827,7 +783,6 @@ fn poll_wallet_bridge(
             .detach();
     }
 
-    // --- retry /auth/me every 10s while connected but profile incomplete ---
     const PROFILE_RETRY_SECS: f32 = 10.0;
     if player_identity.username.is_none()
         && player_identity.pending_profile_rx.is_none()
@@ -889,27 +844,11 @@ fn sync_bridge_pubkey_to_solana(
     }
     drop(bridge_data);
 
-    // Track whether the connected wallet is a Privy embedded wallet. This gates
-    // the no-popup global-session flow — see
-    // `integration::systems::authorize_global_session_if_needed`, which is
-    // enabled only for embedded wallets because the one unresolved blocker on
-    // that path (a Solflare cluster mismatch) cannot occur without an extension
-    // carrying its own selected cluster.
+    // Embedded-wallet status gates global-session setup without extension cluster selection.
     state.wallet_is_embedded = poller.wallet_provider.as_deref() == Some("privy");
 
-    // A wallet switch (the user changes the active account in Phantom/
-    // Solflare, or connects a different wallet in the bridge popup) must
-    // invalidate every identity-dependent field cached here — without this,
-    // `mover_wallet` computation, `SessionInfo.player_pubkey`, and every PDA
-    // derivation elsewhere in `src/multiplayer/solana` keep using the OLD
-    // wallet for the rest of the process's life, since this resource was
-    // otherwise never reset once set (confirmed during the identity audit:
-    // this function and `initialize_solana_integration` both only ever SET
-    // `wallet_pubkey` once and had no invalidation path at all). Mostly
-    // fails safe today (on-chain signer checks reject a stale derivation),
-    // but produces exactly the confusing "why is it asking me to sign in
-    // again" class of bug — clearing eagerly here turns that into a clean
-    // one-time re-sync instead.
+    // Invalidate all wallet-derived caches when switching wallets so signers,
+    // participant identities, and PDAs are recomputed.
     if let Some(current) = state.wallet_pubkey {
         if let Some(ref pubkey_str) = poller.known_pubkey {
             if let Ok(new_pubkey) = pubkey_str.parse::<solana_sdk::pubkey::Pubkey>() {
@@ -976,9 +915,7 @@ fn fetch_bridge_status() -> Result<(Option<String>, Option<String>, Option<Strin
         .as_str()
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    // `phantom` | `solflare` | `privy`. Absent on an older bridge build, which
-    // is treated as "not an embedded wallet" — the conservative default, since
-    // it leaves the no-popup session flow off.
+    // Older bridges omit provider; disable embedded-wallet optimizations by default.
     let provider = json["provider"]
         .as_str()
         .filter(|s| !s.is_empty())
@@ -994,7 +931,6 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
 
     let port = crate::multiplayer::network::vps::wallet_bridge_port();
 
-    // Step 1: fetch JWT from local bridge
     let token_resp = client
         .get(format!("http://127.0.0.1:{port}/token"))
         .send()
@@ -1008,7 +944,6 @@ fn fetch_bridge_me() -> Result<BridgeMeResp, String> {
         .ok_or_else(|| "no JWT in bridge /token".to_string())?
         .to_string();
 
-    // Step 2: call backend /auth/me
     let base = crate::multiplayer::network::vps::vps_base();
     let me_resp = client
         .get(format!("{base}/api/auth/me"))
@@ -1069,11 +1004,7 @@ fn fetch_sol_rates(pubkey: &str) -> (f64, f64, f64) {
             .unwrap_or(0.0)
     });
 
-    // Fetch both USD and GBP rates from the backend in one call, concurrently
-    // with the balance fetch above. Must go through vps_base() (not a
-    // hardcoded localhost URL) — release builds run against the production
-    // backend, and a literal 127.0.0.1 here always fails for real players,
-    // silently losing the USD conversion.
+    // Fetch conversion rates through vps_base so release builds use their configured backend.
     let rates_url = format!(
         "{}/api/rates/all",
         crate::multiplayer::network::vps::vps_base()
@@ -1413,7 +1344,6 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
         }
     }
 
-    // Load Cinzel Bold
     let cinzel_bold_paths = [
         "assets/fonts/Cinzel-Bold.ttf",
         "./assets/fonts/Cinzel-Bold.ttf",
@@ -1429,7 +1359,6 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
         }
     }
 
-    // Load OpenSans as the body/proportional fallback
     let opensans_paths = [
         "assets/fonts/OpenSans-VariableFont_wdth,wght.ttf",
         "./assets/fonts/OpenSans-VariableFont_wdth,wght.ttf",
@@ -1447,8 +1376,7 @@ fn try_setup_fonts(mut contexts: EguiContexts, mut loaded: ResMut<FontsLoaded>) 
         }
     }
 
-    // Proportional family: Cinzel first (gives egui::FontFamily::Proportional a Cinzel default),
-    // then OpenSans as fallback for characters Cinzel doesn't cover.
+    // Use Cinzel first and OpenSans for unsupported characters.
     let proportional = fonts
         .families
         .entry(egui::FontFamily::Proportional)

@@ -111,9 +111,7 @@ impl Stream for Subscription {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(deadline) = this.deadline.as_mut() {
             if std::future::Future::poll(deadline.as_mut(), cx).is_ready() {
-                // Deliberately not re-armed: the subscription is over, and a
-                // caller that keeps polling should keep seeing the timeout rather
-                // than silently beginning a fresh wait.
+                // Keep returning timeout after expiry; polling must not silently re-arm the subscription.
                 return Poll::Ready(Some(Err(BraidError::Timeout)));
             }
         }

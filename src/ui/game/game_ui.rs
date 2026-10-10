@@ -192,9 +192,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
         return;
     }
 
-    // Clone the context so params.contexts is no longer borrowed,
-    // allowing &mut params to be passed into SidePanel closures below.
-    // egui::Context is Arc-backed, so the clone shares the same frame data.
+    // Clone the Arc-backed egui context to release the params borrow for panel closures.
     let ctx = {
         let Ok(ctx_ref) = params.contexts.ctx_mut() else {
             return;
@@ -205,21 +203,10 @@ pub fn game_status_ui(mut params: GameUIParams) {
     // Decode any pending avatar bytes into egui textures.
     params.avatar_cache.flush_pending(&ctx);
 
-    // === TOP BAR ===
-    // Declared first so it reserves the full-width strip before the
-    // left/right SidePanels and the board area are laid out beneath it —
-    // egui panels shrink whatever the "remaining rect" is at the time
-    // they're declared, so ordering here matters.
+    // Declare the full-width top bar before side panels consume the remaining egui rect.
     crate::ui::game::top_bar::render_game_top_bar(&ctx, &mut params);
 
-    // === CENTER PLAYER BARS ===
-    // Resolved once here (this system has full `GameUIParams` access) and
-    // cached so the independent 2D board system can read it without
-    // duplicating the identity/clock/capture resolution — see
-    // `player_bar::PlayerBarsCache`. In 3D there's no board-owned
-    // `CentralPanel` to embed the bars in, so they're rendered directly here
-    // as floating overlays; in 2D, `render_2d_board` draws them itself
-    // (later in the same frame) using the cached data.
+    // Resolve player bars once into a cache shared by 3D overlays and the 2D board.
     let (top_bar_data, bottom_bar_data) =
         crate::ui::game::player_bar::build_player_bar_data(&params);
     params.player_bars_cache.top = top_bar_data.clone();
@@ -233,7 +220,6 @@ pub fn game_status_ui(mut params: GameUIParams) {
         );
     }
 
-    // === CHECK / CHECKMATE INDICATOR ===
     match params.game_state.game_phase.0 {
         GamePhase::Checkmate => render_checkmate_banner(
             &ctx,
@@ -316,10 +302,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
             });
     }
 
-    // === LEFT PANEL ===
-    // Game type / rated badge / time control, both players, inline chat
-    // (online games only). Declared before the central board panel so the
-    // board correctly reserves space for it — see left_panel.rs.
+    // Declare the left panel before the board so the central panel reserves its space.
     egui::SidePanel::left("game_info_panel")
         .resizable(false)
         .show_separator_line(false)
@@ -334,9 +317,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
             crate::ui::game::left_panel::render_game_left_panel(ui, &mut params);
         });
 
-    // === RIGHT PANELS ===
-    // Solana competitive sidebar declared FIRST → gets rightmost position.
-    // game_panel declared SECOND → sits adjacent to board (left of solana_sidebar).
+    // Declare the Solana sidebar first to place it rightmost; game_panel stays beside the board.
 
     #[cfg(feature = "solana")]
     if *params.game_mode == GameMode::MultiplayerCompetitive {
@@ -409,7 +390,6 @@ pub fn game_status_ui(mut params: GameUIParams) {
     }
 }
 
-// ── Lichess-style right panel helpers ────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -506,10 +486,6 @@ pub(crate) fn resolve_player_names(
             .unwrap_or_else(|| "Black".to_string());
         black_elo = b.map(|p| format!("{}", p.rating)).unwrap_or_default();
     } else if *params.game_mode == crate::core::GameMode::SinglePlayer {
-        // vs Computer: one side is the AI (named "Computer", ELO from the
-        // selected difficulty), the other is the local human — identified by
-        // their logged-in name/ELO (on-chain and/or Lichess) when signed in,
-        // or just their color when playing as a guest.
         let ai_color = params.ai_params.ai_config.mode.ai_color();
         let human_color = match ai_color {
             PieceColor::White => PieceColor::Black,
@@ -557,28 +533,12 @@ pub(crate) fn resolve_player_names(
                 params.solana_profile.as_ref(),
                 params.competitive_match.as_ref(),
             ) {
-                // The local player's name should come from the sign-in
-                // identity (`PlayerIdentity`, populated as soon as the wallet
-                // UI hands off) rather than `SolanaProfile.username`, which
-                // stays empty until a separate async VPS fetch resolves —
-                // that race is why the local panel showed "Player".
+                // Prefer the signed-in local identity while the async profile name is pending.
                 let local_name = resolve_online_player_name(
                     params.player_identity.as_ref().map(|id| id.as_ref()),
                     Some(profile.username.as_str()),
                 );
-                // The exact same race, mirrored on the opponent's side:
-                // `comp.opponent_username` is also an async VPS fetch that
-                // can still be empty at the moment this renders, and
-                // `render_compact_user_row` falls back to the literal
-                // string "Player" for an empty name — live repro: a casual
-                // P2P match showed "Player" as the opponent's name on BOTH
-                // clients simultaneously. `p2p_conn.opponent_display_name`
-                // is populated synchronously by the JOIN_ACK/GAME_START
-                // handshake, before `InGame` is even entered (see
-                // `p2p_vps.rs`'s `JoinerDetected`/`JoinerGameStart`
-                // handlers) — no async race — so it's the right same-frame
-                // fallback here, exactly mirroring `local_name`'s priority
-                // order above.
+                // Use the handshake display name while the opponent's async profile lookup is pending.
                 let opponent_name = resolve_opponent_display_name(
                     params
                         .p2p_conn
@@ -630,7 +590,6 @@ pub(crate) fn render_moves_and_controls(
                 | crate::core::GameMode::MultiplayerCompetitive
         );
 
-        // ── MOVES ─────────────────────────────────────────────────────────────
         StyledPanel::sidebar_row()
             .inner_margin(egui::Margin::symmetric(12, 6))
             .show(ui, |ui| {
@@ -666,7 +625,6 @@ pub(crate) fn render_moves_and_controls(
 
         ui.add_space(10.0);
 
-        // ── CONTROLS ─────────────────────────────────────────────────────────
         StyledPanel::sidebar_row()
             .inner_margin(egui::Margin::symmetric(12, 0))
             .show(ui, |ui| {
@@ -700,10 +658,7 @@ pub(crate) fn render_moves_and_controls(
                                     remote: false,
                                 });
 
-                            // Competitive on-chain games also need the offer
-                            // recorded on the `Game` account itself — the P2P
-                            // event above only gives the opponent's client
-                            // instant UI feedback, it never touches chain.
+                            // Record competitive draw offers on chain; the P2P event updates only the opponent UI.
                             #[cfg(feature = "solana")]
                             if let (Some(wallet_pubkey), Some(game_id), Some(rpc_url)) = (
                                 params.solana_wallet.as_ref().and_then(|w| w.pubkey),
@@ -908,7 +863,6 @@ fn move_notation(
         .unwrap_or_else(|| format_move_algebraic(mv))
 }
 
-// ── end Lichess panel helpers ─────────────────────────────────────────────────
 
 pub fn identicon_color(name: &str) -> egui::Color32 {
     let mut hash: u32 = 2166136261;
@@ -1011,10 +965,8 @@ fn format_move_algebraic(mv: &crate::game::components::MoveRecord) -> String {
     let to_file = (b'a' + mv.to.0) as char;
     let to_rank = mv.to.1 + 1;
 
-    // Build notation
     let mut notation = String::new();
 
-    // Castling
     if mv.is_castling {
         if mv.to.0 > mv.from.0 {
             notation = "O-O".to_string();
@@ -1288,7 +1240,6 @@ pub fn rematch_offer_ui(
         });
 }
 
-// ── Opponent disconnect popup ──────────────────────────────────────────────────
 
 #[derive(Resource, Default)]
 pub struct OpponentDisconnectState {
@@ -1375,13 +1326,8 @@ pub fn opponent_disconnect_ui(
         return;
     }
 
-    // Detect disconnect / reconnect. Two independent signals, either one
-    // enough to declare "gone": the P2P/gossip transport state (fast, but
-    // only meaningful when a direct link was ever established) and the
-    // opponent's backend presence heartbeat (slower, but works for
-    // relay-only games too — see `check_opponent_presence`). Both must be
-    // healthy again to clear the banner, so a lingering stale presence
-    // sample can't mask a P2P reconnect declaring "all clear" too early.
+    // Either a broken established P2P link or missing backend presence marks
+    // disconnect. Both must recover before clearing the banner.
     if let Some(conn) = p2p_conn.as_ref() {
         let is_gone = matches!(
             conn.status,
@@ -1402,7 +1348,6 @@ pub fn opponent_disconnect_ui(
     let Some(_since) = disc.disconnected_at else {
         return;
     };
-    // Render banner
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let col_bg = egui::Color32::from_rgba_unmultiplied(180, 60, 20, 220);
     let col_txt = egui::Color32::WHITE;
@@ -1429,7 +1374,6 @@ pub fn opponent_disconnect_ui(
         });
 }
 
-// ── Check sound cue ───────────────────────────────────────────────────────────
 
 pub fn play_check_sound_system(
     mut commands: Commands,
@@ -1450,7 +1394,6 @@ pub fn play_check_sound_system(
     }
 }
 
-// ── Blindfold mode toggle ─────────────────────────────────────────────────────
 
 pub fn toggle_blindfold_system(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -1463,7 +1406,6 @@ pub fn toggle_blindfold_system(
     }
 }
 
-// ── Active tournament sidebar widget ─────────────────────────────────────────
 
 #[cfg(feature = "solana")]
 pub fn tournament_sidebar_widget(
@@ -1476,14 +1418,8 @@ pub fn tournament_sidebar_widget(
     if tc.active_tournament_id.is_none() {
         return;
     };
-    // `active_tournament_id` only ever clears on an explicit "Leave"/"Cancel"
-    // click (screens.rs) — nothing clears it when the tournament actually
-    // finishes for this player, so it can stay `Some(..)` indefinitely after
-    // a tournament the player registered for has long since ended. Rather
-    // than trusting that stale flag alone, also require the current game to
-    // not be an unrelated vs-AI match — this widget showing "TOURNAMENT" /
-    // "waiting for next round" over a vs-Computer game is exactly that
-    // staleness surfacing, not a legitimate reminder.
+    // A tournament ID may outlive participation; suppress tournament status
+    // while playing an unrelated AI game.
     if let Some(ai_config) = &ai_config {
         if matches!(
             ai_config.mode,
@@ -1682,7 +1618,6 @@ pub fn tournament_sidebar_widget(
         });
 }
 
-// ── Increment flash tick ──────────────────────────────────────────────────────
 
 pub fn increment_flash_system(
     mut flash: ResMut<IncrementFlash>,
@@ -1702,9 +1637,7 @@ pub fn increment_flash_system(
     }
 }
 
-// ── Resign / Offer Draw buttons ───────────────────────────────────────────────
 
-// ── Disconnect recovery banner ────────────────────────────────────────────────
 
 pub fn disconnect_recovery_banner(
     mut contexts: bevy_egui::EguiContexts,
@@ -1782,7 +1715,6 @@ pub fn disconnect_recovery_banner(
         });
 }
 
-// ── Game over prompt banner ─────────────────────────────────────────────────
 
 pub fn game_over_prompt_banner(
     mut contexts: bevy_egui::EguiContexts,

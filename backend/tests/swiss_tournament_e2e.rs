@@ -103,8 +103,7 @@ async fn spawn_app() -> TestApp {
         .expect("init pools");
     run_migrations(&pools).await.expect("run migrations");
 
-    // Only used to create/migrate tables via `.init()` — AppState::new below
-    // builds the real store this test actually reads/writes through.
+    // Initialize tables here; AppState owns the store used by the test.
     let schema_vault = IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
     let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await.expect("session store init");
@@ -210,10 +209,7 @@ async fn swiss_tournament_full_lifecycle_via_http() {
         assert_ne!(board["white"], board["black"], "self-pairing: {board}");
     }
 
-    // Find GrandMaster's own board/color straight from the pairing data that
-    // `record_result` actually reads (rather than `/my-match`'s derived
-    // `your_color`, which is computed separately and isn't guaranteed to
-    // agree on which side is which).
+    // Use the recorded pairing board/color, not a separately derived my-match view.
     let gm_pairing = boards_r1
         .iter()
         .find(|b| b["white"] == json!("gm_wallet") || b["black"] == json!("gm_wallet"))
@@ -221,9 +217,7 @@ async fn swiss_tournament_full_lifecycle_via_http() {
     let gm_board = gm_pairing["board"].as_u64().unwrap();
     let gm_is_white = gm_pairing["white"] == json!("gm_wallet");
 
-    // Record round 1: GrandMaster wins decisively on their own board, every
-    // other board draws. This makes GrandMaster the sole 1.0-point leader
-    // with no standings tiebreak ambiguity for the assertion below.
+    // Give GrandMaster the sole round-1 win to avoid standings tiebreak ambiguity.
     for board in &boards_r1 {
         let board_num = board["board"].as_u64().unwrap();
         let result = if board_num == gm_board {

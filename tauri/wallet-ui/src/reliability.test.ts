@@ -2,13 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { withTimeout } from "./App";
 import { createMockWalletProvider } from "./walletProvider.mock";
 
-// withTimeout is the fix for the exact bug that motivated this suite: Phantom/
-// Solflare's injected provider methods proxy through a content script to the
-// extension's background service worker, and when that relay breaks
-// ("Could not establish connection. Receiving end does not exist") the
-// promise never resolves OR rejects — before this wrapper, that hung the
-// "Connect" button's spinner forever with no error shown, see WalletStep in
-// App.tsx.
+// Injected extension calls may neither resolve nor reject when their
+// background relay breaks; withTimeout must bound that wait.
 describe("withTimeout", () => {
   it("resolves with the underlying value when the promise settles in time", async () => {
     await expect(withTimeout(Promise.resolve("ok"), 50, "op")).resolves.toBe("ok");
@@ -30,10 +25,7 @@ describe("withTimeout", () => {
   });
 });
 
-// Exercises App.tsx's actual connect/sign call shape against every relay
-// failure mode via the mock provider, so a future change to the timeout
-// wiring (wrong ms value, wrapper removed, etc.) fails a test instead of
-// only surfacing as a field report of a hung popup.
+// Exercise connect/sign timeout wiring against each relay failure mode.
 describe("wallet relay failure modes (via withTimeout + mock provider)", () => {
   it("a hung connect() times out instead of hanging forever", async () => {
     vi.useFakeTimers();

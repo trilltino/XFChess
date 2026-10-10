@@ -68,10 +68,7 @@ fn debug_transaction_reports_real_on_chain_outcome() {
     if skip_unless_configured("debug_transaction_reports_real_on_chain_outcome") {
         return;
     }
-    // A real, finalized devnet transaction against this backend's own
-    // program — proves `debug::debug_transaction` (backend/src/signing/solana/debug.rs)
-    // reports the actual on-chain outcome instead of the old hardcoded
-    // `success: true` stub. Re-pin this signature if devnet is ever reset.
+    // Pin a real finalized devnet program transaction; update it after a devnet reset.
     const KNOWN_GOOD_SIG: &str =
         "2riEGnPfQQcvWRdnSDnW1kNMLU5TtpYE1CktsrLz9gssbrNZ1VyjwSXQk55fwUqQPiN5NQprsLU2A2Yxgv9pVDQM";
 
@@ -109,9 +106,7 @@ fn debug_transaction_reports_real_on_chain_failure() {
     if skip_unless_configured("debug_transaction_reports_real_on_chain_failure") {
         return;
     }
-    // A real, finalized devnet transaction that failed on-chain (custom
-    // program error 3012) — the case the old hardcoded `success: true` stub
-    // would have gotten exactly backwards. Re-pin if devnet is ever reset.
+    // Pin a finalized failed transaction to verify success detection. Re-pin after devnet resets.
     const KNOWN_FAILED_SIG: &str =
         "3tzUrvpK9ViBwc4fuHgLZ3fJGmiRjotF416dxrtgXEMYBfpiH4dukRk8G3jXMvzsBW72Gp8Y6JE9UeP3F9UWfNa2";
 
@@ -137,17 +132,8 @@ fn debug_transaction_reports_real_on_chain_failure() {
     );
 }
 
-// ── Full on-chain profile-creation loop (opt-in, spends real devnet SOL) ────
-//
-// Exercises the exact gap Tier T1 (e2e_api.rs) can't reach because it's
-// chain-free by design: does completing the wallet-ui's ProfileStep on-chain
-// branch (tauri/wallet-ui/src/App.tsx's `requireOnchain` path) actually flip
-// `PlayerProfile.username_set` on a real cluster? Spins up the real app
-// router (same construction as e2e_api.rs's spawn_app, but pointed at the
-// real SOLANA_RPC_URL instead of an unreachable port), signs with a
-// throwaway devnet keypair instead of a wallet extension — the wire format
-// (bincode-serialized legacy Transaction, base64) is identical either way —
-// and polls sync-profile for the flip.
+// Opt-in devnet profile-creation test using a throwaway signer and the
+// wallet UI wire format. Verify that sync-profile observes username_set.
 
 async fn spawn_live_app(rpc_url: &str) -> axum::Router {
     use backend::infrastructure::{build_app_router, initialize_pools, run_migrations};
@@ -167,8 +153,7 @@ async fn spawn_live_app(rpc_url: &str) -> axum::Router {
         .await
         .expect("init pools");
     run_migrations(&pools).await.expect("run migrations");
-    // Only used to create/migrate tables via `.init()` — AppState::new below
-    // builds the real store this test actually reads/writes through.
+    // Initialize tables here; AppState owns the store used by the test.
     let schema_vault = IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
     let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await.expect("session store init");
@@ -360,17 +345,8 @@ async fn init_profile_flow_flips_onchain_username_set() {
     );
 }
 
-// ── Admin tournament creation → game-client discovery (opt-in, real devnet) ─
-//
-// `POST /admin/tournament/create` (the route the tournament-admin panel's
-// CreateTournament wizard actually calls) is normally only exercised
-// end-to-end via a dev binary calling the on-chain program directly — this
-// route's own wiring (its `vps_authority` signer, its retry/idempotency
-// logic) had no test at all. Requires a *funded* `VPS_AUTHORITY_KEY` in the
-// environment — if unset, the backend falls back to a random unfunded key
-// and every on-chain init transaction below fails with a clear RPC error
-// (see `backend/src/signing/mod.rs`), which is exactly the real-world
-// failure mode this test is meant to catch early.
+// Opt-in devnet tournament creation and discovery test. Requires a funded
+// VPS_AUTHORITY_KEY for the real admin initialization transactions.
 #[tokio::test]
 #[ignore = "hits a live RPC endpoint and spends real devnet SOL (3 on-chain inits) — opt in with --ignored"]
 async fn admin_creates_tournament_and_game_client_can_see_it() {
@@ -380,9 +356,7 @@ async fn admin_creates_tournament_and_game_client_can_see_it() {
     let rpc_url = std::env::var("SOLANA_RPC_URL").expect("checked by skip_unless_configured");
     let router = spawn_live_app(&rpc_url).await;
 
-    // Same fallback the middleware itself uses in debug builds (cargo test
-    // always builds with debug_assertions on), so this works whether or not
-    // the environment sets a custom ADMIN_API_KEY.
+    // Match the middleware’s debug API-key fallback while allowing environment overrides.
     let api_key = std::env::var("ADMIN_API_KEY").unwrap_or_else(|_| "dev".to_string());
 
     // Unique per run so repeated manual runs never collide on "tournament_id
@@ -426,10 +400,7 @@ async fn admin_creates_tournament_and_game_client_can_see_it() {
     );
     assert_eq!(body["tournament_id"], tournament_id);
 
-    // The exact endpoint the game client's poll_tournament_list hits
-    // (src/multiplayer/solana/tournament.rs) — proves creation and
-    // discovery go through the same store, not just that creation alone
-    // returned 200.
+    // Verify the game client's discovery endpoint sees the newly created tournament.
     let (status, body) = live_send(&router, "GET", "/tournaments", None, None).await;
     assert_eq!(status, axum::http::StatusCode::OK, "tournaments: {body}");
     let listed = body

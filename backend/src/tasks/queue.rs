@@ -278,7 +278,6 @@ mod tests {
         enqueue(&pool, "test.fail", &serde_json::json!({}), None)
             .await
             .unwrap();
-        // Force max_attempts=2 for the test.
         sqlx::query("UPDATE jobs SET max_attempts=2")
             .execute(&pool)
             .await

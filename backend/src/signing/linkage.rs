@@ -125,7 +125,6 @@ impl LinkageStore {
     }
 }
 
-// ── Collusion detection (pure) ──────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct GameOutcome {
@@ -148,9 +147,7 @@ const DIRECTIONAL_THRESHOLD: f64 = 0.9;
 pub fn detect_collusion(outcomes: &[GameOutcome]) -> Vec<CollusionPair> {
     use std::collections::HashMap;
 
-    // Key each pair by (smaller_wallet, larger_wallet) so colors don't split
-    // the same two players into two buckets. Value: (total games, games won
-    // by the smaller-keyed wallet `a`).
+    // Canonicalize wallet pairs so colors share one bucket. Wins count the smaller-keyed wallet.
     let mut pairs: HashMap<(String, String), (u32, u32)> = HashMap::new();
     for o in outcomes {
         if o.white == o.black {

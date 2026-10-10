@@ -1,36 +1,28 @@
 #[derive(Debug, Clone)]
 pub struct AcConfig {
-    // ── Stockfish ──────────────────────────────────────────────────────────────
     pub stockfish_path: String,
     pub analysis_depth: u8,
     pub movetime_ms: u64,
     pub worker_count: usize,
 
-    // ── Complexity filter ──────────────────────────────────────────────────────
     pub forced_delta_cp: i32,
     pub complex_delta_cp: i32,
 
-    // ── Timing signal ──────────────────────────────────────────────────────────
     pub timing_fast_threshold_ms: u32,
     pub timing_disable_below_sec: u32,
 
-    // ── Scoring thresholds ─────────────────────────────────────────────────────
     pub review_threshold: f64,
     pub flag_threshold: f64,
 
-    // ── Signal weights (must sum to 1.0) ──────────────────────────────────────
     pub weight_timing: f64,
     pub weight_cpl_vs_elo: f64,
     pub weight_t1_rate: f64,
     pub weight_blur: f64,
 
-    // ── Minimum samples ───────────────────────────────────────────────────────
     pub min_complex_plies: u32,
 
-    // ── Reports ───────────────────────────────────────────────────────────────
     pub reports_dir: String,
 
-    // ── Job queue ──────────────────────────────────────────────────────────────
     pub queue_capacity: usize,
     pub max_attempts: u32,
 }

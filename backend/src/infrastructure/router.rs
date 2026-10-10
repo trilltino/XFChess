@@ -29,14 +29,8 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
     );
     let tournament_router = base
         .clone()
-        // Also mounted under /api/tournament(s) (not just the bare paths): the
-        // web frontend has its own unrelated pages at the exact same bare
-        // "/tournaments" and "/tournament/:id" paths, and nginx has no way
-        // to tell "the game client wants JSON" from "a browser wants the
-        // page" on an identical path — it always resolves to the frontend's
-        // SPA catch-all, silently 200-ing with HTML instead of proxying
-        // here. /api/ is already fully proxied to the backend with no such
-        // collision. The bare mounts stay for now (harmless, purely additive).
+        // Mount API aliases under /api to avoid collisions with frontend tournament
+        // pages served by the nginx SPA fallback.
         .nest("/api/tournaments", tournament_routes::tournaments_routes())
         .nest("/tournaments", tournament_routes::tournaments_routes())
         .nest("/api/tournament", tournament_routes::tournament_routes())
@@ -91,7 +85,6 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                 .layer(middleware::from_fn(require_api_key)),
         );
 
-    // Build dispute router
     let dispute_router = base.clone().nest("/dispute", dispute_routes()).nest(
         "/admin/dispute",
         admin_dispute_routes()
@@ -102,10 +95,6 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
             .layer(middleware::from_fn(require_api_key)),
     );
 
-    // Build metrics endpoint — health/version gauges, core HTTP/RPC/transaction
-    // metrics, the background-worker and anti-cheat/linkage counters
-    // (settlement, prize distribution, think-time discards, Sybil linkage),
-    // and live presence gauges.
     let metrics_router = base.clone().route(
         "/metrics",
         axum::routing::get(|State(app_state): State<AppState>| async move {
@@ -179,35 +168,20 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         )
         .merge(game_log_routes().with_state(signing_state.clone()))
         .merge(spectate_routes().with_state(signing_state.clone()))
-        // Braid `209` subscriptions for tournament resources — standings,
-        // pairings, roster, meta, schedule-status, results. The hub behind
-        // these has been written to by the Swiss orchestrator all along; until
-        // this mount there was no route that served it, so nothing could ever
-        // read what it published. `nest_service` (not `nest`) because
-        // `braid_router` returns a router with its own state already applied.
+        // Use nest_service because braid_router already has its own applied state.
         .nest_service(
             "/braid",
             xfchess_braid_server::braid_router((*signing_state.braid_hub).clone()),
         )
         .merge(social_router)
-        // Records http_requests_total / http_request_duration_ms for every
-        // request. This was defined but never registered anywhere — those
-        // metrics were silently always zero until this layer was added.
         .layer(middleware::from_fn_with_state(
             signing_state.clone(),
             crate::telemetry::telemetry_middleware,
         ))
-        // Cap request bodies. Several routes deserialize caller-supplied
-        // base64 transactions and JSON blobs; without a ceiling a single
-        // request can make the process allocate arbitrarily. 1 MiB is far
-        // above any legitimate payload here (a Solana transaction is capped
-        // at 1232 bytes on the wire) while still leaving headroom for the
-        // tournament-template and PGN endpoints.
+        // Cap caller-supplied transaction and JSON payloads at 1 MiB to bound allocation.
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
         .layer(cors_layer(&signing_state.config.allowed_origins))
-        // Correlation IDs: accept an inbound x-request-id or mint a UUID, include it in
-        // the request span (so every log line within the request carries it), and echo
-        // it on the response so clients/support can quote it.
+        // Accept or generate a request ID, attach it to the tracing span, and echo it to clients.
         .layer(tower_http::propagate_header::PropagateHeaderLayer::new(
             axum::http::HeaderName::from_static("x-request-id"),
         ))

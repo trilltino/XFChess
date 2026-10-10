@@ -51,7 +51,6 @@ fn main() {
     }
     println!();
 
-    // Create log file
     let log_file = match File::create(&args.log_file) {
         Ok(file) => {
             println!(" Log file created: {:?}", args.log_file);
@@ -82,9 +81,7 @@ fn main() {
         println!("Monitoring game {}... (Press Ctrl+C to exit)", args.game_id);
         println!();
 
-        // Simulate monitoring loop
-        // In real implementation, this would connect to the game process
-        // via shared memory, sockets, or file watching
+        // Simulated monitor; a real debugger would use shared memory, sockets, or file watching.
         monitor_simulation(args.game_id, args.pretty_print, log_file, entries);
     }
 }
@@ -113,7 +110,6 @@ fn process_stdin(
                     continue;
                 }
 
-                // Parse JSON input (simplified)
                 let entry = LogEntry {
                     timestamp: current_timestamp(),
                     game_id,
@@ -121,14 +117,12 @@ fn process_stdin(
                     message: line.clone(),
                 };
 
-                // Print to stdout
                 if pretty_print {
                     println!("\x1b[36m[?]\x1b[0m {}", line);
                 } else {
                     println!("{}", line);
                 }
 
-                // Write to log file
                 if let Some(ref mut file) = log_file {
                     use std::io::Write;
                     writeln!(file, "{}", line).ok();
@@ -179,7 +173,6 @@ fn monitor_simulation(
             message: format!("Batch {}", batch_hash),
         };
 
-        // Print to terminal
         if pretty_print {
             println!(
                 "{} Game {} | Batch: {}... | Moves: {} | Time: {}",
@@ -192,7 +185,6 @@ fn monitor_simulation(
             );
         }
 
-        // Write to log file
         let json = format!(
             "{{\"timestamp\":{},\"game_id\":{},\"type\":\"{}\",\"batch\":\"{}\"}}",
             timestamp, game_id, event_type, batch_hash
@@ -206,7 +198,6 @@ fn monitor_simulation(
         // Store in memory
         entries.lock().unwrap().push(entry);
 
-        // Print summary every 5 events
         if event_index % 5 == 0 {
             print_summary(&entries);
         }

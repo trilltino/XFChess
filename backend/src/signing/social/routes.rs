@@ -13,7 +13,6 @@ use super::friends::{Contact, FriendRequest};
 use super::presence::{Presence, PresenceStatus};
 use crate::signing::AppState;
 
-// ── Request / response DTOs ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct SendFriendRequestBody {
@@ -98,7 +97,6 @@ fn err(msg: impl Into<String>) -> (StatusCode, Json<ErrorBody>) {
     )
 }
 
-// ── Router ───────────────────────────────────────────────────────────────────
 
 pub fn social_routes(invite_store: InviteStore) -> Router<AppState> {
     Router::new()
@@ -127,7 +125,6 @@ pub fn social_routes(invite_store: InviteStore) -> Router<AppState> {
         )
 }
 
-// ── Handlers ─────────────────────────────────────────────────────────────────
 
 async fn send_friend_request(
     State(state): State<AppState>,

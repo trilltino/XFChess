@@ -42,11 +42,8 @@ impl Default for SettlementStatus {
     }
 }
 
-/// Combine the finalize signature's status and the Game PDA's existence into
-/// the settlement status shown to the player.
-///
-/// `sig_status`: `Some(Ok)` confirmed, `Some(Err)` failed, `None` unknown.
-/// `game_closed`: `Some(true)` the PDA no longer exists, `None` lookup failed.
+/// Combine signature status and Game PDA existence into settlement status.
+/// None means an unknown signature result or failed account lookup.
 fn settlement_status(
     sig_status: Option<Result<(), String>>,
     game_closed: Option<bool>,
@@ -223,23 +220,8 @@ impl Plugin for RollupNetworkBridgePlugin {
         app.init_resource::<RecentTransactions>();
         app.add_message::<MagicBlockEvent>();
 
-        // Core network bridge systems
-        //
-        // `handle_rollup_to_network_events` must run after
-        // `systems::finalize_game_on_end` (which decides whether there's a
-        // move batch to flush and, if so, emits `RollupEvent::GameEndBatch`)
-        // and `retry_pending_finalization` must run after
-        // `handle_rollup_to_network_events` (which is what actually sets
-        // `game_end_moves_flushing = true` for that batch). Without this
-        // explicit chain, Bevy doesn't guarantee these three run in this
-        // order within the same tick, so `retry_pending_finalization` could
-        // check the flag before it's been set — reproduced live 2026-08-11:
-        // deferring by "one pass through pending_finalization" alone wasn't
-        // enough, because `retry_pending_finalization` could still run
-        // later in the *same* frame as the system that sets the flag, which
-        // isn't a real frame boundary. Explicit ordering is the actual fix;
-        // the one-frame defer in `handle_game_end_undelegation` is now
-        // redundant with this but harmless to leave in place.
+        // Order finalization, batch flush, and retry in one chain so retry observes
+        // game_end_moves_flushing before attempting undelegation.
         app.add_systems(
             Update,
             handle_rollup_to_network_events
@@ -269,9 +251,7 @@ impl Plugin for RollupNetworkBridgePlugin {
         // PGN export: fetch Braid move log and build replay resource after game ends.
         app.add_systems(Update, handle_game_end_pgn_export);
         app.add_systems(Update, apply_pgn_export_result);
-        // Drop this game's causal-chain tracking state so it doesn't accumulate
-        // forever across a long client session (tournament play, many spectated
-        // games, etc.).
+        // Discard finished-game causal state to bound memory across long sessions.
         app.add_systems(Update, handle_game_end_causal_cleanup);
 
         info!("RollupNetworkBridgePlugin initialized with Magic Block ER support");
@@ -348,8 +328,7 @@ fn handle_rollup_to_network_events(
                 bridge.awaiting_commit_confirmation = true;
                 info!("Sent BatchPropose for game {}", game_id);
             }
-            // Final game-end batch: skip BatchPropose/Accept and submit directly to VPS.
-            // This ensures moves are recorded even if the peer disconnects after checkmate.
+            // Submit the final batch directly so peer disconnection cannot prevent recording game-ending moves.
             RollupEvent::GameEndBatch {
                 game_id,
                 moves,
@@ -373,10 +352,8 @@ fn handle_rollup_to_network_events(
                     moves_owned.len(),
                     gid
                 );
-                // Gate undelegation (see `handle_game_end_undelegation`) until
-                // this batch — which may include the game-ending move itself
-                // — has actually been attempted. Set before spawning, cleared
-                // by `poll_game_end_flush` once `flush_tx` fires.
+                // Block undelegation until the final move batch has been attempted.
+                // poll_game_end_flush clears this flag when flush_tx fires.
                 bridge.game_end_moves_flushing = true;
                 let (flush_tx, flush_rx) = oneshot::channel::<()>();
                 bridge.game_end_flush_rx = Some(flush_rx);
@@ -598,16 +575,10 @@ fn handle_network_to_rollup_events(
             }
 
             NetworkMessage::Move { .. } => {
-                // Individual move broadcasts are handled by the game sync layer.
-                // Do NOT add to the local pending_batch — that must only contain
-                // moves made by the local player.
+                // Only local moves belong in pending_batch; the sync layer handles remote broadcasts.
             }
 
-            // ── Braid reconnection recovery ───────────────────────────────────
-            //
-            // A reconnecting peer sends BraidResyncRequest with the version hash
-            // of the last move it applied.  We look up our local Braid move log
-            // and replay every update that came after that version.
+            // Replay moves after the last version supplied in BraidResyncRequest.
             NetworkMessage::BraidResyncRequest {
                 game_id,
                 since_version,
@@ -626,7 +597,6 @@ fn handle_network_to_rollup_events(
                         let all_moves: Vec<MovePayload> =
                             vps_client::fetch_move_log(gid).unwrap_or_default();
 
-                        // Find the position of since_version in the log and return everything after.
                         let since_ver = since.clone();
                         let missed: Vec<String> = all_moves
                             .iter()
@@ -683,9 +653,7 @@ fn handle_network_to_rollup_events(
                 }
             }
 
-            // A new peer joined the game gossip topic and broadcast their full
-            // current game state.  If we are a spectator or have missed moves,
-            // apply the snapshot to catch up.
+            // Apply peer snapshots when spectating or catching up on missed moves.
             NetworkMessage::GameSnapshot {
                 game_id,
                 fen,
@@ -878,9 +846,7 @@ fn handle_game_start_delegation(
     competitive: Option<Res<crate::multiplayer::solana::addon::CompetitiveMatchState>>,
 ) {
     for event in game_started_events.read() {
-        // Use the Solana on-chain game_id, not the P2P gossip game_id.
-        // event.game_id is the Braid/Iroh session ID; rollup_manager.game_id
-        // is set from the actual on-chain game account after create/join.
+        // Use rollup_manager’s on-chain game ID; event.game_id identifies the gossip session.
 
         let game_id = if rollup_manager.game_id != 0 {
             rollup_manager.game_id
@@ -892,20 +858,10 @@ fn handle_game_start_delegation(
             continue;
         };
 
-        // Only the game creator (white player) delegates.
-        // If both players delegate simultaneously the second TX fails with
-        // AccountOwnedByWrongProgram because the PDA owner changed after the first delegation.
+        // Only white delegates; concurrent delegation changes PDA ownership and fails the second transaction.
         if !rollup_manager.is_creator {
-            // The joiner still needs to learn *when* delegation lands —
-            // `can_move_color` (game/systems/input.rs) blocks all moves
-            // until `magicblock_resolver.is_delegated()` is true, and that
-            // flag only ever gets set locally by whoever ran the delegation
-            // task (`poll_delegation_tasks`). Without this, the joiner's own
-            // resolver never transitions out of `Undelegated` and they can
-            // never move for the entire game. So the joiner instead polls
-            // the game PDA's owner until it becomes the MagicBlock
-            // Delegation Program, mirroring the reverse wait already done
-            // for undelegation below.
+            // The joiner polls Game PDA ownership to observe delegation because the
+            // host's local delegation task cannot update the joiner's resolver.
             if magicblock_resolver.is_delegated()
                 || bridge.joiner_delegation_wait_game_id == Some(game_id)
             {
@@ -977,15 +933,8 @@ fn handle_game_start_delegation(
             }
         };
 
-        // Sign with the session key that *this specific game* actually used
-        // (`rollup_manager.used_global_session`, set once at create/join
-        // time) — NOT the wallet's live `global_session_active` flag, which
-        // can flip independently of which flow created this game and would
-        // pick the wrong key (`FeePayerMismatch` on-chain). When it used the
-        // global session, that key co-signs both slots the delegation
-        // instruction needs, no wallet popup at all. Otherwise the VPS
-        // delegates on our behalf (it holds the per-game session key) —
-        // still no wallet popup, just a different signer.
+        // Choose the signer from this game's used_global_session, not the wallet's
+        // current session flag. Per-game sessions delegate through the VPS.
         let global_session_keypair_bytes = solana_state
             .as_ref()
             .filter(|_| rollup_manager.used_global_session)
@@ -993,12 +942,8 @@ fn handle_game_start_delegation(
             .map(|kp| kp.to_bytes().to_vec());
         let _ = wallet_pubkey; // only used above to gate readiness
 
-        // Set unconditionally (not just in the deferred-precondition branches
-        // above) so a genuine signing/broadcast failure — not just "wallet
-        // wasn't ready yet" — also has a PDA/game_id for `poll_delegation_tasks`
-        // to fire `DelegationFailed` with, and for `retry_pending_delegation`
-        // to retry against. Cleared only on confirmed success, in
-        // `poll_delegation_tasks`.
+        // Keep the pending game PDA on all failures so delegation can emit an error
+        // and retry. Clear it only after confirmed success.
         bridge.pending_delegation_pda = Some(game_pda);
         bridge.pending_game_id = Some(game_id);
 
@@ -1041,19 +986,14 @@ async fn spawn_delegation_task(
     resolver.set_game_id(game_id);
 
     if let Some(kp_bytes) = global_session_keypair_bytes {
-        // `game.fee_payer` is the global session key for games created via
-        // `global_create_game`/`global_join_game` — it can satisfy both the
-        // `payer` (bookkeeping rent) and `fee_payer` (authority check) slots
-        // itself, entirely locally, no Tauri round-trip.
+        // The global session key stored in game.fee_payer satisfies both payer
+        // and fee_payer locally, without a wallet round trip.
         let session_kp = solana_sdk::signature::Keypair::try_from(kp_bytes.as_slice())
             .map_err(|e| format!("session keypair: {e}"))?;
         let ix = resolver
             .create_delegation_instruction(game_pda, session_kp.pubkey(), session_kp.pubkey())
             .map_err(|e| format!("build delegation ix: {}", e))?;
-        // Uses the shared fast submit+poll path (skip_preflight, 150ms poll,
-        // 2s deadline) instead of the SDK-default `send_and_confirm_transaction`,
-        // which runs preflight simulation — the only write path in this
-        // codebase that used to, adding a needless extra RPC round trip.
+        // Use fast submit-and-poll to avoid an extra preflight RPC round trip.
         use crate::multiplayer::solana::submit::{submit_local_tx, SubmitConfig};
         return match submit_local_tx(&rpc_client, &session_kp, &[ix], SubmitConfig::fast()) {
             Ok(sig) => {
@@ -1070,12 +1010,7 @@ async fn spawn_delegation_task(
         };
     }
 
-    // Fallback: per-game session flow. `fee_payer` must equal `game.fee_payer`
-    // (the per-game session key the *backend* holds, not the client) — so
-    // the client can't sign that slot itself. Ask the VPS to delegate on our
-    // behalf instead (it already holds that key), same trust model as the
-    // existing `vps_undelegate_game`/`vps_finalize_game` calls — no wallet
-    // popup here either.
+    // The VPS holds the per-game fee payer key and must sign delegation for that flow.
     match crate::multiplayer::vps_client::vps_delegate_game(game_id) {
         Ok(sig) => {
             info!(
@@ -1190,19 +1125,12 @@ fn poll_delegation_tasks(
                 magicblock_resolver.delegated_game_pda = Some(game_pda);
                 magicblock_events.write(MagicBlockEvent::GameDelegated { game_pda });
                 bridge.delegation_rx = None;
-                // Only cleared on confirmed success — a failure leaves these
-                // set so `retry_pending_delegation` picks the same game back
-                // up next frame instead of losing track of it.
+                // Clear pending identifiers only on confirmed success so failures can be retried.
                 bridge.pending_delegation_pda = None;
                 bridge.pending_game_id = None;
             }
             Ok(Err(e)) => {
                 error!("Delegation failed: {}", e);
-                // `pending_delegation_pda` is now always set before a
-                // delegation task is spawned (see `handle_game_start_delegation`
-                // / `retry_pending_delegation`), so this fires for a genuine
-                // signing/broadcast failure too, not just the deferred
-                // wallet-not-ready case.
                 if let Some(pda) = bridge.pending_delegation_pda {
                     magicblock_events.write(MagicBlockEvent::DelegationFailed {
                         game_pda: pda,
@@ -1242,10 +1170,7 @@ fn retry_pending_delegation(
         return;
     }
 
-    // Backs off after a genuine signing/broadcast failure (see
-    // `poll_delegation_tasks`) — without this, a real RPC error would retry
-    // every frame instead of just the "wallet not ready yet" case, which
-    // naturally paces itself on wallet-connect.
+    // Back off after signing or broadcast failures to avoid retrying on every frame.
     if bridge.delegation_retry_cooldown > 0.0 {
         bridge.delegation_retry_cooldown -= time.delta_secs();
         return;
@@ -1274,10 +1199,7 @@ fn retry_pending_delegation(
         }
     };
 
-    // `pending_delegation_pda`/`pending_game_id` are deliberately NOT cleared
-    // here — only `poll_delegation_tasks` clears them, and only on confirmed
-    // success. If this attempt also fails, they need to still be set so the
-    // next retry (after another cooldown) can find this same game again.
+    // Retain pending game identifiers until confirmed success so another retry can find the game.
 
     // Same per-game gating as `handle_game_start_delegation` — see its
     // comment for why this can't be the live `global_session_active` flag.
@@ -1330,12 +1252,7 @@ fn handle_game_end_undelegation(
     mut bridge: ResMut<RollupNetworkBridge>,
 ) {
     for event in game_ended_events.read() {
-        // Same single-authoritative-side reasoning as `finalize_game_on_end`'s
-        // gate (systems.rs): both players' clients detect game end locally and
-        // deterministically, so without this check both processes independently
-        // race to undelegate/finalize the same delegated PDA. Restrict the
-        // on-chain settlement pipeline to the host; `settlement_worker.rs` on
-        // the backend is the safety net if the host's client dies mid-flow.
+        // Only the host drives settlement; the backend worker recovers if it dies mid-flow.
         if !rollup_manager.is_creator {
             continue;
         }
@@ -1439,21 +1356,8 @@ fn handle_game_end_undelegation(
 
         let wager = competitive.as_ref().map(|c| c.wager_lamports).unwrap_or(0);
 
-        // Deliberately never fire `spawn_finalization_task` on this same
-        // frame, even when `white_pk`/`black_pk` are already known. This
-        // system and `finalize_game_on_end` (which decides whether there's a
-        // move batch to flush, in `systems.rs`) both read the same raw
-        // `GameEndedEvent` with no ordering constraint between them — Bevy
-        // does not guarantee `finalize_game_on_end` (and the downstream
-        // `handle_rollup_to_network_events` that actually sets
-        // `game_end_moves_flushing`) has run before this system does on the
-        // same tick. Checking the flag here inline was tried and failed live
-        // 2026-08-11: the flag still read `false` on the first frame even
-        // though a flush was about to start, so undelegate fired immediately
-        // anyway and lost the exact same race. Always deferring by at least
-        // one frame guarantees every other same-tick system — including the
-        // one that sets the flag — has already run by the time
-        // `retry_pending_finalization` actually checks it.
+        // Defer finalization at least one frame so batch-flush systems have run
+        // before checking game_end_moves_flushing.
         let local_pk = if rollup_manager.is_creator {
             white_pk
         } else {
@@ -1488,15 +1392,8 @@ fn spawn_finalization_task(
             use solana_client::rpc_client::RpcClient;
             use solana_commitment_config::CommitmentConfig;
 
-            // Brief pause before requesting undelegation: the ER processes the
-            // last recorded move(s) asynchronously relative to this task, and
-            // undelegating too early can race the final move commit. There is
-            // no queryable "last move landed" signal to poll on instead (the
-            // move record and the undelegation request go through different
-            // paths), so this stays a fixed sleep rather than a poll loop —
-            // unlike the PDA-ownership wait below, which does poll actual
-            // on-chain state. Not reduced without live devnet verification
-            // that a shorter pause still reliably avoids the race.
+            // Allow ER move commits to settle before undelegation; these paths have no
+            // shared completion signal. Shorter delays require live verification.
             std::thread::sleep(std::time::Duration::from_secs(2));
 
             match vps_client::vps_undelegate_game(game_id) {
@@ -1579,10 +1476,8 @@ fn spawn_finalization_task(
                 }
                 Err(e) => {
                     error!("[FINALIZE] Game {} finalization failed: {e}", game_id);
-                    // The request failing does not mean settlement failed: the
-                    // settlement worker may already have finalized (closing
-                    // the PDA), and otherwise it retries server-side. Report
-                    // what the chain shows, never a confirmed payout.
+                    // A failed request may still have settled; the worker retries server-side.
+                    // Report the observed chain state without claiming an unconfirmed payout.
                     let status = match verify_settlement_on_chain(&rpc, &game_pda, None) {
                         SettlementStatus::Confirmed => SettlementStatus::Confirmed,
                         SettlementStatus::Pending(_) => SettlementStatus::Pending(
@@ -1644,10 +1539,7 @@ fn retry_pending_finalization(
         return;
     }
 
-    // See `game_end_moves_flushing`'s doc comment — must not undelegate while
-    // the game-end move batch is still being submitted. Shares the same
-    // frame budget as the opponent-pubkey wait above rather than a separate
-    // counter; either reason blocking this long is equally worth giving up on.
+    // Wait for the final move batch before undelegating; share the existing frame timeout.
     if bridge.game_end_moves_flushing {
         let new_frames = pending.frames_waited + 1;
         if new_frames > MAX_FINALIZATION_WAIT_FRAMES {
@@ -1709,10 +1601,7 @@ fn apply_finalization_result(
                 if result.winner_lamports > 0 {
                     info.winning_prize = result.winner_lamports;
                 }
-                // Overwrite unconditionally (not `if > 0`) — a real 0 (draw,
-                // free game) is a confirmed value, not "still unknown", and
-                // the pre-finalize estimate set in fetch_game_payout_info
-                // must not outlive a successful response.
+                // Overwrite the estimate even for zero: a confirmed draw or free game has no payout.
                 info.country_fee = result.country_fee;
                 info.elo_fee = result.elo_fee;
                 info.operating_cost = result.operating_cost_lamports;
@@ -1763,9 +1652,7 @@ fn handle_game_end_pgn_export(
             event.game_id
         };
 
-        // Real wallet usernames/ELO when known (Solana PVP), falling back to
-        // generic labels only if the profile/match resources haven't been
-        // populated yet (e.g. a free game with no on-chain profile fetch).
+        // Prefer wallet usernames and ELO; fall back to generic labels when profiles are unavailable.
         let my_name = if profile.username.is_empty() {
             "You".to_string()
         } else {
@@ -1894,11 +1781,7 @@ fn handle_magic_block_events(
                     "Magic Block: Failed to delegate game {}: {}",
                     game_pda, error
                 );
-                // Previously logged only, with nothing telling the player.
-                // Backed now by both `retry_pending_delegation` (client-side
-                // retry, with a cooldown) and the backend settlement worker's
-                // redelegate-retry for a still-stuck game — this is
-                // informational, not the fix itself.
+                // Delegation failure is retried by the client and the backend settlement worker.
                 popup_queue.push(crate::ui::menus::popup::GamePopup {
                     title: "Ephemeral Rollup sync issue".to_string(),
                     message: "Having trouble syncing this game to the Ephemeral Rollup — retrying automatically.".to_string(),
@@ -1939,16 +1822,8 @@ mod game_end_ordering_tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
-        // Deliberately NOT adding the full `RollupNetworkBridgePlugin`: most
-        // of its other systems (delegation polling, PGN export, popup
-        // queueing, causal-chain cleanup...) need resources/message types
-        // that belong to entirely different plugins in the real app and are
-        // irrelevant to the ordering bug under test. Bevy 0.19 panics the
-        // whole `update()` if *any* scheduled system's parameters fail
-        // validation, so pulling in the whole plugin here would fail before
-        // ever reaching the systems actually being tested. Register only
-        // the four systems whose relative order matters, with the exact
-        // same `.after()` chain `RollupNetworkBridgePlugin::build` uses.
+        // Register only the ordered systems under test. The full plugin requires
+        // unrelated resources that would fail Bevy system validation.
         app.add_message::<GameEndedEvent>();
         app.add_message::<RollupEvent>();
         app.add_message::<MagicBlockEvent>();
@@ -1967,10 +1842,7 @@ mod game_end_ordering_tests {
             ),
         );
 
-        // A pending move so `finalize_game_on_end`'s `force_flush()` returns
-        // `Some(..)` and actually emits `RollupEvent::GameEndBatch` — an
-        // empty batch would never set `game_end_moves_flushing` at all,
-        // which would trivially (and misleadingly) pass this test.
+        // Queue a move so force_flush emits GameEndBatch and the test exercises the flushing guard.
         let mut mgr = EphemeralRollupManager::new(777, true, "startpos".to_string());
         mgr.add_local_move("g2g4".to_string(), "fen_after_g2g4".to_string());
         app.insert_resource(mgr);
@@ -1988,9 +1860,7 @@ mod game_end_ordering_tests {
         });
         app.insert_resource(OnlineNetworkState::default());
 
-        // Delegated + a real PDA — otherwise `handle_game_end_undelegation`
-        // takes the free-rated (never-delegated) early-return path instead
-        // of the one under test.
+        // Use a delegated Game PDA so the test reaches the undelegation path.
         {
             let mut resolver = app.world_mut().resource_mut::<MagicBlockResolver>();
             resolver.delegation_status = DelegationStatus::Delegated;
@@ -2010,10 +1880,7 @@ mod game_end_ordering_tests {
             reason: "checkmate".to_string(),
         });
 
-        // Frame 1: the event is processed. With the explicit `.after()`
-        // chain, `finalize_game_on_end` -> `handle_rollup_to_network_events`
-        // (sets the flag) -> `retry_pending_finalization` (must see it set)
-        // all resolve within this single `update()` call.
+        // The chained systems must set the flushing flag before retry within this update.
         app.update();
         let bridge = app.world().resource::<RollupNetworkBridge>();
         assert!(
@@ -2028,10 +1895,7 @@ mod game_end_ordering_tests {
              stranded a real-wager game live on 2026-08-11"
         );
 
-        // Frame 2: still flushing (the spawned IoTaskPool task hasn't been
-        // awaited — nothing here drives it to completion), so this must
-        // still hold even once `handle_game_end_undelegation` has had a
-        // second chance to populate `pending_finalization`.
+        // The task is still pending on frame 2, so undelegation must remain blocked.
         app.update();
         let bridge = app.world().resource::<RollupNetworkBridge>();
         assert!(

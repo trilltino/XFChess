@@ -60,7 +60,4 @@ pub fn spawn_background_tasks(
 
 #[cfg(test)]
 mod tests {
-    // AppState and SigningConfig construction tests would require
-    // full dependency injection of all 14+ fields. Integration tests
-    // for task spawning belong in tests/ or with mocked state.
 }

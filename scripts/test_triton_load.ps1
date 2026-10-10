@@ -1,10 +1,7 @@
-#!/usr/bin/env pwsh
-# Load test for Triton One RPC integration.
-# Simulates the burst pattern of 100 tournaments/day without real players.
-#
-# Usage:
-#   .\scripts\test_triton_load.ps1 -BaseUrl http://localhost:3000 -AdminKey your_admin_key
-#   .\scripts\test_triton_load.ps1 -BaseUrl http://localhost:3000 -AdminKey xf_admin_... -Tournaments 10 -Players 16
+﻿#!/usr/bin/env pwsh
+#requires -Version 7.0
+# RPC load test. Usage: just test-triton -BaseUrl URL -Tournaments N -Players N
+# Supply ADMIN_API_KEY through the environment or -AdminKey.
 
 param(
     [string]$BaseUrl     = "http://localhost:3000",
@@ -53,13 +50,11 @@ Write-Host "Target : $BaseUrl"
 Write-Host "Tournaments : $Tournaments x $Players players"
 Write-Host ""
 
-# ── 1. Health check ───────────────────────────────────────────────────────────
 Write-Host "[ 1 ] Health check" -ForegroundColor Yellow
 $h = Invoke-Api GET "/health"
 if (-not $h) { Write-Error "Backend not reachable"; exit 1 }
 Write-Host "  OK — backend is up"
 
-# ── 2. Baseline: single wallet balance (1 RPC call) ──────────────────────────
 Write-Host ""
 Write-Host "[ 2 ] Baseline RPC latency (single feepayer-balance)" -ForegroundColor Yellow
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -67,7 +62,6 @@ Invoke-Api GET "/admin/feepayer-balance" | Out-Null
 $sw.Stop()
 Write-Host ("  Single get_balance: {0}ms" -f $sw.ElapsedMilliseconds)
 
-# ── 3. Burst: wallet-balances (4 sequential RPC calls) ───────────────────────
 Write-Host ""
 Write-Host "[ 3 ] Burst: $Concurrency concurrent wallet-balance requests" -ForegroundColor Yellow
 $walletJobs = 1..$Concurrency | ForEach-Object {
@@ -75,7 +69,6 @@ $walletJobs = 1..$Concurrency | ForEach-Object {
 }
 Measure-Burst "wallet-balances x$Concurrency" $walletJobs | Out-Null
 
-# ── 4. Create tournaments ─────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "[ 4 ] Creating $Tournaments tournaments ($Players max players each)" -ForegroundColor Yellow
 $tournamentIds = @()
@@ -106,7 +99,6 @@ if ($tournamentIds.Count -eq 0) {
     $tournamentIds = @($baseId)  # fall through to fill-bots anyway for manual testing
 }
 
-# ── 5. Fill with bots (simulates burst of players joining) ────────────────────
 Write-Host ""
 Write-Host "[ 5 ] Filling tournaments with $Players bots each (burst start)" -ForegroundColor Yellow
 $fillJobs = $tournamentIds | ForEach-Object {
@@ -122,7 +114,6 @@ $fillJobs = $tournamentIds | ForEach-Object {
 }
 Measure-Burst "fill-bots burst ($($tournamentIds.Count) tournaments)" $fillJobs | Out-Null
 
-# ── 6. Escrow balance burst (100 admin checks) ───────────────────────────────
 Write-Host ""
 Write-Host "[ 6 ] Burst: escrow-balance for $($tournamentIds.Count * 10) tournament IDs" -ForegroundColor Yellow
 $escrowJobs = (1..($tournamentIds.Count * 10)) | ForEach-Object {
@@ -131,7 +122,6 @@ $escrowJobs = (1..($tournamentIds.Count * 10)) | ForEach-Object {
 }
 Measure-Burst "escrow-balance burst" $escrowJobs | Out-Null
 
-# ── 7. Simulated admin dashboard poll (what a real operator would do) ─────────
 Write-Host ""
 Write-Host "[ 7 ] Simulated admin dashboard — 30s of polling every 2s" -ForegroundColor Yellow
 $pollErrors = 0
@@ -151,7 +141,6 @@ for ($tick = 0; $tick -lt 15; $tick++) {
     Start-Sleep -Milliseconds 2000
 }
 
-# ── Summary ──────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "=== Summary ===" -ForegroundColor Cyan
 Write-Host "Tournaments started : $($tournamentIds.Count)"

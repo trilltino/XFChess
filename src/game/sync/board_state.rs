@@ -50,13 +50,11 @@ impl BoardStateSync {
         let move_counter = engine.get_move_counter();
         let current_turn = engine.get_current_turn();
 
-        // Format last move
         let last_move_str = match last_move {
             Some(mv) => format!("{}|{}|{}|{}", mv.from.0, mv.from.1, mv.to.0, mv.to.1),
             None => "|||".to_string(),
         };
 
-        // Format captured pieces
         let captured_white_str = captured_pieces
             .white_captured
             .iter()
@@ -68,7 +66,6 @@ impl BoardStateSync {
             .map(|p| piece_type_to_char(*p))
             .collect::<String>();
 
-        // Build state string
         let state = format!(
             "{}|{}|{}|{}|{}|{}",
             fen,
@@ -83,7 +80,6 @@ impl BoardStateSync {
             captured_black_str
         );
 
-        // Calculate hash
         let hash = calculate_state_hash(&state);
 
         format!("{}|{}", state, hash)
@@ -147,7 +143,6 @@ pub fn broadcast_state_system(
     mut board_sync: ResMut<BoardStateSync>,
     engine: Res<ChessEngine>,
     captured_pieces: Res<CapturedPieces>,
-    // Add braid network writer here when integrated
 ) {
     // Only broadcast if we have pending local moves
     if board_sync.sync_status == SyncStatus::PendingLocal {

@@ -167,13 +167,8 @@ fn handle_spectate_link(
     for ev in events.read() {
         info!("[spectator] Starting spectate for game {}", ev.game_id);
         match_info.0 = ev.details.clone().unwrap_or_default();
-        // Fail safe: `begin_session` tears down any previous game's feed and
-        // leaves this one marked delayed (HTTP-only) until the lookup confirms
-        // otherwise. The live subscription is opened later, in
-        // `resolve_spectator_delay`, only when the delay is 0.
-        // A switch from the HUD carries the same playlist it came from; a
-        // fresh spectate from a list supplies one. Either way, set it before
-        // `begin_session` so the index resolves against the right list.
+        // Start in delayed HTTP-only mode until lookup confirms zero delay. Set
+        // the playlist before begin_session so its index uses the right game list.
         if !ev.playlist.is_empty() {
             session.playlist = ev.playlist.clone();
         }
@@ -459,12 +454,8 @@ pub fn apply_braid_resync_to_spectator(
                     expected_fen: Some(next_fen.clone()),
                     dedup_version: None,
                 });
-                // Advance so the VPS poll (`tick_spectator_poll`) doesn't
-                // re-fetch and re-queue moves already applied via gossip
-                // resync — previously this counter was only ever read here,
-                // never advanced, so it stayed flat across gossip-applied
-                // moves (redundant re-fetch/re-queue traffic on every poll
-                // cycle, not board corruption — see docs/PRE_MAINNET_E2E_PLAN.md §1.7).
+                // Advance the applied move count after gossip resync so VPS polling does
+                // not fetch and queue those moves again.
                 session.applied_move_count += 1;
             }
         }
@@ -482,7 +473,6 @@ fn tick_spectator_clock(
         return;
     }
 
-    // Apply any incoming clock snapshots first.
     for ev in rollup_events.read() {
         if let crate::multiplayer::rollup::manager::RollupEvent::SnapshotReceived { .. } = ev {
             // SnapshotReceived carries move history — clock is implicit from move count.

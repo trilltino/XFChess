@@ -45,7 +45,6 @@ impl IpPatternDetector {
                 .entry(ip_address.to_string())
                 .or_insert_with(Vec::new);
 
-            // Remove old attempts outside the window
             attempts.retain(|t| now.duration_since(*t) < self.rate_limit_window);
 
             // Check if too many recent attempts
@@ -56,11 +55,9 @@ impl IpPatternDetector {
                 ));
             }
 
-            // Record this attempt
             attempts.push(now);
         }
 
-        // Record successful registration
         {
             let mut registrations = self.registrations_per_ip.write().await;
             *registrations.entry(ip_address.to_string()).or_insert(0) += 1;

@@ -1,6 +1,4 @@
-// Emit the current git commit SHA as a compile-time env var (`GIT_SHA`) so the
-// running backend can report exactly which commit it was built from (deploy →
-// commit traceability; see /health). Best-effort: "unknown" if git is unavailable.
+// Expose the build commit as GIT_SHA for /health; use unknown if Git is unavailable.
 use std::process::Command;
 
 fn main() {

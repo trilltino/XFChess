@@ -3,10 +3,7 @@ name = "xfchess"
 version = "0.1.0"
 edition = "2021"
 
-# crate-type matches Bevy's own examples/mobile/Cargo.toml exactly: "lib" keeps
-# the desktop `[[bin]]` targets below linking against this crate as a normal
-# rlib, "cdylib" is what cargo-ndk needs to produce libxfchess.so for Android's
-# GameActivity to dlopen. Inert on every other target.
+# Build rlib for desktop linkage and cdylib for Android GameActivity loading.
 [lib]
 name = "xfchess"
 path = "src/lib.rs"
@@ -37,9 +34,7 @@ name = "debugger"
 
 path = "src/bin/debugger.rs"
 
-# Solana-only helper. Declared explicitly so Cargo skips it without the feature;
-# otherwise auto-discovery tries to build it and `cargo test` fails (the file is
-# entirely `#![cfg(feature = "solana")]`, leaving no `main`).
+# Require solana for this binary; otherwise automatic discovery finds no main function.
 [[bin]]
 name = "profile_pda"
 path = "src/bin/profile_pda.rs"
@@ -69,9 +64,7 @@ strip = "debuginfo" # Strip debuginfo from the resulting binary (reduces .exe si
 [profile.dev.package."*"]
 opt-level = 3
 
-# Compile build scripts and proc-macros optimized so they *run* faster during
-# every compile (Bevy / Anchor / serde / sqlx are heavily macro-driven). This
-# speeds up build time and has no effect on the final runtime binary.
+# Optimize build scripts and proc-macros to reduce compilation time.
 [profile.dev.build-override]
 opt-level = 3
 [profile.release.build-override]
@@ -105,9 +98,7 @@ homepage = "https://github.com/trilltino/XFChess"
 keywords = ["solana", "chess", "gaming"]
 
 [workspace.dependencies]
-# Anchor 1.1.2 is the version compatible with Solana 3.x's account model; the
-# Anchor 1.0/Solana 3.x migration landed 2026-07-22 and also unblocked the
-# ephemeral-rollups-sdk 0.16.2 bump below. See docs/runbooks/magicblock-lifecycle-devnet.md.
+# Anchor 1.1.2 supports the Solana 3.x account model.
 anchor-lang = { version = "=1.1.2", features = ["init-if-needed"] }
 anchor-spl = "=1.1.2"
 # Solana 3.0.0: paired with the anchor-lang 1.1.2 pin above, same migration.
@@ -126,13 +117,9 @@ iroh-base = "=1.0.3"
 bevy_egui = "=0.40.1"
 
 webbrowser = "=1.1.0"
-# 0.16.2 fixes the 2026-07-22 undelegation-buffer disclosure (checks `buffer`
-# is the canonical PDA for `delegated_account`); unblocked by the Anchor/Solana
-# migration above. See docs/runbooks/magicblock-lifecycle-devnet.md.
+# Require canonical undelegation-buffer PDA checks; see the MagicBlock lifecycle runbook.
 ephemeral-rollups-sdk = { version = "=0.16.2", features = ["anchor", "instruction"] }
-# solana-security-txt: embeds the security.txt metadata blob read by
-# `solana-verify` / explorers. Exact-pinned to match Cargo.lock; 1.1.3 is the
-# latest release line (there is no 4.x — a `=4.1` pin broke workspace resolution).
+# Embed security.txt metadata for explorers and solana-verify.
 solana-security-txt = "=1.1.3"
 axum = "=0.8.9"
 tower-http = "=0.7.0"
@@ -141,28 +128,18 @@ braid-core = { path = "crates/zarathustra_net/braid-core" }
 braid-http = { path = "crates/zarathustra_net/braid-http" }
 braid-iroh = { path = "crates/zarathustra_net/braid-iroh" }
 braid_chess = { path = "crates/zarathustra_net/braid_chess" }
-# Vendored copy removed 2026-08-10: it was an unmodified snapshot of upstream
-# v0.101.0 (see former crates/zarathustra_net/iroh-gossip/FORK_NOTES.md), which
-# is also the exact version published on crates.io — no local patches existed.
-# "net" is already in iroh-gossip's own default features.
 iroh-gossip = { version = "0.101.0" }
 # The public contracts repo is pinned so CI and clean checkouts can resolve it.
 nimzovich_engine = { git = "https://github.com/trilltino/xfchess-contracts.git", rev = "67932ae105b67d58b78cd2203c9657204bf8b259", package = "nimzovich_engine" }
 xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
-# chess-logic-on-chain: removed from workspace dependencies — consolidated
-# into programs/xfchess-game/src/chess_logic_on_chain.rs (move-validation feature).
-# Exact-pinned because several call sites and feature flags in this repo
-# (bevy_fixed_node, sky — see below; the winit pin) target 0.19's specific
-# rc.3-era API surface, not just the 0.19 line in general; bumping needs those
-# checked, not just a version-string edit. See docs/PUBLISHING.md's "Bevy API
-# drift" note for a concrete case where feature-gated code silently drifted.
+# The exact Bevy pin matches release-candidate APIs used by feature-gated code;
+# check those paths when upgrading.
 bevy = { version = "=0.19.0", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg", "hdr", "android-game-activity"] }
 bevy_sprite = "=0.19.0"
 bevy_text = "=0.19.0"
 bevy_ui = "=0.19.0"
 image = { version = "=0.25.5", default-features = false, features = ["png"] }
-# Pinned to the version Bevy 0.19 pulls in so the winit::window::Icon type
-# unifies with bevy_winit (used to set the OS window/taskbar icon at startup).
+# Match Bevy’s winit version so window Icon types unify.
 winit = "=0.30.13"
 tokio = { version = "=1.53.1", features = ["full"] }
 tokio-tungstenite = "=0.20.1"
@@ -193,22 +170,14 @@ web-time = "=1.1"
 [features]
 default = []
 profile = ["bevy/trace_tracy"]
-# Tag the in-game HUD root with `bevy_ui::FixedNode` (viewport-anchored UI).
-# `FixedNode` landed after bevy 0.19.0-rc.3, the version this project pins, so
-# this is opt-in until a release that exports it is pinned. See
-# src/ui/game/hud.rs.
+# FixedNode needs a newer Bevy export; keep viewport HUD anchoring opt-in
+# until the pinned release supports it.
 bevy_fixed_node = []
-# Opt-in physically-based sky/atmosphere for the in-game board scene. OFF by
-# default: bevy 0.19.0-rc.3 still uses the single-camera atmosphere path, and
-# XFChess runs multiple cameras, so this is gated until a release with the
-# multi-camera fix is pinned. See src/rendering/effects/sky.rs.
+# Keep atmosphere opt-in until the pinned Bevy release supports multiple cameras.
 sky = []
-# Accept unsigned (0x01) P2P gossip messages. DEV/TEST ONLY — the default
-# build rejects unsigned moves so a peer cannot skip authentication by
-# sending plaintext. See docs/plans/causal-authentication.md (Gap A3).
+# Development-only unsigned gossip. Production rejects plaintext moves to require authentication.
 allow-unsigned-p2p = []
-# TempleOS tribute board theme (orthographic camera, unlit board, Terry Davis
-# quote). DEV ONLY — compiled out of default builds; enables the main-menu entry.
+# Development-only TempleOS theme; excluded from default builds.
 templeos = []
 solana = [
     "anchor-lang",
@@ -276,9 +245,6 @@ solana-system-interface = { version = "3", features = ["bincode"], optional = tr
 solana-commitment-config = { version = "3", optional = true }
 xfchess-game = { workspace = true, optional = true }
 
-# docs/PRE_MAINNET_E2E_PLAN.md §6.3: introduces proptest scoped to the one
-# seam identified as this plan's single highest-value test (§1.2, dual-
-# transport move dedup) rather than adopting it workspace-wide.
 [dev-dependencies]
 proptest = "1"
 
@@ -290,49 +256,21 @@ windows = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
-# Android target support (see mobile/ and src/android/). jni is pinned to the
-# same 0.22.4 that bevy_android's android-activity dependency already resolves
-# to (verified against Cargo.lock), so there is exactly one `jni` crate major
-# in the Android dependency graph rather than two incompatible ones.
+# Match the JNI version selected by bevy_android to avoid incompatible duplicate majors.
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "=0.22.4", default-features = false }
 ndk-context = "=0.1.1"
-# tracing_subscriber::Layer that writes directly to logcat via the NDK's
-# __android_log_write — composed with the existing file_log_layer in lib.rs
-# so every info!/warn!/error! call site in this codebase (all tracing-based,
-# via bevy::prelude::*) reaches `adb logcat`, not just the two bootstrap-time
-# lines in android/mod.rs. Deliberately not `android_logger` (a `log`-facade
-# bridge) for the app's own logging — this codebase's ~800+ log call sites
-# are all `tracing`, and a `log`-facade bridge would miss all of them without
-# an additional tracing→log shim.
+# Send tracing events to Android logcat alongside the file log subscriber.
 paranoid-android = "=0.2.2"
-# android_logger + log cover the narrow pre-`build_app()` bootstrap window in
-# android/mod.rs (TLS-verifier init, before Bevy's App/LogPlugin — and so
-# before the tracing subscriber paranoid-android hooks into — exists at all;
-# a bare `tracing::error!` there would silently go nowhere, since tracing
-# events with no subscriber registered are dropped, not buffered).
+# Use log for Android bootstrap before Bevy installs the tracing subscriber.
 android_logger = "=0.15.1"
-# Not exact-pinned like most deps here: `log` is a near-universal facade many
-# unrelated transitive deps (wgpu-types via bevy_egui, jni, rustls-platform-
-# verifier) each declare their own compatible-range constraint on; an exact
-# pin here produced a real resolution conflict against wgpu-types' `^0.4.29`.
+# Use a compatible log range so transitive facade constraints can resolve together.
 log = "0.4"
-# reqwest's `rustls` feature already pulls this in transitively (its Cargo.toml
-# unconditionally depends on rustls-platform-verifier), but it must be a direct
-# dependency here too so `android::init_with_env` is nameable from
-# src/android/mod.rs. That call is mandatory before any HTTP client is
-# constructed on Android — without it every HTTPS request fails at the TLS
-# handshake, since the crate's Android verifier calls into a Kotlin class that
-# needs an Android Context first.
+# Declare the verifier directly for Android init_with_env; initialize its
+# Context before constructing any HTTP client.
 rustls-platform-verifier = "=0.7.0"
 
-# `rfd` genuinely does not compile for Android — confirmed by attempting the
-# cross-compile, not assumed: every one of its dialog-backend traits
-# (FilePickerDialogImpl, FileSaveDialogImpl, MessageDialogImpl, and their
-# Async* counterparts) is simply unimplemented for this target, so it fails
-# at the crate level regardless of whether any call site is cfg-gated. See
-# the cfg-gated call in profile_onboarding.rs — Android always takes the
-# `save_path: None` branch there instead.
+# rfd has no Android dialog backend; use the platform-gated default save path.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 rfd = "0.15"
 

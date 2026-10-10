@@ -72,12 +72,9 @@ pub fn camera_zoom_input_system(
     // AccumulatedMouseScroll.delta is a Vec2 where y is vertical scroll
     if mouse_scroll.delta.y != 0.0 {
         for mut controller in query.iter_mut() {
-            // Calculate zoom delta
-            // AccumulatedMouseScroll.delta.y is already normalized
-            // Positive y = scroll up = zoom in = decrease height
+            // Positive normalized scroll decreases camera height to zoom in.
             let zoom_delta = -mouse_scroll.delta.y * controller.zoom_speed;
 
-            // Update target zoom and clamp to bounds
             controller.target_zoom = (controller.target_zoom + zoom_delta)
                 .clamp(controller.min_zoom, controller.max_zoom);
         }
@@ -91,7 +88,6 @@ pub fn camera_zoom_system(mut query: Query<(&mut Transform, &mut CameraControlle
             .current_zoom
             .lerp(controller.target_zoom, controller.zoom_smoothing);
 
-        // Apply zoom to camera Y position (height)
         transform.translation.y = controller.current_zoom;
     }
 }
@@ -108,7 +104,6 @@ pub fn camera_movement_system(
     }
 
     for (mut transform, controller) in query.iter_mut() {
-        // Calculate movement direction from keyboard input
         let mut direction = Vec3::ZERO;
 
         // Get camera's basis vectors
@@ -116,9 +111,7 @@ pub fn camera_movement_system(
         let right = transform.right();
         let up = transform.up();
 
-        // Project onto XZ plane (maintain Y height for RTS-style movement)
-        // CRITICAL FIX: when looking straight down (Forward = -Y), Forward.xz is zero!
-        // In that case, we must use the UP vector (which points to Board "North") for forward movement.
+        // When looking straight down, Forward.xz is zero; use UP for board-plane movement.
         let is_vertical = forward.y.abs() > 0.9;
 
         // When vertical (top-down), use UP vector for forward/backward
@@ -148,7 +141,6 @@ pub fn camera_movement_system(
         // Normalize diagonal movement to prevent faster diagonal speed
         direction = direction.normalize_or_zero();
 
-        // Calculate target position with velocity-based movement
         let velocity = direction * controller.move_speed * time.delta_secs();
         let target_position = transform.translation + velocity;
 
@@ -180,7 +172,6 @@ pub fn camera_rotation_system(
     }
 
     for (mut transform, mut controller) in query.iter_mut() {
-        // Initialize pitch/yaw from Transform on first frame
         if !controller.initialized {
             let (yaw, pitch, _roll) = transform.rotation.to_euler(EulerRot::YXZ);
             controller.yaw = yaw;
@@ -195,10 +186,6 @@ pub fn camera_rotation_system(
 
         let mut modified = false;
 
-        // Keyboard Rotation (Q/E)
-        // Q = Rotate Left (Increase Yaw)
-        // E = Rotate Right (Decrease Yaw)
-        // Speed: 2.0 radians per second (adjust as needed)
         const KEYBOARD_ROTATION_SPEED: f32 = 2.0;
 
         if keyboard.pressed(KeyCode::KeyQ) {
@@ -226,7 +213,6 @@ pub fn camera_rotation_system(
             modified = true;
         }
 
-        // Apply rotation to Transform if anything changed
         if modified {
             // Order: ZYX (roll=0, yaw, pitch) matches Bevy reference
             transform.rotation =
@@ -268,9 +254,7 @@ pub fn camera_touch_gestures(
                 };
                 let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
 
-                // Negative: dragging a finger up/right should move the *view*
-                // as if grabbing the board surface, i.e. the camera moves
-                // down/left relative to the drag.
+                // Negate drag to move the camera as though grabbing the board surface.
                 let world_delta = (forward_xz * delta.y - right_xz * delta.x)
                     * TOUCH_PAN_SENSITIVITY
                     * controller.move_speed;
@@ -291,10 +275,7 @@ pub fn camera_touch_gestures(
 
                 for (mut transform, mut controller) in query.iter_mut() {
                     if distance_delta != 0.0 {
-                        // Fingers spreading apart (distance increasing) zooms
-                        // in — decreases target_zoom, matching
-                        // camera_zoom_input_system's "scroll up = zoom in"
-                        // sign convention.
+                        // Spreading fingers decreases target_zoom, matching scroll-up zoom direction.
                         controller.target_zoom = (controller.target_zoom
                             - distance_delta * TOUCH_PINCH_ZOOM_SENSITIVITY)
                             .clamp(controller.min_zoom, controller.max_zoom);
@@ -412,7 +393,6 @@ pub fn camera_rotate_on_turn_system(
         return;
     }
 
-    // Calculate rotation delta
     let delta_yaw = rotation_state.target_yaw - rotation_state.current_yaw;
 
     // Normalize delta to shortest path (-PI to PI range)
@@ -448,7 +428,6 @@ pub fn camera_rotate_on_turn_system(
         rotation_state.current_yaw += 2.0 * PI;
     }
 
-    // Apply rotation to all game cameras
     for mut transform in camera_query.iter_mut() {
         // Store original position relative to board center
         let relative_pos = transform.translation - CameraRotationState::BOARD_CENTER;
@@ -460,7 +439,6 @@ pub fn camera_rotate_on_turn_system(
         // Rotate position around board center
         let rotated_pos = rotation_quat * relative_pos;
 
-        // Update position
         transform.translation = CameraRotationState::BOARD_CENTER + rotated_pos;
 
         // Update rotation to look at board center with the new yaw
@@ -637,9 +615,6 @@ mod tests {
     fn test_zoom_range_is_reasonable_for_chess() {
         let controller = CameraController::default();
 
-        // Chess board is typically 8x8 units, pieces ~1 unit tall
-        // Min zoom (5.0) should see several squares clearly
-        // Max zoom (30.0) should see entire board
         assert!(
             controller.min_zoom >= 3.0,
             "Too close might clip through board"
@@ -722,10 +697,8 @@ pub fn setup_game_camera(
 
     let new_transform = if is_2d {
         let height = 16.0;
-        // Sit behind the player's back rank (same side as the 3D camera) so
-        // rank 1 stays at the bottom and files a–h run left to right.
-        // A pure top-down camera cannot achieve standard orientation in a
-        // right-handed coordinate system, so we use a steep (~7°) angle instead.
+        // A steep 7-degree angle preserves rank 1 at the bottom and files a-h left to right
+        // in this right-handed coordinate system.
         let z_behind = 2.0; // units behind the back rank
         let camera_pos_2d = if is_black_view {
             Vec3::new(3.5, height, 7.0 + z_behind) // behind black's rank 8
@@ -739,8 +712,7 @@ pub fn setup_game_camera(
 
     let show_3d = !is_2d;
 
-    // Persistent camera becomes UI-only: draws after (higher order) the board
-    // camera. In 3D mode it doesn't clear output; in 2D mode it clears to solid dark background.
+    // The UI camera draws after the board; only 2D mode clears to a dark background.
     if let Some(entity) = persistent_camera.entity {
         if let Ok(mut camera) = ui_cam_query.get_mut(entity) {
             camera.order = 1;

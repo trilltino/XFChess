@@ -7,11 +7,8 @@ use xfchess_game::errors::GameErrorCode;
 use xfchess_game::state::{Game, GameResult, GameStatus, GameType, MatchType};
 
 const GAME_ID: u64 = 90_001;
-// `base_time_seconds` only needs to be nonzero to select the "timed game"
-// branch of `lifecycle::clock::inactivity_window_seconds` — the actual
-// window is now a fixed `TIMED_GAME_INACTIVITY_WINDOW_SECONDS` (90s),
-// independent of this value. See that function's doc comment for why it's
-// no longer proportional to base time.
+// Nonzero base time selects the timed-game branch; inactivity uses the
+// fixed 90s window independently of that value.
 const BASE_TIME_SECONDS: u64 = 300;
 
 fn timed_active_game(
@@ -102,11 +99,7 @@ async fn claim_timeout_awards_white_when_black_flags() {
         .unwrap()
         .unix_timestamp;
 
-    // turn = 2 (even) -> black's clock is the one that expired, per
-    // `finish_by_timeout`'s `white_timed_out = turn % 2 == 1` branch. The
-    // sibling test (`er_delegation_tests::claim_timeout_mutates_only_game_even_when_delegated`)
-    // only covers the odd-turn (white-timed-out) parity.
-    // 200s elapsed, comfortably past the fixed 90s window.
+    // Even turn 2 expires black's clock. 200s exceeds the fixed 90s window.
     let (game_key, game_data) = timed_active_game(white, black, 2, now - 200);
     ctx.set_account(&game_key, &AccountSharedData::from(game_data));
 

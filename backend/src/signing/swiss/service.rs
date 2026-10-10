@@ -93,10 +93,8 @@ impl SwissService {
             return Err(SwissServiceError::TournamentComplete);
         }
 
-        // Build player list with current scores
         let players = self.build_swiss_players(&tournament).await?;
 
-        // Build pairing config from stored forbidden pairs and manual overrides
         let config = PairingConfig {
             forbidden: swiss_data.forbidden_pairs.clone(),
             manual_overrides: swiss_data.manual_pairings_next_round.clone(),
@@ -126,9 +124,7 @@ impl SwissService {
             round.byes.len()
         );
 
-        // Publish the round's pairings. The orchestrator republishes this same
-        // resource once it has created the games, adding a `game_id` per board;
-        // that is a second version of one resource, not a second writer.
+        // The orchestrator republishes this resource with game IDs after creating games.
         if let Some(hub) = &self.braid_hub {
             let pairings_json = serde_json::to_value(&round.pairings).unwrap_or_default();
             bridge::push_pairings(hub, tournament_id, next_round, pairings_json);
@@ -180,7 +176,6 @@ impl SwissService {
             .await?;
         let standings = calculate_standings(&players, &swiss_data.rounds, &swiss_data.results);
 
-        // Update stored standings
         swiss_data.standings = standings.clone();
 
         let is_last_round = swiss_data.current_round >= swiss_data.total_rounds;
@@ -211,7 +206,6 @@ impl SwissService {
                     t.status = TournamentStatus::Completed;
                     t.completed_at = Some(chrono::Utc::now().timestamp());
 
-                    // Set final placements for top 8
                     for (i, entry) in standings.iter().enumerate().take(8) {
                         match i {
                             0 => t.winner = Some(entry.player_id.clone()),
@@ -355,7 +349,6 @@ impl SwissService {
             })
             .collect();
 
-        // Apply results to update scores
         for (round_num, board, result) in &swiss_data.results {
             let round = swiss_data
                 .rounds
@@ -369,14 +362,12 @@ impl SwissService {
                 .find(|p| p.board == *board)
                 .ok_or_else(|| SwissServiceError::InvalidBoard(*board))?;
 
-            // Update white player
             if let Some(white) = players.get_mut(&pairing.white) {
                 white.score += result.white_score();
                 white.opponents.push(pairing.black.clone());
                 white.color_history.push(Color::White);
             }
 
-            // Update black player
             if let Some(black) = players.get_mut(&pairing.black) {
                 black.score += result.black_score();
                 black.opponents.push(pairing.white.clone());
@@ -411,7 +402,6 @@ impl SwissService {
         Ok(players.into_values().collect())
     }
 
-    // ── Gap 1: Absent flag + forfeit ──────────────────────────────────────────
 
     pub async fn mark_absent(
         &self,
@@ -430,7 +420,6 @@ impl SwissService {
             .clone()
             .ok_or(SwissServiceError::NotSwissFormat)?;
 
-        // Find any existing pairing for this player in the given round
         let forfeit_result: Option<(u16, MatchResult)> = swiss_data
             .rounds
             .iter()
@@ -465,7 +454,6 @@ impl SwissService {
         Ok(())
     }
 
-    // ── Gap 2: Withdrawal timing distinction ──────────────────────────────────
 
     pub async fn withdraw_player(
         &self,
@@ -517,7 +505,6 @@ impl SwissService {
         Ok(())
     }
 
-    // ── Gap 3: Late rejoin ────────────────────────────────────────────────────
 
     pub async fn rejoin_player(
         &self,
@@ -556,7 +543,6 @@ impl SwissService {
         Ok(())
     }
 
-    // ── Gap 6: Forbidden pairings ─────────────────────────────────────────────
 
     pub async fn add_forbidden_pair(
         &self,
@@ -631,7 +617,6 @@ impl SwissService {
         Ok(())
     }
 
-    // ── Gap 7: Manual result override ─────────────────────────────────────────
 
     pub async fn override_result(
         &self,
@@ -689,10 +674,7 @@ impl SwissService {
     }
 }
 
-// ── Scoring conversion (contract ↔ backend) ────────────────────────────────
-//
-// On-chain uses integer points (2/1/0), pairing engine uses FIDE float (1.0/0.5/0.0).
-// See `SCORING.md` for the full mapping.
+// On-chain points are 2/1/0; the pairing engine uses 1.0/0.5/0.0.
 
 pub fn to_contract_points(score: f64) -> u8 {
     (score * 2.0).round() as u8

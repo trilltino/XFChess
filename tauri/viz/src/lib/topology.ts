@@ -1,9 +1,6 @@
 /**
- * XFChess network topology for the visualiser graph.
- *
- * Nodes = real components (Bevy clients, Iroh relay, Axum backend, Triton RPC,
- * MagicBlock ER, Solana L1). The backend↔Triton edge is driven by live latency
- * from the benchmark.
+ * Network graph of clients, relays, backend, RPC, ER, and L1; backend/RPC
+ * latency is driven by the live benchmark.
  */
 
 import type { EChartsCoreOption } from 'echarts';

@@ -227,7 +227,6 @@ pub fn spectator_hud_system(
                 });
             });
 
-            // Chat log (last N messages)
             if !chat_log.messages.is_empty() {
                 ui.add_space(2.0);
                 for (player, text) in &chat_log.messages {

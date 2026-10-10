@@ -21,14 +21,8 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<MainTab>("CONSOLE");
   const { authState } = useAuth();
   const backendUrl = authState.backend_url;
-  // Prometheus (:9090) is internal-only on the VPS and not forwarded by the
-  // SSH tunnel, so it's only ever reached directly — never through
-  // backend_url. In PRODUCTION that means the VPS IP (best-effort: only
-  // populates when :9090 is directly reachable from this machine). In LOCAL
-  // it must stay on loopback — pointing a local session at the VPS IP made
-  // every 5s poll hang for the OS's full TCP connect timeout instead of
-  // failing fast, since an unreachable-but-not-actively-refusing remote host
-  // doesn't reject the way a closed local port does.
+  // Prometheus is not forwarded by the admin tunnel. Use loopback for LOCAL
+  // and the configured VPS address for best-effort PRODUCTION access.
   const promHost = authState.env === "production" ? VPS_HOST : "127.0.0.1";
 
   const [onlineCount, setOnlineCount] = useState(0);
@@ -98,10 +92,7 @@ export default function Dashboard() {
 
         const promQuery = async (q: string) => {
           try {
-            // Bound the wait ourselves — an unreachable-but-not-refusing
-            // remote host (e.g. production Prometheus with no route from
-            // this machine) otherwise hangs for the OS's full TCP connect
-            // timeout, stalling this 5s poll loop for far longer than that.
+            // Bound connection waits so an unreachable host cannot stall the five-second poll loop.
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 3000);
             const r = await fetch(
@@ -195,9 +186,7 @@ export default function Dashboard() {
     const ar = await apiClient.getAntiCheatReports(); if (ar.ok && ar.data) setReports(ar.data.reports);
   };
 
-  // "refund" = the suspect's flag stands and the (non-suspect) victim is
-  // awarded the win; "winner" = false positive, the original result is
-  // upheld and the dispute is dismissed with no on-chain outcome change.
+  // refund awards the victim a win; winner dismisses a false positive and preserves the outcome.
   const resolveDispute = async (report: Report, action: "refund" | "winner") => {
     const note = resolutionNotes[report.game_id]?.trim();
     if (!disputeAdminToken || !note) {
@@ -441,10 +430,7 @@ export default function Dashboard() {
               {Object.keys(taskStatus).length > 0 && (
                 <InfraSection title="SCHEDULED TASKS">
                   {Object.entries(taskStatus).map(([name, t]) => {
-                    // Staleness is decided server-side per worker's own poll
-                    // interval (settlement/scheduler: 30s, prize distributor:
-                    // 60s) — a flat client-side threshold would flag the
-                    // slower workers as stale right after every normal tick.
+                    // Use server-side staleness: workers have different poll intervals.
                     const stale = t.status === "stale";
                     const label = t.last_tick == null ? t.status.toUpperCase() : `${stale ? "STALE" : "OK"} ${t.age_seconds ?? 0}s`;
                     return (
@@ -524,14 +510,8 @@ export default function Dashboard() {
 }
 
 /**
- * One worker's counters as a labelled grid.
- *
- * Two rendering rules carry meaning rather than style:
- *  - a `*_age_seconds` key is a heartbeat, so it is coloured by staleness and
- *    a `null` reads "NEVER" — a worker that has not ticked once is the least
- *    healthy state, and must not render as a healthy-looking zero.
- *  - a `*_failed_*` / `*_dropped_*` counter above zero is coloured as a
- *    problem, because for those the only good value is zero.
+ * Heartbeat ages show staleness; null means NEVER, not zero. Nonzero failure
+ * and dropped counters indicate a problem.
  */
 function MetricGroupPanel({ title, group }: { title: string; group?: Record<string, number | null> }) {
   const entries = Object.entries(group ?? {});

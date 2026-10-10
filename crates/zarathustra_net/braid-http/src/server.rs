@@ -119,9 +119,7 @@ mod tests {
 
     #[test]
     fn an_unrecognised_parent_is_the_servers_problem_not_a_parse_error() {
-        // Version ids are opaque strings, so anything well-formed parses. A server
-        // that doesn't recognise the version should replay from the start rather
-        // than reject the subscribe.
+        // Versions are opaque; replay from the start when a well-formed version is unknown.
         assert_eq!(resume_from(given(&[("parents", "\"nonsense\"")])).len(), 1);
     }
 }

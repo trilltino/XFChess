@@ -55,7 +55,6 @@ async fn register_identity(
     State(state): State<AppState>,
     Json(payload): Json<IdentityPayload>,
 ) -> Result<Json<()>, (StatusCode, String)> {
-    // 1. Verify Authentication
     let pk =
         Pubkey::from_str(&payload.pubkey).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -76,7 +75,6 @@ async fn register_identity(
         return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
     }
 
-    // 2. Encryption
     let blind_index = state.identity_vault.generate_blind_index(&payload.tax_id);
 
     let privacy_json = serde_json::json!({
@@ -95,7 +93,6 @@ async fn register_identity(
 
     let registered_at = now as i64;
 
-    // 3. Vault Storage
     let pool = &state.vault_pool;
 
     // Reject if GDPR consent was not given
@@ -128,7 +125,6 @@ async fn register_identity(
         return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
 
-    // 4. On-Chain Sync: VPS signs the instruction to flag the user as verified
     let admin_keypair = &state.kyc_authority;
     let program_id = Pubkey::from_str(&state.config.program_id).unwrap_or_else(|_| {
         "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
@@ -171,13 +167,11 @@ async fn register_identity(
         );
     }
 
-    // 6. Mark kyc_status = 'approved' in users_v2 (on-chain verification succeeded).
     let _ = state
         .store
         .set_kyc_status(&payload.pubkey, "approved")
         .await;
 
-    // 7. Persist CACF compliance: identity verification → fully_compliant for their country.
     if let Err(e) = vault
         .save_cacf(
             &payload.pubkey,
@@ -199,7 +193,6 @@ async fn register_identity(
         payload.pubkey
     );
 
-    // 8. Log audit event for GDPR compliance
     log_audit_event(&payload.pubkey, "KYC_REGISTERED", &state.vault_pool).await;
 
     Ok(Json(()))
@@ -222,7 +215,6 @@ async fn check_kyc_status(
     let verified = row.is_some();
     let verified_at = row.as_ref().map(|r| r.get::<i64, _>("registered_at"));
 
-    // Log access for GDPR audit trail
     log_audit_event(&pubkey, "KYC_STATUS_CHECKED", pool).await;
 
     Ok(Json(KycStatus {
@@ -237,7 +229,6 @@ async fn delete_identity_data(
     State(state): State<AppState>,
     Json(req): Json<DeleteDataRequest>,
 ) -> Result<Json<()>, (StatusCode, String)> {
-    // 1. Verify Authentication
     let pk = Pubkey::from_str(&req.pubkey).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let sig = Signature::from_str(&req.signature)
@@ -259,7 +250,6 @@ async fn delete_identity_data(
 
     let pool = &state.vault_pool;
 
-    // 3. Log deletion request before deleting (for audit)
     let reason = req.reason.as_deref().unwrap_or("User request");
     warn!(
         "[GDPR] Identity deletion requested for {}. Reason: {}",
@@ -267,7 +257,6 @@ async fn delete_identity_data(
     );
     log_audit_event(&req.pubkey, "KYC_DELETION_REQUESTED", pool).await;
 
-    // 4. Delete user data
     let result = sqlx::query("DELETE FROM vault_users WHERE pubkey = ?")
         .bind(&req.pubkey)
         .execute(&**pool)

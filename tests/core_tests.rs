@@ -49,7 +49,6 @@ fn test_state_transition_to_multiplayer() {
         .resource_mut::<NextState<GameState>>()
         .set(GameState::InGame);
 
-    // Update to apply the state change
     app.update();
 
     // Verify state changed
@@ -94,7 +93,6 @@ fn test_systems_run_conditionally_based_on_state() {
     app.init_state::<GameState>();
     app.init_resource::<SystemExecutionTracker>();
 
-    // Add state-conditional systems
     app.add_systems(
         Update,
         track_main_menu_execution.run_if(in_state(GameState::MainMenu)),
@@ -125,7 +123,6 @@ fn test_systems_run_conditionally_based_on_state() {
         assert_eq!(tracker.multiplayer_executions, 1); // Incremented
     }
 
-    // Update again in InGame state
     app.update();
     {
         let tracker = app.world().resource::<SystemExecutionTracker>();
@@ -183,7 +180,6 @@ fn test_state_persistence_across_updates() {
     app.add_plugins(StatesPlugin); // Bevy 0.18: required for init_state (MinimalPlugins omits it)
     app.init_state::<GameState>();
 
-    // Set to InGame
     app.world_mut()
         .resource_mut::<NextState<GameState>>()
         .set(GameState::InGame);

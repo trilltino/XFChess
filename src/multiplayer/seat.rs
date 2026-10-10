@@ -1,12 +1,5 @@
-//! One playing device per player per on-chain game (client side of the
-//! backend's `storage::seat_lease`).
-//!
-//! Policy: the newest device to claim a seat takes it over; earlier devices
-//! become view-only. This client claims its seat whenever an on-chain game
-//! starts or resumes, re-checks the lease periodically, and reacts at once
-//! when the backend refuses a write as `seat_superseded`. A view-only window
-//! keeps showing the live board but cannot move, and offers an explicit
-//! "Play here instead" that takes the seat back.
+//! Claim a device seat on game start or resume. The newest claim makes prior
+//! devices view-only; poll for takeover and handle seat_superseded immediately.
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};

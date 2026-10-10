@@ -28,10 +28,7 @@ fn side_score(game: &GameRecord, parity: usize) -> f64 {
 
     let mut score: f64 = 0.0;
 
-    // Timing heuristics only run when this side has trustworthy timing
-    // (client think times, or a non-batched server wall clock). Batch-
-    // collapsed games resolve to None and contribute no timing score — they
-    // would otherwise read as "every move instant" and false-positive.
+    // Collapsed batches lack per-move timing; return None rather than infer instant moves.
     let source = source_for(&game.moves, parity);
     if source != crate::types::TimingSource::None {
         let latencies: Vec<f64> = game
@@ -50,9 +47,7 @@ fn side_score(game: &GameRecord, parity: usize) -> f64 {
                 let variance = latencies.iter().map(|l| (l - mean).powi(2)).sum::<f64>() / n;
                 let cv = variance.sqrt() / mean;
 
-                // Flat move times: humans think longer on hard positions; a
-                // coefficient of variation this low over a slow game is the
-                // metronome signature.
+                // Low timing variation over a slow game triggers the metronome heuristic.
                 if mean >= FLAT_MIN_MEAN_MS {
                     if cv < 0.35 {
                         score += 0.7;
@@ -74,9 +69,7 @@ fn side_score(game: &GameRecord, parity: usize) -> f64 {
         }
     }
 
-    // Client-reported blur: alt-tabbing before most moves is the strongest
-    // pre-engine signal there is — send the game to full analysis. Always
-    // evaluated, independent of timing source.
+    // Frequent client-reported blur triggers full analysis regardless of timing source.
     let blur = crate::features::blur::blur_rate(&game.moves, parity);
     if blur >= 0.7 {
         score += 0.5;
@@ -198,9 +191,7 @@ mod tests {
 
     #[test]
     fn batch_collapsed_timing_does_not_false_positive() {
-        // Metronome latencies, but all timestamps within a few ms of each
-        // other (GameEndBatch). Timing source resolves to None, so the
-        // flat-time/no-snap heuristics must NOT fire.
+        // Collapsed batch timestamps resolve to None and must not trigger timing heuristics.
         let mut g = game(60, &[8_000, 8_000, 8_000], &[8_000, 8_000, 8_000]);
         let base = 1_700_000_000_000u64;
         for (i, m) in g.moves.iter_mut().enumerate() {

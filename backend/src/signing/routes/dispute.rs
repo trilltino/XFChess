@@ -19,11 +19,8 @@ use crate::signing::AppState;
 const DISPUTE_NOTIFY_EMAIL: &str = "isicheivalentine@gmail.com";
 const FROM_EMAIL: &str = "noreply@xfchess.com";
 
-// ── Route builder ─────────────────────────────────────────────────────────────
 
-// Paths are relative to the nest prefixes applied in `build_app_router`
-// (`/dispute` and `/admin/dispute`). Absolute paths here would double-prefix
-// to `/dispute/dispute/notify`, leaving the endpoints unreachable.
+// Use paths relative to the /dispute and /admin/dispute router prefixes.
 pub fn dispute_routes() -> Router<AppState> {
     Router::new()
         .route("/notify", post(notify_dispute))
@@ -36,7 +33,6 @@ pub fn admin_dispute_routes() -> Router<AppState> {
         .route("/recover_stuck_delegation", post(recover_stuck_delegation))
 }
 
-// ── Request / Response types ──────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct NotifyDisputeReq {
@@ -68,7 +64,6 @@ pub struct ResolveDisputeResp {
     pub tx_sig: String,
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
 
 pub async fn notify_dispute(
     State(state): State<AppState>,
@@ -126,7 +121,6 @@ pub async fn resolve_dispute(
     State(state): State<AppState>,
     Json(req): Json<ResolveDisputeReq>,
 ) -> Result<Json<ResolveDisputeResp>, StatusCode> {
-    // Authenticate admin token
     let expected = env::var("ADMIN_TOKEN").unwrap_or_default();
     if expected.is_empty() || !constant_time_eq(&req.admin_token, &expected) {
         warn!("[dispute] resolve rejected — bad admin token");
@@ -144,7 +138,6 @@ pub async fn resolve_dispute(
         StatusCode::SERVICE_UNAVAILABLE
     })?;
 
-    // Determine winner pubkey
     let winner: Option<Pubkey> = match req.decision.as_str() {
         "WHITE_WINS" => {
             Some(Pubkey::from_str(&req.white_wallet).map_err(|_| StatusCode::BAD_REQUEST)?)
@@ -156,7 +149,6 @@ pub async fn resolve_dispute(
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
-    // Build and send the on-chain resolve_dispute instruction
     let tx_sig = submit_resolve_dispute_tx(
         &state,
         &authority,
@@ -172,7 +164,6 @@ pub async fn resolve_dispute(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // Update DB
     let pool = state.store.pool();
     let disputes = DisputeRepository::new(pool);
     disputes
@@ -278,7 +269,6 @@ pub async fn recover_stuck_delegation(
     }))
 }
 
-// ── Solana helpers ────────────────────────────────────────────────────────────
 
 async fn submit_resolve_dispute_tx(
     state: &AppState,
@@ -365,7 +355,6 @@ async fn submit_resolve_dispute_tx(
     Ok(sig.to_string())
 }
 
-// ── Email helpers ─────────────────────────────────────────────────────────────
 
 async fn send_dispute_notification_email(game_id: i64, challenger: &str, reason: &str) {
     let key = match env::var("SENDGRID_API_KEY") {

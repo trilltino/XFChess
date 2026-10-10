@@ -26,10 +26,8 @@ pub fn apply_master_volume_system(
     }
     *last_settings = Some((current_volume, current_muted));
 
-    // Calculate effective volume
     let effective_volume = if current_muted { 0.0 } else { current_volume };
 
-    // Apply volume to all audio sinks
     for mut sink in audio_sinks.iter_mut() {
         sink.set_volume(Volume::Linear(effective_volume));
     }

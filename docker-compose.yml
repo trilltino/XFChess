@@ -33,11 +33,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # Monitoring (Prometheus/Grafana/Alertmanager) does NOT live in this file —
-  # it used to, referencing a ./deploy/ config directory that never existed
-  # in this repo, so it could never actually start. The real, working
-  # monitoring stack is ops/monitoring/docker-compose.yml (run via
-  # ops/monitoring/setup.sh on the server, or setup-local.sh for local dev).
+  # Monitoring is configured in ops/monitoring/docker-compose.yml.
 
 volumes:
   backend-data:

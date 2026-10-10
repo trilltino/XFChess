@@ -15,7 +15,6 @@ use solana_sdk::{pubkey::Pubkey, signature::Signer};
 
 use crate::signing::AppState;
 
-// ── DB row types ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct PuzzleRow {
@@ -51,7 +50,6 @@ struct BountyRow {
     max_per_wallet: i64,
 }
 
-// ── Tuning constants ────────────────────────────────────────────────────────
 
 const CHALLENGE_TTL_SECS: i64 = 600; // 10 min to submit
 const RATING_WINDOW: i64 = 150; // ±band around player rating
@@ -59,7 +57,6 @@ const DEFAULT_RATING: i64 = 1500;
 const DEFAULT_RATING_DEV: i64 = 350;
 const DAILY_PAYOUT_CAP: i64 = 5; // max paid solves per wallet per day
 
-// ── Router builders ─────────────────────────────────────────────────────────
 
 pub fn puzzle_routes() -> Router<AppState> {
     Router::new()
@@ -70,7 +67,6 @@ pub fn puzzle_routes() -> Router<AppState> {
         .route("/puzzle/rating/{wallet}", get(get_rating))
 }
 
-// ── Serve: GET /puzzle/next?mode=solve|earn&wallet=W ─────────────────────────
 
 #[derive(Deserialize)]
 struct NextQuery {
@@ -113,7 +109,6 @@ async fn get_next(
     serve_puzzle(&pool, &q.wallet, &puzzle, mode, reward).await
 }
 
-// ── Serve: GET /puzzle/daily?wallet=W ────────────────────────────────────────
 
 async fn get_daily(
     State(state): State<AppState>,
@@ -189,7 +184,6 @@ async fn serve_puzzle(
     Ok(Json(body))
 }
 
-// ── Verify: POST /puzzle/solve { nonce, moves: [..] } ────────────────────────
 
 #[derive(Deserialize)]
 struct SolveReq {
@@ -204,18 +198,15 @@ async fn post_solve(
     let pool = state.store.pool();
     let now = chrono::Utc::now().timestamp();
 
-    // 1. Consume the challenge — single-use, errors if missing/expired/consumed.
     let ch = match consume_challenge(&pool, &req.nonce, now).await {
         Ok(c) => c,
         Err(code) => return Err(code),
     };
 
-    // 2. Guard against double credit: one (wallet, puzzle) attempt ever.
     if round_exists(&pool, &ch.wallet, &ch.puzzle_id).await {
         return Err(StatusCode::CONFLICT);
     }
 
-    // 3. Load the puzzle (has the secret line).
     let Some(puzzle) = load_puzzle(&pool, &ch.puzzle_id).await else {
         return Err(StatusCode::NOT_FOUND);
     };
@@ -229,10 +220,8 @@ async fn post_solve(
         && submitted.len() == expected.len()
         && submitted.iter().zip(&expected).all(|(a, b)| a == b);
 
-    // 5. Server-observed think time (not a client claim).
     let solve_ms = (now - ch.issued_at).max(0) * 1000;
 
-    // 6. Rating + payout + round record.
     let outcome = finalize(&state, &pool, &ch, &puzzle, win, solve_ms, now).await;
 
     Ok(Json(json!({
@@ -244,7 +233,6 @@ async fn post_solve(
     })))
 }
 
-// ── Interactive verify: POST /puzzle/move { nonce, uci } ─────────────────────
 
 #[derive(Deserialize)]
 struct MoveReq {
@@ -413,7 +401,6 @@ async fn consume(pool: &sqlx::SqlitePool, nonce: &str) {
         .await;
 }
 
-// ── GET /puzzle/rating/{wallet} ──────────────────────────────────────────────
 
 async fn get_rating(State(state): State<AppState>, Path(wallet): Path<String>) -> Json<Value> {
     let pool = state.store.pool();
@@ -421,7 +408,6 @@ async fn get_rating(State(state): State<AppState>, Path(wallet): Path<String>) -
     Json(json!({ "wallet": wallet, "rating": rating, "rating_dev": dev }))
 }
 
-// ── Selection helpers ────────────────────────────────────────────────────────
 
 async fn select_puzzle(pool: &sqlx::SqlitePool, wallet: &str, rating: i64) -> Option<PuzzleRow> {
     // Widen the band on retry until we find an unplayed puzzle.
@@ -510,7 +496,6 @@ async fn round_exists(pool: &sqlx::SqlitePool, wallet: &str, puzzle_id: &str) ->
         > 0
 }
 
-// ── Challenge lifecycle ──────────────────────────────────────────────────────
 
 async fn consume_challenge(
     pool: &sqlx::SqlitePool,
@@ -544,7 +529,6 @@ async fn consume_challenge(
     Ok(ch)
 }
 
-// ── Rating (simplified Glicko / Elo) ─────────────────────────────────────────
 
 async fn load_rating(pool: &sqlx::SqlitePool, wallet: &str) -> (i64, i64) {
     sqlx::query_as::<_, RatingRow>("SELECT rating, rating_dev FROM puzzle_ratings WHERE wallet = ?")
@@ -585,7 +569,6 @@ fn rating_update(player: i64, dev: i64, puzzle: i64, won: bool) -> (i64, i64) {
     (new.clamp(400, 3200), new_dev)
 }
 
-// ── Bounty + payout ──────────────────────────────────────────────────────────
 
 async fn find_active_bounty(
     pool: &sqlx::SqlitePool,
@@ -703,7 +686,6 @@ async fn pay_sol(state: &AppState, to: &str, lamports: u64) -> anyhow::Result<St
     Ok(sig)
 }
 
-// ── FEN helper ───────────────────────────────────────────────────────────────
 
 fn player_color_after_setup(fen: &str) -> &'static str {
     match fen.split_whitespace().nth(1) {
@@ -712,9 +694,7 @@ fn player_color_after_setup(fen: &str) -> &'static str {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Admin: curation + funding (docs/PUZZLES.md §9). Mounted behind require_api_key.
-// ─────────────────────────────────────────────────────────────────────────────
+// Admin curation and funding routes require the API key.
 
 pub fn puzzle_admin_routes() -> Router<AppState> {
     Router::new()

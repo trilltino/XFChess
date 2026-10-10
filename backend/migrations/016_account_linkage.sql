@@ -1,13 +1,5 @@
--- Migration 016: persisted, cross-tournament account-linkage signals for
--- Sybil / multi-accounting defense. Replaces the in-memory per-tournament IP
--- counter as the source of truth; the IP count becomes one input among several.
---
--- One row per wallet, accumulating linkage signals across all events:
---   funder      — on-chain SOL funding source (common funder => likely linked)
---   device_hash — coarse client/device fingerprint (hashed, PII-light)
---   ip_count    — registrations observed from the same IP (demoted signal)
---   flagged     — surfaced for manual review (soft)
---   hard_blocked— blocked from prize entry (hard, KYC-driven)
+-- Accumulate linkage signals per wallet across tournaments. flagged requests
+-- manual review; hard_blocked prevents prize entry.
 
 CREATE TABLE IF NOT EXISTS account_linkage (
     wallet        TEXT    PRIMARY KEY,

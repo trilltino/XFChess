@@ -55,7 +55,6 @@ pub fn create_templeos_quote_ui(mut commands: Commands, view_mode: Res<ViewMode>
         Name::new("TempleOS Attribution Name"),
     ));
 
-    // Spawn years
     commands.spawn((
         Text::new("1969 - 2018"),
         TextFont {

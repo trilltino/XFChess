@@ -20,9 +20,7 @@ fn elo_window(wait_secs: u64) -> u32 {
 }
 
 pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
-    // Reload queue/pending matches from SQLite so a backend restart resumes
-    // instead of losing them (migration 022) — must happen before the first
-    // tick so the sweep below doesn't see an empty queue.
+    // Restore persisted matchmaking state before the first sweep.
     state.hydrate().await;
 
     let mut interval =
@@ -36,9 +34,7 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        // Sweep stale match results every tick, independent of queue size —
-        // otherwise a player who crashes right after being paired leaves
-        // their (and their opponent's) MatchResult in memory forever.
+        // Sweep stale results even with an empty queue so crashed players cannot leave permanent entries.
         match state.matches.lock() {
             Ok(mut matches) => {
                 matches.retain(|_, m| now.saturating_sub(m.matched_at) < STALE_MATCH_SECS);
@@ -59,9 +55,7 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
             );
         }
 
-        // Mutate the in-memory queue synchronously inside this block (no
-        // .await while the mutex is held), then persist the outcome after
-        // the guard drops.
+        // Mutate synchronously under the mutex; persist after releasing it.
         let (removed_stale, new_matches): (Vec<String>, Vec<(_, _, u64)>) = {
             let mut queue = match state.queue.lock() {
                 Ok(q) => q,

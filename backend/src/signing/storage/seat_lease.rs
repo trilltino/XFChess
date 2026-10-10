@@ -1,15 +1,6 @@
-//! One playing device per player per game (migration 034).
-//!
-//! Policy: **the most recent device to claim a seat takes it over; every
-//! earlier device becomes view-only.** A player who crashes and restarts, or
-//! moves from desktop to phone, is never locked out of their own game — and a
-//! forgotten second window can no longer submit moves that conflict with the
-//! device actually being played on.
-//!
-//! A lease is keyed by `(game_id, wallet)`. Claiming bumps `epoch`; writes
-//! carry the writer's `device_id` and are refused when another device holds
-//! the seat. No lease means no client has opted in for that seat yet (older
-//! clients), so writes stay allowed exactly as before.
+//! A lease is keyed by (game_id, wallet). The newest device claim increments
+//! epoch and makes previous devices view-only. A seat without a lease allows
+//! legacy clients to write.
 
 use serde::Serialize;
 
@@ -35,8 +26,7 @@ pub struct SeatLeaseStore {
     pool: sqlx::SqlitePool,
 }
 
-/// Device ids are client-generated opaque tokens; bound their shape so the
-/// column can't be used to store arbitrary payloads.
+/// Bound opaque client device IDs to prevent arbitrary payload storage.
 pub fn valid_device_id(device_id: &str) -> bool {
     (8..=64).contains(&device_id.len())
         && device_id

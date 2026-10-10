@@ -17,7 +17,6 @@ use tracing::{info, warn};
 
 use crate::signing::{solana, AppState};
 
-// ── Request / Response types ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct InitRequest {
@@ -53,7 +52,6 @@ pub struct LichessErrorResponse {
     pub error: String,
 }
 
-// ── PKCE State Store ─────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 struct PkceState {
@@ -76,7 +74,6 @@ pub fn lichess_oauth_routes() -> Router<AppState> {
         .route("/auth/lichess/callback", get(oauth_callback))
 }
 
-// ── Handlers ─────────────────────────────────────────────────────────────────
 
 async fn init_oauth(
     State(state): State<AppState>,
@@ -93,7 +90,6 @@ async fn init_oauth(
             )
         })?;
 
-    // Validate wallet pubkey
     let _ = Pubkey::from_str(&req.wallet_pubkey).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
@@ -131,7 +127,6 @@ async fn init_oauth(
         store.retain(|_, v| v.created_at.elapsed() < Duration::from_secs(600));
     }
 
-    // Build Lichess authorize URL
     let auth_url = format!(
         "https://lichess.org/oauth?response_type=code&client_id={}&redirect_uri={}&state={}&code_challenge={}&code_challenge_method=S256&scope=preference:read",
         urlencoding::encode(client_id),
@@ -293,7 +288,6 @@ async fn complete_link(
         ));
     }
 
-    // ── Step 1: Exchange code for access token ───────────────────────────────
     let token_url = "https://lichess.org/api/token";
 
     let client = reqwest::Client::new();
@@ -345,7 +339,6 @@ async fn complete_link(
         wallet_pubkey
     );
 
-    // ── Step 2: Fetch authenticated user profile ─────────────────────────────
     let profile_resp = client
         .get("https://lichess.org/api/account")
         .bearer_auth(access_token)
@@ -405,7 +398,6 @@ async fn complete_link(
         wallet_pubkey, username, blitz_rating, rapid_rating, bullet_rating
     );
 
-    // ── Step 3: Build and submit on-chain link_external_elo instruction ────
     let player_pk = Pubkey::from_str(wallet_pubkey).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
@@ -425,11 +417,7 @@ async fn complete_link(
         bullet_rating * 100,
     );
 
-    // Transient RPC hiccups (rate limits, dropped connections, momentary node
-    // lag) are the common case for a single `sign_and_submit` failure here —
-    // retrying a few times before giving up avoids stranding an otherwise-
-    // successful Lichess link in the `offchain-pending` state, which nothing
-    // ever automatically retries afterward (see the doc comment below).
+    // Retry transient RPC failures before falling back to off-chain-only persistence.
     let rpc = solana::make_rpc(&state.solana_rpc_url);
     let mut submit_result = solana::sign_and_submit(&rpc, link_authority, &[ix.clone()]);
     for attempt in 1..=2 {
@@ -442,12 +430,8 @@ async fn complete_link(
     let tx_sig = match submit_result {
         Ok(sig) => sig.to_string(),
         Err(e) => {
-            // Falls back to DB-only persistence below so matchmaking ELO
-            // (`matchmaking/handlers.rs`, reads `external_elo_links` directly)
-            // still works, but nothing here retries the on-chain write later —
-            // `ProfileViewer`'s "Lichess linked" checklist row and the on-chain
-            // `PlayerProfile.lichess_username` field will show unlinked
-            // indefinitely for this wallet until a human re-runs the link.
+            // DB-only fallback preserves matchmaking ratings. The on-chain link stays
+            // pending until the user retries; there is no background retry here.
             warn!(
                 "[LichessOAuth] On-chain submission failed for {} after retries; persisting OAuth link locally: {}",
                 wallet_pubkey, e
@@ -456,7 +440,6 @@ async fn complete_link(
         }
     };
 
-    // ── Step 4: Persist to backend DB ──────────────────────────────────────
     let pool = state.store.pool();
     if let Err(e) = store_link_in_db(
         pool,
@@ -472,7 +455,6 @@ async fn complete_link(
         warn!("[LichessOAuth] Failed to store link in DB: {}", e);
     }
 
-    // Invalidate ELO cache
     state.elo_cache.invalidate(wallet_pubkey);
 
     info!(
@@ -489,7 +471,6 @@ async fn complete_link(
     })
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn generate_code_verifier() -> String {
     use base64::{engine::general_purpose, Engine as _};

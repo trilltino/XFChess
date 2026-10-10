@@ -4,9 +4,6 @@ use crate::game::systems::camera::CameraController;
 use crate::multiplayer::traits::MessageReader;
 use bevy::prelude::*;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Resource
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum CameraDirectorMode {
@@ -43,9 +40,6 @@ pub struct CameraDirector {
     pub target_sq: Option<Vec3>,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// System
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn camera_director_system(
     time: Res<Time>,
@@ -112,7 +106,6 @@ pub fn camera_director_system(
             *elapsed += dt;
             let t = smooth_step((*elapsed / *duration).min(1.0));
             cam_tf.translation = origin.translation.lerp(target.translation, t);
-            // slerp rotation
             cam_tf.rotation = origin.rotation.slerp(target.rotation, t);
             if *elapsed >= *duration {
                 Some(CameraDirectorMode::Hold {

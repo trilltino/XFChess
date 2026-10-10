@@ -18,10 +18,7 @@ pub fn wager_ui_system(
         Err(_) => return,
     };
 
-    // USD is the primary display currency everywhere else in the client (see
-    // wager_rate.rs) — this HUD only fell back to raw SOL because it predates
-    // that convention. Falls back to a plain SOL amount when no live rate has
-    // loaded yet, same as the wager lobby.
+    // Display USD when a live rate is available; otherwise fall back to SOL.
     let usd_or_sol = |sol: f64| -> String {
         match sol_usd_rate.usd_for_sol(sol) {
             Some(usd) => format!("${:.2}", usd),
@@ -29,14 +26,12 @@ pub fn wager_ui_system(
         }
     };
 
-    // Create a top-right panel for wager info
     egui::Window::new("Wager Info")
         .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
         .default_width(200.0)
         .collapsible(true)
         .show(ctx, |ui| {
             ui.vertical(|ui| {
-                // Game ID
                 if let Some(id) = wager_state.game_id {
                     ui.label(format!("Game ID: {}", id));
                 }
@@ -78,7 +73,6 @@ pub fn wager_ui_system(
                     ui.label(egui::RichText::new("Fee Breakdown").strong().size(13.0));
                     ui.add_space(4.0);
 
-                    // Country fee
                     if let Some(country_fee) = wager_state.country_fee {
                         ui.horizontal(|ui| {
                             ui.label("Country Fee:");
@@ -90,7 +84,6 @@ pub fn wager_ui_system(
                         });
                     }
 
-                    // ELO fee
                     if let Some(elo_fee) = wager_state.elo_fee {
                         ui.horizontal(|ui| {
                             ui.label("ELO Fee:");
@@ -104,7 +97,6 @@ pub fn wager_ui_system(
 
                     ui.separator();
 
-                    // Total fees
                     let total_fees =
                         wager_state.country_fee.unwrap_or(0.0) + wager_state.elo_fee.unwrap_or(0.0);
                     if total_fees > 0.0 {
@@ -120,7 +112,6 @@ pub fn wager_ui_system(
                     }
                 }
 
-                // Player color
                 if let Some(ref player_color) = wager_state.player_color {
                     ui.horizontal(|ui| {
                         ui.label("Playing as:");

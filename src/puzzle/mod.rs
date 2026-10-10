@@ -121,7 +121,6 @@ impl Plugin for PuzzlePlugin {
     }
 }
 
-// ── 1. Request a puzzle ──────────────────────────────────────────────────────
 
 fn start_request(
     mut commands: Commands,
@@ -133,11 +132,8 @@ fn start_request(
     if session.phase == PuzzlePhase::Loading {
         return;
     }
-    // Earn mode pays out on completion, so it still requires a real wallet.
-    // Solve mode has no reward and is open to Guest play — the identifier
-    // just needs to be *something* (a node ID or local username both work)
-    // so the server can track solve-attempt state for this session. See
-    // docs/plans/identity-implementation-plan.md.
+    // Earn mode requires a wallet for payouts. Guest identifiers suffice for
+    // reward-free solve attempts.
     if req.wallet.trim().is_empty() && req.mode == PuzzleMode::Earn {
         warn!("[puzzle] no wallet connected — cannot request an Earn puzzle");
         session.status = "connect a wallet first".into();
@@ -178,7 +174,6 @@ fn fetch_next(base: &str, mode: PuzzleMode, wallet: &str) -> NetMsg {
     }
 }
 
-// ── 2/4. Poll network results (load + per-move verdicts) ─────────────────────
 
 fn poll_net(
     mut session: ResMut<PuzzleSession>,
@@ -212,7 +207,6 @@ fn poll_net(
                 "[puzzle] loaded {} (player plays {}, {} moves, reward {:?})",
                 d.id, d.color, d.solution_len, d.reward_lamports
             );
-            // Spawn the position (before the setup move) and enter the game.
             board.active = true;
             board.fen = d.fen.clone();
             *game_mode = GameMode::MultiplayerLocal; // both sides local: no AI auto-plays
@@ -270,9 +264,7 @@ fn puzzle_driver(
         return; // board still spawning
     }
 
-    // Authoritatively set the engine to the puzzle position (the reset on
-    // entering InGame put it at the start position) and rebuild the move cache
-    // so the setup move passes legality.
+    // Apply the puzzle position and rebuild legal moves before accepting its setup move.
     if let Err(e) = engine.set_from_fen(&board.fen) {
         warn!("[puzzle] bad FEN: {e}");
         session.phase = PuzzlePhase::Done;
@@ -292,7 +284,6 @@ fn puzzle_driver(
     info!("[puzzle] board ready, setup move played — your move");
 }
 
-// ── Capture the player's move and submit it ──────────────────────────────────
 
 fn capture_player_move(
     mut session: ResMut<PuzzleSession>,
@@ -351,7 +342,6 @@ fn clear_puzzle_board(mut board: ResMut<PuzzleBoard>, mut session: ResMut<Puzzle
     }
 }
 
-// ── UCI <-> board coordinate helpers ─────────────────────────────────────────
 
 fn uci_to_event(uci: &str) -> Option<NetworkMoveEvent> {
     let b = uci.trim().as_bytes();

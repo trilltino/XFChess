@@ -149,7 +149,6 @@ pub fn trigger_checkmate_flash(
     if !game_over.is_checkmate() {
         return;
     }
-    // Find the king of the losing side (the side that was checkmated)
     use crate::rendering::pieces::{PieceColor, PieceType};
     // WhiteWon = Black was checkmated → Black king flashes
     let loser_color = match &*game_over {
@@ -276,13 +275,8 @@ pub fn update_eval_bar(
         return;
     }
 
-    // Start from the cached game state and apply only the new moves.
-    // Uses `new_game_no_tt` (not `new_game`) — this Game only ever runs
-    // `do_move_with_promo` + `evaluate_position`, never `reply`/search, so the
-    // multi-GB transposition table `new_game` allocates would be pure waste.
-    // Allocating it here, synchronously on the first `MoveHistory` change
-    // (i.e. the first move of the game), was the exact cause of the
-    // first-move-only stutter — every move after that reuses `cached_game`.
+    // Use new_game_no_tt for move application and evaluation; no search occurs
+    // here, so allocating a transposition table would stall the first move.
     let start = eval_history.scores.len();
     let mut game = eval_history
         .cached_game
@@ -459,12 +453,9 @@ pub fn render_2d_board(
     let game_over = input_params.game_over.is_game_over();
     let piece_alpha = (extras.board_fade.alpha_mult * 255.0).clamp(0.0, 255.0) as u8;
     let in_check = input_params.engine.is_check();
-    // The side currently in check is determined by the engine position itself,
-    // not by the display turn/resource cache. In replay and network-lagged
-    // states `CurrentTurn` can be stale or out-of-sync with the actual FEN.
+    // Use the engine’s side to move for check; replay and network lag can leave CurrentTurn stale.
     let check_color = input_params.engine.side_to_move();
 
-    // Last move squares for highlight
     let last_move_squares: Option<((u8, u8), (u8, u8))> = input_params
         .move_history
         .moves
@@ -474,9 +465,7 @@ pub fn render_2d_board(
     // Collect theme value to avoid borrow in closure
     let current_theme = *theme;
 
-    // Collect active capture flashes: board square → animation progress (0..1).
-    // Captured-piece world X is mirrored (`7 - file`); convert it back to the
-    // logical file before placing the 2D capture flash.
+    // Convert mirrored capture X (7-file) back to the logical file for 2D flashes.
     let capture_flashes: HashMap<(u8, u8), f32> = fading_captures
         .iter()
         .map(|fc| {
@@ -509,11 +498,7 @@ pub fn render_2d_board(
     // Variables filled inside the closure for premove.
     let mut premove_click: Option<(u8, u8)> = None;
 
-    // Keep the 2D board transparent, but do not force it to a different
-    // footprint from the normal in-game layout. That extra panel offset was the
-    // source of the ghost board behind the 3D board and the weird side shift when
-    // toggling views. We now center on the standard board area and remove the
-    // gray background under it entirely.
+    // Match the normal board footprint so switching 2D/3D views preserves alignment.
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE)
         .show(ctx, |ui| {
@@ -548,7 +533,6 @@ pub fn render_2d_board(
                     egui::Sense::click_and_drag(),
                 );
                 board_layout.rect = Some(board_rect);
-                // Determine color kind from modifier keys
                 let arrow_kind: u8 = if extras
                     .keyboard
                     .any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
@@ -562,7 +546,6 @@ pub fn render_2d_board(
                 } else {
                     0
                 };
-                // Convert screen position to board square
                 let pos_to_sq = |pos: egui::Pos2| -> Option<(u8, u8)> {
                     let rel = pos - board_rect.min;
                     if rel.x < 0.0 || rel.y < 0.0 || rel.x >= board_size || rel.y >= board_size {
@@ -808,9 +791,7 @@ pub fn render_2d_board(
                     }
                 }
 
-                // ── Animated piece overlay ───────────────────────────────────
                 if extras.anim.active && !extras.settings.blindfold {
-                    // Compute pixel centers on the first render frame of this animation.
                     if !extras.anim.pixels_ready {
                         let from_off = board_to_screen(
                             extras.anim.from_sq.0,
@@ -855,7 +836,6 @@ pub fn render_2d_board(
                     }
                 }
 
-                // ── Dragged piece at cursor ──────────────────────────────────
                 if extras.drag.dragging && !extras.settings.blindfold {
                     if let Some((pt, pc)) = extras.drag.piece {
                         let pos = extras.drag.cursor_pos;
@@ -875,7 +855,6 @@ pub fn render_2d_board(
                     }
                 }
 
-                // ── Inline promotion picker ──────────────────────────────────
                 if extras.promotion.is_active() {
                     if let (Some((pf, pr)), Some(pcolor)) =
                         (extras.promotion.position, extras.promotion.color)
@@ -942,7 +921,6 @@ pub fn render_2d_board(
                     }
                 }
 
-                // ── Arrow overlays ───────────────────────────────────────────
                 for &(ff, fr, tf, tr, kind) in &extras.arrows.arrows {
                     let from_offset = board_to_screen(ff, fr, black_view, square_size);
                     let to_offset = board_to_screen(tf, tr, black_view, square_size);
@@ -960,7 +938,6 @@ pub fn render_2d_board(
                         egui::Stroke::new(square_size * 0.12, col),
                     );
                 }
-                // Draw in-progress drag arrow
                 if let Some(from) = extras.arrows.drag_from {
                     if let Some(cursor) = board_resp.interact_pointer_pos() {
                         let from_off = board_to_screen(from.0, from.1, black_view, square_size);
@@ -979,7 +956,6 @@ pub fn render_2d_board(
                     }
                 }
 
-                // ── Keyboard navigation ──────────────────────────────────────
                 if extras.keyboard.just_pressed(KeyCode::Tab) {
                     extras.focus.active = !extras.focus.active;
                 }
@@ -1015,7 +991,6 @@ pub fn render_2d_board(
                     }
                 }
 
-                // ── Evaluation bar (right of board) ──────────────────────────
                 if extras.eval_bar.visible {
                     let bar_w = 14.0_f32;
                     let bar_x = board_rect.max.x + 8.0;
@@ -1056,7 +1031,6 @@ pub fn render_2d_board(
                     }
                 }
 
-                // ── Check notification badge ──────────────────────────────────
                 if in_check && !game_over {
                     let label = match check_color {
                         PieceColor::White => "  White is in Check!",
@@ -1096,7 +1070,6 @@ pub fn render_2d_board(
             extras.bar_layout.bottom_h = bottom_bar.response.rect.height();
         });
 
-    // ── Promotion choice ─────────────────────────────────────────────────
     if let (Some(pt), Some(entity), Some(position)) = (
         promo_chosen,
         extras.promotion.pawn_entity,
@@ -1111,7 +1084,6 @@ pub fn render_2d_board(
             });
     }
 
-    // Apply cursor update for dragged piece.
     if let Some(pos) = drag_cursor_update {
         extras.drag.cursor_pos = pos;
     }
@@ -1120,7 +1092,6 @@ pub fn render_2d_board(
         return;
     }
 
-    // ── Drag-to-move: start ──────────────────────────────────────────────
     if let Some(sq) = drag_started_at {
         let piece_at = {
             let q = input_params.pieces.p1();
@@ -1138,7 +1109,6 @@ pub fn render_2d_board(
         }
     }
 
-    // ── Drag-to-move: release ────────────────────────────────────────────
     if let Some(to_sq) = drag_released_at {
         if extras.drag.dragging {
             extras.drag.dragging = false;
@@ -1166,7 +1136,6 @@ pub fn render_2d_board(
         }
     }
 
-    // ── Premove: queue clicks during opponent's turn ─────────────────────
     if !is_human {
         if let Some(sq) = premove_click {
             if extras.premove.from.is_none() {
@@ -1196,7 +1165,6 @@ pub fn render_2d_board(
         return;
     }
 
-    // ── Execute queued premove when it becomes our turn ──────────────────
     if is_human && extras.premove.is_set() {
         let from = extras.premove.from.unwrap();
         let to = extras.premove.to.unwrap();
@@ -1230,7 +1198,6 @@ pub fn render_2d_board(
         }
     }
 
-    // ── Normal click handling ────────────────────────────────────────────
     let Some((cf, cr)) = clicked_square else {
         return;
     };

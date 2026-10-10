@@ -49,11 +49,7 @@ struct Cli {
 
 #[derive(ValueEnum, Clone, Debug)]
 enum TestMode {
-    // clap's default kebab-case rename would be "one-v-one", which doesn't
-    // match `default_value = "1v1"` below or the `--mode 1v1` usage printed
-    // by `--init` — pinning the value string here so the documented default
-    // actually parses instead of erroring on every invocation that omits
-    // `--mode`.
+    // Pin 1v1 to match the default and documented CLI spelling.
     #[value(name = "1v1")]
     OneVOne,
     GlobalSession,
@@ -253,10 +249,7 @@ async fn run_recovery_drill(
 
     run_stuck_delegation_drill(&base_rpc, program_id, white, black, &dispute_authority).await?;
 
-    // Deliberately no reclaim_surplus here: recover_stuck_delegation already
-    // moved the wager back to white/black, and this drill's whole point is
-    // to prove that payout landed - sweeping it away immediately after
-    // would undercut the point of leaving it inspectable.
+    // Leave recovered payouts in place for inspection; do not reclaim surplus.
     Ok(())
 }
 
@@ -344,10 +337,7 @@ async fn run_swiss_test(
         fund_children(&base_rpc, master, &children).await?;
     }
 
-    // Tournament creation (initialize_tournament/_shards/_escrow) requires the
-    // signer to be the program's hardcoded vps_authority::ID — a plain funded
-    // wallet like `master` gets UnauthorizedAccess. See
-    // load_tournament_authority_keypair's doc comment.
+    // Tournament setup requires the configured program authority, not the funded master wallet.
     let authority = load_tournament_authority_keypair()?;
     let authority_balance = base_rpc.get_balance(&authority.pubkey())?;
     println!(
@@ -408,11 +398,8 @@ async fn run_single_elim_test(
     println!("══════════════════════════════════════════════════════════");
 
     let base_rpc = base_client();
-    // Kept small relative to Swiss's [8..256]: each match costs 2-3
-    // sequential transactions (record_match_result + advance_winner), and
-    // unlike Swiss's player-signed rounds there's no parallelism to exploit,
-    // so a 256-player bracket (255 matches) would take far longer than the
-    // 1-minute-ish turnaround this benchmark aims for per run.
+    // Bound single-elimination size because match completion requires sequential
+    // transactions rather than parallel player-signed rounds.
     let valid_sizes = [2u16, 4, 8, 16];
     if !valid_sizes.contains(&size) {
         return Err(anyhow::anyhow!(

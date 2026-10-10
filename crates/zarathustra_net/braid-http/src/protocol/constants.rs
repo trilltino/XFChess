@@ -1,6 +1,3 @@
-// =============================================================================
-// Top-Level Status Code Constants
-// =============================================================================
 
 pub const STATUS_SUBSCRIPTION: u16 = 209;
 
@@ -10,9 +7,6 @@ pub const STATUS_GONE: u16 = 410;
 
 pub const STATUS_RANGE_NOT_SATISFIABLE: u16 = 416;
 
-// =============================================================================
-// Status Code Module
-// =============================================================================
 
 pub mod status {
     pub const OK: u16 = 200;
@@ -28,9 +22,6 @@ pub mod status {
     pub const RANGE_NOT_SATISFIABLE: u16 = 416;
 }
 
-// =============================================================================
-// Header Names Module
-// =============================================================================
 
 pub mod headers {
     use http::HeaderName;
@@ -64,9 +55,6 @@ pub mod headers {
     pub const CONTENT_TYPE: HeaderName = http::header::CONTENT_TYPE;
 }
 
-// =============================================================================
-// Merge Types Module
-// =============================================================================
 
 pub mod merge_types {
 
@@ -75,9 +63,6 @@ pub mod merge_types {
     pub const SIMPLETON: &str = "simpleton";
 }
 
-// =============================================================================
-// Media Types Module
-// =============================================================================
 
 pub mod media_types {
     pub const BRAID_PATCH: &str = "application/braid-patch";

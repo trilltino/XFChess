@@ -114,17 +114,8 @@ async fn process_undelegation_rejects_non_canonical_buffer() {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
-    // The canonical-buffer-PDA rejection lives inside
-    // `ephemeral_rollups_sdk::cpi::undelegate_account` (pinned 0.16.2), not in
-    // our own program code (see the comment on `process_undelegation` in
-    // `lib.rs`). Reading that function's source directly
-    // (`ephemeral-rollups-sdk-0.16.2/src/cpi.rs:290-306`) shows it checks, in
-    // order: (1) `buffer.is_signer`, (2) `buffer.owner == DELEGATION_PROGRAM_ID`,
-    // (3) `buffer == canonical_undelegate_buffer_pda(delegated_account)`. To
-    // actually exercise check (3) — the one this test is named for — the
-    // spoofed buffer must first pass (1) and (2), otherwise the tx fails
-    // earlier with `MissingRequiredSignature`/`InvalidAccountOwner` instead
-    // and check (3) is never reached.
+    // To reach the SDK canonical-buffer check, the spoof must first be a signer
+    // and be owned by the delegation program.
     let spoofed_buffer_kp = Keypair::new();
     let spoofed_buffer = spoofed_buffer_kp.pubkey();
 
@@ -158,12 +149,8 @@ async fn process_undelegation_rejects_non_canonical_buffer() {
         spoofed_buffer,
         vec![b"game".to_vec(), GAME_ID.to_le_bytes().to_vec()],
     );
-    // `InitializeAfterUndelegation::buffer` is a bare `AccountInfo`, not
-    // `Signer`, so Anchor's derived `to_account_metas` never marks it as a
-    // signer — the SDK's runtime check (not Anchor) is what actually
-    // requires it. In production the ER validator infra signs with the
-    // buffer keypair it created at delegation time; here we must flip the
-    // same flag by hand to reach check (3).
+    // Anchor does not mark bare AccountInfo as a signer. Set the buffer signer
+    // flag manually to exercise the SDK canonical-PDA check.
     for meta in ix.accounts.iter_mut() {
         if meta.pubkey == spoofed_buffer {
             meta.is_signer = true;

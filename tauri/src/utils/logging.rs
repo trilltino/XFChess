@@ -19,9 +19,7 @@ pub fn init_logging() {
   // Daily rotation: this runs every time the game launches, so an unrotated
   // single file would grow forever across a player's entire install history.
   let file_appender = tracing_appender::rolling::daily(&dir, "wallet-bridge.log");
-  // `_guard` must outlive the program — non_blocking's background writer
-  // thread stops flushing once its guard drops. Leaking is the standard
-  // tracing-appender pattern for a writer that should live as long as main().
+  // The tracing writer guard must live until exit; dropping it stops background flushing.
   let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
   Box::leak(Box::new(guard));
 
@@ -104,10 +102,8 @@ mod tests {
   use std::env;
   use std::sync::Once;
 
-  // init_logging() installs a process-global tracing subscriber via
-  // tracing_subscriber::fmt()....init(), which panics if called more than
-  // once — correct for real app startup, but multiple tests below need to
-  // exercise it and `cargo test` runs them concurrently in one process.
+  // Logging installs a process-global subscriber and panics on repeated initialization.
+  // Concurrent tests must coordinate it.
   static INIT: Once = Once::new();
   fn ensure_logging_init() {
     INIT.call_once(init_logging);
@@ -115,9 +111,6 @@ mod tests {
 
   #[test]
   fn test_logging_init() {
-    // This test ensures that the logging system can be initialized
-    // without panicking. In a real scenario, this would be called
-    // at application startup.
     ensure_logging_init();
 
     // If we reach this point, initialization succeeded

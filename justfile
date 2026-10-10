@@ -1,20 +1,8 @@
-# XFChess dev task runner
-# Install: cargo install just  (or winget install Casey.Just)
-# Usage:   just dev            — full local stack
-#          just build          — build all Rust binaries
-#          just kill           — stop all running XFChess processes
-#          just backend        — build + run backend only
-#          just game           — build + run game only
-#          just viz            — standalone Triton/network visualiser (Tauri)
+# XFChess tasks. Install with cargo install just; run just to list commands.
 
 set windows-shell := ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
 
-# ── Environment ───────────────────────────────────────────────────────────────
-#
-# Secrets are loaded from an untracked `.env` (see `.env.example`). This file is
-# TRACKED — never hardcode private keys or API keys here. The fallbacks below let
-# `just dev` boot without a `.env` (using public RPC + throwaway crypto), but
-# on-chain signing needs real values supplied via `.env`.
+# Load secrets from untracked .env; defaults are for local development only.
 set dotenv-load := true
 
 # Public, non-secret config (safe to keep inline)
@@ -41,19 +29,20 @@ export ADMIN_API_KEY           := env_var_or_default("ADMIN_API_KEY", "dev")
 # Debug build dir (fast local iteration)
 bin := "target/debug"
 
-# ── Default ───────────────────────────────────────────────────────────────────
 
 # List all available recipes
 default:
     @just --list
 
-# ── Cleanup ───────────────────────────────────────────────────────────────────
 
 # Stop all running XFChess processes (PID file first, then port owner, then name)
 kill:
     powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/kill_stale_xfchess_dev.ps1"
 
-# ── Build ─────────────────────────────────────────────────────────────────────
+# Close only stale wallet browser popups
+kill-wallets:
+    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/kill_stale_xfchess_dev.ps1" -WalletOnly
+
 
 # Build backend signing-server (debug)
 build-backend:
@@ -78,6 +67,27 @@ build-release:
     cargo build --bin xfchess --features solana --release
     cargo build -p xfchess-tauri --features tournament-admin --release
 
+# Build the local release stack, including wallet, admin and web UIs
+build-all: build-wallet-ui-force build-admin-ui-force build-release build-web
+
+# Cross-compile Android native library, then assemble the unsigned release APK
+build-android:
+    cargo ndk -t arm64-v8a -P 31 -o mobile/app/src/main/jniLibs build --release --lib --features solana
+    @Get-ChildItem -LiteralPath mobile/app/src/main/jniLibs/arm64-v8a -Filter *.so | Where-Object Name -ne 'libxfchess.so' | Remove-Item -Force -ErrorAction Stop
+    Set-Location mobile; ./gradlew.bat assembleRelease
+
+# Build and extract a Linux game folder via Docker
+build-linux:
+    cmd /c scripts\build_linux.bat
+
+# Stage a Windows folder: local includes backend; dev uses a remote backend
+package target="local" *args:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -Target {{target}} {{args}}
+
+# Push branch + release tag; add -Deploy to wait for CI and deploy the VPS
+release *args:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 {{args}}
+
 # Build wallet UI (only if dist is missing or forced)
 build-wallet-ui:
     @if (-not (Test-Path "tauri/wallet-ui/dist")) { \
@@ -98,14 +108,9 @@ build-admin-ui:
 
 # Force-rebuild tournament admin UI
 build-admin-ui-force:
-    Set-Location tauri/tournament-admin; npm install; if ($?) { npm run build }; Set-Location ../..
+    Set-Location tauri/tournament-admin; npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; exit $LASTEXITCODE
 
-# Vite dev server on :5176; the desktop window points at it via
-# XFCHESS_ADMIN_DEV_URL. UI edits apply instantly — no rebuild, no relaunch —
-# and the panel auto-resumes your last session so a full reload doesn't send
-# you back to the login screen.
-#
-# Admin panel with HOT RELOAD (UI edits apply instantly, no rebuild)
+# Admin panel with hot reload on :5176 via XFCHESS_ADMIN_DEV_URL
 admin-dev: build-tauri build-backend
     @$root = (Get-Location).Path; \
      $bin = "{{bin}}"; \
@@ -137,13 +142,12 @@ build-web-ui:
 
 # Force-rebuild wallet UI
 build-wallet-ui-force:
-    Set-Location tauri/wallet-ui; npm install; if ($?) { npm run build }; Set-Location ../..
+    Set-Location tauri/wallet-ui; npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; exit $LASTEXITCODE
 
 # Build web frontend (production)
 build-web:
-    Set-Location xfchessdotcom; npm install; if ($?) { npm run build }
+    Set-Location xfchessdotcom; npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; exit $LASTEXITCODE
 
-# ── Run individual services ───────────────────────────────────────────────────
 
 # Run backend only (builds first)
 backend: build-backend
@@ -173,12 +177,7 @@ profile: build-profile
 web:
     Set-Location xfchessdotcom; npm run dev
 
-# Always force-rebuilds the admin UI — it used to skip rebuilding whenever
-# dist/ already existed, which silently kept serving a stale bundle after any
-# tauri/tournament-admin/src edit (e.g. the PRODUCTION SSH-tunnel key path fix
-# never took effect until an explicit build-admin-ui-force).
-#
-# Open the tournament admin desktop window (built dist; use admin-dev for HMR)
+# Open the admin desktop window after rebuilding its UI; admin-dev enables HMR
 admin: build-admin-ui-force build-tauri build-backend
     @$root = (Get-Location).Path; \
      $bin = "{{bin}}"; \
@@ -222,7 +221,6 @@ web-stack: kill build-backend build-web-ui
     @Write-Host "Web Frontend: http://localhost:5173" -ForegroundColor White
     @Write-Host "========================================" -ForegroundColor Cyan
 
-# ── Visualiser ────────────────────────────────────────────────────────────────
 
 # Install visualiser deps (only if node_modules is missing)
 build-viz-ui:
@@ -246,7 +244,6 @@ viz-build: build-viz-ui
 viz-bench:
     cargo run -p er-cu-benchmark --bin triton-bench -- read-load
 
-# ── Full dev stack ────────────────────────────────────────────────────────────
 
 # Build everything then launch full local stack (uses Windows Terminal tabs if available)
 dev: kill build build-wallet-ui build-admin-ui build-web-ui
@@ -331,17 +328,27 @@ dev2: kill build build-wallet-ui build-admin-ui build-web-ui
     @Write-Host "  Web Frontend: http://localhost:5173" -ForegroundColor White
     @Write-Host "  Tournament Admin: desktop window opens automatically from P1 — local token: dev" -ForegroundColor Green
 
-# ── Solana program ────────────────────────────────────────────────────────────
 
-# Build Solana program (size-optimized)
+# Build Solana program without Anchor IDL generation (works on Windows)
 build-program:
-    anchor build
+    cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml
+
+# Build program and IDL in the Linux Anchor toolchain container
+build-program-docker:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/anchor.ps1
+
+# Build and deploy using the Linux Anchor toolchain and local Solana config
+deploy-program-docker:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/anchor.ps1 -Deploy
 
 # Deploy to devnet
 deploy-devnet:
     anchor deploy
 
-# ── Monitoring ────────────────────────────────────────────────────────────────
+# Compare local program bytes with devnet (read-only)
+verify-program *args:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify_devnet_program.ps1 {{args}}
+
 
 # Start local Prometheus + Grafana monitoring stack
 monitoring:
@@ -352,7 +359,6 @@ monitoring:
 monitoring-down:
     docker-compose -f ops/monitoring/docker-compose.local.yml down
 
-# ── Lint & test ───────────────────────────────────────────────────────────────
 
 # Fast type-check all workspace crates (no codegen — much faster than build)
 check:
@@ -389,7 +395,6 @@ lint:
     cargo fmt
     cargo clippy
 
-# ── Database ──────────────────────────────────────────────────────────────────
 
 # Wipe local SQLite databases (sessions + vault) for a clean dev state
 db-reset:
@@ -408,7 +413,6 @@ db-reset:
 db-migrate:
     Set-Location backend; sqlx migrate run
 
-# ── Watch ─────────────────────────────────────────────────────────────────────
 
 # Auto-rebuild + restart backend on file changes (requires: cargo install cargo-watch)
 watch-backend:
@@ -416,7 +420,6 @@ watch-backend:
     @Write-Host "        Install if missing: cargo install cargo-watch" -ForegroundColor DarkGray
     cargo watch -w backend/src -w crates -x "build -p backend --bin signing-server"
 
-# ── Utilities ─────────────────────────────────────────────────────────────────
 
 # Open all local service URLs in the default browser (tournament admin is a desktop window: 'just admin')
 open:
@@ -435,6 +438,22 @@ port-check:
 logs:
     @if (Test-Path "backend/backend.log") { Get-Content backend/backend.log -Wait -Tail 50 } \
      else { Write-Host "No backend.log found — logs go to the terminal window" }
+
+# Tail wallet signing diagnostics
+wallet-logs *args:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tail_wallet_signing.ps1 {{args}}
+
+# Launch eight isolated tournament participants; start 'just dev' first
+dev8:
+    cmd /c scripts\dev8.bat
+
+# Run a Nimzovich/Rustic SPRT match through cutechess-cli
+engine-match:
+    cmd /c scripts\engine_match.bat
+
+# Exercise tournament RPC load (requires PowerShell 7; uses ADMIN_API_KEY)
+test-triton *args:
+    pwsh -NoProfile -File scripts/test_triton_load.ps1 {{args}}
 
 # Clean all build artifacts
 clean:

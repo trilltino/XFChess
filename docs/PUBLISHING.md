@@ -7,10 +7,13 @@ they don't have to be rediscovered.
 ## Cutting a release
 
 ```powershell
-# Pushes the current branch + an auto-bumped (or explicit) version tag to both
-# origin and private in one step
-.\scripts\push_and_release.ps1
-.\scripts\push_and_release.ps1 -Version v0.5.0
+# Push the current branch + an auto-bumped (or explicit) version tag to origin
+just release
+just release -Version v0.5.0
+
+# Preview without pushing, or wait for CI and deploy the VPS after release
+just release -DryRun
+just release -Deploy
 ```
 
 Or manually, origin only:

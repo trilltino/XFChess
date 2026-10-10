@@ -36,10 +36,8 @@ pub fn generate_100_move_sequence() -> Vec<ValidMove> {
             }
         };
 
-        // Apply move to engine state
         let _ = do_move(&mut game, src, dst, true);
 
-        // Build CompactBoard from current game state
         let cb = CompactBoard {
             squares: game.board,
             castling: CASTLE_WK | CASTLE_WQ | CASTLE_BK | CASTLE_BQ,
@@ -54,9 +52,7 @@ pub fn generate_100_move_sequence() -> Vec<ValidMove> {
         });
     }
 
-    // Fool's Mate finish — 96 shuffle plies land back on the starting
-    // position (96 is a multiple of 4), so this is a legal continuation:
-    // f2->f3, e7->e5, g2->g4, d8->h4 (Qh4#, checkmate).
+    // After 96 shuffle plies the board is at the start position, permitting Fool’s Mate.
     let finish: [(i8, i8, [u8; 5]); 4] = [
         (13, 21, *b"f2f3\0"),
         (52, 36, *b"e7e5\0"),

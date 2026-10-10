@@ -83,7 +83,6 @@ pub struct Metrics {
     http_requests_total: RwLock<HashMap<(String, u16), AtomicU64>>,
     http_request_duration_ms: RwLock<HashMap<String, DurationHistogram>>,
 
-    // Solana RPC metrics
     solana_rpc_calls_total: RwLock<HashMap<(String, String), AtomicU64>>,
     solana_rpc_latency_ms: RwLock<HashMap<String, DurationHistogram>>,
 

@@ -27,7 +27,6 @@ pub struct P2PVpsState {
     pub response_tx: Sender<VpsResponse>,
     pub response_rx: Receiver<VpsResponse>,
 
-    // ── Host-side join detection ─────────────────────────────────────────────
     pub hosting_game_id: Option<String>,
     pub hosting_node_id: Option<String>,
     pub host_poll_last: Option<std::time::Instant>,
@@ -36,7 +35,6 @@ pub struct P2PVpsState {
     pub hosting_inc: u16,
     pub pending_joiner: Option<PendingJoinerInfo>,
 
-    // ── Joiner-side game-start detection ─────────────────────────────────────
     pub joining_game_id: Option<String>,
     pub joining_host_node_id: Option<String>,
     pub joining_stake_amount: f64,
@@ -131,12 +129,7 @@ impl Plugin for P2PVpsPlugin {
             .add_systems(Update, poll_for_game_start_message)
             .add_systems(Update, handle_vps_responses)
             .add_systems(Update, send_vps_messages)
-            // `.after(bevy::window::ExitSystems)` matters: that's the set
-            // `bevy_window` uses for the system that actually writes
-            // `AppExit` once all windows are closed. Ordering after it
-            // guarantees we observe that event in the same `Last` pass
-            // instead of missing it because there's no next frame to catch
-            // up on.
+            // Observe AppExit after ExitSystems in Last; there may be no next frame.
             .add_systems(
                 Last,
                 cleanup_p2p_lobby_on_exit.after(bevy::window::ExitSystems),
@@ -340,9 +333,7 @@ fn poll_for_game_start_message(
             Ok((messages, _)) => {
                 for msg in &messages {
                     if let Some(rest) = msg.strip_prefix("GAME_START:") {
-                        // Wire format: "GAME_START:1|{host_display_name}" — the
-                        // "1" is a vestigial payload-version marker, the name is
-                        // everything after the first '|'.
+                        // GAME_START:1|<name>: 1 is a legacy version marker; the name follows the first pipe.
                         let host_display_name = rest
                             .split_once('|')
                             .map(|(_, name)| name.to_string())
@@ -438,10 +429,7 @@ fn handle_vps_responses(
                         );
                     }
 
-                    // Opportunistically try Iroh P2P (dual transport — OK if it fails).
-                    // Non-authoritative: game-start for this flow is owned by the
-                    // host's explicit "Start Game" / relayed GAME_START below, not by
-                    // this connection succeeding — see `P2PConnectionState::drive_game_start`.
+                    // Iroh is optional here; the host sends GAME_START to authorize starting the game.
                     connect_events.write(ConnectToPeerEvent {
                         peer_node_id: host_id.clone(),
                         is_host: false,
@@ -460,9 +448,7 @@ fn handle_vps_responses(
                     p2p_conn.is_host = false;
                     p2p_conn.player_color = Some(crate::rendering::pieces::PieceColor::Black);
 
-                    // Remember what we joined so `poll_for_game_start_message` can watch
-                    // for the host's GAME_START signal — the game doesn't start until the
-                    // host clicks "Start Game" on their end.
+                    // Remember the joined game until the host sends GAME_START.
                     vps_state.joining_game_id = Some(game_id.clone());
                     vps_state.joining_host_node_id = Some(host_id);
                     vps_state.joining_stake_amount = stake_amount;
@@ -529,9 +515,7 @@ fn handle_vps_responses(
                     elo_str: joiner_elo,
                 });
 
-                // Stop polling for further joiners (one opponent is enough). Keep
-                // `hosting_stake_amount` around — the waiting screen's "Start Game"
-                // button reads it when the host actually starts the match.
+                // Stop searching for opponents but retain hosting_stake_amount for the Start Game button.
                 vps_state.hosting_game_id = None;
                 vps_state.hosting_node_id = None;
 
@@ -556,10 +540,7 @@ fn handle_vps_responses(
                 p2p_conn.is_host = true;
                 p2p_conn.player_color = Some(crate::rendering::pieces::PieceColor::White);
 
-                // Stay on the waiting screen — it now shows "Opponent found!" with a
-                // Start Game button. The host explicitly starts the match from there
-                // (see the button handler in `render_p2p_waiting_screen`), which sends
-                // GAME_START and is what actually transitions both sides into InGame.
+                // Wait for the host to send GAME_START before either peer enters InGame.
             }
 
             VpsResponse::JoinerGameStart {
@@ -577,12 +558,8 @@ fn handle_vps_responses(
                     game_id, stake
                 );
 
-                // Pure casual P2P entry: clear any stale on-chain game
-                // context from a previous Solana lobby / tournament match
-                // before entering (see `clear_on_chain_game_state`). For a
-                // wagered game this is a no-op — `SolanaGameSync` is still
-                // default here, the on-chain join lands later via the lobby
-                // `EnterGame` flow.
+                // Clear stale on-chain context before casual P2P entry. Wagered join state
+                // is established later by the lobby EnterGame flow.
                 #[cfg(feature = "solana")]
                 crate::multiplayer::solana::addon::clear_on_chain_game_state(
                     solana_sync.as_deref_mut(),
@@ -598,9 +575,7 @@ fn handle_vps_responses(
 
                 let gid = parse_game_id_u64(&game_id);
 
-                // Ask the host for the authoritative board state.
-                // On a fresh game this is a no-op (host replies with starting FEN).
-                // On reconnect this restores the current mid-game position.
+                // Request the host’s authoritative position to restore a reconnected game.
                 if let Some(tx) = &network_state.message_sender {
                     let _ = tx.send(
                         crate::multiplayer::network::protocol::NetworkMessage::ResyncRequest {

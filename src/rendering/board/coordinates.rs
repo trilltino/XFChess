@@ -15,14 +15,11 @@ pub fn create_coordinate_labels(
         return;
     }
 
-    // Black text style for labels (visible on yellow background)
-    // Use default font (works if default_font feature is enabled, otherwise will need a font file)
     let text_style = TextFont {
         font_size: FontSize::from(24.0),
         ..default() // Uses default font
     };
 
-    // Spawn number labels (1-8) along the vertical Z-axis (Ranks)
     for rank in 1..=8 {
         // Rank 1 (index 0) is at Z=0.0
         let z_pos = (rank - 1) as f32;

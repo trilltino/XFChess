@@ -1,9 +1,5 @@
 import { test, expect } from '@playwright/test';
 
-// Golden-path coverage for the homepage: the hero and feature sections
-// actually render real content (not the CSR fallback shell), and the
-// top-nav is present and interactive. seo.spec.ts covers meta/OG/JSON-LD
-// on the same route — this covers visible page content instead.
 
 test.describe('Homepage', () => {
   test('renders the hero and all three feature sections', async ({ page }) => {

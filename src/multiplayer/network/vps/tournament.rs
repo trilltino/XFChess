@@ -264,10 +264,7 @@ pub fn list_tournament_games() -> Result<Vec<TournamentGameListing>, String> {
                 white_name,
                 black_name,
                 game_id,
-                // This path only knows the bracket record. Everything the
-                // per-tournament endpoint computes is unavailable here, so it
-                // reports the conservative answer: not watchable. Callers that
-                // need a Watch button must use `fetch_tournament_games`.
+                // Bracket records lack watchability data; use fetch_tournament_games for Watch buttons.
                 state: match m.status.as_str() {
                     "Active" => GameState::Live,
                     "Completed" => GameState::Finished,
@@ -524,9 +521,7 @@ pub fn my_tournament_status(
     tournament_id: u64,
     player_pubkey: &str,
 ) -> Result<MyTournamentStatus, String> {
-    // Built inline rather than via reqwest's `query()`, which needs a feature
-    // this build doesn't enable. A base58 pubkey is URL-safe by construction
-    // (no reserved characters), so no escaping is required.
+    // Construct the query inline: reqwest query support is disabled and base58 needs no URL escaping.
     let resp = client()?
         .get(format!(
             "{}/api/tournament/{}/my-status?player={}",
@@ -570,9 +565,7 @@ pub fn confirm_join(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        // 202 = tx not visible to the RPC yet. The registration is real and
-        // will land; it just needs another moment before the backend can see
-        // it, so this is worth retrying rather than surfacing as a failure.
+        // Retry 202 while RPC propagation catches up with the registration transaction.
         return Err(format!("vps confirm_join: HTTP {status} - {body}"));
     }
     let data = resp
@@ -597,9 +590,7 @@ pub fn confirm_join_with_retry(
             Ok(slot) => return Ok(slot),
             Err(e) => {
                 last_err = e;
-                // Only propagation-ish failures are worth retrying; a 403/409
-                // (ELO out of range, already registered, tournament full) is
-                // a definitive answer and retrying just delays the error.
+                // Retry propagation failures; 403/409 responses are definitive.
                 if !(last_err.contains("202") || last_err.contains("502")) {
                     return Err(last_err);
                 }

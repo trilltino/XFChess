@@ -8,7 +8,6 @@ pub struct GameOverPlugin;
 
 impl Plugin for GameOverPlugin {
     fn build(&self, app: &mut App) {
-        // Add the popup plugin
         app.add_plugins(GameOverPopupPlugin);
 
         app.add_systems(

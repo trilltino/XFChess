@@ -2,9 +2,7 @@
 Description=XFChess Backend API
 After=network.target
 
-# NOTE: Type=simple — the signing-server binary does not implement sd_notify,
-# so Type=notify/WatchdogSec would (correctly) be treated as a failed start and
-# crash-loop the service.
+# The binary does not implement sd_notify; use Type=simple without WatchdogSec.
 [Service]
 Type=simple
 User=xfchess

@@ -5,9 +5,6 @@ use crate::core::{DespawnOnExit, GameState};
 use crate::xf_animate::viewport::MINI_LAYER;
 
 pub fn spawn_mini_lights(mut commands: Commands) {
-    // Moody, dim lighting so the mini showcase reads like a study board
-    // rather than a bright ad. Values tuned low to keep the pieces
-    // atmospheric while still legible.
     commands.spawn((
         DirectionalLight {
             illuminance: 2_800.0,

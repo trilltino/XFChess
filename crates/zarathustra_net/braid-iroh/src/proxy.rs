@@ -72,15 +72,12 @@ pub mod bridge {
             "Proxying request"
         );
 
-        // Convert incoming axum body to bytes
-        // Note: We collect the entire body for simplicity. For large uploads,
-        // streaming would be more efficient but requires more complex handling.
+        // Buffer the entire request body; large uploads would benefit from streaming.
         let (parts, body) = req.into_parts();
         let body_bytes = axum::body::to_bytes(body, 10 * 1024 * 1024) // 10MB limit
             .await
             .map_err(|e| format!("Failed to read request body: {}", e))?;
 
-        // Build the request using IrohH3Client
         let mut builder = state.client.request(parts.method.clone(), &target_url);
 
         // Copy headers from the original request, skipping hop-by-hop headers
@@ -121,11 +118,9 @@ pub mod bridge {
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
 
-        // Extract response parts
         let status = resp.status;
         let headers = resp.headers.clone();
 
-        // Collect response body
         let response_bytes = resp
             .bytes()
             .await
@@ -137,10 +132,8 @@ pub mod bridge {
             "Received response from P2P network"
         );
 
-        // Build the response
         let mut response_builder = Response::builder().status(status);
 
-        // Copy response headers
         let response_headers = response_builder
             .headers_mut()
             .ok_or_else(|| "Failed to get response headers mut".to_string())?;

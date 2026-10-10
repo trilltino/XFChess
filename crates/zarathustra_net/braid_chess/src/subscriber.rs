@@ -28,7 +28,6 @@ impl ChessSubscriber {
         })
     }
 
-    // ─── Subscription methods ────────────────────────────────────────────────
 
     pub async fn subscribe_moves(
         &self,
@@ -58,7 +57,6 @@ impl ChessSubscriber {
             .await
     }
 
-    // ─── Internal ────────────────────────────────────────────────────────────
 
     async fn subscribe_inner(
         &self,
@@ -67,7 +65,6 @@ impl ChessSubscriber {
         let url = resource.to_url(&self.base_url);
         debug!("[BRAID SUB] Subscribing to {}", url);
 
-        // Build a subscribe request (BraidClient sets the Subscribe header)
         let request = BraidRequest::new().subscribe();
 
         let mut subscription: Subscription = self
@@ -91,9 +88,7 @@ impl ChessSubscriber {
                         }
                     }
                     Some(Err(e)) => {
-                        // Throttle timeout spam: only warn once every 30s.
-                        // braid-http returns Timeout on routine heartbeat miss;
-                        // logging it every poll cycle drowns real events.
+                        // Warn at most once per 30 seconds for routine heartbeat timeouts.
                         static LAST_WARN_NS: AtomicU64 = AtomicU64::new(0);
                         const WARN_COOLDOWN_SECS: u64 = 30;
                         let now = std::time::SystemTime::now()
@@ -113,12 +108,8 @@ impl ChessSubscriber {
                         }
                     }
                     None => {
-                        // The long-poll connection cycling closed is routine
-                        // (server-side timeout, or `spawn_reconnecting_subscription`
-                        // recycling it) — not itself a problem. Only the caller
-                        // (which knows whether this was expected) should decide
-                        // whether an actual reconnect-after-drop is worth a
-                        // player-visible warning.
+                        // Routine long-poll closure is not a warning; the caller decides whether
+                        // the disconnect was unexpected.
                         debug!("[BRAID SUB] Stream ended");
                         break;
                     }
@@ -130,7 +121,6 @@ impl ChessSubscriber {
     }
 }
 
-// ─── Decode helpers ──────────────────────────────────────────────────────────
 
 fn decode_update(update: &Update) -> Option<ChessMessage> {
     if let Some(body_str) = update.body_str() {

@@ -111,7 +111,6 @@ fn calculate_sonneborn_berger(
             continue;
         }
 
-        // Find opponent
         let opponent_id = if is_white {
             &pairing.black
         } else {
@@ -123,7 +122,6 @@ fn calculate_sonneborn_berger(
             None => continue,
         };
 
-        // Add to sum based on result
         match result {
             MatchResult::WhiteWin if is_white => sum += opponent.score,
             MatchResult::BlackWin if is_black => sum += opponent.score,

@@ -149,10 +149,7 @@ pub fn parse(data: &[u8]) -> Option<GameAccount> {
 
     let nonce = r.u64()?;
 
-    // `draw_offered_by: Option<Pubkey>` is the final field. Nothing here reads
-    // it, but it is consumed so that an account truncated after `nonce` fails
-    // to decode instead of passing as complete — the record is only whole once
-    // this tag is present.
+    // Consume the final Option<Pubkey> tag to reject accounts truncated after nonce.
     match r.u8()? {
         0 => {}
         1 => r.skip(32)?,

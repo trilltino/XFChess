@@ -43,7 +43,6 @@ fn setup_pause_camera(
         persistent_camera.entity
     );
 
-    // Update persistent camera transform for pause view
     if let Some(camera_entity) = persistent_camera.entity {
         info!(
             "[PAUSE] DEBUG: Attempting to query camera entity {:?}",
@@ -56,7 +55,6 @@ fn setup_pause_camera(
                     .looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y);
                 info!("[PAUSE] Updated persistent camera transform for pause");
 
-                // Add pause marker to persistent camera
                 info!("[PAUSE] DEBUG: Adding PauseCamera component");
                 commands.entity(camera_entity).insert(PauseCamera);
                 info!("[PAUSE] DEBUG: PauseCamera component added successfully");
@@ -107,7 +105,6 @@ fn pause_ui(
 
                 Layout::section_space(ui);
 
-                // Resume
                 if ModernButton::primary(ui, "Resume Game").clicked() {
                     info!("[PAUSE] Resuming game");
                     next_state.set(GameState::InGame);
@@ -115,7 +112,6 @@ fn pause_ui(
 
                 Layout::item_space(ui);
 
-                // Main Menu
                 if ModernButton::secondary(ui, "Main Menu").clicked() {
                     info!("[PAUSE] Returning to main menu");
                     next_state.set(GameState::MainMenu);

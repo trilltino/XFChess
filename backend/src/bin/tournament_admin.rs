@@ -4,7 +4,6 @@ use std::io::{self, Write};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
-// ── Config ────────────────────────────────────────────────────────────────────
 
 static SERVICE_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -88,7 +87,6 @@ fn client() -> reqwest::blocking::Client {
         .expect("Failed to build HTTP client")
 }
 
-// ── I/O helpers ───────────────────────────────────────────────────────────────
 
 fn prompt(label: &str) -> String {
     print!("  {}: ", label);
@@ -232,7 +230,6 @@ fn read_prize_shares(max_players: u16, is_free: bool) -> [u16; 4] {
     [first, second, third, fourth]
 }
 
-// ── API types ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct TournamentSummary {
@@ -307,7 +304,6 @@ struct KycStatus {
     requires_kyc: bool,
 }
 
-// ── Display helpers ───────────────────────────────────────────────────────────
 
 fn shorten(s: &str, max: usize) -> String {
     if s.len() <= max {
@@ -327,7 +323,6 @@ fn fmt_timestamp(ts: i64) -> String {
         .unwrap_or_else(|| ts.to_string())
 }
 
-// ── Actions ───────────────────────────────────────────────────────────────────
 
 fn list_tournaments() {
     println!("\n[LIST] Fetching all tournaments…\n");
@@ -368,11 +363,9 @@ fn list_tournaments() {
 fn create_tournament() {
     println!("\n[CREATE] New Tournament\n");
 
-    // --- Basic info ---
     let tournament_id = read_u64("Tournament ID (unique number)");
     let name = prompt("Tournament name");
 
-    // --- Format ---
     println!("\n  Format options:");
     println!("    1  Single Elimination");
     println!("    2  Swiss");
@@ -393,11 +386,9 @@ fn create_tournament() {
         }
     };
 
-    // --- Entrant count ---
     println!();
     let max_players = read_max_players();
 
-    // --- Minimum players (optional) ---
     let min_players: Option<u16> = {
         let s = prompt(&format!(
             "Minimum players to start (leave blank for {})",
@@ -406,7 +397,6 @@ fn create_tournament() {
         s.parse().ok()
     };
 
-    // --- Entry fee ---
     println!("\n  Entry fee examples:");
     println!("    0          = FREE (no prizes)");
     println!("    10000000   = 0.01 SOL");
@@ -415,25 +405,20 @@ fn create_tournament() {
     let entry_fee_lamports = read_u64("Entry fee (lamports)");
     let is_free = entry_fee_lamports == 0;
 
-    // --- Prize shares ---
     println!();
     let prize_shares = read_prize_shares(max_players, is_free);
 
-    // --- ELO range ---
     println!("\n  ELO gating (optional — leave blank to allow all ratings)");
     let elo_min = read_u32_opt("Minimum ELO");
     let elo_max = read_u32_opt("Maximum ELO");
 
-    // --- KYC / CACF ---
     println!("\n  CACF KYC — require players to have completed identity verification?");
     println!("  (Players must register via /identity/register on the website or in-game)");
     let kyc_required = confirm("Require KYC/CACF for all entrants?");
 
-    // --- Schedule ---
     println!();
     let scheduled_at = read_scheduled_at();
 
-    // --- Summary ---
     println!("\n  ┌── Tournament Summary ──────────────────────────────────┐");
     println!("  │ ID:        {:<44}│", tournament_id);
     println!("  │ Name:      {:<44}│", shorten(&name, 44));
@@ -906,17 +891,8 @@ fn calculate_prizes() {
     }
 }
 
-// ── Recovery (direct RPC, no backend) ───────────────────────────────────────
-//
-// Everything above this section talks to the backend's HTTP API. This one
-// command deliberately doesn't: it's the "break glass" path from the
-// persistency plan — round advancement for a Swiss tournament is a
-// permissionless on-chain instruction (`advance_round`) specifically so a
-// stalled tournament can be pushed forward even if the backend that would
-// normally do this automatically is gone for good. Needs only an RPC URL and
-// a funded keypair to pay the (tiny) transaction fee — the keypair does not
-// need any special authority, since the program validates completeness from
-// on-chain state, not from who calls it.
+// Permissionless Swiss round recovery uses direct RPC when the backend is
+// unavailable. Requires a funded fee payer, not a privileged authority.
 
 const DEFAULT_PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
@@ -984,15 +960,12 @@ fn advance_tournament_round_directly() {
     }
 }
 
-// ── Menu ──────────────────────────────────────────────────────────────────────
 
 fn print_header() {
     println!("\n╔═══════════════════════════════════════════════════════════════════╗");
     println!("║         XFChess Tournament Admin CLI                              ║");
     println!("╚═══════════════════════════════════════════════════════════════════╝");
-    // Everything except menu option 11 (direct-RPC recovery) needs a backend
-    // + admin key. Don't hard-require either up front — option 11 exists
-    // specifically for when there's no backend to talk to.
+    // Require backend credentials per option; direct-RPC recovery works without the backend.
     match env::var("ADMIN_API_KEY") {
         Ok(key) => {
             println!("  Server : {}", server_url());

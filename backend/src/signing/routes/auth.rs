@@ -131,7 +131,6 @@ pub fn auth_routes() -> Router<AppState> {
         .route("/privy-login", post(privy_login))
 }
 
-// ── Privy social login ─────────────────────────────────────────────────────────
 
 const SOCIAL_SIGNUP_HOURLY_CAP: i64 = 200;
 
@@ -167,7 +166,6 @@ async fn privy_login(
     //    every other wallet route; a Privy wallet is an ordinary ed25519 keypair.
     verify_wallet_sig(&req.wallet, &req.signature, "login", req.timestamp)?;
 
-    // 2. Privy token — corroboration. Fails closed on an unreachable JWKS.
     let claims = privy::verify_access_token(&req.privy_token)
         .await
         .map_err(|e| match e {
@@ -192,15 +190,11 @@ async fn privy_login(
         .filter(|e| !e.is_empty());
     let email = email_owned.as_deref();
 
-    // 3. Existing binding for this credential?
     let bound = state.store.find_wallet_by_social(provider, &subject).await;
 
     if let Some(bound_wallet) = bound {
-        // Refuse to re-point an existing credential at a different wallet. Same
-        // invariant `link_wallet` enforces for email/password accounts: silently
-        // re-attaching would detach this identity from whatever KYC, CACF and
-        // session history sits under the old wallet, none of which is reconciled
-        // anywhere.
+        // A linked credential cannot change wallets; KYC and session history remain
+        // bound to the original wallet.
         if bound_wallet != req.wallet {
             return Err((
                 StatusCode::CONFLICT,
@@ -210,7 +204,6 @@ async fn privy_login(
             ));
         }
     } else {
-        // 4. First binding for this credential. Enforce D3 on the email, if any.
         if let Some(addr) = email {
             if let Some(other) = state
                 .store
@@ -270,7 +263,6 @@ async fn privy_login(
         }
     };
 
-    // 6. Record/refresh the credential binding.
     let login_method = req
         .login_method
         .as_deref()
@@ -283,7 +275,6 @@ async fn privy_login(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // 7. Ordinary XFChess JWT, keyed on the wallet like every other login.
     let token = state
         .jwt
         .issue(&req.wallet)
@@ -300,7 +291,6 @@ async fn privy_login(
     }))
 }
 
-// ── Shared response ────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 pub struct AuthResp {
@@ -309,7 +299,6 @@ pub struct AuthResp {
     pub wallet: String,
 }
 
-// ── Register ───────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct RegisterReq {
@@ -355,7 +344,6 @@ async fn register(
     }))
 }
 
-// ── Login ──────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct LoginReq {
@@ -388,7 +376,6 @@ async fn login(
     }))
 }
 
-// ── Email/Password Auth ────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct RegisterEmailReq {
@@ -505,7 +492,6 @@ async fn link_wallet(
     // 1. Verify Wallet Signature
     verify_wallet_sig(&req.wallet, &req.signature, "link", req.timestamp)?;
 
-    // 2. Verify Email/Password
     let user = state.store.find_user_by_email(&req.email).await.ok_or((
         StatusCode::UNAUTHORIZED,
         "Invalid email or password".to_string(),
@@ -527,16 +513,8 @@ async fn link_wallet(
             )
         })?;
 
-    // 3. Refuse to silently re-point an already-linked account to a
-    // different wallet. `link_wallet`'s UPDATE has no concept of "this
-    // account already has an identity" — letting it succeed here would
-    // silently detach this email/username from its current wallet (and
-    // whatever KYC/CACF/session history sits under that wallet string,
-    // none of which is reconciled anywhere) and re-attach the account to a
-    // new one, with no history or explicit consent step. Linking a wallet
-    // for the first time (the common case: an email-first account that
-    // never had one) is unaffected — this only blocks a SECOND link to a
-    // DIFFERENT wallet.
+    // Allow the first wallet link or an idempotent relink to the same wallet.
+    // Changing an existing identity requires an explicit migration of its history.
     if !user.0.is_empty() && user.0 != req.wallet {
         return Err((
             StatusCode::CONFLICT,
@@ -546,7 +524,6 @@ async fn link_wallet(
         ));
     }
 
-    // 4. Link Wallet
     state
         .store
         .link_wallet(&req.email, &req.wallet)
@@ -557,7 +534,6 @@ async fn link_wallet(
     Ok(Json(()))
 }
 
-// ── GET /auth/me ───────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 struct MeResp {
@@ -626,9 +602,7 @@ async fn me(
         false
     };
 
-    // Pull ELO from on-chain cache (non-fatal if missing or no profile yet).
-    // `elo_rating` is stored centiscale (1200 Elo = 120000) — convert to
-    // display scale, matching `external_elo.rs`/`anticheat_enqueue.rs`.
+    // Convert on-chain centiscale ELO (120000 = 1200) to display units; missing profiles are nonfatal.
     let cached_elo = state.elo_cache.get_elo(&wallet).await.ok();
     let elo = cached_elo
         .as_ref()
@@ -663,7 +637,6 @@ async fn me(
     }))
 }
 
-// ── POST /auth/add-email ────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct AddEmailReq {
@@ -697,7 +670,6 @@ async fn add_email(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-// ── POST /auth/sync-profile ────────────────────────────────────────────────────
 
 #[derive(borsh::BorshDeserialize)]
 struct ProfileOnChain {
@@ -774,21 +746,13 @@ async fn fetch_onchain_profile(
             "Account data too short".to_string(),
         ));
     }
-    // `deserialize`, not `try_from_slice`: Anchor allocates `8 +
-    // PlayerProfile::INIT_SPACE`, which reserves the *max* length of every
-    // `#[max_len]` string, while borsh writes only the actual bytes. Every
-    // real profile therefore ends in zero padding, and `try_from_slice`
-    // rejects leftover bytes ("Not all bytes read") — which made this fail
-    // for every wallet that had a profile at all. Reading only the fields we
-    // declare and ignoring the tail is exactly what Anchor's own
-    // `try_deserialize` does on-chain.
+    // Deserialize fields while tolerating Anchor allocation padding; try_from_slice
+    // rejects the unused tail reserved by INIT_SPACE.
     let profile = ProfileOnChain::deserialize(&mut &account.data[8..]).map_err(|e| {
         (
             StatusCode::UNPROCESSABLE_ENTITY,
-            // Length is the first thing to check when this fires: a profile
-            // created by an older program version is too short for the fields
-            // declared above and hits EOF here (devnet still has 200-byte
-            // pre-`date_of_birth` accounts from an old bot-seeding run).
+            // Older PlayerProfile allocations may be shorter than this field layout;
+            // report their length when deserialization reaches EOF.
             format!(
                 "Failed to decode profile ({} bytes): {e}",
                 account.data.len()
@@ -839,7 +803,6 @@ async fn sync_profile(
     })))
 }
 
-// ── POST /auth/init-profile-tx ────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct InitProfileTxReq {
@@ -902,15 +865,12 @@ async fn init_profile_tx(
     let discriminator: [u8; 8] = [0xd2, 0xa2, 0xd4, 0x5f, 0x5f, 0xba, 0x59, 0x77];
     let mut data = Vec::with_capacity(64);
     data.extend_from_slice(&discriminator);
-    // username
     let un_bytes = req.username.as_bytes();
     data.extend_from_slice(&(un_bytes.len() as u32).to_le_bytes());
     data.extend_from_slice(un_bytes);
-    // country
     let co_bytes = req.country.as_bytes();
     data.extend_from_slice(&(co_bytes.len() as u32).to_le_bytes());
     data.extend_from_slice(co_bytes);
-    // date_of_birth (i64 LE)
     data.extend_from_slice(&req.date_of_birth.to_le_bytes());
 
     let accounts = vec![
@@ -926,11 +886,7 @@ async fn init_profile_tx(
         data,
     };
 
-    // Fetch a recent blockhash so the transaction is immediately broadcastable.
-    // `finalized`, not `confirmed` — this transaction goes to a browser wallet
-    // extension, which decides whether to sign it at all by looking the
-    // blockhash up on its selected cluster at finalized commitment. See
-    // `solana::wallet_signable_blockhash`.
+    // Use a finalized blockhash so wallet extensions can validate it on their cluster.
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
     let recent_blockhash =
         tokio::task::spawn_blocking(move || solana::wallet_signable_blockhash(&rpc))
@@ -957,7 +913,6 @@ async fn init_profile_tx(
     }))
 }
 
-// ── POST /auth/init-profile-sponsored-tx ──────────────────────────────────────
 
 #[derive(Serialize)]
 struct InitProfileSponsoredResp {
@@ -988,12 +943,7 @@ async fn init_profile_sponsored_tx(
         )
     })?;
 
-    // ── KYC gate ──────────────────────────────────────────────────────────
-    // Uses the working KYC store (kyc_records, written by /api/kyc/submit) —
-    // NOT vault_users, which historically was never populated. See
-    // docs/plans/identity-implementation-plan.md.
-    // Bypassed on devnet — mirrors the can_wager devnet bypass in kyc.rs/auth.rs
-    // (see SigningConfig::is_devnet() doc comment); mainnet stays fully gated.
+    // Use active kyc_records. Devnet bypasses this gate; mainnet requires KYC.
     let vault = crate::signing::storage::vault::VaultStore::new(
         (*state.vault_pool).clone(),
         state.store.pool(),
@@ -1005,7 +955,6 @@ async fn init_profile_sponsored_tx(
         ));
     }
 
-    // ── One sponsorship per account ─────────────────────────────────────
     if state.store.profile_sponsored_at(&wallet).await.is_some() {
         return Err((
             StatusCode::CONFLICT,
@@ -1054,16 +1003,8 @@ async fn init_profile_sponsored_tx(
         data,
     };
 
-    // discriminator(8) + PlayerProfile::INIT_SPACE(281: 257 plus the 24 bytes
-    // added by `elo_bullet`/`elo_blitz`/`elo_rapid`, three f64 per-time-
-    // control ratings appended to the struct). The username_record
-    // account struct constraint is `space = 8 + UsernameRecord::LEN`, and
-    // UsernameRecord::LEN (48) already includes its own discriminator — so
-    // the real allocated space is 56, not 48 (verified against a live
-    // ProgramTest run in programs/xfchess-game/tests/init_profile_sponsored_tests.rs,
-    // which failed on-chain with "insufficient lamports" before this fix).
-    // Kept in sync manually since the backend doesn't depend on the program
-    // crate — see programs/xfchess-game/src/state/{player_profile.rs,username_record.rs}.
+    // Keep rent sizes aligned with the program: PlayerProfile is 8 + INIT_SPACE
+    // (281 bytes); UsernameRecord is 8 + LEN (48 bytes, already including a discriminator).
     const PROFILE_SPACE: usize = 8 + 281;
     const USERNAME_RECORD_SPACE: usize = 8 + 48;
 
@@ -1121,7 +1062,6 @@ async fn init_profile_sponsored_tx(
     }))
 }
 
-// ── POST /auth/broadcast-tx ───────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct BroadcastTxReq {
@@ -1171,7 +1111,6 @@ async fn broadcast_tx(
     }))
 }
 
-// ── PATCH /auth/username ──────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct SetUsernameReq {
@@ -1220,7 +1159,6 @@ async fn set_username(
     Ok(Json(serde_json::json!({ "username": req.username })))
 }
 
-// ── POST /auth/logout ──────────────────────────────────────────────────────────
 
 async fn logout(
     State(state): State<AppState>,
@@ -1237,7 +1175,6 @@ async fn logout(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-// ── Check username ─────────────────────────────────────────────────────────────
 
 async fn check_username(
     State(state): State<AppState>,
@@ -1247,7 +1184,6 @@ async fn check_username(
     Json(serde_json::json!({ "taken": taken }))
 }
 
-// ── Check wallet ───────────────────────────────────────────────────────────────
 
 async fn check_wallet(
     State(state): State<AppState>,
@@ -1264,7 +1200,6 @@ async fn check_wallet(
     }
 }
 
-// ── GDPR delete ────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct DeleteReq {
@@ -1286,14 +1221,12 @@ async fn delete_account(
         .await
         .ok_or((StatusCode::NOT_FOUND, "Wallet not registered".to_string()))?;
 
-    // 1. Erase auth record
     state
         .store
         .erase_user(&req.wallet)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // 2. Erase KYC PII from vault and write audit trail
     let vault = crate::signing::storage::vault::VaultStore::new(
         (*state.vault_pool).clone(),
         state.store.pool(),
@@ -1311,15 +1244,8 @@ async fn delete_account(
     ))
 }
 
-// ── SIWS (Sign-In With Solana) ─────────────────────────────────────────────────
-//
-// Headless wallet auth for the game client — no browser extension required.
-// Flow:
-//   1. POST /auth/siws-challenge  →  { nonce }
-//   2. Client signs `"xfchess:siws:<nonce>"` with their wallet keypair
-//   3. POST /auth/siws-verify { wallet, signature, nonce }  →  AuthResp (JWT)
-//
-// Nonces are one-time-use and expire after 5 minutes.
+// SIWS: issue a nonce, sign xfchess:siws:<nonce>, then verify for a JWT.
+// Nonces are single-use and expire after five minutes.
 
 #[derive(Deserialize)]
 struct SiwsChallengeReq {

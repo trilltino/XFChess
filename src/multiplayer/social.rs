@@ -9,7 +9,6 @@ use crate::multiplayer::network::vps::{
 };
 use crate::multiplayer::types::NetworkEvent;
 
-// ── Resources ────────────────────────────────────────────────────────────────
 
 #[derive(Resource)]
 pub struct FriendsState {
@@ -83,7 +82,6 @@ pub struct BackendRegion {
     pub latency_ms: Option<u32>,
 }
 
-// ── Lobby filter config ───────────────────────────────────────────────────────
 
 #[derive(Resource, Default)]
 pub struct LobbyFilterConfig {
@@ -121,7 +119,6 @@ impl LobbySort {
     }
 }
 
-// ── Lobby fetch state ─────────────────────────────────────────────────────────
 
 #[derive(Resource, Default)]
 pub struct LobbyFetchState {
@@ -140,7 +137,6 @@ pub enum LobbyLoadStatus {
     Error(String),
 }
 
-// ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct SocialPlugin;
 
@@ -166,7 +162,6 @@ impl Plugin for SocialPlugin {
     }
 }
 
-// ── Systems ───────────────────────────────────────────────────────────────────
 
 fn sync_node_id_from_network(
     mut friends: ResMut<FriendsState>,

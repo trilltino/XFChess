@@ -67,11 +67,7 @@ pub fn initialize_braid_network(
     network_state.bootstrap_sender = Some(bootstrap_tx.clone());
     network_state.subscription_sender = Some(sub_tx);
 
-    // Cloned `Arc`, not a snapshot — this task reads the *shared* cell fresh
-    // on every send (see `OnlineNetworkState::session_signing_key_shared`'s
-    // doc comment), since a plain copy taken here would forever be `None`:
-    // this function runs at app boot, long before any wallet connects and a
-    // real signing key exists.
+    // Read the shared signing-key cell on each send; boot precedes wallet connection.
     let session_signing_key_shared = network_state.session_signing_key_shared.clone();
     let event_tx_clone = event_tx.clone();
 
@@ -89,12 +85,7 @@ pub fn initialize_braid_network(
             .map(|d| d.join("xfchess").join("braid"))
             .or_else(|| Some(std::path::PathBuf::from("braid-data")));
 
-        // Namespaced by XFCHESS_WALLET_PORT (same instance-scoping signal used
-        // for the hot wallet path, session-key storage, and wallet bridge
-        // elsewhere) so two same-machine instances (`just dev2`'s P1/P2, base
-        // port 7454 vs 7464) don't both bind 127.0.0.1:8181 — the second one
-        // always failed with "Only one usage of each socket address ...
-        // (os error 10048)" and silently never got a spectator TCP bridge.
+        // Scope spectator bridge ports by XFCHESS_WALLET_PORT for concurrent local instances.
         let wallet_port: u16 = std::env::var("XFCHESS_WALLET_PORT")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -160,21 +151,16 @@ pub fn initialize_braid_network(
         let bootstrap_tx_sub = bootstrap_tx.clone();
         let bootstrap_tx_main = bootstrap_tx.clone();
 
-        // 1. Outgoing message loop
         let event_tx_error = event_tx_clone.clone();
         tokio::spawn(async move {
             while let Some(msg) = msg_rx.recv().await {
-                // Determine topic before msg is potentially consumed by signing.
                 let topic = match &msg {
                     NetworkMessage::GameInvite { .. }
                     | NetworkMessage::InviteResponse { .. }
                     | NetworkMessage::GameStart { .. } => GAME_TOPIC.to_string(),
                     _ => format!("{}/{}", GAME_TOPIC, msg.game_id()),
                 };
-                // Captured before `msg` is potentially consumed below — kept
-                // deliberately cheap (variant name + game_id only) so this
-                // log line is safe to leave on permanently, unlike dumping
-                // full message contents.
+                // Capture variant and game ID before consuming msg; avoid logging full message contents.
                 let msg_kind = msg.kind_str();
                 let msg_game_id = msg.game_id();
 
@@ -186,9 +172,7 @@ pub fn initialize_braid_network(
                     .unwrap_or(None);
                 let signed = session_signing_key.is_some();
 
-                // Serialize with a 1-byte version prefix:
-                // 0x02 = bincode-encoded SignedNetworkMessage (secure path)
-                // 0x01 = JSON-encoded NetworkMessage (legacy plain path)
+                // Wire prefix: 0x02 = bincode SignedNetworkMessage; 0x01 = legacy JSON NetworkMessage.
                 let payload_bytes: Vec<u8> = if let Some(ref sk) = session_signing_key {
                     let signed = SignedNetworkMessage::sign(msg, sk);
                     match bincode::serialize(&signed) {
@@ -247,19 +231,11 @@ pub fn initialize_braid_network(
             }
         });
 
-        // 2. Subscription loop
         let event_tx_sub = event_tx_clone.clone();
         tokio::spawn(async move {
             while let Some(topic) = sub_rx.recv().await {
-                // Bootstrap with every peer we already know. Subscribing with
-                // an empty bootstrap list (as this did) joins a swarm of one:
-                // the topic exists locally, broadcasts succeed, and nothing is
-                // ever delivered to the opponent.
-                //
-                // The lock is held across the subscribe so the bootstrap loop
-                // can't observe a topic that `SubscriptionManager` hasn't
-                // registered yet (its `join_peers` errors on an unknown topic)
-                // nor add a peer that this snapshot has already missed.
+                // Bootstrap known peers while holding the subscription lock so no peer is
+                // lost between the snapshot and topic registration.
                 let mut mesh = mesh_sub.lock().await;
                 let bootstrap = mesh.subscribe(&topic);
                 info!(
@@ -285,12 +261,9 @@ pub fn initialize_braid_network(
             }
         });
 
-        // 3. Bootstrap loop
         tokio::spawn(async move {
             while let Some(peer_id) = bootstrap_rx.recv().await {
-                // Join the peer into every topic we hold, not just the global
-                // one — the per-game move topic is the one that matters, and
-                // it may have been subscribed before this peer was known.
+                // Join every tracked topic, including game topics subscribed before this peer was discovered.
                 let topics = mesh_bootstrap.lock().await.add_peer(peer_id);
                 for topic in topics {
                     if let Err(e) = node_bootstrap.join_peers(&topic, vec![peer_id]).await {
@@ -302,7 +275,6 @@ pub fn initialize_braid_network(
             }
         });
 
-        // 4. Main gossip pump (global topic)
         process_gossip_stream(rx, event_tx_clone, bootstrap_tx_main).await;
     });
 }
@@ -323,10 +295,7 @@ async fn process_gossip_stream(
         match result {
             Ok(IrohEvent::NeighborUp(peer_id)) => {
                 info!("[NET] Peer connected via gossip: {}", peer_id);
-                // The subscription that observed this peer may be the global
-                // topic, while a game topic was subscribed later. Feed the
-                // endpoint into the bootstrap loop so it joins every topic
-                // currently tracked by GossipMesh.
+                // Bootstrap this endpoint into every tracked topic, including topics subscribed after discovery.
                 bootstrap_tx.send(peer_id).ok();
                 let bs58_id = bs58::encode(peer_id.as_bytes()).into_string();
                 event_tx
@@ -427,11 +396,7 @@ async fn process_gossip_stream(
                             } else if let Ok(net_msg) =
                                 serde_json::from_slice::<NetworkMessage>(&body)
                             {
-                                // Plain unsigned legacy message. A3: rejected by
-                                // default — accepting it would let a peer bypass
-                                // authentication entirely by sending plaintext.
-                                // The `allow-unsigned-p2p` feature re-enables it
-                                // for local dev/testing only.
+                                // Reject unsigned messages unless allow-unsigned-p2p is enabled for local testing.
                                 #[cfg(feature = "allow-unsigned-p2p")]
                                 {
                                     warn!(
@@ -493,25 +458,9 @@ pub fn handle_network_events(
     };
 
     while let Some(event) = incoming.pop_front() {
-        // Dual-transport reorder gate for `Move` — see
-        // `crate::multiplayer::network::reorder` for why this exists: gossip
-        // and the VPS relay have independent latency, so move N+1 can arrive
-        // before move N. Buffer out-of-order arrivals via `NonceSequencer`
-        // and release them in strict order instead of letting a fast-path
-        // N+1 jump the old `expected_nonces` counter forward and permanently
-        // orphan N when it later shows up (rejected as a "replay" it never
-        // was). Gated arrivals land in `ready` — a separate queue from
-        // `incoming` — so a message released from the buffer here is never
-        // re-fed through the gate a second time (it would look like a
-        // duplicate, since the sequencer's `expected` has already moved past
-        // it).
-        //
-        // `Resign` deliberately does NOT go through this gate: it's a
-        // terminal, idempotent, order-independent signal, not part of the
-        // ordered move stream — sharing this gate previously meant every
-        // resign (which used a hardcoded `nonce: 0`, always `< expected`
-        // once any real move had been seen) was silently dropped and never
-        // reached the opponent.
+        // Sequence moves across gossip and relay transports before adding them to ready.
+        // Do not feed released messages through the gate again. Resign bypasses the gate
+        // because it is terminal, idempotent, and outside the ordered move stream.
         let mut ready: VecDeque<NetworkEvent> = VecDeque::new();
         if let NetworkEvent::MessageReceived(NetworkMessage::Move { nonce, .. }) = &event {
             let nonce = *nonce;
@@ -620,9 +569,7 @@ pub fn handle_network_events(
                     }
                 }
                 NetworkEvent::MessageReceived(msg) => {
-                    // Move's own nonce ordering/replay protection is handled by
-                    // `NonceSequencer` before we get here (see above) — by this
-                    // point a `Move` has already been confirmed in-order.
+                    // NonceSequencer has already ordered and replay-checked moves before this point.
                     let game_id = msg.game_id();
 
                     match msg {
@@ -678,19 +625,8 @@ pub fn handle_network_events(
                         _ => {}
                     }
 
-                    // A2: build the per-game roster of allowed signer keys from
-                    // SessionInfo (broadcast only after the VPS confirms a session is
-                    // active). Capped at two — the two participants.
-                    //
-                    // Must use `signing_pubkey`, NOT `session_pubkey` — the roster is
-                    // checked against `signer_pubkey`, which `bind_identity` sets from the
-                    // verified signer of this message's own P2P envelope (i.e. the
-                    // sender's `session_signing_key`, an ephemeral per-connection
-                    // gossip key). `session_pubkey` is a completely different key
-                    // (the VPS/backend on-chain session-delegation key). Populating
-                    // the roster from it meant no real move's signer could ever
-                    // match, so every move was rejected as "non-participant" as soon
-                    // as the roster had any entry at all.
+                    // Build a two-participant roster from gossip signing_pubkey, which must
+                    // match the verified envelope signer, not the session delegation key.
                     if let NetworkMessage::SessionInfo {
                         game_id: sg,
                         player_pubkey,
@@ -698,14 +634,8 @@ pub fn handle_network_events(
                         ..
                     } = msg
                     {
-                        // Phase C (`docs/plans/networking-hardening-plan.md`):
-                        // once the backend-verified on-chain wallets are
-                        // known for this game, a claim whose `player_pubkey`
-                        // isn't actually white or black is never trusted
-                        // into the roster — closing the race a forged
-                        // SessionInfo could otherwise win by arriving first.
-                        // Absent (casual game, or fetch not complete yet)
-                        // falls back to the original trust-first bootstrap.
+                        // When on-chain participants are known, reject claims for other wallets.
+                        // Casual games or pending lookups retain the bootstrap path.
                         let claim_trusted = match causal.verified_wallets.get(sg) {
                             Some((white, black)) => {
                                 let claimed = player_pubkey.to_string();
@@ -750,12 +680,7 @@ pub fn handle_network_events(
                     } = msg
                     {
                         if !signer_pubkey.is_empty() && *seq > 0 {
-                            // A2: roster check. `signer_pubkey` here is the VERIFIED signer
-                            // (bound in `bind_identity`). Once we know this game's
-                            // participant session keys (from `SessionInfo`), reject any
-                            // move whose signer is not one of them — a stranger cannot
-                            // inject a move into a game they are not part of, even with
-                            // a valid signature of their own.
+                            // After roster establishment, accept moves only from its verified signers.
                             if let Some(allowed) = causal.roster.get(&game_id) {
                                 if !allowed.is_empty() && !allowed.contains(signer_pubkey) {
                                     warn!(
@@ -803,16 +728,8 @@ pub fn handle_network_events(
                                 });
                                 continue;
                             }
-                            // Equivocation guard. Once we have a head for THIS agent
-                            // (the game has progressed past their first move), EVERY
-                            // subsequent move must name that head as its parent —
-                            // including a move that falsely claims genesis ("0") or an
-                            // empty parent. Gating on `parent_version != "0"` (as
-                            // before) let a malicious peer bypass the check by attaching
-                            // "0" to a move with an otherwise-valid sequence number,
-                            // forking our local head. Verified by the TLA+ model in
-                            // specs/CausalChain.tla (CC_byzantine_current = fork,
-                            // CC_byzantine_fixed = safe across 15.2M states).
+                            // Every noninitial move must name the current head, even if it claims a
+                            // genesis parent. See specs/CausalChain.tla for the equivocation model.
                             if !our_head.is_empty() && parent_version != &our_head {
                                 warn!(
                                     "[NET] Equivocation detected for game {}: \
@@ -837,10 +754,7 @@ pub fn handle_network_events(
                                 .or_default()
                                 .insert(new_head.clone());
                             causal.head_version.insert(agent_key, new_head);
-                            // Cross-transport dedup: if the Braid moves log
-                            // already delivered this exact move (same
-                            // resulting position), skip re-dispatching it to
-                            // the board — see `CausalChainState::applied_versions`.
+                            // Skip moves already applied through Braid, identified by their resulting position.
                             if !first_time_seen {
                                 info!(
                                     "[NET] Move for game {} already applied via another transport — skipping duplicate dispatch",
@@ -1009,33 +923,13 @@ pub fn feed_local_moves_to_rollup(
     mut move_events: MessageReader<MoveMadeEvent>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
 ) {
-    // `game_id != 0` is the real "is there an active on-chain game" signal.
-    // This used to also require `OnlineNetworkState::active_session` to be
-    // `Some`, but that field is only ever set by the `NetworkMessage::GameStart`
-    // handler (the old direct-invite P2P flow's `GameInvite`/`InviteResponse`/
-    // `GameStart` handshake) — the current Solana lobby flow (VPS relay +
-    // `JOIN_ACK`) never sends that message, so `active_session` stayed `None`
-    // for the entire game. That silently meant no move was ever fed into the
-    // rollup batch, so nothing was ever recorded on the Ephemeral Rollup and
-    // no `[ER] Move ... recorded` log ever appeared — reproduced live across
-    // two full two-client devnet games, zero record_move calls in either.
+    // game_id != 0 identifies active on-chain games; VPS lobby games do not
+    // set the direct-invite active_session field.
     if rollup_manager.game_id == 0 {
         return;
     }
-    // Only the creator submits moves to the ER — same single-writer reasoning
-    // as delegation (`handle_game_start_delegation`'s doc comment: "If both
-    // players delegate simultaneously the second TX fails..."). The backend
-    // holds one shared per-game session key for `record_move`, so either
-    // client CAN ask it to submit — but if both do, they submit overlapping
-    // move sets with independently-assigned nonces, which collides with the
-    // program's strict nonce-per-turn ordering and fails the backend's own
-    // replay-validation ("Move ... rejected by engine"). Reproduced live: a
-    // 4-move game had the joiner submit its own 2 moves while the creator's
-    // manager (already fed by `feed_remote_moves_to_rollup` below) submitted
-    // an overlapping set — every `record_move` call failed. The joiner
-    // doesn't need `pending_batch` for anything else: `committed_fen`/
-    // `committed_turn` resync comes from `NetworkMessage::Committed`
-    // separately, not from what this function feeds.
+    // Only the creator submits rollup moves. Two writers would assign overlapping
+    // nonces; the joiner receives committed baselines independently.
     if !rollup_manager.is_creator {
         return;
     }
@@ -1072,8 +966,6 @@ pub fn feed_remote_moves_to_rollup(
     mut remote_events: MessageReader<crate::game::events::RemoteMoveApplied>,
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
 ) {
-    // See `feed_local_moves_to_rollup`'s comment — `active_session` used to
-    // be gated here too, and was just as dead for the same reason.
     if rollup_manager.game_id == 0 {
         return;
     }
@@ -1154,18 +1046,8 @@ pub fn finalize_game_on_end(
     mut rollup_manager: ResMut<crate::multiplayer::rollup::manager::EphemeralRollupManager>,
     mut rollup_events: MessageWriter<crate::multiplayer::rollup::manager::RollupEvent>,
 ) {
-    // See `feed_local_moves_to_rollup`'s comment — `active_session` used to
-    // be gated here too, and was just as dead for the same reason.
-    //
-    // Checkmate/stalemate/timeout are detected identically and deterministically
-    // by both clients, so without this gate BOTH players' processes independently
-    // re-submit the same trailing move batch to the backend at game end. The
-    // backend's `er_game_lock` only serializes those concurrent writes against
-    // each other, it doesn't prevent them — two processes racing the same
-    // delegated PDA is exactly what produced live `InvalidWritableAccount`
-    // failures on the final move (reproduced 2026-08-11, game 8344535065683900662).
-    // Restricting the final-batch submission to a single authoritative side
-    // (the host) removes the race outright instead of trying to order around it.
+    // Only the host submits the final move batch; serializing two writers
+    // would still permit duplicate submissions.
     for _event in game_end_events.read() {
         if !rollup_manager.is_creator {
             continue;
@@ -1512,11 +1394,7 @@ pub fn handle_game_control_messages(
                 game_id,
                 timestamp_ms,
             } => {
-                // Reply with Pong immediately. Gossip-only: a live Braid
-                // subscription is itself a connectivity-liveness signal now
-                // (see `braid_transport`'s module doc comment), so Ping/Pong
-                // doesn't need a durable fallback the way moves/resign/
-                // session-handshake do.
+                // Ping/Pong uses gossip only; a live Braid subscription already signals liveness.
                 let pong = NetworkMessage::Pong {
                     game_id: *game_id,
                     timestamp_ms: *timestamp_ms,
@@ -1596,13 +1474,6 @@ pub fn send_local_draw_events(
             flagged_player: ev.flagged_player.clone(),
         });
     }
-    // The in-game "Resign" button (game_ui.rs) only ever wrote the local
-    // ResignEvent that updates this client's own GameOverState — nothing
-    // forwarded it to the opponent, so resigning ended the game on one
-    // screen while the other side's clock and board just kept running.
-    // `confirm_exit_game` (input.rs) already sent NetworkMessage::Resign
-    // for the "exit mid-game" path; this closes the same gap for the actual
-    // Resign button.
     for ev in local_resigns.read() {
         if ev.remote {
             continue;
@@ -1745,28 +1616,13 @@ pub fn reset_multiplayer_session_state(
     braid_transport.reset();
     pending.sequencers.clear();
     pending.oldest_buffered_since.clear();
-    // Without this, a stale opponent-last-seen timestamp from the previous
-    // match's opponent could immediately read as "stale" against the new
-    // match's clock, false-positiving a disconnect banner at kickoff.
+    // Reset opponent liveness between matches to avoid a false disconnect at kickoff.
     *liveness = crate::multiplayer::social::OpponentLivenessState::default();
     #[cfg(feature = "solana")]
     {
         *rollup_manager = crate::multiplayer::rollup::manager::EphemeralRollupManager::default();
-        // RollupNetworkBridge was never reset here — a failed delegation
-        // retry/cooldown from one game (and the "Ephemeral Rollup Sync
-        // Issue" popup it drives) stayed live in this resource forever,
-        // including into a completely unrelated later casual game that
-        // never touches ER at all. That's exactly the "popup comes up as
-        // if they're the same thing" report: two genuinely separate game
-        // modes sharing one leftover piece of state.
-        //
-        // A full `Default` reset here was too broad, though: this system
-        // fires on `OnExit(InGame)`, i.e. the instant the game-over prompt
-        // is dismissed — which can happen before `retry_pending_finalization`
-        // has gotten around to spawning the undelegate+finalize task for a
-        // just-finished wagered game. Wiping the bridge at that moment
-        // silently dropped the queued finalization with no error, stranding
-        // the wager. Preserve any in-flight finalization instead.
+        // Reset stale rollup state when leaving a game, but retain in-flight finalization
+        // so dismissing the game-over prompt cannot strand the wager.
         rollup_bridge.reset_preserving_finalization();
     }
     info!("[NET] Reset P2P connection, heartbeat, Braid transport, opponent-liveness, and rollup bridge state on match exit");
@@ -2058,17 +1914,8 @@ mod dual_transport_dedup_property_tests {
             prop_assume!(move_count > 0);
             let mut deliveries = deliveries;
 
-            // Once gossip misses one move for this agent (a pure-relay
-            // delivery), gossip's own per-agent seq chain has a permanent gap
-            // for this receiver — the *next* gossip message would be
-            // correctly rejected as a seq gap (a real, already-covered
-            // mechanism: `NonceSequencer`'s `Overflow{resync_from}` triggers
-            // a resync). That's a gap-recovery/liveness concern, not the
-            // cross-transport *dedup* property this test targets — so once a
-            // gossip miss occurs, every later move is normalized to also
-            // skip gossip, keeping the chain (and this test's scope)
-            // consistent instead of tripping an unrelated, already-tested
-            // rejection path.
+            // After a gossip-only sequence gap, use relay copies for the remainder of
+            // this dedup test. Gap recovery is covered separately.
             let mut gossip_has_gapped = false;
             for d in deliveries.iter_mut().take(move_count) {
                 if gossip_has_gapped {
@@ -2114,10 +1961,8 @@ mod dual_transport_dedup_property_tests {
                 }
             }
 
-            // Gossip arrivals are shuffled — NonceSequencer must reorder them
-            // back into strict nonce order before the causal chain ever sees
-            // them. Relay arrivals are shuffled too, since Braid needs no
-            // ordering at all by design.
+            // Shuffle both transports; NonceSequencer must restore strict gossip nonce order
+            // before the causal chain sees messages.
             shuffle(&mut gossip_items, gossip_seed);
             shuffle(&mut relay_items, relay_seed);
 
@@ -2142,12 +1987,8 @@ mod dual_transport_dedup_property_tests {
                 relay_rx,
             ));
 
-            // `.chain()` on the three systems above means `dispatch_remote_moves`
-            // (last in the chain) already sees, within this same update, every
-            // message the first two wrote — one `update()` is enough. A second
-            // no-op update is added defensively; Bevy retains messages for 2
-            // frames after they're written, so nothing from the first update
-            // is dropped by the time this reads them.
+            // The system chain delivers messages in one update. A second update remains
+            // within Bevy's two-frame message retention window.
             app.update();
             app.update();
 

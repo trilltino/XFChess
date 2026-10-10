@@ -111,7 +111,6 @@ impl FollowRedirects {
                     return Err(MiddlewareError::RedirectLimitExceeded.into());
                 }
 
-                // Extract Location
                 let location = response
                     .headers()
                     .get(http::header::LOCATION)

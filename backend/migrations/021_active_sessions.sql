@@ -1,11 +1,3 @@
--- Migration 021: active_sessions table for disconnect recovery
---
--- Backs GET /admin/active-sessions (backend/src/db/repository.rs
--- list_active_sessions) and backend/src/db/sessions.rs's session-recovery
--- queries. Previously only defined in db/schema.rs::init_db, which is never
--- called from the real startup path (infrastructure/database.rs::run_migrations
--- is what actually runs against the live pool) — the table never existed,
--- so every read of it failed with "no such table".
 
 CREATE TABLE IF NOT EXISTS active_sessions (
     session_id TEXT PRIMARY KEY,

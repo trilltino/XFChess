@@ -1,6 +1,5 @@
-# XFChess rollback script
-# Restores the previous backend binary (and optionally the databases).
-# Usage: .\ops\rollback.ps1 -Server 178.104.55.19 -User root [-RestoreDb]
+# Restore the prior backend binary and optionally databases.
+# Usage: .\ops\scripts\rollback.ps1 -Server <host> -User root [-RestoreDb]
 
 param(
     [string]$Server    = "178.104.55.19",
@@ -26,11 +25,9 @@ Write-Host "Restoring previous binary..." -ForegroundColor Yellow
 & ssh $DEST "cp /opt/xfchess/signing-server-http.prev /opt/xfchess/signing-server-http && chmod +x /opt/xfchess/signing-server-http"
 if ($LASTEXITCODE -ne 0) { Write-Host "Binary restore failed." -ForegroundColor Red; exit 1 }
 
-# ── Database rollback (opt-in with -RestoreDb) ────────────────────────────────
 if ($RestoreDb) {
     Write-Host "`nRestoring databases from latest snapshot..." -ForegroundColor Yellow
 
-    # Find latest backup for each db
     $latestSessions = (& ssh $DEST "ls -t /opt/xfchess/backups/sessions-*.db 2>/dev/null | head -1").Trim()
     $latestVault    = (& ssh $DEST "ls -t /opt/xfchess/backups/vault-*.db    2>/dev/null | head -1").Trim()
 
@@ -53,7 +50,6 @@ if ($RestoreDb) {
     Write-Host "`nDB not touched. Pass -RestoreDb to also restore databases." -ForegroundColor DarkGray
 }
 
-# ── Restart and verify ────────────────────────────────────────────────────────
 Write-Host "`nRestarting service..." -ForegroundColor Yellow
 & ssh $DEST "systemctl start xfchess-backend"
 if ($LASTEXITCODE -ne 0) { Write-Host "Service restart failed — check server." -ForegroundColor Red; exit 1 }

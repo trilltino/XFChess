@@ -22,21 +22,13 @@ fn remove_pid_file() {
 
 #[tokio::main]
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // Must happen before any TLS connection is attempted anywhere in the
-    // process (e.g. tasks::er_watch's wss:// pubsub connect, or any reqwest
-    // client). The dependency tree pulls in both rustls crypto backends
-    // (aws-lc-rs is the default in this workspace; some other dependency
-    // enables ring too), so rustls can't pick one on its own and panics on
-    // the first TLS handshake without this — took production down on first
-    // deploy after adding the WS pubsub watcher.
+    // Install a rustls crypto provider before any TLS connection: dependencies
+    // enable both backends, so automatic selection is ambiguous.
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("failed to install rustls default CryptoProvider");
 
     dotenv::dotenv().ok();
-    // Structured JSON logs when LOG_FORMAT=json (production: machine-parseable, one
-    // object per line, includes the per-request `request_id` span field). Human-readable
-    // pretty logs otherwise (local dev).
     let json_logs = std::env::var("LOG_FORMAT").is_ok_and(|v| v.eq_ignore_ascii_case("json"));
     if json_logs {
         tracing_subscriber::fmt()
@@ -64,10 +56,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // ── Write PID so the launcher can kill exactly this process on restart ──
     write_pid_file();
 
-    // ── Initialize database pools ────────────────────────────────────────
-    // Read DB locations from the environment so production can point them at
-    // /opt/xfchess/data (the only writable path under the hardened systemd
-    // unit). Falls back to the local-dev defaults when unset.
+    // Use configured DB paths; hardened production writes only to its data directory.
     let session_db =
         std::env::var("SESSION_DB_URL").unwrap_or_else(|_| "sqlite://sessions.db?mode=rwc".into());
     let vault_db =
@@ -75,15 +64,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let pools = initialize_pools(&session_db, &vault_db).await?;
     info!("[signing-server] Database pools initialized");
 
-    // ── Run database migrations ───────────────────────────────────────────
     run_migrations(&pools).await?;
     info!("[signing-server] Database migrations completed");
 
-    // ── Initialize application state ─────────────────────────────────────
-    // Vault used only to satisfy SessionStore::new's signature here — this
-    // local store exists solely to create/migrate tables via `.init()`
-    // before AppState::new builds the real one it actually reads/writes
-    // through.
+    // Initialize tables before AppState constructs the live SessionStore.
     let schema_vault = crate::signing::identity::IdentityVault::new(
         &config.identity_encryption_key,
         &config.identity_salt,
@@ -124,19 +108,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     state.orchestrator_tx = Some(orchestrator_tx);
 
-    // ── Initialize social tables (friends, contacts) ─────────────────────────
     if let Err(e) = state.friends.init().await {
         tracing::warn!("[signing-server] Failed to init friends tables: {}", e);
     }
     info!("[signing-server] Social tables initialized");
 
-    // ── Mirror every Braid hub update onto its tournament's gossip topic ─────
-    // One write, two transports: the Swiss orchestrator publishes a fact into
-    // the hub exactly once, and it reaches browsers over HTTP 209 (the /braid
-    // mount) and peers over gossip (here) as the same versioned update. This
-    // replaces the separate tagged-JSON broadcasts the service used to emit
-    // alongside its hub writes, and the SQLite log that existed only so a late
-    // peer could be replayed what those broadcasts dropped.
+    // Publish each fact once to the hub; fan out the same versioned update
+    // over HTTP 209 and gossip.
     {
         let gossip = state.tournament_gossip.clone();
         state
@@ -159,7 +137,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         info!("[signing-server] Braid hub → tournament gossip fan-out wired");
     }
 
-    // ── Build application router ───────────────────────────────────────────
     let app = crate::infrastructure::build_app_router(state.clone());
     info!("[signing-server] Application router built");
 
@@ -170,35 +147,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .await
             .map_err(|e| anyhow::anyhow!("failed to spawn braid-iroh node: {}", e))?;
 
-    // ── Spawn background tasks ───────────────────────────────────────────────
     let (tournament_trigger, ac_queue) = spawn_background_tasks(state.clone(), config);
     state.tournament_trigger = Some(tournament_trigger);
     state.anticheat_queue = Some(ac_queue);
     info!("[signing-server] Background tasks spawned");
 
-    // ── Spawn workers that need the fully-populated AppState ────────────────
-    // Must run after anticheat_queue is set above: spawn_reingest_sweep no-ops
-    // if the AppState snapshot it receives still has anticheat_queue = None,
-    // and Arc::new(state.clone()) freezes that snapshot at construction time.
-    // These used to live inside spawn_background_tasks itself (the old
-    // crate::tasks::spawn_background_tasks, since removed) where they ran
-    // before anticheat_queue existed on state at all — silently never doing
-    // anything useful. Wager games were never auto-settled as a result.
+    // Populate anticheat_queue before cloning state for workers; the snapshot
+    // is fixed at construction and reingestion skips a missing queue.
     let settlement_state = Arc::new(state.clone());
     crate::tasks::settlement_worker::spawn_settlement_worker(settlement_state.clone());
     crate::tasks::er_watch::spawn_er_watch(settlement_state.clone());
     crate::tasks::tournament_forfeit::spawn_tournament_forfeit_watcher(settlement_state.clone());
     crate::signing::anticheat_enqueue::spawn_reingest_sweep(settlement_state);
-    // Evicts expired SIWS nonces and idle per-game ER locks. Without this the
-    // nonce map grows on every unauthenticated challenge request and never
-    // shrinks — see `AppState::spawn_state_sweeps`.
+    // Sweep expired nonces and idle ER locks to bound memory from unauthenticated requests.
     AppState::spawn_state_sweeps(state.clone());
     // Pin the uptime clock to process start so `/stats` reports real uptime
     // rather than the elapsed time since whichever request first touched it.
     crate::signing::routes::main::init_uptime_clock();
     info!("[signing-server] Settlement worker + anti-cheat re-ingest sweep + ER watch + tournament auto-forfeit watcher + state sweeps spawned");
 
-    // ── Start HTTP Server ──────────────────────────────────────────────────
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
         .map_err(|e| anyhow::anyhow!("Failed to bind TCP listener on port {}: {}", port, e))?;
@@ -207,13 +174,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         port
     );
 
-    // Serve with graceful shutdown: on SIGTERM (systemctl stop/restart) or Ctrl-C,
-    // stop accepting new connections and let in-flight requests finish before exit.
-    // `into_make_service_with_connect_info` is what makes the peer address
-    // available to handlers. The RPC proxy's rate limiter needs it as ground
-    // truth: it previously keyed on the caller-supplied `x-real-ip` header,
-    // which anything reaching the port directly could rotate per request to
-    // escape the limit entirely.
+    // Use the socket peer address for RPC rate limiting; caller-supplied headers
+    // cannot establish client identity.
     axum::serve(
         listener,
         app.with_state(state.clone())

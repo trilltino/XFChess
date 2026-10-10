@@ -30,7 +30,7 @@ pub enum TxErrorCategory {
     InvalidInstruction,
     InsufficientFunds,
     AccountNotFound,
-    ProgramError(u32), // Custom program error code
+    ProgramError(u32),
 
     // Server/transient errors (retry)
     RpcTimeout,
@@ -132,7 +132,6 @@ pub async fn submit_er_with_telemetry(
         ..Default::default()
     };
 
-    // Send transaction
     let send_start = Instant::now();
     let sig = match rpc.send_transaction_with_config(tx, config) {
         Ok(sig) => sig,

@@ -1,10 +1,4 @@
--- Migration 020: casual (off-chain) game history + sponsored profile-creation guard
---
--- Casual games (vs bot / local P2P) played while logged into an Account are
--- recorded here for history only. They deliberately do NOT touch on-chain
--- elo_rating — writing to a Solana account costs a transaction per game, and
--- on-chain Elo stays driven only by real wagered/ranked on-chain settlement,
--- as today. See docs/plans/identity-implementation-plan.md.
+-- Casual games contribute history only; on-chain Elo changes through settlement.
 CREATE TABLE IF NOT EXISTS casual_games (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id      TEXT    NOT NULL,   -- wallet pubkey, or the "email:<addr>" JWT subject

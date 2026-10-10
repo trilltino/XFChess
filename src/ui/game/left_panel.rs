@@ -38,7 +38,6 @@ pub fn render_game_left_panel(
     ui.add_space(10.0);
     crate::ui::game::game_ui::render_moves_and_controls(ui, params);
 
-    // ── Chat (online games only), anchored lower in the panel ──────────────
     if is_online {
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             StyledPanel::sidebar_card()

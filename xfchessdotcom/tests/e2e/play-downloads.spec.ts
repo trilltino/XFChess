@@ -1,12 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-// Golden-path coverage for src/pages/play/play.tsx's platform download buttons.
-// Each button fetches the GitHub "latest release" API, picks the asset
-// matching its platform's filename pattern, and redirects the page straight
-// to that asset's download URL — falling back to the releases page if the
-// API call fails or no matching asset is found. The GitHub API and the
-// asset download itself are both mocked so this stays deterministic and
-// network-independent.
+// Mock release API and download responses to verify platform asset selection
+// and the release-page fallback without network dependencies.
 
 const RELEASES_URL = 'https://github.com/trilltino/XFChess/releases';
 

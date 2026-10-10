@@ -14,7 +14,6 @@ const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const EURC_MINT: &str = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"; // Circle EURC — verify on mainnet
 const BRLA_MINT: &str = "BRLbKUMNMHhpSA6pppwJT6MLBpVtCVhpPAMHu9KMLVH"; // BRLA Digital — verify on mainnet
 
-// ── Helius RPC helpers ──────────────────────────────────────────────────────
 
 fn helius_rpc_url() -> String {
     let key = std::env::var("HELIUS_API_KEY").unwrap_or_default();
@@ -138,7 +137,6 @@ async fn fetch_token_balances(
     Ok(rpc.result.value)
 }
 
-// ── Response types ──────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 pub struct StablecoinBalances {
@@ -168,7 +166,6 @@ fn country_currency(country: &str) -> (&'static str, &'static str) {
     }
 }
 
-// ── Route handler ───────────────────────────────────────────────────────────
 
 async fn get_wallet_balance(
     Path(pubkey): Path<String>,
@@ -185,16 +182,13 @@ async fn get_wallet_balance(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    // Fetch SOL balance
     let lamports = fetch_sol_lamports(&client, &pubkey).await.map_err(|e| {
         warn!("[WALLET] SOL balance fetch failed for {pubkey}: {e}");
         StatusCode::BAD_GATEWAY
     })?;
     let sol_balance = lamports as f64 / 1_000_000_000.0;
 
-    // Convert to USD + local fiat using the cached exchange-rate feed. Best-effort
-    // display only (unlike fee calculations, a rate-cache miss here degrades to
-    // zero values rather than failing the whole balance lookup).
+    // Display conversions are best effort: a rate-cache miss yields zero, unlike fee calculations.
     let rates = state.rate_cache.get().await.unwrap_or_else(|e| {
         warn!("[WALLET] rate cache unavailable, using zero rates: {e}");
         std::collections::HashMap::new()
@@ -205,7 +199,6 @@ async fn get_wallet_balance(
     let local_value = sol_balance * rates.get(currency_code).copied().unwrap_or(0.0);
     let local_currency = currency_code.to_uppercase();
 
-    // Fetch SPL token balances
     let token_accounts = fetch_token_balances(&client, &pubkey)
         .await
         .unwrap_or_default();

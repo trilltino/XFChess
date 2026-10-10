@@ -19,7 +19,6 @@ fn cfg() -> PairingConfig {
     PairingConfig::default()
 }
 
-// ─── Test 1: rematch transposition ────────────────────────────────────────────
 
 #[test]
 fn rematch_transposition_in_bottom_half() {
@@ -40,7 +39,6 @@ fn rematch_transposition_in_bottom_half() {
     }
 }
 
-// ─── Test 2: forced bye on odd leftover ───────────────────────────────────────
 
 #[test]
 fn forced_bye_on_odd_leftover_after_float() {
@@ -61,7 +59,6 @@ fn forced_bye_on_odd_leftover_after_float() {
     assert!(!round.byes.is_empty(), "at least one forced bye expected");
 }
 
-// ─── Test 3: 5-round bye rotation ────────────────────────────────────────────
 
 #[test]
 fn five_round_bye_rotation_no_double_bye() {
@@ -116,7 +113,6 @@ fn five_round_bye_rotation_no_double_bye() {
     }
 }
 
-// ─── Test 4: float_downs recorded in round ────────────────────────────────────
 
 #[test]
 fn float_down_recorded_in_round() {

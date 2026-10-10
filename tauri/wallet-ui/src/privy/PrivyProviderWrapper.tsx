@@ -1,22 +1,6 @@
 /**
- * Mounts Privy around the popup when `VITE_PRIVY_APP_ID` is set.
- *
- * Unlike the website (`xfchessdotcom/src/privy/`), this imports the SDK
- * statically. The website defers it because a megabyte of JavaScript in the
- * critical path of a public marketing page is a real cost; here the bundle is
- * served from `http://localhost` by the Tauri bridge on the user's own machine,
- * so the download is essentially free and the lazy-load machinery would be
- * complexity with no benefit.
- *
- * Google only. Privy's `'email'` method is email-OTP that also mints an embedded
- * wallet — not the backend's argon2 email/password login — but it is
- * deliberately not offered: the social path exists to give a non-crypto user a
- * wallet in one click.
- *
- * Extension wallets stay on their own path (`wallet/extension.ts`) — letting
- * Privy also broker Phantom would give the popup two competing notions of "the
- * connected wallet", and this window's whole job is to report exactly one
- * pubkey to the bridge.
+ * Mount Privy when VITE_PRIVY_APP_ID is set. Offer Google only; extension
+ * wallets use their own provider path to keep one connected-wallet authority.
  */
 import type { ReactNode } from 'react';
 import { PrivyProvider } from '@privy-io/react-auth';
@@ -45,11 +29,7 @@ export function PrivyProviderWrapper({ children }: { children: ReactNode }) {
         embeddedWallets: {
           solana: { createOnLogin: 'users-without-wallets' },
         },
-        // Privy's standard-wallet signing hooks resolve an RPC for the chain
-        // being signed on, and throw outright if there is no entry for it.
-        // Without this the very first embedded-wallet transaction died with
-        // "No RPC configuration found for chain solana:mainnet" — mainnet
-        // because `chain` defaults there, hence SOLANA_CHAIN at every call site.
+        // Configure the selected Solana chain RPC for Privy signing hooks.
         solana: {
           rpcs: {
             [SOLANA_CHAIN]: {

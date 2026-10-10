@@ -195,7 +195,6 @@ impl VaultStore {
         }
     }
 
-    // ── CACF compliance persistence ────────────────────────────────────────────
 
     pub async fn save_cacf(
         &self,

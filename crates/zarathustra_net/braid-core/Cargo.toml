@@ -8,9 +8,7 @@ publish = false
 default = ["client", "serde", "native"]
 # `native` pulls in the tokio runtime used by the default trait impls.
 native = ["dep:tokio", "tokio?/full"]
-# `client` / `serde` are kept as markers for downstream consumers (braid-iroh,
-# backend) that request them explicitly. The heavy `server`, `fs`, `blob` and
-# vendored-CRDT (`diamond-types`) features were removed — unused by XFChess.
+# Keep client/serde feature markers for downstream compatibility.
 client = ["serde"]
 serde = []
 

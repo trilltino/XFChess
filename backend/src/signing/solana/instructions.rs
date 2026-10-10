@@ -585,9 +585,7 @@ pub fn initialize_tournament_ix(
     data.extend_from_slice(&entry_fee.to_le_bytes());
     data.extend_from_slice(&max_players.to_le_bytes());
 
-    // TournamentType Borsh encoding — the on-chain enum declares
-    // `Swiss { rounds }` as variant 0 and `SingleElimination` as variant 1,
-    // the reverse of this function's 0=SingleElimination param convention.
+    // Borsh variants are Swiss=0 and SingleElimination=1, opposite to this function’s parameter convention.
     if tournament_type == 1 {
         data.push(0); // TournamentType::Swiss { rounds }
         data.push(swiss_rounds);
@@ -626,11 +624,8 @@ pub fn initialize_tournament_ix(
 
     Instruction {
         program_id: *program_id,
-        // Account order must match `InitializeTournament`: tournament,
-        // usdc_prize_escrow_authority, usdc_prize_escrow (None), usdc_mint
-        // (None), authority, token_program, associated_token_program,
-        // system_program. SOL-only tournaments pass the program ID for the two
-        // optional USDC accounts (Anchor's `None` marker).
+        // Account order matches InitializeTournament. SOL-only tournaments use the
+        // program ID as Anchor's None marker for the two optional USDC accounts.
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
             AccountMeta::new_readonly(usdc_prize_escrow_authority, false),

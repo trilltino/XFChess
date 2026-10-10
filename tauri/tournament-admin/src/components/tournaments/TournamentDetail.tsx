@@ -327,7 +327,6 @@ export default function TournamentDetail({ tournamentId, onBack }: TournamentDet
   const statusColor = (s: string) => ({ active: "var(--primary)", completed: "#3b82f6", scheduled: "var(--accent)", registration: "#4ade80" }[s.toLowerCase()] ?? "var(--text-dim)");
   const shorten = (k: string) => k.length > 16 ? `${k.slice(0, 8)}…${k.slice(-4)}` : k;
 
-  // ── Overview ──────────────────────────────────────────────────────────────────
   const renderOverview = () => {
     if (!tournament) return null;
     return (
@@ -466,7 +465,6 @@ export default function TournamentDetail({ tournamentId, onBack }: TournamentDet
     );
   };
 
-  // ── Players tab ───────────────────────────────────────────────────────────────
   const renderPlayers = () => {
     if (!tournament) return null;
     const list = reseedMode ? reseedOrder : tournament.players;
@@ -523,7 +521,6 @@ export default function TournamentDetail({ tournamentId, onBack }: TournamentDet
     );
   };
 
-  // ── Match card ────────────────────────────────────────────────────────────────
   const renderMatchCard = (match: MatchRecord) => {
     const white = match.player_white ?? "TBD";
     const black = match.player_black ?? "TBD";
@@ -609,7 +606,6 @@ export default function TournamentDetail({ tournamentId, onBack }: TournamentDet
     );
   };
 
-  // ── Matches tab ───────────────────────────────────────────────────────────────
   const renderMatches = () => {
     if (!tournament) return null;
     const isSwiss = tournament.format === "Swiss";

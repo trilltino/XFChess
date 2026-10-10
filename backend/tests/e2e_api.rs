@@ -131,19 +131,15 @@ async fn spawn_app() -> TestApp {
     spawn_app_on(&unique_db_url("session"), &unique_db_url("vault")).await
 }
 
-/// Build a fresh `AppState` (empty in-memory maps, as after a process
-/// restart) over existing databases. Shared-cache in-memory SQLite stays
-/// alive while any earlier app's pool is open, so calling this twice with the
-/// same URLs simulates a backend restart over durable storage.
+/// Build a fresh AppState over existing SQLite databases to simulate restart.
+/// Shared in-memory databases survive while an earlier pool remains open.
 async fn spawn_app_on(session_url: &str, vault_url: &str) -> TestApp {
     let pools = initialize_pools(session_url, vault_url)
         .await
         .expect("init pools");
     run_migrations(&pools).await.expect("run migrations");
 
-    // Only used below to create/migrate tables via `.init()` — the vault
-    // itself doesn't matter since AppState::new builds the real store this
-    // test actually reads/writes through.
+    // Initialize tables here; AppState owns the store used by the test.
     let schema_vault = IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
     let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
     session_store.init().await.expect("session store init");
@@ -168,7 +164,6 @@ async fn spawn_app_on(session_url: &str, vault_url: &str) -> TestApp {
     TestApp { state }
 }
 
-// ── /metrics ────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn metrics_endpoint_exposes_worker_counters() {
@@ -202,9 +197,7 @@ async fn metrics_endpoint_exposes_worker_counters() {
     );
 }
 
-// multi_thread flavor: detailed_health_check's Solana RPC check runs the
-// blocking RpcClient inside spawn_blocking (block_in_place), same reason as
-// offchain_username_does_not_imply_onchain_profile above.
+// Use a multithread runtime for blocking Solana health checks.
 #[tokio::test(flavor = "multi_thread")]
 async fn health_detailed_reports_real_memory_and_disk_state() {
     let app = spawn_app().await;
@@ -239,7 +232,6 @@ async fn health_detailed_reports_real_memory_and_disk_state() {
     );
 }
 
-// ── Blur telemetry parity (anti-cheat input boundary) ─────────────────────────
 
 #[tokio::test]
 async fn blur_telemetry_requires_a_wallet_identity() {
@@ -316,9 +308,7 @@ async fn blur_telemetry_enforces_ply_parity() {
         .await;
     assert_eq!(zero_status, StatusCode::BAD_REQUEST);
 
-    // Correct parity passes the parity check, then the caller must be a
-    // verifiable participant; this wallet is not, so the report is refused
-    // rather than recorded against the game.
+    // Correct parity is insufficient: the reporter must be a verified participant.
     let (ok_parity, _) = app
         .send_auth(
             "POST",
@@ -331,7 +321,6 @@ async fn blur_telemetry_enforces_ply_parity() {
     assert_ne!(ok_parity, StatusCode::NO_CONTENT);
 }
 
-// ── Broadcast-delay gating (esports integrity) ────────────────────────────────
 
 #[tokio::test]
 async fn broadcast_delay_gates_public_move_feed() {
@@ -373,7 +362,6 @@ async fn broadcast_delay_gates_public_move_feed() {
     assert_eq!(body["delay_secs"].as_i64().unwrap(), 3600);
 }
 
-// ── Game history ──────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn completed_game_surfaces_in_history() {
@@ -405,7 +393,6 @@ async fn completed_game_surfaces_in_history() {
     );
 }
 
-// ── Disputes (chain-free notify + status) ─────────────────────────────────────
 
 #[tokio::test]
 async fn dispute_notify_then_status() {
@@ -437,7 +424,6 @@ async fn dispute_notify_then_status() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-// ── Auth-chain hardening (this pass) ─────────────────────────────────────────
 
 use solana_sdk::signature::{Keypair, Signer};
 
@@ -707,10 +693,8 @@ async fn lichess_init_requires_auth_and_rejects_wallet_mismatch() {
         "a valid JWT for one wallet must not init a Lichess link for a different wallet"
     );
 
-    // The authenticated wallet's own request passes the auth gate (fails
-    // later with SERVICE_UNAVAILABLE since LICHESS_CLIENT_ID is unset in
-    // this test config — proves the auth check specifically, not the whole
-    // flow, which needs real Lichess OAuth config to complete).
+    // The owned request passes auth and then fails on missing OAuth config;
+    // this assertion covers the guard, not the external flow.
     let (status, _) = app
         .send_auth(
             "GET",
@@ -796,10 +780,7 @@ async fn kyc_submit_requires_auth_and_rejects_wallet_mismatch() {
     assert_eq!(status, StatusCode::OK, "own-wallet KYC submission: {body}");
 }
 
-// multi_thread flavor: `/api/auth/me`'s on-chain existence check runs the
-// blocking Solana RpcClient inside `spawn_blocking`, which internally uses
-// `tokio::task::block_in_place` — that requires a multi-threaded runtime,
-// unlike every other test in this file that never touches `state.solana_rpc`.
+// Use a multi-threaded runtime for the blocking Solana client's block_in_place path.
 #[tokio::test(flavor = "multi_thread")]
 async fn offchain_username_does_not_imply_onchain_profile() {
     let app = spawn_app().await;
@@ -835,10 +816,8 @@ async fn offchain_username_does_not_imply_onchain_profile() {
         .await;
     assert_eq!(status, StatusCode::OK, "username PATCH should succeed");
 
-    // /auth/me reflects the off-chain name immediately, but must NOT claim an
-    // on-chain profile exists — the account-existence RPC call degrades to
-    // false against this test's unreachable RPC URL, proving the two
-    // registration states are computed independently of each other.
+    // Verify off-chain username and on-chain profile existence remain independent
+    // when the test RPC is unreachable.
     let (status, body) = app
         .send_auth("GET", "/api/auth/me", Some(&token), None)
         .await;
@@ -849,9 +828,7 @@ async fn offchain_username_does_not_imply_onchain_profile() {
         "an off-chain username must never be mistaken for an on-chain profile"
     );
 
-    // sync-profile independently confirms: no on-chain PlayerProfile PDA, no
-    // on-chain username_set — the exact field the game client's profile check
-    // gates the "Choose Your Handle" popup on.
+    // Missing on-chain profile and username must require the client’s handle-setup flow.
     let (status, body) = app
         .send_auth("POST", "/api/auth/sync-profile", Some(&token), None)
         .await;
@@ -896,9 +873,7 @@ async fn dual_accept_auth_guards_signing_endpoints() {
     let (status, _) = app.post_json("/move/record", &move_body).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "no auth must 401");
 
-    // (b) Relay secret alone passes the router guard but carries no wallet
-    // identity; `record_move` requires one (`RequireWallet`), so a move can
-    // no longer be submitted on a self-declared `mover_wallet` alone.
+    // Relay-secret authentication carries no wallet identity; moves require a verified wallet.
     let req = Request::builder()
         .uri("/move/record")
         .method("POST")
@@ -962,11 +937,7 @@ async fn dual_accept_auth_guards_signing_endpoints() {
         "own-wallet session must pass authz"
     );
 
-    // (f) Secret genuinely unset + no auth at all → the guard fails CLOSED.
-    // The game client fetches a JWT automatically on every wallet connection
-    // (see `src/multiplayer/network/vps/client.rs`), so an unconfigured
-    // relay secret is a fallback, not the primary flow — a missing/invalid
-    // credential must never be treated as an unauthenticated pass-through.
+    // Unset relay secret and absent JWT must fail closed.
     std::env::remove_var("RELAY_SHARED_SECRET");
     let (status, _) = app.post_json("/move/record", &move_body).await;
     assert_eq!(
@@ -975,17 +946,8 @@ async fn dual_accept_auth_guards_signing_endpoints() {
         "fail-closed: unset secret + no JWT must be rejected by the auth guard"
     );
 
-    // (g) Valid JWT for wallet A, but mover_wallet in the body names wallet B,
-    // for a game_id neither wallet is verifiably part of → rejected. A
-    // credential authenticating one wallet must not be usable to submit a
-    // move for a game it has no on-chain relationship to. (This is NOT the
-    // same as "caller must equal mover_wallet" — see
-    // `record_move_allows_a_genuine_participant_to_relay_the_other_players_move`
-    // in signing::routes::main's own test module for the case this must
-    // *allow*: a game's host relays moves for both players, so caller and
-    // mover_wallet routinely differ for one side's moves. This test only
-    // proves the reject side, since a fake game_id can't be seeded with real
-    // on-chain participants from here.)
+    // A wallet JWT must not submit moves for a game it does not participate in.
+    // A participant may still relay the opponent's move; this test covers rejection.
     let _relay_secret_g = RelaySharedSecretGuard::set("e2e-relay-secret");
     let mismatched_move_body = json!({
         "game_id": 1,
@@ -1068,7 +1030,6 @@ async fn treasury_refund_never_signs_in_process() {
     assert!(handoff.get("command").is_none(), "no shell line: {body}");
 }
 
-// ── Tournament templates + persistent audit log (Phase 3) ─────────────────────
 
 #[tokio::test]
 async fn tournament_template_round_trip_persists_and_is_audited() {
@@ -1092,10 +1053,7 @@ async fn tournament_template_round_trip_persists_and_is_audited() {
     assert_eq!(templates[0]["name"], "weekly-blitz");
     assert_eq!(templates[0]["data"]["max_players"], 16);
 
-    // The save should have landed in the persistent audit log, attributed to
-    // the debug-default actor, findable without a tournament_id filter.
-    // add_audit's DB write is awaited synchronously (see admin.rs), so it's
-    // guaranteed to be visible as soon as the save_template response returns.
+    // Audit persistence is awaited, so the save response implies the entry is visible.
     let (status, body) = app
         .admin_request("GET", "/admin/audit-log?limit=50", None)
         .await;
@@ -1108,10 +1066,8 @@ async fn tournament_template_round_trip_persists_and_is_audited() {
         "expected a persisted save_template audit entry: {entries:?}"
     );
 
-    // A mutating admin route that never calls add_audit (set-round-deadline
-    // has no tournament to act on here, so it 404s) must still be captured
-    // by the generic catch-all middleware — this is the "new endpoint can't
-    // forget to log" guarantee from Phase 3.
+    // Generic audit middleware must capture mutations without handler-specific
+    // audit calls, including rejected requests.
     let (status, _) = app
         .admin_request(
             "POST",
@@ -1209,11 +1165,7 @@ async fn private_tournament_rejects_bad_password() {
     );
 }
 
-// ── Multiplayer lifecycle drills (two clients, backend restart) ──────────────
-//
-// In-process two-client drills against the real router. "Restart" builds a
-// brand-new `AppState` (all in-memory maps empty) over the same SQLite
-// databases, exactly what a process restart leaves behind.
+// Simulate restart with a new AppState over the same SQLite databases.
 
 fn relay_sign(kp: &Keypair, game_id: &str, message: &str) -> Vec<u8> {
     let signable = format!("{}:{}:{}", game_id, kp.pubkey(), message);
@@ -1503,9 +1455,7 @@ async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() {
 
 #[tokio::test]
 async fn casual_player_can_write_more_than_one_move_in_the_same_backend_process() {
-    // Regression: Iroh node ids parse as Pubkeys, so the roster fast path
-    // demanded a session key no casual client has and 403'd every casual
-    // player's second Braid write until the backend restarted.
+    // Casual Iroh node IDs parse as Pubkeys but must not require on-chain session keys.
     let app = spawn_app().await;
     let host = Keypair::new().pubkey().to_string();
     let joiner = Keypair::new().pubkey().to_string();

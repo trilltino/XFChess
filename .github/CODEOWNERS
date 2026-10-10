@@ -1,6 +1,4 @@
-# Sensitive areas — GitHub requests these reviewers on matching PRs.
-# (Review is not *required* to merge while the repo is solo — enable
-# "require code owner reviews" in branch protection once you add collaborators.)
+# GitHub requests reviewers for these paths; branch protection controls whether approval is required.
 
 /backend/migrations/        @trilltino
 /programs/                  @trilltino

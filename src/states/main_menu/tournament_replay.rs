@@ -51,9 +51,7 @@ pub fn poll_pgn_replay_fetch(
     match nimzovich_engine::parse_pgn(&pgn_text) {
         Ok(mut pgn) => {
             info!("[replay] loaded tournament game: {} moves", pgn.moves.len());
-            // The backend assembles PGN from stored SAN and doesn't always
-            // carry player tags; fill them so the replay header names the
-            // players the viewer just clicked on.
+            // Fill missing player tags in backend PGN so replay names match the selected pairing.
             pgn.tags
                 .entry("White".to_string())
                 .or_insert_with(|| white.clone());

@@ -8,7 +8,6 @@ closeBtn.addEventListener('click', () => {
     window.close();
 });
 
-// Show status message
 function showStatus(message, type = 'loading') {
     statusEl.textContent = message;
     statusEl.className = `status ${type}`;
@@ -30,7 +29,6 @@ async function connectHotWallet() {
 
         showStatus('Wallet connected!', 'success');
 
-        // Send pubkey to Tauri
         await invokeTauri('wallet_connected', { pubkey: pubkeyBase58 });
 
         // Close window after short delay
@@ -112,7 +110,6 @@ async function invokeTauri(cmd, args = {}) {
     }
 }
 
-// Add click handler to hot wallet button
 document.querySelector('.wallet-btn').addEventListener('click', () => {
     connectHotWallet();
 });

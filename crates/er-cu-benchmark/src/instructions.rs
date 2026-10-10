@@ -71,9 +71,6 @@ fn borsh_string(s: &str) -> Vec<u8> {
     buf
 }
 
-// ---------------------------------------------------------------------------
-// init_profile
-// ---------------------------------------------------------------------------
 pub fn init_profile_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -103,9 +100,6 @@ pub fn init_profile_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// create_game
-// ---------------------------------------------------------------------------
 #[allow(clippy::too_many_arguments)]
 pub fn create_game_ix(
     program_id: Pubkey,
@@ -123,12 +117,7 @@ pub fn create_game_ix(
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
-    // create_game(game_id, wager_amount, match_type, platform_fee,
-    // base_time_seconds, increment_seconds) — see programs/xfchess-game/src/
-    // game_ix/create.rs. This used to take a `country: String` before the
-    // program moved to a universal live-rate `platform_fee`; the old encoding
-    // here silently produced a malformed instruction (4 zero bytes standing
-    // in for half of platform_fee's 8) that would fail to deserialize on-chain.
+    // Encode create_game arguments to match game_ix/create.rs; platform_fee is u64.
     let mut data = anchor_discriminator("create_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&wager_amount.to_le_bytes());
@@ -150,9 +139,6 @@ pub fn create_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// join_game
-// ---------------------------------------------------------------------------
 pub fn join_game_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -187,9 +173,6 @@ pub fn join_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// record_move
-// ---------------------------------------------------------------------------
 pub fn record_move_ix(
     program_id: Pubkey,
     session_key: Pubkey,
@@ -238,9 +221,6 @@ pub fn record_move_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// finalize_game
-// ---------------------------------------------------------------------------
 pub fn finalize_game_ix(
     program_id: Pubkey,
     game_id: u64,
@@ -271,9 +251,7 @@ pub fn finalize_game_ix(
             AccountMeta::new(black_pubkey, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(treasury_vault, false),
-            // fee_payer is a plain SystemAccount on-chain (game_ix/finalize.rs:39-40),
-            // not a Signer — marking it `true` here worked only because the
-            // current call site happens to pass the tx's own fee payer.
+            // fee_payer is a SystemAccount, not a required signer.
             AccountMeta::new(fee_payer, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
@@ -281,9 +259,6 @@ pub fn finalize_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// authorize_session_key
-// ---------------------------------------------------------------------------
 pub fn authorize_session_key_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -302,11 +277,7 @@ pub fn authorize_session_key_ix(
     )
     .0;
 
-    // authorize_session_key(game_id, session_pubkey) — see lib.rs:443-447.
-    // A trailing `duration_seconds` used to be encoded here too; Anchor's
-    // deserializer silently ignores extra trailing bytes so it never caused
-    // a failure, but the value had no effect — session lifetime is fixed at
-    // 2 hours in delegation_ix/session.rs:28.
+    // authorize_session_key takes game_id and session_pubkey; lifetime is fixed on-chain.
     let mut data = anchor_discriminator("authorize_session_key").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(session_pubkey.as_ref());
@@ -323,9 +294,6 @@ pub fn authorize_session_key_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// delegate_game (ER-specific)
-// ---------------------------------------------------------------------------
 pub fn delegate_game_ix(
     program_id: Pubkey,
     game_pda: Pubkey,
@@ -376,9 +344,6 @@ pub fn delegate_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// undelegate_game (ER-specific)
-// ---------------------------------------------------------------------------
 pub fn undelegate_game_ix(
     program_id: Pubkey,
     game_pda: Pubkey,
@@ -403,9 +368,6 @@ pub fn undelegate_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// schedule_time_check (ER crank)
-// ---------------------------------------------------------------------------
 pub fn schedule_time_check_ix(
     program_id: Pubkey,
     game_pda: Pubkey,
@@ -437,9 +399,6 @@ pub fn schedule_time_check_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// crank_time_check (ER crank)
-// ---------------------------------------------------------------------------
 pub fn crank_time_check_ix(
     program_id: Pubkey,
     game_pda: Pubkey,
@@ -459,9 +418,6 @@ pub fn crank_time_check_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// cancel_time_check (ER crank)
-// ---------------------------------------------------------------------------
 pub fn cancel_time_check_ix(
     program_id: Pubkey,
     payer: Pubkey,
@@ -485,10 +441,6 @@ pub fn cancel_time_check_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// request_force_undelegate / force_undelegate_after_timeout / recover_stuck_delegation
-// (ER-unavailability recovery drill — see recovery_drill.rs)
-// ---------------------------------------------------------------------------
 
 pub fn request_force_undelegate_ix(
     program_id: Pubkey,
@@ -618,9 +570,6 @@ pub fn recover_stuck_delegation_ix(
     }
 }
 
-// ---------------------------------------------------------------------------
-// initialize_tournament
-// ---------------------------------------------------------------------------
 const TOURNAMENT_TYPE_SWISS: u8 = 0;
 const TOURNAMENT_TYPE_SINGLE_ELIMINATION: u8 = 1;
 
@@ -676,12 +625,10 @@ pub fn initialize_tournament_ix(
     data.extend_from_slice(&max_players.to_le_bytes());
     match rounds {
         Some(rounds) => {
-            // TournamentType::Swiss { rounds }
             data.push(TOURNAMENT_TYPE_SWISS);
             data.push(rounds);
         }
         None => {
-            // TournamentType::SingleElimination (no fields)
             data.push(TOURNAMENT_TYPE_SINGLE_ELIMINATION);
         }
     }
@@ -716,18 +663,8 @@ pub fn initialize_tournament_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// initialize_shards_small / _medium / initialize_tournament_shards (large)
-//
-// The on-chain program has three separate shard-init instructions tiered by
-// `max_players` (initialize_shards.rs's doc comment: ≤64 -> 1 shard, ≤128 ->
-// 2 shards, 256 -> 4 shards) — each is its own instruction with its own
-// Accounts struct and its own `max_players` range constraint (mapped to
-// `GameErrorCode::InvalidGameStatus`), not one instruction that always
-// creates 4. Calling the large-tier instruction (the only one that used to be
-// wired up here) for anything smaller than 256 players fails that
-// `tournament.max_players == 256` constraint every time.
-// ---------------------------------------------------------------------------
+// Select the shard-init instruction by capacity: <=64 uses one shard,
+// <=128 two, and 256 four. Each instruction has its own capacity constraint.
 
 fn shard_pda(program_id: &Pubkey, tournament_id: u64, idx: u8) -> Pubkey {
     Pubkey::find_program_address(
@@ -838,9 +775,6 @@ pub fn initialize_shards_for_size_ix(
     }
 }
 
-// ---------------------------------------------------------------------------
-// initialize_tournament_escrow
-// ---------------------------------------------------------------------------
 pub fn initialize_tournament_escrow_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -872,9 +806,6 @@ pub fn initialize_tournament_escrow_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// register_player
-// ---------------------------------------------------------------------------
 pub fn register_player_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -900,13 +831,8 @@ pub fn register_player_ix(
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend_from_slice(&elo.to_le_bytes());
 
-    // RegisterPlayer is 10 accounts, in this exact order — see
-    // programs/xfchess-game/src/tournament_ix/registration/register.rs:19-79.
-    // `host_treasury` is a plain `UncheckedAccount` (constrained ==
-    // tournament.host_treasury), not a signer — there used to be a second
-    // `platform_treasury_vault` account here too, which doesn't exist on the
-    // real struct and pushed every following account (just `system_program`)
-    // one slot out of alignment.
+    // Keep the ten RegisterPlayer accounts in program order. host_treasury
+    // is unchecked but constrained, not a signer.
     Ok(Instruction {
         program_id,
         accounts: vec![
@@ -925,9 +851,6 @@ pub fn register_player_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// start_tournament
-// ---------------------------------------------------------------------------
 pub fn start_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -949,10 +872,7 @@ pub fn start_tournament_ix(
     let mut data = anchor_discriminator("start_tournament").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
 
-    // StartTournament sweeps entry fees from escrow_pda to host_treasury —
-    // both were missing here, which bound `authority`'s signature to
-    // escrow_pda's slot and dropped host_treasury/authority/system_program
-    // each one slot early. See tournament_ix/lifecycle/start.rs:12-66.
+    // StartTournament sweeps escrow into the host treasury; include both account metas.
     Ok(Instruction {
         program_id,
         accounts: vec![
@@ -970,9 +890,6 @@ pub fn start_tournament_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// record_match_result
-// ---------------------------------------------------------------------------
 pub fn record_match_result_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -996,11 +913,8 @@ pub fn record_match_result_ix(
     )
     .0;
 
-    // record_match_result(tournament_id, match_index: u16, winner, loser) —
-    // see tournament_ix/matches/record_result.rs:11,32-37. `match_index` was
-    // encoded as a single byte (u8) here, shifting `winner`/`loser` one byte
-    // short; `tournament_match` (the account the result is actually written
-    // to) was missing entirely; and the 4th arg is `loser`, not a game PDA.
+    // record_match_result encodes match_index as u16, then winner and loser.
+    // Include the writable tournament_match account.
     let mut data = anchor_discriminator("record_match_result").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend_from_slice(&match_index.to_le_bytes());
@@ -1018,9 +932,6 @@ pub fn record_match_result_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// authorize_tournament_session
-// ---------------------------------------------------------------------------
 #[allow(clippy::too_many_arguments)]
 pub fn authorize_tournament_session_ix(
     program_id: Pubkey,
@@ -1078,9 +989,6 @@ pub fn authorize_tournament_session_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// session_create_game
-// ---------------------------------------------------------------------------
 #[allow(clippy::too_many_arguments)]
 pub fn session_create_game_ix(
     program_id: Pubkey,
@@ -1111,12 +1019,7 @@ pub fn session_create_game_ix(
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
-    // session_create_game(tournament_id, game_id, wager_amount, match_type,
-    // platform_fee, base_time_seconds, increment_seconds) — see
-    // programs/xfchess-game/src/tournament_ix/session/session_create_game.rs.
-    // This used to take a `country: String`; the old encoding here (4 zero
-    // bytes standing in for half of platform_fee's 8) would fail to
-    // deserialize on-chain today.
+    // Encode session_create_game to match the program; platform_fee is u64.
     let mut data = anchor_discriminator("session_create_game").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend_from_slice(&game_id.to_le_bytes());
@@ -1146,9 +1049,6 @@ pub fn session_create_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// session_join_game
-// ---------------------------------------------------------------------------
 pub fn session_join_game_ix(
     program_id: Pubkey,
     tournament_id: u64,
@@ -1207,9 +1107,6 @@ pub fn session_join_game_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// record_swiss_result
-// ---------------------------------------------------------------------------
 pub fn record_swiss_result_ix(
     program_id: Pubkey,
     tournament_id: u64,
@@ -1248,15 +1145,8 @@ pub fn record_swiss_result_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// close_tournament — sweeps residual escrow to the treasury and marks the
-// tournament Closed. Only callable once every funded prize place has already
-// been claimed via `distribute_tournament_prizes`/`claim_tournament_prize`
-// (tournament_ix/lifecycle/close_tournament.rs:33-70); this instruction never
-// pays anyone directly and doesn't read `remaining_accounts` at all — a
-// `prize_recipients` param used to be appended here as extra account metas,
-// which the program simply ignored.
-// ---------------------------------------------------------------------------
+// Close only after funded prizes are claimed. Sweep residual escrow to
+// treasury; this instruction does not pay remaining-account recipients.
 pub fn close_tournament_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -1290,11 +1180,7 @@ pub fn close_tournament_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// fund_sol_prize — locks a guaranteed SOL prize pool in escrow. Must be sent
-// before the first player registers (tournament_ix/prizes/fund_sol_prize.rs:
-// rejects once tournament.num_registered_players > 0 or prize_pool != 0).
-// ---------------------------------------------------------------------------
+// Fund a guaranteed prize before any registration or existing prize funding.
 pub fn fund_sol_prize_ix(
     program_id: Pubkey,
     operator: Pubkey,
@@ -1328,11 +1214,7 @@ pub fn fund_sol_prize_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// advance_round — permissionless Swiss round-advancement crank
-// (tournament_ix/matches/advance_round.rs). Requires every board in the
-// current round to have already reported via record_swiss_result.
-// ---------------------------------------------------------------------------
+// Permissionless Swiss advancement requires results for every current-round board.
 pub fn advance_round_ix(
     program_id: Pubkey,
     cranker: Pubkey,
@@ -1357,15 +1239,8 @@ pub fn advance_round_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// complete_swiss_tournament — permissionless crank that sorts final Swiss
-// standings and marks the tournament Completed once `advance_round` has
-// pushed `current_round` to `total_rounds`
-// (tournament_ix/matches/complete_swiss.rs). `max_players` determines which
-// shards actually exist (see `required_shards`); shards beyond that are
-// passed as the program-ID `None` sentinel via `shard_meta`, matching
-// `CompleteSwissTournament`'s `Option<Account<...>>` fields for shards 1-3.
-// ---------------------------------------------------------------------------
+// Complete Swiss after all rounds; optional absent shards use the program-ID
+// None sentinel matching the program account fields.
 pub fn complete_swiss_tournament_ix(
     program_id: Pubkey,
     cranker: Pubkey,
@@ -1395,12 +1270,8 @@ pub fn complete_swiss_tournament_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// distribute_tournament_prizes — permissionless crank that pushes each
-// recorded place's SOL share directly to their wallet
-// (tournament_ix/prizes/distribute.rs). `winners` are passed as writable
-// remaining accounts in any order; places whose wallet is absent are skipped.
-// ---------------------------------------------------------------------------
+// Distribute recorded SOL shares to writable winner accounts in any order;
+// skip places whose wallet is absent.
 pub fn distribute_tournament_prizes_ix(
     program_id: Pubkey,
     cranker: Pubkey,
@@ -1435,11 +1306,7 @@ pub fn distribute_tournament_prizes_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// initialize_match — creates one single-elimination bracket slot
-// (tournament_ix/matches/initialize_match.rs). Authority-only (the backend,
-// or here, the benchmark's own admin/master keypair).
-// ---------------------------------------------------------------------------
+// Authority-only creation of a single-elimination bracket slot.
 #[allow(clippy::too_many_arguments)]
 pub fn initialize_match_ix(
     program_id: Pubkey,
@@ -1501,11 +1368,7 @@ pub fn initialize_match_ix(
     })
 }
 
-// ---------------------------------------------------------------------------
-// advance_winner — copies a completed match's winner into their slot in the
-// next round's match (tournament_ix/matches/record_result.rs's
-// `handler_advance_winner`).
-// ---------------------------------------------------------------------------
+// Advance a completed match winner to their slot in the next round.
 pub fn advance_winner_ix(
     program_id: Pubkey,
     authority: Pubkey,
@@ -1566,9 +1429,6 @@ pub fn bracket_position(max_players: u16, match_index: u16) -> (u8, Option<u16>,
     (round, next, (pos_in_round % 2) as u8)
 }
 
-// ---------------------------------------------------------------------------
-// resign
-// ---------------------------------------------------------------------------
 pub fn resign_game_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Result<Instruction> {
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
@@ -1576,11 +1436,7 @@ pub fn resign_game_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Resul
     let mut data = anchor_discriminator("resign").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
 
-    // ResignGame is exactly `game` (mut) + `player` (read-only Signer) — see
-    // programs/xfchess-game/src/game_ix/resign.rs. The previous 6-account
-    // version (escrow_pda, white, black, system_program that don't belong
-    // here) bound `player`'s signature to slot 2 (escrow_pda) instead of
-    // itself, failing on-chain with `AccountNotSigner`.
+    // ResignGame accounts are writable game and read-only player signer.
     Ok(Instruction {
         program_id,
         accounts: vec![
@@ -1591,17 +1447,8 @@ pub fn resign_game_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Resul
     })
 }
 
-// ---------------------------------------------------------------------------
-// authorize_global_session / global_create_game / global_join_game
-//
-// The persistent, non-tournament session flow: one `authorize_global_session`
-// covers up to 200 games, with `global_create_game`/`global_join_game` paying
-// rent + wager out of the `GlobalSessionDelegation` PDA vault instead of the
-// player's wallet. Current on-chain layout (see programs/xfchess-game/src/
-// account_ix/global_session_ix.rs and game_ix/global_create.rs,
-// global_join.rs) — `platform_fee: u64`, not the older `country: String` seen
-// in `create_game_ix`/`session_create_game_ix` above.
-// ---------------------------------------------------------------------------
+// Global sessions fund game rent and wagers from their delegation vault.
+// Match the current program argument layout, including platform_fee: u64.
 
 fn global_session_pda(program_id: &Pubkey, player: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[b"global_session", player.as_ref()], program_id).0

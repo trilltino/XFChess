@@ -14,19 +14,13 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Production endpoints baked into the installers/launchers. nginx serves the
-  # frontend + API from the same domain (see ops/nginx/nginx.conf) — there's
-  # no separate api.* subdomain.
+  # Installers use a shared frontend/API domain; see ops/nginx/nginx.conf.
   BACKEND_URL: https://xfchess.com
   SIGNING_URL: https://xfchess.com
-  # Actual production backend today (xfchess.com has no DNS yet). Update this
-  # to https://xfchess.com/health once DNS + nginx are live, and drop this env.
-  # nginx redirects plain HTTP to HTTPS with a self-signed cert (no DNS yet,
-  # so no real cert either) — hence https:// + -k below.
+  # Use the configured IP health endpoint with self-signed TLS until domain TLS is provisioned.
   BACKEND_HEALTH_URL: https://178.104.55.19/health
 
 jobs:
-  # ─────────────────────── Verify backend is up ───────────────────────
   verify-backend:
     runs-on: ubuntu-latest
     steps:
@@ -44,7 +38,6 @@ jobs:
           echo "::error::Production backend at $BACKEND_HEALTH_URL is not responding — refusing to cut a release."
           exit 1
 
-  # ───────────────────────────── Windows ─────────────────────────────
   windows:
     needs: verify-backend
     runs-on: windows-latest
@@ -70,11 +63,7 @@ jobs:
         shell: bash
         env:
           VITE_BACKEND_URL: ${{ env.BACKEND_URL }}
-          # Privy's public app ID — must be set at vite build time or the
-          # kill switch in wallet-ui/src/privy/config.ts compiles social login
-          # out of the bundle entirely. Public value, so the inline fallback is
-          # safe; the repo secret (if present) wins so it can be rotated
-          # without touching this file.
+          # VITE_PRIVY_APP_ID must be present at build time to enable social login.
           VITE_PRIVY_APP_ID: ${{ secrets.VITE_PRIVY_APP_ID || 'cmt4t5mz200920ekywk04lspv' }}
         run: |
           (cd xfchessdotcom && npm ci && npm run build)
@@ -112,9 +101,7 @@ jobs:
           Copy-Item -Force target/release/xfchess.exe "$stage/"
           Copy-Item -Force target/release/xfchess-tauri.exe "$stage/"
           Copy-Item -Force stockfish.exe "$stage/"
-          # wallet-ui is served by xfchess-tauri itself from next to its own
-          # binary (see wallet_ui_dist_path in tauri/src/main.rs) — without
-          # this, the wallet-signing popup has nowhere real to load.
+          # Ship wallet-ui/dist beside the companion binary.
           New-Item -ItemType Directory -Force -Path "$stage/wallet-ui" | Out-Null
           Copy-Item -Recurse -Force tauri/wallet-ui/dist "$stage/wallet-ui/"
 
@@ -169,9 +156,6 @@ jobs:
         with:
           files: release/XFChess-Setup-*.exe
 
-  # ───────────────────────────── Linux ─────────────────────────────
-  # Native ubuntu-latest build of both the game client (xfchess) and the
-  # wallet-bridge companion (xfchess-tauri), matching Windows/macOS parity.
   linux:
     needs: verify-backend
     runs-on: ubuntu-latest
@@ -222,8 +206,7 @@ jobs:
           cp target/release/xfchess release/linux/xfchess
           cp target/release/xfchess-tauri release/linux/xfchess-tauri
           chmod +x release/linux/xfchess release/linux/xfchess-tauri
-          # wallet-ui is served by xfchess-tauri itself from next to its own
-          # binary (see wallet_ui_dist_path in tauri/src/main.rs).
+          # Ship wallet-ui/dist beside the companion binary.
           mkdir -p release/linux/wallet-ui
           cp -r tauri/wallet-ui/dist release/linux/wallet-ui/
           cat > release/linux/launch.sh <<EOF
@@ -265,8 +248,7 @@ jobs:
           set -e
           if [ "$code" != "124" ] && [ "$code" != "0" ]; then
             echo "::error::xfchess exited with code $code — see crash log below"
-            # Crash reports land in the app-data (or profile) log dir now, not
-            # CWD-relative — search both home and the workspace.
+            # Search profile/app-data logs under both home and the workspace.
             find "$HOME" "$PWD" -name 'crash_*.log' -exec cat {} + 2>/dev/null || true
             exit 1
           fi
@@ -292,12 +274,7 @@ jobs:
         with:
           files: release/XFChess-linux-x86_64-*.tar.gz
 
-  # ─────────────────────────── Chrome OS ────────────────────────────
-  # Crostini is a genuine Debian/Linux container, so the full-featured Linux
-  # build (Solana, wallet bridge, bundled Stockfish — everything) already
-  # works there unmodified. No reason to ship a crippled variant: this job
-  # just relabels the `linux` job's own artifact as a separate Chrome OS
-  # release asset, rather than compiling (and maintaining) a second build.
+  # Crostini uses the Linux artifact unchanged; publish it under a Chrome OS asset name.
   chromeos:
     needs: linux
     runs-on: ubuntu-latest
@@ -330,13 +307,9 @@ jobs:
         with:
           files: release/XFChess-chromeos-x86_64-*.tar.gz
 
-  # ───────────────────────────── macOS ─────────────────────────────
   macos:
     needs: verify-backend
-    # The release Stockfish artifact below is x86_64. Use an Intel runner so
-    # the game, bridge, and engine are one architecture; Apple Silicon Macs
-    # can run this build through Rosetta 2. (`macos-13` was retired; jobs on
-    # it sat queued until the 24h limit cancelled the whole release.)
+    # Build x86_64 game, bridge, and Stockfish together; Apple Silicon uses Rosetta 2.
     runs-on: macos-15-intel
     timeout-minutes: 120
     env:
@@ -417,16 +390,8 @@ jobs:
         with:
           files: release/XFChess-*.dmg
 
-  # ─────────────────────────────── Android ───────────────────────────────
-  # Debug-signed APK only, for now. Store submission needs a real release
-  # keystore (see mobile/app/build.gradle.kts and docs/plans — the plan this
-  # job implements deliberately treats keystore generation as a step that
-  # needs a human decision, not something to fabricate inside a CI file: it
-  # can never be rotated once the dApp Store has a release built against it,
-  # and this repo has a documented history of a secret reaching public git
-  # — see the "Secret Exposure" incident). Once a keystore exists as a repo
-  # secret, add a signing step here and switch assembleDebug → assembleRelease
-  # + the dapp-store-cli publish step from the plan's §9.
+  # Publish a debug-signed APK until release signing is configured. Store
+  # updates must retain the same release keystore; see docs/PUBLISHING.md.
   android:
     # Android is intentionally excluded from this desktop release until the
     # mobile signing and store-delivery path is complete.
@@ -473,29 +438,14 @@ jobs:
 
       - name: Build libxfchess.so (release, arm64-v8a)
         run: |
-          # $ANDROID_HOME is exported by android-actions/setup-android above
-          # (shell-level, via GITHUB_ENV) — read here as a plain shell
-          # variable rather than through a workflow-expression env lookup,
-          # which resolves against the job's static env context rather than
-          # what a prior step exported at run time.
+          # Read ANDROID_HOME from the shell environment set by the preceding action.
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
-          # --lib only: the workspace's [[bin]] targets (desktop CLI tools —
-          # tournament_data_gen, on_chain_benchmark, etc.) aren't meaningful
-          # on Android and cross-compiling them alongside the lib (which
-          # shares the package name "xfchess" with the first [[bin]]) hits an
-          # E0463 "can't find crate" — confirmed by hitting it locally without
-          # --lib, root cause not fully diagnosed but irrelevant once scoped
-          # to just what Android actually needs.
+          # Build only the Android library; desktop binaries are not valid cross-compilation targets.
           cargo ndk -t arm64-v8a -P 31 -o mobile/app/src/main/jniLibs \
             build --release --lib --features solana
 
       - name: Strip stray cdylib artifacts from jniLibs
-        # cargo-ndk's -o copies every cdylib artifact from cargo's build
-        # cache for this target, not just libxfchess.so — confirmed by
-        # inspection: xfchess-game (the Solana program crate, also
-        # crate-type=["cdylib"]) and internal cdylib byproducts from
-        # iroh/solana-zk-sdk/irpc all land here too. Keep only what
-        # MainActivity.kt actually loads.
+        # cargo-ndk copies all target cdylibs; retain only the library MainActivity loads.
         run: |
           find mobile/app/src/main/jniLibs/arm64-v8a -name '*.so' ! -name 'libxfchess.so' -delete
 
@@ -504,10 +454,7 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Verify libxfchess.so is present and extractable in the built APK
-        # Catches the extractNativeLibs/useLegacyPackaging drift failure mode
-        # documented in the plan (§6c) before it ships silently — a mismatch
-        # there produces a runtime EACCES on-device, not a build error, so
-        # this is the one place that class of bug is cheap to catch.
+        # Verify native-library extraction settings to catch runtime permission errors.
         run: |
           apk="mobile/app/build/outputs/apk/release/app-release-unsigned.apk"
           if ! unzip -l "$apk" | grep -q "lib/arm64-v8a/libxfchess.so"; then

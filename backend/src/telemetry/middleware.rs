@@ -23,13 +23,9 @@ pub async fn telemetry_middleware(
     let endpoint = format!("{} {}", request.method(), path);
     let context = RequestContext::new(&endpoint);
 
-    // High-frequency heartbeat/poll routes are expected traffic, not events —
-    // log them at `debug` so `info`-level terminals only show real activity
-    // (moves, auth, tournament actions, errors). Nothing else changes: they
-    // still go through metrics and error/warn logging below like any route.
+    // Log routine polls at debug while retaining metrics and error reporting.
     let is_routine_poll = matches!(path.as_str(), "/region" | "/presence");
 
-    // Log request start
     if is_routine_poll {
         tracing::debug!(
             request_id = %context.request_id,
@@ -46,10 +42,8 @@ pub async fn telemetry_middleware(
         );
     }
 
-    // Process request
     let response = next.run(request).await;
 
-    // Calculate duration
     let duration = start.elapsed();
     let duration_ms = duration.as_millis() as f64;
     let status = response.status().as_u16();
@@ -59,7 +53,6 @@ pub async fn telemetry_middleware(
         .metrics
         .record_http_request(&endpoint, status, duration_ms);
 
-    // Log request completion
     if status as u16 >= HTTP_STATUS_SERVER_ERROR {
         tracing::error!(
             request_id = %context.request_id,

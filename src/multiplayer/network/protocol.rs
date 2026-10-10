@@ -291,7 +291,6 @@ mod synchronized_start_tests {
     }
 }
 
-// Helper function to calculate deterministic batch hash
 pub fn calculate_batch_hash(
     game_id: u64,
     start_turn: u16,

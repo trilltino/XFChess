@@ -27,9 +27,10 @@ cargo build --release
 cargo run --release
 ```
 
-For local development with monitoring:
+For local development (install `just` with `cargo install just`):
 ```bash
-scripts\run_offline.bat
+just dev
+just monitoring  # optional Prometheus and Grafana
 ```
 
 ### Pick a GitHub issue to work on
@@ -132,7 +133,7 @@ When you're ready, make an issue ticket and link relevant, constructive comments
 
 ### Solana Development
 - Test contract changes on devnet first
-- Use `scripts/build_program.bat` to build the Solana program
+- Use `just build-program` to build the Solana program
 - Verify contract logic with unit tests
 - Check gas costs and rent requirements
 - Document any breaking changes

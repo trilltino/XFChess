@@ -63,12 +63,10 @@ impl IrohAxum {
             // Call into the Axum router.
             let response = router.call(request).await?;
 
-            // Send response headers.
             let (parts, body) = response.into_parts();
             let response_head: Response<()> = Response::from_parts(parts, ());
             send.send_response(response_head).await?;
 
-            // Stream response body frames.
             let mut response_stream = body.into_data_stream();
             while let Some(Ok(chunk)) = response_stream.next().await {
                 send.send_data(chunk).await?;

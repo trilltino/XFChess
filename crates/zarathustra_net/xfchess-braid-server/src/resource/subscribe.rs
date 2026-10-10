@@ -57,9 +57,7 @@ async fn subscribe_stream(hub: Arc<ResourceHub>, path: String) -> Response {
                 maybe_update = rx_stream.next() => {
                     match maybe_update {
                         Some(Ok(update)) => yield Ok(format_chunk(&update)),
-                        // A lagging subscriber has already missed updates. Keep
-                        // the stream open: later updates still arrive, and a
-                        // reconnect replays from the snapshot.
+                        // Keep lagging subscribers open; reconnecting replays the snapshot.
                         Some(Err(e)) => warn!("[braid] broadcast lag on {}: {}", path, e),
                         None => {
                             debug!("[braid] channel closed for {}", path);

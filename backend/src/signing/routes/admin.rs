@@ -26,7 +26,6 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, info, warn};
 
-// ── In-memory state for features that don't yet have DB backing ──────────────
 
 #[derive(Clone, Serialize)]
 struct IpBanEntry {
@@ -88,7 +87,6 @@ async fn add_audit(pool: Option<sqlx::SqlitePool>, action: &str, target: &str, r
     }
 }
 
-// ── Request types ─────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct ListQuery {
@@ -231,9 +229,7 @@ async fn operator_affordability(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
 
-    // max_players defaults to the largest bracket size so an unparameterised
-    // call reports the worst case rather than silently claiming affordability
-    // for a size nobody asked about.
+    // Default to the largest bracket to report conservative affordability.
     let max_players = q.max_players.unwrap_or(256);
     let format = q.format.as_deref().unwrap_or("SingleElimination");
     let average_moves = q.average_moves.unwrap_or(40);
@@ -336,12 +332,10 @@ async fn delete_template(
     Ok(Json(json!({ "ok": true, "name": name })))
 }
 
-// ── Router ────────────────────────────────────────────────────────────────────
 
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
         .merge(crate::signing::routes::money_actions::admin_money_action_routes())
-        // Players
         .route("/admin/players", get(list_players))
         .route("/admin/players/{wallet}", get(reporting::player_detail))
         .route("/admin/pvp/summary", get(reporting::pvp_summary))
@@ -351,18 +345,14 @@ pub fn admin_routes() -> Router<AppState> {
         )
         .route("/admin/players/{wallet}/ban", post(ban_player))
         .route("/admin/players/{wallet}/elo-override", post(elo_override))
-        // Sessions / active
         .route("/admin/active-sessions", get(list_active_sessions))
         // Wallet balances
         .route("/admin/feepayer-balance", get(get_feepayer_balance))
         .route("/admin/wallet-balances", get(get_wallet_balances))
-        // Anti-cheat
         .route("/admin/anti-cheat/reports", get(anti_cheat_reports))
         .route("/admin/anti-cheat/game/{game_id}/eval", get(get_game_eval))
-        // Games
         .route("/admin/games/{game_id}/force-resign", post(force_resign))
         .route("/admin/games/{game_id}/flag", post(flag_game))
-        // Audit
         .route("/admin/audit-log", get(get_audit_log))
         // Tournament templates
         .route(
@@ -373,9 +363,7 @@ pub fn admin_routes() -> Router<AppState> {
             "/admin/tournament-templates/{name}",
             axum::routing::delete(delete_template),
         )
-        // Logs stream
         .route("/admin/logs/stream", get(logs_stream))
-        // Treasury
         .route("/admin/treasury/payouts", get(treasury_payouts))
         .route("/admin/treasury/fee-report", get(treasury_fee_report))
         .route("/admin/treasury/refund", post(treasury_refund))
@@ -420,21 +408,15 @@ pub fn admin_routes() -> Router<AppState> {
         // Token rotation (authority-key rotation is a runbook, not an endpoint —
         // see ops/SECRETS_ROTATION.md; a "rotate" button that only logs is a footgun)
         .route("/admin/auth/rotate-token", post(rotate_token))
-        // Moderation
         .route("/admin/moderation/ip-ban", post(ip_ban))
         .route("/admin/moderation/ip-bans", get(list_ip_bans))
-        // Disputes
         .route("/admin/disputes/{game_id}/assign", post(assign_dispute))
 }
 
-// ── Handler implementations ───────────────────────────────────────────────────
 
 async fn anti_cheat_reports(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // Real data only. This used to prepend two hardcoded fake reports (game 1001,
-    // 1045), which is fabricated data on a compliance/moderation surface. Report
-    // only genuinely flagged games, persisted in flagged_games (migration 024).
     let flagged_repo = crate::db::repository::FlaggedGameRepository::new(state.store.pool());
     let flagged = flagged_repo.list().await.map_err(reporting::query_error)?;
     let reports: Vec<serde_json::Value> = flagged
@@ -1053,11 +1035,7 @@ async fn list_players(
     Ok(Json(json!({ "players": players_json })))
 }
 
-// No per-game ELO snapshot is recorded anywhere (on-chain PlayerProfile only
-// keeps the current rating, not a history) — this used to fabricate a
-// +12/-8/0 cycling delta series. Real per-game outcomes are all that's
-// actually available, so that's what this reports instead of inventing an
-// ELO curve.
+// Report recorded outcomes; PlayerProfile does not retain per-game Elo snapshots.
 async fn get_player_elo_history(
     Path(wallet): Path<String>,
     State(state): State<AppState>,
@@ -1178,12 +1156,8 @@ async fn force_resign(
     Path(game_id): Path<u64>,
     Json(req): Json<ForceResignReq>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    // Honest 501: there is no on-chain resign/timeout instruction builder in the
-    // backend, so this cannot submit a real transaction. The stub previously
-    // returned {ok:true, sig:"admin_force_resign_pending"}, which could mislead an
-    // operator into thinking the game was settled. To force a disputed game's
-    // outcome, use POST /admin/dispute/resolve (dispute_authority). A dedicated
-    // admin force-resign path is Phase 5 on-chain work.
+    // Force resign requires an on-chain instruction builder. Resolve disputed
+    // outcomes through /admin/dispute/resolve until that path is implemented.
     add_audit(
         None,
         "force_resign_attempt",
@@ -1301,12 +1275,7 @@ async fn get_audit_log(
 }
 
 async fn logs_stream() -> Result<Json<serde_json::Value>, StatusCode> {
-    // Honest empty stream: real log streaming needs either `axum::response::Sse`
-    // fed by a tokio broadcast channel wired into the tracing subscriber, or the
-    // panel tailing journald over SSH (it already has an SSH terminal). The stub
-    // fabricated "backend started / metrics polled / health check OK" lines every
-    // poll, which is noise that masks the absence of real logs. Return nothing
-    // until a real source is wired.
+    // Return an empty stream until a real tracing or journald log source is connected.
     Ok(Json(json!({
         "lines": [],
         "note": "in-app log streaming not wired; tail journald via the Hetzner SSH panel or `journalctl -u xfchess-backend -f`",
@@ -1373,17 +1342,8 @@ async fn treasury_refund(
         req.lamports, req.wallet, req.reason
     );
 
-    // Structured arguments, not a shell line. The previous version interpolated
-    // `state.config.solana_rpc_url` raw — that URL carries the Triton x-token in
-    // its path, the very secret `solana::redact_url` exists to keep out of logs,
-    // and this handler put it in an HTTP response body and the audit trail. It
-    // also spliced the operator-supplied `reason` into the command with nothing
-    // but surrounding double quotes, so a reason containing `"; …` produced a
-    // line that ran attacker-chosen text the moment it was pasted into the
-    // isolated host — the one machine in this design that holds the treasury key.
-    //
-    // The operator supplies the RPC URL and key from that host's own
-    // environment; neither belongs in a response from this process.
+    // Return structured arguments without RPC credentials. The isolated signer host
+    // supplies its own RPC URL and treasury key; never interpolate operator text into shell commands.
     (
         StatusCode::ACCEPTED,
         Json(json!({
@@ -1487,11 +1447,7 @@ async fn fund_tournament_prize(
         })
         .await;
 
-    // Mirror the confirmed on-chain lock into the store's prize_pool field so
-    // GET /tournaments (list_tournaments) shows a real, chain-confirmed
-    // figure instead of the stale local accumulator it used to be (removed
-    // from join/fill-bots — see F2 in tournament-production-readiness-plan.md).
-    // Cumulative: fund_sol_prize can be called more than once per tournament.
+    // Mirror the cumulative, confirmed on-chain prize funding into the store.
     state
         .tournament_store
         .update(id, |t| {
@@ -1561,10 +1517,7 @@ async fn metrics_summary(
     let now = now_secs();
     let last_push = ER_LAST_PUSH_UNIX.load(Ordering::Relaxed);
 
-    // Age of a heartbeat, or None when the worker has never ticked. `None`
-    // rather than 0 matters: a worker that has not run once is a different
-    // state from one that ticked this second, and 0 would render as the
-    // healthiest possible value for the least healthy case.
+    // None means the worker has never ticked; zero means a fresh heartbeat.
     let age = |unix: u64| -> Option<u64> {
         if unix == 0 {
             None
@@ -1575,7 +1528,6 @@ async fn metrics_summary(
     let n = |m: &std::sync::atomic::AtomicU64| m.load(Ordering::Relaxed);
 
     Ok(Json(json!({
-        // ── headline ────────────────────────────────────────────────────
         "online_count": state.presence.count_in_game(),
         "games_in_progress": state.presence.count_games_in_progress(),
         "transactions_confirmed_solana": state.metrics.transactions_confirmed("solana"),
@@ -1584,11 +1536,6 @@ async fn metrics_summary(
         "er_last_push_age_seconds": age(last_push),
         "feepayer_balance_lamports": state.metrics.feepayer_balance(0),
 
-        // ── worker detail ───────────────────────────────────────────────
-        // Everything below was already being collected by the workers and
-        // exported to Prometheus, but had no path into the admin panel — so
-        // it was only visible to someone with a Grafana session. Grouped by
-        // the worker that owns it so the UI can panel them directly.
         "settlement": {
             "ticks_total": n(&SETTLEMENT_TICKS_TOTAL),
             "tick_millis": n(&SETTLEMENT_TICK_MILLIS),
@@ -1813,7 +1760,6 @@ async fn fill_tournament_bots(
         })
         .await;
 
-    // Generate bracket and start
     store.generate_bracket(id).await;
     match store.start_tournament(id).await {
         Ok(()) => {

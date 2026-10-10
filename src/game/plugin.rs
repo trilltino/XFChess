@@ -92,13 +92,10 @@ impl Plugin for GamePlugin {
             .add_message::<crate::game::events::RematchResponseEvent>()
             .add_message::<crate::game::events::FlagTimeoutEvent>();
 
-        // Add AI plugin
         app.add_plugins(AIPlugin);
 
-        // Add network sync plugin for P2P multiplayer
         app.add_plugins(GameSyncPlugin);
 
-        // Add spectator sync plugin
         app.add_plugins(SpectateSyncPlugin);
 
         // 30-second first-move grace period (online games only)
@@ -171,23 +168,12 @@ impl Plugin for GamePlugin {
                 .run_if(in_state(GameState::InGame)),
         );
 
-        // Register systems with run conditions
-        // Systems are assigned to sets for predictable execution order
-        // NOTE: Input handling is now done via observers on entities (.observe())
-        // so we don't need handle_piece_selection/clear_selection_on_empty_click systems
-        // NOTE: Game logic systems are disabled in TempleOS mode (just a board, no game)
+        // Entity observers handle selection. TempleOS mode disables game logic.
         app.add_systems(
             Update,
             (
-                // Input set: Handle user input (camera only in TempleOS)
-                //
-                // Android gets one touch-gesture system in place of WASD pan
-                // (camera_movement_system), mouse-drag rotate
-                // (camera_rotation_system), and scroll-wheel zoom
-                // (camera_zoom_input_system) — see camera_touch_gestures'
-                // doc comment. camera_zoom_system (the smoothing/apply step)
-                // stays shared: touch pinch drives the same
-                // CameraController.target_zoom field scroll does on desktop.
+                // Android touch gestures replace desktop pan, drag, and scroll. Both feed
+                // CameraController.target_zoom and share the smoothing system.
                 #[cfg(not(target_os = "android"))]
                 camera_movement_system
                     .in_set(GameSystems::Input)
@@ -216,15 +202,10 @@ impl Plugin for GamePlugin {
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
                 // Validation set: Sync board state before validation (disabled in TempleOS)
 
-                // Execution set: Update game state (disabled in TempleOS)
-                // Advance the turn immediately (before AI runs) so the
-                // AI sees the new turn and responds in the same frame the player moved.
+                // Advance the turn before AI runs so it responds in the player’s move frame.
                 flush_pending_turn.in_set(GameSystems::Execution),
-                // Run when the turn changes (normal per-move path) OR when the
-                // legal-move cache is still empty but the game is not yet over.
-                // The second condition catches the frame after deferred piece-spawn
-                // commands are flushed: CurrentTurn has not changed, but the cache
-                // is empty and needs to be built for the first time.
+                // An empty cache also triggers after deferred piece spawns, even when
+                // CurrentTurn has not changed.
                 update_game_phase
                     .in_set(GameSystems::Execution)
                     .run_if(
@@ -242,11 +223,8 @@ impl Plugin for GamePlugin {
                 update_game_timer
                     .in_set(GameSystems::Execution)
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
-                // Gated on is_game_over() rather than is_changed(): the system also
-                // waits for the checkmating move's PieceMoveAnimation/FadingCapture to
-                // finish, which never happens on the same frame GameOverState flips.
-                // A one-shot is_changed() gate would miss that later frame entirely and
-                // leave the game stuck in InGame (see game_logic::check_game_over_state).
+                // Keep checking GameOverState until move and capture animations finish;
+                // a change-only gate would miss completion on a later frame.
                 check_game_over_state
                     .in_set(GameSystems::Execution)
                     .run_if(|go: Res<GameOverState>| go.is_game_over())
@@ -266,20 +244,12 @@ impl Plugin for GamePlugin {
                 crate::game::systems::network_move::handle_network_moves
                     .in_set(GameSystems::Execution)
                     .after(crate::multiplayer::systems::dispatch_remote_moves),
-                // Visual set: Update rendering (disabled in TempleOS)
-                // highlight_possible_moves is gated on Selection changing so the
-                // 64-square iteration and material handle clones only happen when a
-                // piece is clicked or a move is made (not 60x/s on idle frames).
+                // Rebuild highlights only when Selection changes, avoiding an idle-frame board scan.
                 highlight_possible_moves
                     .in_set(GameSystems::Visual)
                     .run_if(|sel: Res<Selection>| sel.is_changed())
                     .run_if(|view_mode: Res<super::view_mode::ViewMode>| !view_mode.is_templeos()),
-                // animate_piece_movement is skipped entirely when no piece has a
-                // PieceMoveAnimation component (archetype cache lookup — zero cost).
-                // Nested to stay under Bevy's tuple-arity limit for `.chain()`
-                // (the flat list above this point already has 19 systems) —
-                // this sub-tuple is itself chained, so overall ordering is
-                // unchanged from a flat 21-element chain.
+                // Nest the chained tuple to stay within Bevy tuple arity while preserving order.
                 (
                     animate_piece_movement.in_set(GameSystems::Visual),
                     // animate_capture_fade is skipped when nothing is mid-fade.
@@ -317,7 +287,6 @@ impl Plugin for GamePlugin {
             crate::ui::game::game_2d::trigger_piece_anim_2d.run_if(in_state(GameState::InGame)),
         );
 
-        // Eval bar resources and update system
         app.init_resource::<crate::ui::game::game_2d::EvalBarState>();
         app.init_resource::<crate::ui::game::game_2d::EvalHistory>();
         app.init_resource::<crate::ui::game::game_2d::BoardFocus>();
@@ -488,7 +457,6 @@ impl Plugin for GamePlugin {
                 .run_if(in_mode(GameMode::PgnReplay)),
         );
 
-        // Draw offer / rematch / chat network handlers
         app.add_systems(
             Update,
             (
@@ -539,16 +507,13 @@ impl Plugin for GamePlugin {
                 .run_if(not(in_mode(GameMode::PgnReplay))),
         );
 
-        // Global visual setup
         app.add_systems(Startup, setup_global_scene);
 
         // Add mesh picking plugin for 3D picking support (required in Bevy 0.18)
         app.add_plugins(MeshPickingPlugin);
 
-        // Parks the persistent egui camera back to its non-gameplay state only
-        // when the gameplay scene (InGame/Paused/GameOver) is actually left —
-        // not on the InGame<->GameOver internal hops, so the board camera keeps
-        // rendering behind the game-over popup instead of fighting a reset camera.
+        // Reset the persistent camera only when leaving the gameplay scene;
+        // InGame/GameOver transitions keep the board visible behind the popup.
         app.add_systems(OnExit(InGameplay), (reset_game_camera,));
 
         // Replay cleanup

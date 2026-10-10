@@ -146,12 +146,8 @@ mod tests {
 
     #[test]
     fn sparse_gap_with_no_further_traffic_is_reaped_by_explicit_expire() {
-        // Models the realistic "genuinely dropped, not just reordered" case:
-        // the opponent whose turn it is can't produce move 2 until they see
-        // move 1, so the buffer never grows past one entry and the count
-        // bound alone never fires. The ECS wrapper's wall-clock sweep calls
-        // `expire()` directly once the oldest buffered entry has waited too
-        // long — this test exercises that path.
+        // A missing move can leave only one buffered successor, so the count bound
+        // never fires. Explicit expiry must reap the stalled gap.
         let mut seq = NonceSequencer::new(8);
         assert_eq!(seq.ingest(2, "b"), IngestOutcome::Ready(vec![]));
         assert!(seq.has_buffered());
@@ -185,17 +181,8 @@ mod tests {
         for trial in 0..TRIALS {
             let mut rng = XorShift(0x9E3779B97F4A7C15u64.wrapping_add(trial as u64 * 2654435761));
 
-            // Build the "wire": every move appears twice (gossip copy + relay
-            // copy, both carrying the same nonce/payload) — except ~15% of
-            // nonces, which lose exactly one of their two copies, modeling a
-            // single transport dropping that particular move. The other copy
-            // always survives (matching the relay's at-least-once
-            // persistence within its TTL window plus gossip's independent
-            // path), so every nonce remains deliverable — this models
-            // reordering/duplication/single-transport-loss, not the
-            // "genuinely unrecoverable" case (covered separately by
-            // `permanently_dropped_message_triggers_overflow_not_infinite_buffering`
-            // and `sparse_gap_with_no_further_traffic_is_reaped_by_explicit_expire`).
+            // Duplicate each move across transports, dropping one copy for some nonces.
+            // Every nonce remains deliverable; unrecoverable gaps are tested separately.
             let mut wire: Vec<(u64, u64)> = Vec::new();
             for nonce in 1..=MOVES {
                 let drop_one_copy = rng.range(100) < 15;
@@ -220,18 +207,8 @@ mod tests {
                     IngestOutcome::Duplicate => {}
                     IngestOutcome::Ready(batch) => {
                         for item in batch {
-                            // The single-correct-lineage property: every
-                            // nonce this sequencer ever hands back as ready
-                            // to apply must be strictly greater than the
-                            // last one it handed back. Violating this would
-                            // mean a fork (re-applying an already-applied
-                            // nonce) or a regression (applying an earlier
-                            // nonce after a later one) — exactly the
-                            // divergence between "what the P2P layer thinks
-                            // happened and what gets recorded" that matters
-                            // for a wagered game. This must hold on every
-                            // step, resync or not — a resync only excuses
-                            // *gaps*, never forks/regressions.
+                            // Applied nonces must increase strictly, including after resync. Resync may
+                            // excuse gaps, but never forks or regressions.
                             if let Some(&last) = applied.last() {
                                 assert!(
                                     item > last,
@@ -242,22 +219,15 @@ mod tests {
                         }
                     }
                     IngestOutcome::Overflow { .. } => {
-                        // The buffer gave up on a gap — in production this
-                        // fires a ResyncRequest, and the receiver's board
-                        // gets snapped to the authoritative FEN wholesale
-                        // (not gap-filled). So a resync legitimately excuses
-                        // *missing* nonces from here on — but the
-                        // strictly-increasing check above still applies to
-                        // whatever the sequencer does go on to apply.
+                        // A resync replaces the board with authoritative FEN and may skip missing
+                        // nonces; subsequent applied nonces must still increase.
                         resynced = true;
                     }
                 }
             }
 
             if !resynced {
-                // No gap was ever tolerated: reordering and duplication
-                // alone (no permanent loss) must still deliver the complete,
-                // exact 1..=MOVES run with nothing skipped.
+                // Reordering and duplication without loss must deliver every nonce exactly once.
                 let expected: Vec<u64> = (1..=MOVES).collect();
                 assert_eq!(
                     applied, expected,

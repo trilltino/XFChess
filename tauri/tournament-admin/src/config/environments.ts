@@ -1,13 +1,5 @@
-// Single source of truth for where the admin panel talks to the backend.
-//
-// LOCAL      → a backend you run yourself on this machine (http://127.0.0.1:8090).
-// PRODUCTION → the Hetzner VPS backend, reached ONLY through an SSH tunnel
-//              (ssh -L 8091:127.0.0.1:8090). The admin API is never exposed on
-//              the public HTTPS path (nginx returns 444 for /admin/*), so the
-//              panel forwards a local port to the backend's loopback port over
-//              SSH. See docs/plans/admin-panel-and-production-hardening.md §1.
-//
-// This is the ONLY place the VPS IP and tunnel parameters appear in the panel.
+// LOCAL uses the local backend. PRODUCTION reaches the private admin API
+// through an SSH forward to backend loopback; nginx blocks public admin routes.
 
 export type EnvId = "local" | "production";
 
@@ -62,9 +54,7 @@ export const ENVIRONMENTS: Record<EnvId, EnvConfig> = {
   },
 };
 
-// Interactive ops terminal (Hetzner SSH panel) connects as the restricted
-// `deploy` user — NOT root. deploy has NOPASSWD sudo for only
-// `systemctl restart/reload/status` (see ops/scripts/deploy.ps1 Step 2a).
+// SSH uses restricted deploy credentials with sudo limited to systemctl operations.
 export const OPS_SSH = {
   user: "deploy",
   host: VPS_HOST,

@@ -93,7 +93,6 @@ async fn handle_get(
 
         // 2. Check for ?history=true
         if params.get("history").map(|v| v == "true").unwrap_or(false) {
-            // Return list of version strings
             let versions: Vec<String> = history
                 .iter()
                 .map(|u| {
@@ -111,7 +110,6 @@ async fn handle_get(
                 .into_response();
         }
 
-        // 3. Default: Return latest
         if let Some(latest) = history.last() {
             return (
                 StatusCode::OK,
@@ -155,7 +153,6 @@ async fn handle_put(
         tracing::trace!(body = %body, "PUT body");
     }
 
-    // Parse the incoming update from headers
     let version = headers
         .get("version")
         .and_then(|v| v.to_str().ok())
@@ -163,8 +160,6 @@ async fn handle_put(
         .unwrap_or_else(|| Version::String(uuid::Uuid::new_v4().to_string()));
     let update = Update::snapshot(version, Bytes::from(body.clone().into_bytes()));
 
-    // Store locally
-    // Store locally (append to history)
     let mut resources = state.resources.write().await;
     resources
         .entry(url.clone())
@@ -185,9 +180,6 @@ mod tests {
 
     #[test]
     fn test_braid_app_state_clone() {
-        // This test verifies BraidAppState can be cloned (required for Axum)
-        // We can't easily create a real SubscriptionManager without a gossip instance,
-        // but we can verify the derive macro works
         fn assert_clone<T: Clone>() {}
         assert_clone::<BraidAppState>();
     }

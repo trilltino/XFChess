@@ -151,7 +151,6 @@ fn handle_host_game(
     network_state: Res<OnlineNetworkState>,
 ) {
     for event in events.read() {
-        // Generate a random game ID
         let game_id: u64 = rand::random();
 
         connection_state.local_node_id = network_state.node_id.clone();
@@ -202,7 +201,6 @@ fn handle_connect_to_peer(
             PieceColor::Black
         });
 
-        // Decode peer ID from bs58
         let peer_endpoint_id = match bs58::decode(&event.peer_node_id).into_vec() {
             Ok(decoded) => {
                 if decoded.len() == 32 {
@@ -462,22 +460,13 @@ fn handle_network_events(
                                     let _ = tx.send(start_msg);
 
                                     if connection_state.drive_game_start {
-                                        // This is the *only* signaling channel Direct
-                                        // Connection / join-links have — drive the
-                                        // transition ourselves and make sure the game
-                                        // actually comes up in online-multiplayer mode
-                                        // (previously nothing set these, so both of
-                                        // those flows silently landed in
-                                        // GameMode::SinglePlayer / ChessAIResource's
-                                        // default VsAI instead).
+                                        // Direct connections and join links must establish multiplayer mode here;
+                                        // this is their game-start signaling path.
                                         connection_state.status = P2PConnectionStatus::InGame;
                                         *core_mode = crate::core::GameMode::OnlineMultiplayer;
                                         ai_config.mode =
                                             crate::game::ai::resource::GameMode::Multiplayer;
-                                        // Pure casual P2P entry: clear any stale on-chain
-                                        // game context from a previous Solana lobby /
-                                        // tournament match (see
-                                        // `clear_on_chain_game_state`).
+                                        // Clear on-chain context left by a previous Solana lobby or tournament match.
                                         #[cfg(feature = "solana")]
                                         crate::multiplayer::solana::addon::clear_on_chain_game_state(
                                             solana_sync.as_deref_mut(),
@@ -488,11 +477,8 @@ fn handle_network_events(
                                         game_started.write(GameStartedEvent { game_id: *game_id });
                                         next_state.set(GameState::InGame);
                                     } else {
-                                        // VPS-lobby / tournament flow: this is just the
-                                        // opportunistic dual-transport link coming up.
-                                        // Game-start is owned by the host's explicit
-                                        // "Start Game" (relayed GAME_START) or by
-                                        // handle_tournament_match_assigned — don't race it.
+                                        // For VPS lobbies and tournaments, connection is opportunistic. Explicit
+                                        // GAME_START or match assignment owns the game-start transition.
                                         connection_state.status = P2PConnectionStatus::Connected;
                                         info!(
                                             "Direct link ready for game {} (non-authoritative — waiting for the real game-start signal)",
@@ -522,11 +508,7 @@ fn handle_network_events(
                                     "Game {} started! White: {}, Black: {}",
                                     game_id, white_player, black_player
                                 );
-                                // The opponent's display name for our own color was
-                                // already captured earlier in the handshake (from
-                                // GameInvite/InviteResponse); this message is the
-                                // first point the *other* side's name arrives, so
-                                // fill it in here too if it's still unset.
+                                // Fill the other side's display name when it first arrives in this handshake.
                                 if connection_state.opponent_display_name.is_none() {
                                     let opponent_name = match connection_state.player_color {
                                         Some(PieceColor::White) => black_display.clone(),
@@ -541,10 +523,7 @@ fn handle_network_events(
                                 *core_mode = crate::core::GameMode::OnlineMultiplayer;
                                 ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
 
-                                // Pure casual P2P entry: clear any stale on-chain
-                                // game context from a previous Solana lobby /
-                                // tournament match (see
-                                // `clear_on_chain_game_state`).
+                                // Clear on-chain context left by a previous Solana lobby or tournament match.
                                 #[cfg(feature = "solana")]
                                 crate::multiplayer::solana::addon::clear_on_chain_game_state(
                                     solana_sync.as_deref_mut(),
@@ -639,7 +618,6 @@ fn handle_reject_invite(
                 }
             }
 
-            // Reset connection state
             connection_state.status = P2PConnectionStatus::Disconnected;
             connection_state.game_id = None;
             connection_state.peer_node_id = None;

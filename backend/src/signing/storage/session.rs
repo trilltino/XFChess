@@ -52,9 +52,7 @@ impl SessionStore {
         .execute(&self.pool)
         .await?;
 
-        // Global-session flow marker (migration 026) — guarded ALTER, same
-        // pattern as the other defensive ALTERs below. See that migration's
-        // comment for why move-recording needs to tell the two flows apart.
+        // Mirror migration 026 for deployments that skip sqlx migrations.
         let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0")
             .execute(&self.pool)
             .await;
@@ -63,9 +61,7 @@ impl SessionStore {
                 .execute(&self.pool)
                 .await;
 
-        // Per-wallet activation record (migration 025) — mirrors migrations/
-        // for deployments that don't run sqlx migrations. See that file's
-        // comment for why this can't just reuse `sessions.active`.
+        // Mirror per-wallet activation migration 025 for deployments that skip sqlx migrations.
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS session_wallet_activations (
@@ -102,9 +98,7 @@ impl SessionStore {
         .execute(&self.pool)
         .await?;
 
-        // Client-side anti-cheat telemetry (blur + think-time reporting) —
-        // mirrors migrations/013_move_telemetry.sql and 014_think_time.sql for
-        // deployments that don't run sqlx migrations.
+        // Mirror telemetry migrations 013/014 for deployments that skip sqlx migrations.
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS move_telemetry (
@@ -121,9 +115,7 @@ impl SessionStore {
         .execute(&self.pool)
         .await?;
 
-        // Defensive ALTER for DBs created before migration 014. SQLite has no
-        // ADD COLUMN IF NOT EXISTS; a duplicate-column error here is expected
-        // and harmless.
+        // SQLite lacks ADD COLUMN IF NOT EXISTS; ignore duplicate-column errors for existing schemas.
         let _ = sqlx::query("ALTER TABLE move_telemetry ADD COLUMN think_ms INTEGER")
             .execute(&self.pool)
             .await;
@@ -135,13 +127,8 @@ impl SessionStore {
         .execute(&self.pool)
         .await;
 
-        // Reconcile the migration-006 `games`/`moves` schema with the columns
-        // the repository actually reads/writes. Migration 006 created the
-        // minimal tables; `pgn_text`, `move_san`, and `fen_before` live only in
-        // the alternate `db::schema` init path that the signing-server does not
-        // run. Without these, SAN/PGN persistence and `SELECT *` of GameRecord
-        // fail (silently, on fire-and-forget paths). Guarded ALTERs are
-        // idempotent across restarts.
+        // Idempotently add repository columns missing from the migration-006 schema;
+        // the alternate db::schema initialization path does not run here.
         let _ = sqlx::query("ALTER TABLE games ADD COLUMN pgn_text TEXT")
             .execute(&self.pool)
             .await;
@@ -180,9 +167,7 @@ impl SessionStore {
         .await
         .ok();
 
-        // JWT revocation cut-offs (migration 017). A logout records the current
-        // time for a subject; any token issued at or before `valid_after` is then
-        // rejected, giving us a kill switch for the otherwise non-revocable JWTs.
+        // Reject JWTs issued at or before the subject’s logout cutoff, valid_after.
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS jwt_revocations (
@@ -312,7 +297,6 @@ impl SessionStore {
         Ok(())
     }
 
-    // ── Social identities (Privy Google/email → wallet) ────────────────────────
 
     pub async fn find_wallet_by_social(&self, provider: &str, subject: &str) -> Option<String> {
         sqlx::query_as::<_, (String,)>(
@@ -482,7 +466,6 @@ impl SessionStore {
     }
 
     pub async fn create(&self, game_id: u64, wallet_pubkey: Pubkey) -> anyhow::Result<Pubkey> {
-        // Return the existing session pubkey if one already exists for this game.
         if let Some(existing) = self.get(game_id).await {
             return Ok(existing.session_pubkey());
         }
@@ -567,16 +550,7 @@ impl SessionStore {
     ) -> anyhow::Result<()> {
         let wallet_str = wallet_pubkey.to_string();
 
-        // Guard against silently repointing an in-use session's recorded
-        // owner: `game_id` is client-generated, so a collision with an
-        // existing row should be vanishingly rare — but the UPSERT below
-        // previously overwrote `wallet` unconditionally on ANY conflict,
-        // decoupling a session's recorded owner from whoever actually holds
-        // it (see the identity audit: this was a real invariant-violation
-        // gap, not just theoretical). Reject instead of silently
-        // reassigning when an ACTIVE row already exists under a DIFFERENT
-        // wallet; a re-call for the SAME wallet (retry, idempotent re-track)
-        // still proceeds exactly as before.
+        // Reject changing an active session's owner. Retracking the same wallet is idempotent.
         if let Some((existing_wallet, active)) = sqlx::query_as::<_, (String, i64)>(
             "SELECT wallet, active FROM sessions WHERE game_id = ?",
         )

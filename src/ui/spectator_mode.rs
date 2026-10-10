@@ -25,9 +25,7 @@ pub struct SpectatorModePlugin;
 impl Plugin for SpectatorModePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpectatorMode>()
-            // Must run in EguiPrimaryContextPass — EguiContexts is only valid there.
-            // The run condition avoids touching the egui context every frame when
-            // spectator mode is inactive, which previously blocked the main menu UI.
+            // Run in EguiPrimaryContextPass only while spectating; EguiContexts is valid only in that pass.
             .add_systems(
                 bevy_egui::EguiPrimaryContextPass,
                 spectator_ui_system.run_if(|s: Res<SpectatorMode>| s.active),
@@ -139,7 +137,6 @@ fn spectator_ui_system(
 }
 
 fn render_simple_board(ui: &mut egui::Ui, fen: &str) {
-    // Parse FEN and render basic board
     let board_part = fen.split_whitespace().next().unwrap_or("");
 
     ui.monospace("+-------------------------------+");
@@ -148,7 +145,6 @@ fn render_simple_board(ui: &mut egui::Ui, fen: &str) {
         let mut row_str = String::from("¦");
 
         for file in 0..8 {
-            // Find piece at this position
             let square = get_square_from_fen(board_part, file, rank);
             row_str.push_str(&format!(" {} ¦", square));
         }
@@ -213,7 +209,6 @@ pub fn spectator_menu_ui(
         .resizable(false)
         .default_width(320.0)
         .show(ctx, |ui| {
-            // Collect unique active games from discovered peers
             let mut active_games = std::collections::HashSet::new();
             for peer in &braid_network.discovered_peers {
                 if let Some(game_id) = peer.connected_game {

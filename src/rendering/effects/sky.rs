@@ -2,8 +2,7 @@ use bevy::prelude::*;
 
 #[cfg(feature = "sky")]
 use crate::core::{DespawnOnExit, GameState};
-// In bevy 0.19.0-rc.3 the atmosphere components live in `bevy_light` (`Atmosphere`,
-// `ScatteringMedium`); only `AtmosphereSettings` is re-exported from `bevy::pbr`.
+// Atmosphere and ScatteringMedium live in bevy_light; only AtmosphereSettings is re-exported by pbr.
 #[cfg(feature = "sky")]
 use bevy::light::{atmosphere::ScatteringMedium, Atmosphere};
 #[cfg(feature = "sky")]
@@ -39,10 +38,7 @@ fn setup_sky(
         Name::new("Sky Atmosphere"),
     ));
 
-    // Attach per-camera atmosphere settings to the dedicated board camera (the
-    // one that renders the 3D world during gameplay — see `camera::BoardCamera`).
-    // This also pulls in `Hdr` (required by `AtmosphereSettings`); `teardown_sky`
-    // strips both back off on exit, though the board camera despawns on its own.
+    // AtmosphereSettings requires Hdr on the board camera; teardown_sky removes both.
     if let Ok(camera) = board_camera.single() {
         commands
             .entity(camera)

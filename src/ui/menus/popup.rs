@@ -2,9 +2,6 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
 
-// ---------------------------------------------------------------------------
-// Data types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct GamePopup {
@@ -54,9 +51,6 @@ impl GamePopup {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Queue resource
-// ---------------------------------------------------------------------------
 
 #[derive(Resource, Default)]
 pub struct GamePopupQueue {
@@ -69,9 +63,6 @@ impl GamePopupQueue {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Systems
-// ---------------------------------------------------------------------------
 
 fn tick_popups(mut queue: ResMut<GamePopupQueue>, time: Res<Time>) {
     let dt = time.delta_secs();
@@ -207,7 +198,6 @@ fn render_popups(
                 ui.add(egui::Separator::default().horizontal());
                 ui.add_space(8.0);
 
-                // Body
                 ui.label(egui::RichText::new(&message).size(12.0).color(body_color));
 
                 if let Some(ref ct) = copy_text {
@@ -274,9 +264,6 @@ fn render_popups(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Plugin
-// ---------------------------------------------------------------------------
 
 pub struct PopupPlugin;
 

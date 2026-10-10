@@ -237,10 +237,7 @@ async fn global_create_game_accepts_a_vault_funded_exactly_enough() {
         1_000_000_000,
     );
 
-    // rent-exemption for the delegation account + the Game PDA's rent + the
-    // wager, with a small margin. Well under the 1 SOL the helper defaults to,
-    // so this is a genuinely tight vault rather than a restatement of the
-    // happy-path test above.
+    // Fund only the reserve, game rent, and wager to exercise the minimum vault balance.
     session_account_data.lamports = 20_000_000;
 
     let mut ctx = start(vec![(session_pda, session_account_data)]).await;
@@ -272,9 +269,7 @@ async fn global_create_game_accepts_a_vault_funded_exactly_enough() {
 
 #[tokio::test]
 async fn global_create_game_works_for_a_free_zero_wager_game() {
-    // Rent still has to be funded by the PDA vault even with no wager — this
-    // is the code path that would fail on the very first game creation for
-    // any brand-new session, wagered or not.
+    // The PDA vault must fund account rent even for a zero-wager game.
     let player = Pubkey::new_unique();
     let session_signer = Keypair::new();
 
@@ -309,11 +304,6 @@ async fn global_create_game_works_for_a_free_zero_wager_game() {
     assert_eq!(game.status, GameStatus::WaitingForOpponent);
 }
 
-// ── global_join_game: same bug, join side ──────────────────────────────────
-// `global_join_game`'s wager transfer had the identical "from must not carry
-// data" bug as `global_create_game` (both drew from the same
-// `GlobalSessionDelegation` PDA vault via a plain `system_program::transfer`),
-// just never caught because nobody exercised it under the real BPF runtime.
 
 fn player_profile_pda(player: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[b"profile", player.as_ref()], &xfchess_game::ID).0

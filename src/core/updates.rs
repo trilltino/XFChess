@@ -14,7 +14,6 @@ pub const INSTALL_GUIDE_URL: &str =
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
-// ─────────────────────────────── Platforms ───────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Platform {
@@ -55,10 +54,7 @@ impl Platform {
             Platform::Windows => "assets/branding/platforms/windows.png",
             Platform::MacOs => "assets/branding/platforms/macos.png",
             Platform::Linux => "assets/branding/platforms/linux.png",
-            // The Chrome OS release *is* the Linux build, relabelled by the
-            // `chromeos` job in release.yml, but it gets the Chrome mark
-            // rather than Tux: the card is how a Chrome OS user identifies
-            // their own download, and a penguin doesn't say "this one".
+            // Chrome OS uses the Linux artifact with its own download icon.
             Platform::ChromeOs => "assets/branding/platforms/chromeos.png",
         }
     }
@@ -101,7 +97,6 @@ fn running_on_chrome_os() -> bool {
     false
 }
 
-// ───────────────────────────── Release data ──────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReleaseAsset {
@@ -168,7 +163,6 @@ struct WireAsset {
     size: u64,
 }
 
-// ────────────────────────── Version comparison ───────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Version {
@@ -199,7 +193,6 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
     }
 }
 
-// ──────────────────────────── Checker state ──────────────────────────────
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum UpdateStatus {
@@ -250,9 +243,7 @@ impl UpdateCheck {
         self.rx = Some(rx);
         self.status = UpdateStatus::Checking;
 
-        // `reqwest::blocking` is safe here: `IoTaskPool` is Bevy's own pool
-        // for exactly this kind of blocking IO, not a tokio runtime (building
-        // a blocking client inside one of those panics).
+        // Blocking reqwest is safe on Bevy’s IoTaskPool; creating it inside Tokio would panic.
         IoTaskPool::get()
             .spawn(async move {
                 let _ = tx.send(fetch_latest_release());
@@ -270,7 +261,6 @@ impl UpdateCheck {
     }
 }
 
-// ───────────────────────────── Networking ────────────────────────────────
 
 fn fetch_latest_release() -> Result<ReleaseInfo, String> {
     let client = reqwest::blocking::Client::builder()
@@ -330,7 +320,6 @@ pub fn open_in_browser(url: &str) {
     }
 }
 
-// ─────────────────────── Skipped-version persistence ─────────────────────
 
 const SKIP_FILENAME: &str = "update_check.json";
 
@@ -340,12 +329,7 @@ struct SkipState {
 }
 
 fn skip_file_path() -> Option<PathBuf> {
-    // The in-app update checker this file implements is Windows/macOS/Linux
-    // installer-update logic (GitHub release downloads) — it doesn't apply to
-    // Android at all, which updates through the dApp Store instead. Kept
-    // buildable on Android only because this module isn't itself cfg-gated
-    // out of the crate; `internal_data_dir()` here is unreachable code, not a
-    // real Android code path.
+    // Android updates through the dApp Store; this installer-update path is unreachable there.
     #[cfg(target_os = "android")]
     return crate::core::paths::internal_data_dir().map(|d| d.join(SKIP_FILENAME));
     #[cfg(not(target_os = "android"))]
@@ -384,7 +368,6 @@ fn save_skipped_version(version: &str) {
     }
 }
 
-// ─────────────────────────────── Systems ─────────────────────────────────
 
 fn start_update_check(mut check: ResMut<UpdateCheck>) {
     info!("[UPDATE] Running {CURRENT_VERSION}; checking for a newer release");

@@ -50,15 +50,12 @@ pub fn reset_game_resources(
         current_turn.color, current_turn.move_number
     );
 
-    // Reset game phase to Playing
     *game_phase = CurrentGamePhase(GamePhase::Playing);
     info!("[GAME_INIT] Game phase reset: {:?}", game_phase.0);
 
-    // Clear selection (no piece selected)
     selection.clear();
     info!("[GAME_INIT] Selection cleared");
 
-    // Clear move history
     move_history.clear();
     info!(
         "[GAME_INIT] Move history cleared (was {} moves)",
@@ -88,15 +85,12 @@ pub fn reset_game_resources(
         game_timer.white_time_left, game_timer.increment
     );
 
-    // Clear captured pieces
     captured_pieces.clear();
     info!("[GAME_INIT] Captured pieces cleared");
 
-    // Reset game over state to Playing
     *game_over = GameOverState::Playing;
     info!("[GAME_INIT] Game over state reset: {:?}", game_over);
 
-    // Reset turn state context to default phase
     *turn_context = TurnStateContext::default();
 
     info!(
@@ -104,7 +98,6 @@ pub fn reset_game_resources(
         turn_context.phase
     );
 
-    // Reset chess engine to starting position
     engine.reset();
     info!("[GAME_INIT] Chess engine reset to starting position");
 
@@ -151,10 +144,7 @@ pub fn initialize_players(
             .as_ref()
             .and_then(|s| s.player_color)
             .unwrap_or(PieceColor::White);
-        // Real names once available (local profile / on-chain via wallet
-        // connect, plus the JOIN_ACK/GAME_START P2P exchange) — "Opponent"
-        // only survives as a fallback if that exchange genuinely never
-        // completed, not as the normal case.
+        // Use profile or exchanged player names; Opponent is a fallback for missing names.
         let my_name = player_identity.display_name().to_string();
         let opponent_name = p2p_conn
             .as_ref()
@@ -232,9 +222,7 @@ pub fn start_timer_when_ready(
         return;
     }
 
-    // Sync the engine from the ECS board exactly once, as soon as the full set
-    // of pieces is present. This must happen regardless of whether the clock has
-    // started yet, so move validation is ready before the first move.
+    // Sync the engine once after all pieces spawn, before clock start or move validation.
     if pieces_query.iter().count() >= 32 && !*engine_inited {
         engine.sync_ecs_to_engine(&pieces_query);
         *engine_inited = true;
