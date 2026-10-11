@@ -1,4 +1,3 @@
-
 pub const STATUS_SUBSCRIPTION: u16 = 209;
 
 pub const STATUS_MERGE_CONFLICT: u16 = 293;
@@ -6,7 +5,6 @@ pub const STATUS_MERGE_CONFLICT: u16 = 293;
 pub const STATUS_GONE: u16 = 410;
 
 pub const STATUS_RANGE_NOT_SATISFIABLE: u16 = 416;
-
 
 pub mod status {
     pub const OK: u16 = 200;
@@ -21,7 +19,6 @@ pub mod status {
 
     pub const RANGE_NOT_SATISFIABLE: u16 = 416;
 }
-
 
 pub mod headers {
     use http::HeaderName;
@@ -55,14 +52,12 @@ pub mod headers {
     pub const CONTENT_TYPE: HeaderName = http::header::CONTENT_TYPE;
 }
 
-
 pub mod merge_types {
 
     pub const DIAMOND: &str = "diamond";
 
     pub const SIMPLETON: &str = "simpleton";
 }
-
 
 pub mod media_types {
     pub const BRAID_PATCH: &str = "application/braid-patch";

@@ -1,5 +1,3 @@
-#![warn(missing_docs)]
-
 pub mod color;
 pub mod error;
 pub mod pairing;

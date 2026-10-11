@@ -7,7 +7,7 @@ bridge from Bevy picking events to piece selection.
 
 Sits between Bevy's built-in picking (part of `DefaultPlugins`) and
 [`game/`](../game/): pointer events resolve to board squares/pieces here, then the
-`GameSystems::Input` set in `game/systems/input.rs` turns them into selections and
+observers in [board.rs](board.rs) turn them into selections and
 moves.
 
 ## Key files
@@ -15,7 +15,8 @@ moves.
 | File | Contents |
 |------|----------|
 | [pointer.rs](pointer.rs) | Hover effects via `Pointer<Over>` / `Pointer<Out>` observers, `CursorIcon` switching, cursor-position resource |
-| [mod.rs](mod.rs) | `InputPlugin` (currently only registers pointer systems — Bevy's `PointerInputPlugin` is already in `DefaultPlugins`) |
+| [board.rs](board.rs) | Piece/square click and drag observers, selection and move submission, fullscreen and Escape-to-leave |
+| [mod.rs](mod.rs) | `InputPlugin`: the `CursorStyle` resource and applying the hover cursor to the window |
 
 ## Example
 
@@ -28,7 +29,7 @@ use bevy::window::{CursorIcon, SystemCursorIcon};
 
 ## Gotchas
 
-- Selection logic itself lives in [game/systems/input.rs](../game/systems/input.rs);
+- Selection logic itself lives in [board.rs](board.rs);
   this module only produces hover/cursor state. Don't add move execution here.
 - Hover systems check `CurrentGamePhase`/`CurrentTurn` so pieces don't light up when
   it isn't your turn — keep that gating when adding new pointer feedback.

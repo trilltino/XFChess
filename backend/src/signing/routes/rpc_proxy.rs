@@ -86,7 +86,7 @@ fn client_ip(headers: &HeaderMap, peer: Option<SocketAddr>) -> String {
         .map(|addr| addr.ip().to_string())
         .unwrap_or_else(|| "unknown-peer".to_string());
 
-    if trusted_proxies().iter().any(|t| *t == peer_ip) {
+    if trusted_proxies().contains(&peer_ip) {
         if let Some(forwarded) = headers
             .get("x-real-ip")
             .or_else(|| headers.get("x-forwarded-for"))

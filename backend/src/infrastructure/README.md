@@ -37,4 +37,4 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
   when the env var is set, and falls back to any-origin with a warning log when it
   isn't — the fallback is meant for local dev only. Whether this is actually locked
   down in a given deployment depends on that environment's `.env`, tracked
-  operationally as R4 in [ops/docs/E2E_REMEDIATION.md](../../../ops/docs/E2E_REMEDIATION.md).
+  in [the environment guide](../../../ops/docs/ENVIRONMENTS.md).

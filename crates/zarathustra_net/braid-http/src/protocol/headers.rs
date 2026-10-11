@@ -2,27 +2,23 @@ use crate::error::{BraidError, Result};
 use crate::types::Version;
 
 pub fn parse_version_header(value: &str) -> Result<Vec<Version>> {
-    tracing::info!("[BraidHTTP] Parsing version header: '{}'", value);
     use sfv::{BareItem, List, ListEntry, Parser};
-    match Parser::new(value).parse::<List>() {
-        Ok(list) => {
-            let mut versions = Vec::new();
-            for member in list {
-                match member {
-                    ListEntry::Item(item) => match item.bare_item {
-                        BareItem::String(s) => versions.push(Version::String(s.into())),
-                        BareItem::Integer(i) => versions.push(Version::Integer(i.into())),
-                        BareItem::Token(t) => versions.push(Version::String(t.into())),
-                        _ => {}
-                    },
-                    _ => {}
-                }
-            }
-            if !versions.is_empty() {
-                return Ok(versions);
-            }
+    if let Ok(list) = Parser::new(value).parse::<List>() {
+        let mut versions = Vec::new();
+        for member in list {
+            let ListEntry::Item(item) = member else {
+                return Err(BraidError::HeaderParse(
+                    "Invalid version list member".into(),
+                ));
+            };
+            versions.push(match item.bare_item {
+                BareItem::String(s) => Version::String(s.into()),
+                BareItem::Integer(i) => Version::Integer(i.into()),
+                BareItem::Token(t) => Version::String(t.into()),
+                _ => return Err(BraidError::HeaderParse("Invalid version identifier".into())),
+            });
         }
-        Err(_) => {}
+        return Ok(versions);
     }
 
     if let Ok(json_arr) = serde_json::from_str::<Vec<String>>(value) {
@@ -33,61 +29,73 @@ pub fn parse_version_header(value: &str) -> Result<Vec<Version>> {
         return Ok(vec![Version::String(json_str)]);
     }
 
-    let trimmed = value.trim();
-    if !trimmed.is_empty() {
-        // Strip quotes and escapes recursively (handles "\"id\"", '"id"', etc.)
-        let mut clean = trimmed.to_string();
-        loop {
-            let next = clean
-                .trim_matches(|c| c == '"' || c == '\'' || c == '\\')
-                .to_string();
-            if next == clean || next.is_empty() {
-                break;
-            }
-            clean = next;
-        }
-
-        if !clean.is_empty() {
-            return Ok(vec![Version::String(clean)]);
-        }
+    if value.trim().is_empty() {
+        return Ok(Vec::new());
     }
-
-    Ok(Vec::new())
+    Err(BraidError::HeaderParse("Invalid version list".into()))
 }
-
 pub fn format_version_header(versions: &[Version]) -> String {
     versions
         .iter()
         .map(|v| match v {
-            Version::String(s) => format!("\"{}\"", s.replace("\"", "\\\"")),
+            Version::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
             Version::Integer(i) => format!("\"{}\"", i), // Force quotes around integers
         })
         .collect::<Vec<_>>()
         .join(", ")
 }
 
-pub fn format_version_header_json(versions: &[Version]) -> String {
-    // Braid.org expects JSON array of STRINGS.
-    // Ensure all versions (even Integers) are serialized as strings.
-    let strings: Vec<String> = versions.iter().map(|v| v.to_string()).collect();
-    let json = serde_json::to_string(&strings).unwrap_or_else(|_| "[]".to_string());
-    tracing::info!("[Protocol] Formatted headers as JSON: {}", json);
-    json
-}
-
 pub fn parse_current_version_header(value: &str) -> Result<Vec<Version>> {
     parse_version_header(value)
 }
 
+pub(crate) fn parse_patch_count(
+    patches: Option<&str>,
+    content_type: Option<&str>,
+) -> Result<Option<usize>> {
+    let parse = |value: &str| {
+        value
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| BraidError::HeaderParse("Invalid patch count".into()))
+    };
+    let explicit = patches.map(parse).transpose()?;
+    let mut media_count = None;
+    if let Some(content_type) = content_type {
+        let mut parts = content_type.split(';');
+        if parts.next().is_some_and(|media| {
+            media
+                .trim()
+                .eq_ignore_ascii_case("application/http-patches")
+        }) {
+            for parameter in parts {
+                if let Some((name, value)) = parameter.split_once('=') {
+                    if name.trim().eq_ignore_ascii_case("count") {
+                        let count = parse(value.trim().trim_matches('"'))?;
+                        if media_count.replace(count).is_some() {
+                            return Err(BraidError::HeaderParse("Duplicate patch count".into()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if explicit.zip(media_count).is_some_and(|(a, b)| a != b) {
+        return Err(BraidError::HeaderParse("Conflicting patch counts".into()));
+    }
+    Ok(explicit.or(media_count))
+}
+
 pub fn parse_content_range(value: &str) -> Result<(String, String)> {
-    let parts: Vec<&str> = value.splitn(2, ' ').collect();
-    if parts.len() != 2 {
+    let value = value.trim();
+    let (unit, range) = value.split_once(char::is_whitespace).unwrap_or((value, ""));
+    if unit.is_empty() {
         return Err(BraidError::HeaderParse(format!(
-            "Invalid Content-Range: expected 'unit range', got '{}'",
+            "Invalid Content-Range: missing unit in '{}'",
             value
         )));
     }
-    Ok((parts[0].to_string(), parts[1].to_string()))
+    Ok((unit.to_owned(), range.trim_start().to_owned()))
 }
 
 #[inline]
@@ -121,33 +129,6 @@ pub fn parse_merge_type(value: &str) -> Result<String> {
             "Unsupported merge-type: {}",
             value
         ))),
-    }
-}
-
-pub fn parse_tunneled_response(
-    bytes: &[u8],
-) -> Result<(u16, std::collections::BTreeMap<String, String>, usize)> {
-    let s = String::from_utf8_lossy(bytes);
-    if let Some(end_idx) = s.find("\r\n\r\n") {
-        let headers_part = &s[..end_idx];
-        let mut status = 200;
-        let mut headers = std::collections::BTreeMap::new();
-        for line in headers_part.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(val) = line.strip_prefix(":status:") {
-                status = val.trim().parse().unwrap_or(200);
-                continue;
-            }
-            if let Some((name, value)) = line.split_once(':') {
-                headers.insert(name.trim().to_lowercase(), value.trim().to_string());
-            }
-        }
-        Ok((status, headers, end_idx + 4))
-    } else {
-        Err(BraidError::HeaderParse("Incomplete headers".to_string()))
     }
 }
 

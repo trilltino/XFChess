@@ -3,6 +3,10 @@
 // Access is scoped by capabilities/admin-http.json.
 import { fetch } from "@tauri-apps/plugin-http";
 import type { SwissResultRequest, CancellationResponse, TournamentOperation } from "./adminFlows";
+import { normalizeTournamentDetail, type TournamentDetail } from "./tournamentDetail";
+import type { HostResources } from "./operations";
+
+export type { TournamentDetail };
 
 export interface ApiError {
   message: string;
@@ -19,36 +23,23 @@ export interface ApiResponse<T = any> {
 class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
+  private generation = 0;
 
+  // Credentials are held in memory only; useAuth persists the key in the OS
+  // credential store (services/credentials.ts).
   constructor(baseUrl: string = "http://127.0.0.1:8090") {
     this.baseUrl = baseUrl;
-    this.loadCredentials();
-  }
-
-  private loadCredentials() {
-    if (typeof localStorage === "undefined") {
-      return;
-    }
-    this.token = localStorage.getItem("admin_token");
   }
 
   setCredentials(token: string, baseUrl: string) {
+    this.generation++;
     this.token = token;
     this.baseUrl = baseUrl;
-    if (typeof localStorage === "undefined") {
-      return;
-    }
-    localStorage.setItem("admin_token", token);
-    localStorage.setItem("backend_url", baseUrl);
   }
 
   clearCredentials() {
+    this.generation++;
     this.token = null;
-    if (typeof localStorage === "undefined") {
-      return;
-    }
-    localStorage.removeItem("admin_token");
-    localStorage.removeItem("backend_url");
   }
 
   private async request<T>(
@@ -56,6 +47,12 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${endpoint}`;
+    const generation = this.generation;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) controller.abort();
+    const deadline = setTimeout(abort, 30_000);
 
     const headers = new Headers({
       "Content-Type": "application/json",
@@ -76,6 +73,7 @@ class ApiClient {
       const response = await fetch(url, {
         ...options,
         headers,
+        signal: controller.signal,
       });
 
       let data: any;
@@ -87,6 +85,9 @@ class ApiClient {
         data = await response.text();
       }
 
+      if (generation !== this.generation) {
+        return { ok: false, error: { message: "Connection changed during request", code: "STALE_RESPONSE" } };
+      }
       if (response.ok) {
         console.log(` Success: ${endpoint} (HTTP ${response.status})`);
         return {
@@ -115,6 +116,9 @@ class ApiClient {
         },
         ok: false,
       };
+    } finally {
+      clearTimeout(deadline);
+      options.signal?.removeEventListener("abort", abort);
     }
   }
 
@@ -139,12 +143,78 @@ class ApiClient {
     };
   }
 
-  async getTournament(id: number) {
-    return this.request<any>(`/api/tournament/${id}`);
+  async getTournament(id: number): Promise<ApiResponse<TournamentDetail>> {
+    const response = await this.request<Record<string, any>>(`/api/tournament/${id}`);
+    if (!response.ok || !response.data) return response as ApiResponse<TournamentDetail>;
+    return { ...response, data: normalizeTournamentDetail(response.data) };
   }
 
-  async createTournament(data: any) {
-    return this.request<any>("/admin/tournament/create", {
+  // Swiss roster management. Withdrawal forfeits the player's open board and drops
+  // them from later pairings; marking absent forfeits one round only.
+  async withdrawSwissPlayer(tournamentId: number, playerId: string) {
+    return this.request<unknown>(`/admin/tournament/${tournamentId}/withdraw`, {
+      method: "POST",
+      body: JSON.stringify({ player_id: playerId }),
+    });
+  }
+
+  async markSwissAbsent(tournamentId: number, playerId: string, round: number) {
+    return this.request<unknown>(`/admin/tournament/${tournamentId}/absent`, {
+      method: "POST",
+      body: JSON.stringify({ player_id: playerId, round }),
+    });
+  }
+
+  async rejoinSwissPlayer(tournamentId: number, playerId: string) {
+    return this.request<unknown>(`/admin/tournament/${tournamentId}/rejoin`, {
+      method: "POST",
+      body: JSON.stringify({ player_id: playerId }),
+    });
+  }
+
+  /** Never pair these two (e.g. same club/family); applies from the next round. */
+  async addForbiddenPair(tournamentId: number, playerA: string, playerB: string) {
+    return this.request<unknown>(`/admin/tournament/${tournamentId}/forbidden-pair`, {
+      method: "POST",
+      body: JSON.stringify({ player_a: playerA, player_b: playerB }),
+    });
+  }
+
+  async removeForbiddenPair(tournamentId: number, playerA: string, playerB: string) {
+    return this.request<unknown>(`/admin/tournament/${tournamentId}/forbidden-pair`, {
+      method: "DELETE",
+      body: JSON.stringify({ player_a: playerA, player_b: playerB }),
+    });
+  }
+
+  /** Forces one board of the next round's pairings. */
+  async addManualPairing(tournamentId: number, white: string, black: string) {
+    return this.request<unknown>(`/admin/tournament/${tournamentId}/manual-pair`, {
+      method: "POST",
+      body: JSON.stringify({ white, black }),
+    });
+  }
+
+  async removeManualPairing(tournamentId: number, white: string, black: string) {
+    return this.request<unknown>(`/admin/tournament/${tournamentId}/manual-pair`, {
+      method: "DELETE",
+      body: JSON.stringify({ white, black }),
+    });
+  }
+
+  /**
+   * Starts now: Swiss pairs round 1; a single-elimination bracket must be full (the
+   * backend explains otherwise). Also retries an on-chain start that failed.
+   */
+  async startTournament(tournamentId: number) {
+    return this.request<{ ok: boolean; queued?: boolean; rounds?: number; players?: number }>(
+      `/admin/tournament/${tournamentId}/start`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  }
+
+  async createTournament(data: CreateTournamentRequest) {
+    return this.request<{ tournament_id: number; [key: string]: unknown }>("/admin/tournament/create", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -177,16 +247,6 @@ class ApiClient {
         winner,
         loser,
         ...(reason ? { reason } : {}),
-      }),
-    });
-  }
-
-  async setMatchGameId(tournamentId: number, matchIndex: number, gameId: number) {
-    return this.request<any>(`/admin/tournament/${tournamentId}/set-match-game-id`, {
-      method: "POST",
-      body: JSON.stringify({
-        match_index: matchIndex,
-        game_id: gameId,
       }),
     });
   }
@@ -389,6 +449,7 @@ class ApiClient {
   }
 
   // Infrastructure
+  async getHealth() { return this.request<{ status: string; git_sha: string; version: string }>("/health"); }
   async getTasksStatus() { return this.request<any>("/admin/tasks/status"); }
   async getDbStats() { return this.request<any>("/admin/db/stats"); }
   async getTlsExpiry() { return this.request<any>("/admin/tls/expiry"); }
@@ -399,6 +460,7 @@ class ApiClient {
   async getMetricsSummary() {
     return this.request<{
       online_count: number;
+      resources?: HostResources | null;
       games_in_progress: number;
       transactions_confirmed_solana: number;
       er_stale_delegated_count: number;
@@ -642,53 +704,9 @@ export interface UpdateOfflineTournamentRequest {
   revision: number;
 }
 
-export interface SwissStandingsEntry {
-  player_id: string;
-  score: number;
-  buchholz: number;
-  sonneborn: number;
-  rating: number;
-  rank: number;
-}
-
-export interface SwissDataDetail {
-  current_round: number;
-  total_rounds: number;
-  standings: SwissStandingsEntry[];
-  rounds: {
-    round: number;
-    pairings: { white: string; black: string; board: number }[];
-    byes: string[];
-  }[];
-}
-
-export interface TournamentDetail {
-  tournament_id: number;
-  name: string;
-  status: string;
-  max_players: number;
-  entry_fee_lamports: number;
-  platform_fee_lamports?: number;
-  players: string[];
-  player_elos?: number[];
-  prize_pool?: number;
-  prize_shares: [number, number, number, number, number, number, number, number, number, number];
-  winner?: string;
-  second_place?: string;
-  third_place?: string;
-  fourth_place?: string;
-  kyc_required?: boolean;
-  scheduled_at?: number;
-  elo_min?: number;
-  elo_max?: number;
-  format: string;
-  current_round?: number;
-  total_rounds?: number;
-  swiss_data?: SwissDataDetail;
-}
-
 export interface CreateTournamentRequest {
-  tournament_id: number;
+  /** Omit to let the backend assign one; set only to resume a half-finished setup. */
+  tournament_id?: number;
   name: string;
   entry_fee_lamports: number;
   platform_fee_lamports: number;
@@ -704,14 +722,4 @@ export interface CreateTournamentRequest {
   kyc_required?: boolean;
   /** Set to make the tournament private — players must supply it to register. */
   password?: string;
-}
-
-export interface MatchInfo {
-  match_index: number;
-  player1: string;
-  player2: string;
-  game_id?: number;
-  winner?: string;
-  status: string;
-  round?: number;
 }

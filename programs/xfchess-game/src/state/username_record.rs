@@ -13,7 +13,7 @@ impl UsernameRecord {
 pub fn validate_username(username: &str) -> Result<()> {
     let len = username.len();
     require!(
-        len >= 3 && len <= 20,
+        (3..=20).contains(&len),
         crate::errors::GameErrorCode::InvalidLength
     );
 

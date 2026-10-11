@@ -30,12 +30,18 @@ keys/
 # The backend creates game archives at runtime, including on an empty startup.
 data/
 
-# Superseded local research; canonical analysis is docs/XFChess_Jurisdictional_Deep_Dive.txt.
+# Superseded local research; source notes are in docs/research/jurisdictional-analysis.txt.
 /legal/
 
 stockfish.exe
+/cargo-test-offline.txt
 
 .windsurf/
+
+# Local editor state.
+/.claude/
+/.kilo/
+/.kilocode/
 
 tmp/
 temp/

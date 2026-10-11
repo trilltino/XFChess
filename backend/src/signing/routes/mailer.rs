@@ -117,6 +117,7 @@ pub async fn send_email(to: &str, kind: EmailKind<'_>) -> Result<bool, String> {
     let resp = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
+        .timeout(std::time::Duration::from_secs(10))
         .json(&payload)
         .send()
         .await

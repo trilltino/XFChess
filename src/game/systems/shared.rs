@@ -232,13 +232,10 @@ fn find_en_passant_capture(
         return None;
     }
 
-    let Some(ep_square) = engine
+    let ep_square = engine
         .en_passant
         .as_deref()
-        .and_then(square_name_to_coords)
-    else {
-        return None;
-    };
+        .and_then(square_name_to_coords)?;
     if ep_square != ctx.target {
         return None;
     }
@@ -479,15 +476,13 @@ fn update_castling_rights(
                 rights.retain(|&c| c != 'k' && c != 'q');
             }
         }
-        PieceType::Rook => {
-            match (piece_color, from) {
-                (PieceColor::White, (7, 0)) => rights.retain(|&c| c != 'K'),
-                (PieceColor::White, (0, 0)) => rights.retain(|&c| c != 'Q'),
-                (PieceColor::Black, (7, 7)) => rights.retain(|&c| c != 'k'),
-                (PieceColor::Black, (0, 7)) => rights.retain(|&c| c != 'q'),
-                _ => {}
-            }
-        }
+        PieceType::Rook => match (piece_color, from) {
+            (PieceColor::White, (7, 0)) => rights.retain(|&c| c != 'K'),
+            (PieceColor::White, (0, 0)) => rights.retain(|&c| c != 'Q'),
+            (PieceColor::Black, (7, 7)) => rights.retain(|&c| c != 'k'),
+            (PieceColor::Black, (0, 7)) => rights.retain(|&c| c != 'q'),
+            _ => {}
+        },
         _ => {}
     }
 

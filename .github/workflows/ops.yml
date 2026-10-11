@@ -1,0 +1,40 @@
+name: Operations
+on:
+  pull_request:
+    paths: ['ops/**', '.github/workflows/ops.yml']
+  push:
+    paths: ['ops/**', '.github/workflows/ops.yml']
+permissions:
+  contents: read
+jobs:
+  configuration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose and notification configuration
+        env:
+          GRAFANA_ADMIN_PASSWORD: fixture-only
+        run: |
+          docker compose -f ops/monitoring/docker-compose.yml config --quiet
+          docker compose -f ops/monitoring/docker-compose.local.yml config --quiet
+          python3 -m unittest discover -s ops/monitoring -p 'test_*.py'
+      - name: Prometheus and Alertmanager
+        run: |
+          docker run --rm --network none --entrypoint promtool -v "$PWD/ops/monitoring:/etc/prometheus:ro" prom/prometheus:v3.15.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm --network none --entrypoint promtool -v "$PWD/ops/monitoring:/etc/prometheus:ro" prom/prometheus:v3.15.0 test rules /etc/prometheus/tests/rules.yml
+          docker run --rm --network none --entrypoint amtool -v "$PWD/ops/monitoring/alertmanager.yml:/etc/alertmanager/config.yml:ro" prom/alertmanager:v0.34.1 check-config /etc/alertmanager/config.yml
+      - name: Linux deployment, proxy and backup fixtures
+        run: |
+          docker run --rm -v "$PWD/ops:/work:ro" debian:bookworm-slim bash -c 'apt-get update -qq && apt-get install -y -qq python3 sqlite3 age nginx openssl shellcheck >/dev/null && shellcheck -x -P /work/scripts:/work/monitoring /work/scripts/*.sh /work/backup/*.sh /work/monitoring/*.sh && python3 /work/tests/integration.py'
+      - name: Grafana provisioning and Prometheus connection
+        env:
+          GRAFANA_ADMIN_PASSWORD: ops-fixture-only
+        run: |
+          docker compose -p xfchess-ops-audit -f ops/monitoring/docker-compose.local.yml -f ops/tests/monitoring.override.yml up -d --wait --wait-timeout 120
+          python3 ops/tests/monitoring.py
+      - name: Stop disposable monitoring stack
+        if: always()
+        env:
+          GRAFANA_ADMIN_PASSWORD: ops-fixture-only
+        run: docker compose -p xfchess-ops-audit -f ops/monitoring/docker-compose.local.yml -f ops/tests/monitoring.override.yml down

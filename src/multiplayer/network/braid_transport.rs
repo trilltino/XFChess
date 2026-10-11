@@ -1,7 +1,11 @@
 use bevy::prelude::*;
 use braid_chess::message::ChatPayload;
+use braid_chess::{
+    journal::Journal,
+    subscriber::{ChessDelivery, DeliveryReceipt},
+    ChessResource,
+};
 use braid_chess::{ChessMessage, ChessSubscriber, MovePayload};
-use serde::Serialize;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
@@ -15,8 +19,21 @@ const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 const GENESIS_PARENT: &str = "0";
 
-const MAX_PARENT_RETRIES: usize = 3;
+mod publish;
+use publish::publish;
+pub(super) use publish::retry_pending;
 
+pub(crate) fn open_journal(base_url: &str, game_id: &str) -> std::io::Result<Journal> {
+    Journal::open(
+        &super::device_id::data_dir().join("game-sync"),
+        &format!(
+            "{}/{}/{}",
+            base_url.trim_end_matches('/'),
+            game_id,
+            super::device_id::device_id()
+        ),
+    )
+}
 
 pub struct BraidStreamHeads {
     moves: String,
@@ -53,6 +70,9 @@ impl BraidStreamHeads {
 }
 
 pub type SharedStreamHeads = std::sync::Arc<std::sync::Mutex<BraidStreamHeads>>;
+type AppliedCursors = std::sync::Arc<
+    std::sync::Mutex<std::collections::HashMap<&'static str, Vec<braid_http::Version>>>,
+>;
 
 fn version_of(message: &ChessMessage) -> Option<String> {
     Some(match message {
@@ -63,9 +83,10 @@ fn version_of(message: &ChessMessage) -> Option<String> {
         ChessMessage::Chat(p) => {
             braid_chess::version_hash(&format!("chat:{}:{}", p.player, p.timestamp_ms), 0)
         }
-        ChessMessage::SessionInfo { player_pubkey, .. } => {
-            braid_chess::version_hash(&format!("session:{player_pubkey}"), 0)
-        }
+        ChessMessage::SessionInfo { .. } => braid_chess::version_hash(
+            &serde_json::to_string(message).expect("chess message serializes"),
+            0,
+        ),
         _ => return None,
     })
 }
@@ -76,137 +97,6 @@ fn stream_of(message: &ChessMessage) -> &'static str {
     } else {
         "moves"
     }
-}
-
-
-#[derive(Serialize)]
-struct GameEventReq<'a> {
-    #[serde(rename = "player_pubkey")]
-    sender_identity: &'a str,
-    session_token: &'a str,
-    message: &'a ChessMessage,
-    content_version: &'a str,
-    content_parent: &'a str,
-    device_id: &'a str,
-}
-
-#[derive(serde::Deserialize)]
-struct ParentMismatchResp {
-    expected_parent: String,
-}
-
-fn publish(
-    base_url: String,
-    game_id: String,
-    stream: &'static str,
-    sender_identity: String,
-    session_token: String,
-    message: ChessMessage,
-    content_version: String,
-    heads: SharedStreamHeads,
-) {
-    std::thread::spawn(move || {
-        let client = match crate::multiplayer::network::vps::client() {
-            Ok(c) => c,
-            Err(e) => {
-                warn!("[braid-transport] client build failed: {e}");
-                return;
-            }
-        };
-        let url = format!(
-            "{}/game/{}/{}",
-            base_url.trim_end_matches('/'),
-            game_id,
-            stream
-        );
-
-        // Claim the version up-front so the echo of our own event is
-        // recognised even if it arrives before this thread finishes.
-        let mut parent = match heads.lock() {
-            Ok(mut h) => {
-                h.self_published.insert(content_version.clone());
-                h.head(stream)
-            }
-            Err(_) => GENESIS_PARENT.to_string(),
-        };
-
-        for attempt in 0..=MAX_PARENT_RETRIES {
-            let body = GameEventReq {
-                sender_identity: &sender_identity,
-                session_token: &session_token,
-                message: &message,
-                content_version: &content_version,
-                content_parent: &parent,
-                device_id: crate::multiplayer::network::device_id::device_id(),
-            };
-            match client.put(&url).json(&body).send() {
-                Ok(resp) if resp.status().is_success() => {
-                    if let Ok(mut h) = heads.lock() {
-                        h.set_head(stream, content_version.clone());
-                    }
-                    debug!("[braid-transport] published to {game_id}/{stream}");
-                    return;
-                }
-                Ok(resp) if resp.status() == reqwest::StatusCode::CONFLICT => {
-                    let text = resp.text().unwrap_or_default();
-                    if crate::multiplayer::network::device_id::is_seat_superseded_body(&text) {
-                        warn!(
-                            "[braid-transport] game {game_id} is being played on another device; this window is view-only"
-                        );
-                        if let Ok(id) = game_id.parse::<u64>() {
-                            crate::multiplayer::network::device_id::mark_seat_superseded(id);
-                        }
-                        return;
-                    }
-                    match serde_json::from_str::<ParentMismatchResp>(&text) {
-                        Ok(m) => {
-                            debug!(
-                                "[braid-transport] re-chaining {stream} publish for game {game_id} onto head {} (attempt {})",
-                                m.expected_parent,
-                                attempt + 1
-                            );
-                            if let Ok(mut h) = heads.lock() {
-                                h.set_head(stream, m.expected_parent.clone());
-                            }
-                            parent = m.expected_parent;
-                        }
-                        Err(e) => {
-                            warn!(
-                                "[NET] Move sync backup (Braid) got an unreadable conflict for {stream} on game {game_id}: {e}"
-                            );
-                            return;
-                        }
-                    }
-                }
-                Ok(resp) => {
-                    let status = resp.status();
-                    // Preserve the backend error body so participant and other rejection reasons remain diagnosable.
-                    let body = resp.text().unwrap_or_default();
-                    if status == reqwest::StatusCode::FORBIDDEN
-                        || status == reqwest::StatusCode::UNAUTHORIZED
-                    {
-                        warn!(
-                            "[braid-transport] Backend rejected our identity for {stream} on game {game_id} (HTTP {status}, sender={sender_identity}, body={body:?}) — check wallet-pubkey vs node-id selection for this game type"
-                        );
-                    } else {
-                        warn!(
-                            "[braid-transport] couldn't save {stream} for game {game_id}: server returned HTTP {status} (body={body:?})"
-                        );
-                    }
-                    return;
-                }
-                Err(e) => {
-                    warn!(
-                        "[NET] Move sync backup (Braid) couldn't save {stream} for game {game_id}: {e}"
-                    );
-                    return;
-                }
-            }
-        }
-        warn!(
-            "[NET] Move sync backup (Braid) gave up publishing {stream} for game {game_id} after {MAX_PARENT_RETRIES} re-chain attempts"
-        );
-    });
 }
 
 pub fn publish_move(
@@ -292,31 +182,44 @@ pub fn publish_session_info(
     expires_at: i64,
     heads: SharedStreamHeads,
 ) {
-    let content_version = braid_chess::version_hash(&format!("session:{wallet_pubkey}"), 0);
+    let message = ChessMessage::SessionInfo {
+        player_pubkey: wallet_pubkey,
+        session_pubkey,
+        signing_pubkey,
+        expires_at,
+    };
+    let content_version = version_of(&message).expect("session info has a version");
     publish(
         base_url,
         game_id,
         "moves",
         sender_identity,
         session_token,
-        ChessMessage::SessionInfo {
-            player_pubkey: wallet_pubkey,
-            session_pubkey,
-            signing_pubkey,
-            expires_at,
-        },
+        message,
         content_version,
         heads,
     );
 }
-
 
 #[derive(Resource, Default)]
 pub struct BraidTransportState {
     heads: SharedStreamHeads,
     game_id: String,
     rx: Option<crossbeam_channel::Receiver<ChessMessage>>,
+    deliveries: Option<tokio::sync::mpsc::Receiver<ChessDelivery>>,
+    subscription_task: Option<tokio::task::JoinHandle<()>>,
+    journal: Option<Journal>,
+    pending: std::collections::HashMap<String, DeliveryReceipt>,
+    cursors: AppliedCursors,
     pub connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for BraidTransportState {
+    fn drop(&mut self) {
+        if let Some(task) = self.subscription_task.take() {
+            task.abort();
+        }
+    }
 }
 
 impl BraidTransportState {
@@ -330,6 +233,11 @@ impl BraidTransportState {
             rx: Some(rx),
             connected: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             heads: SharedStreamHeads::default(),
+            deliveries: None,
+            subscription_task: None,
+            journal: None,
+            pending: Default::default(),
+            cursors: Default::default(),
         }
     }
 
@@ -340,15 +248,45 @@ impl BraidTransportState {
     pub fn reset(&mut self) {
         self.game_id.clear();
         self.rx = None;
+        self.deliveries = None;
+        if let Some(task) = self.subscription_task.take() {
+            task.abort();
+        }
+        self.journal = None;
+        self.pending.clear();
+        self.cursors = Default::default();
         self.connected
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        if let Ok(mut h) = self.heads.lock() {
-            *h = BraidStreamHeads::default();
-        }
+        self.heads = SharedStreamHeads::default();
     }
 
     pub fn is_connected(&self) -> bool {
         self.connected.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn confirm(&self, receipt: DeliveryReceipt, stream: &'static str, fen: Option<String>) {
+        let Some(journal) = &self.journal else {
+            return;
+        };
+        match journal.applied(stream, receipt.versions().to_vec(), fen) {
+            Ok(()) => {
+                if let Ok(mut cursors) = self.cursors.lock() {
+                    cursors.insert(stream, receipt.versions().to_vec());
+                }
+                let _ = receipt.acknowledge();
+            }
+            Err(error) => warn!("[braid] could not save applied checkpoint: {error}"),
+        }
+    }
+
+    pub(crate) fn confirm_move(&mut self, version: &str, fen: &str) {
+        if let Some(receipt) = self.pending.remove(version) {
+            self.confirm(receipt, "moves", Some(fen.to_owned()));
+        }
+    }
+
+    pub(crate) fn reject_move(&mut self, version: &str) {
+        self.pending.remove(version);
     }
 }
 
@@ -358,32 +296,50 @@ pub fn ensure_subscribed(
     game_id: String,
     rt: &tokio::runtime::Handle,
 ) {
-    if state.game_id == game_id && state.rx.is_some() {
+    if state.game_id == game_id && state.deliveries.is_some() {
         return;
     }
+    state.reset();
+    let journal = match open_journal(&base_url, &game_id) {
+        Ok(journal) => journal,
+        Err(error) => {
+            warn!("[braid] could not open game journal: {error}");
+            return;
+        }
+    };
     state.game_id = game_id.clone();
+    state.journal = Some(journal);
     state
         .connected
         .store(false, std::sync::atomic::Ordering::Relaxed);
 
-    let (tx, rx) = crossbeam_channel::unbounded::<ChessMessage>();
-    state.rx = Some(rx);
+    let (tx, rx) = tokio::sync::mpsc::channel::<ChessDelivery>(2);
+    state.deliveries = Some(rx);
 
-    spawn_reconnecting_subscription(base_url, game_id, tx, state.connected.clone(), rt);
+    state.subscription_task = Some(spawn_reconnecting_subscription(
+        base_url,
+        game_id,
+        tx,
+        state.connected.clone(),
+        state.cursors.clone(),
+        rt,
+    ));
 }
 
 fn spawn_reconnecting_subscription(
     base_url: String,
     game_id: String,
-    tx: crossbeam_channel::Sender<ChessMessage>,
+    tx: tokio::sync::mpsc::Sender<ChessDelivery>,
     connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cursors: AppliedCursors,
     rt: &tokio::runtime::Handle,
-) {
+) -> tokio::task::JoinHandle<()> {
     rt.spawn(async move {
         let mut backoff = MIN_BACKOFF;
         // Show reconnection notices only after a prior successful connection was lost.
         let mut recovering = false;
         loop {
+            if tx.is_closed() { return; }
             let sub = match ChessSubscriber::new(&base_url, &game_id) {
                 Ok(s) => s,
                 Err(e) => {
@@ -397,12 +353,20 @@ fn spawn_reconnecting_subscription(
                 }
             };
 
-            // Reconnect both streams if either drops; full history is replayed on resubscription.
-            let moves = sub.subscribe_moves().await;
-            let chat = sub.subscribe_chat().await;
+            // Resume both streams from their last durable application acknowledgment.
+            let (moves_parents, chat_parents) = match cursors.lock() {
+                Ok(cursors) => (cursors.get("moves").cloned().unwrap_or_default(), cursors.get("chat").cloned().unwrap_or_default()),
+                Err(_) => return,
+            };
+            let moves = sub.subscribe_acknowledged(ChessResource::moves(&game_id), moves_parents).await;
+            let chat = sub.subscribe_acknowledged(ChessResource::chat(&game_id), chat_parents).await;
             let (moves_rx, chat_rx) = match (moves, chat) {
                 (Ok((m, _)), Ok((c, _))) => (m, c),
                 (Err(e), _) | (_, Err(e)) => {
+                    if matches!(e, braid_chess::BraidChessError::HttpStatus(410)) {
+                        // Replay through the engine and deduplication layer after cursor expiry.
+                        if let Ok(mut cursors) = cursors.lock() { cursors.clear(); }
+                    }
                     warn!(
                         "[NET] Move sync backup (Braid) couldn't reach the server for game {game_id}: {e} — retrying"
                     );
@@ -425,13 +389,13 @@ fn spawn_reconnecting_subscription(
                 tokio::select! {
                     msg = moves_rx.recv() => {
                         match msg {
-                            Ok(m) => { let _ = tx.send(m); }
+                            Ok(m) => { if tx.send(m).await.is_err() { return; } }
                             Err(_) => break,
                         }
                     }
                     msg = chat_rx.recv() => {
                         match msg {
-                            Ok(m) => { let _ = tx.send(m); }
+                            Ok(m) => { if tx.send(m).await.is_err() { return; } }
                             Err(_) => break,
                         }
                     }
@@ -444,24 +408,44 @@ fn spawn_reconnecting_subscription(
             recovering = true;
             tokio::time::sleep(MIN_BACKOFF).await;
         }
-    });
+    })
 }
 
 pub fn drain_braid_messages(
-    state: Res<BraidTransportState>,
+    mut state: ResMut<BraidTransportState>,
     session: Res<OnlineGameSession>,
     mut causal: ResMut<CausalChainState>,
     mut network_events: MessageWriter<NetworkEvent>,
     mut resign_events: MessageWriter<crate::game::events::ResignEvent>,
     mut chat_events: MessageWriter<OnlineChatMessage>,
 ) {
-    let Some(rx) = &state.rx else {
+    if state.rx.is_none() && state.deliveries.is_none() {
         return;
-    };
+    }
     let game_id_u64 =
         crate::multiplayer::network::online_game_session::numeric_game_id(&session.game_id);
 
-    while let Ok(msg) = rx.try_recv() {
+    loop {
+        let (msg, receipt) = if let Some(rx) = state.deliveries.as_mut() {
+            let Ok(delivery) = rx.try_recv() else {
+                break;
+            };
+            (delivery.message, Some(delivery.receipt))
+        } else {
+            let Some(rx) = &state.rx else {
+                break;
+            };
+            let Ok(msg) = rx.try_recv() else {
+                break;
+            };
+            (msg, None)
+        };
+        let stream = stream_of(&msg);
+        let fen = if let ChessMessage::Move(payload) = &msg {
+            Some(payload.fen_after.clone())
+        } else {
+            None
+        };
         // Advance to the accepted stream head and discard self-published echoes
         // so moves and chat are not applied twice.
         let mut is_self_echo = false;
@@ -472,22 +456,34 @@ pub fn drain_braid_messages(
             }
         }
         if is_self_echo {
+            if let Some(receipt) = receipt {
+                state.confirm(receipt, stream, fen);
+            }
             continue;
         }
 
         match msg {
             ChessMessage::Move(payload) => {
                 let version = braid_chess::version_hash(&payload.fen_after, payload.move_number);
-                let already_seen = causal
+                let already_applied = causal
                     .applied_versions
                     .get(&game_id_u64)
-                    .is_some_and(|versions| versions.contains(&version))
-                    || causal
-                        .pending_versions
-                        .get(&game_id_u64)
-                        .is_some_and(|versions| versions.contains(&version));
-                if already_seen {
-                    continue; // already applied via gossip — see module doc comment
+                    .is_some_and(|versions| versions.contains(&version));
+                if already_applied {
+                    if let Some(receipt) = receipt {
+                        state.confirm(receipt, "moves", Some(payload.fen_after));
+                    }
+                    continue;
+                }
+                if let Some(receipt) = receipt {
+                    state.pending.insert(version.clone(), receipt);
+                }
+                let already_pending = causal
+                    .pending_versions
+                    .get(&game_id_u64)
+                    .is_some_and(|versions| versions.contains(&version));
+                if already_pending {
+                    continue;
                 }
                 causal
                     .pending_versions
@@ -505,6 +501,7 @@ pub fn drain_braid_messages(
                     seq: 0,
                     parent_version: String::new(),
                 }));
+                continue;
             }
             ChessMessage::Resign { player } => {
                 let winner = if player == "white" { "black" } else { "white" };
@@ -589,9 +586,15 @@ pub fn drain_braid_messages(
                         }
                     }
                 }
+                // Without Solana there is no opponent key to record.
+                #[cfg(not(feature = "solana"))]
+                let _ = (session_pubkey, expires_at);
             }
             // Draw offers use gossip. Clock and EngineAnalysis use separate Braid streams.
             _ => {}
+        }
+        if let Some(receipt) = receipt {
+            state.confirm(receipt, stream, fen);
         }
     }
 }
@@ -612,15 +615,38 @@ fn sync_braid_subscription(
     );
 }
 
+fn acknowledge_applied_moves(
+    mut state: ResMut<BraidTransportState>,
+    mut results: MessageReader<crate::game::events::NetworkMoveResult>,
+) {
+    for result in results.read() {
+        if let Some(version) = &result.version {
+            match &result.fen {
+                Some(fen) => state.confirm_move(version, fen),
+                None => state.reject_move(version),
+            }
+        }
+    }
+}
+
 pub struct BraidTransportPlugin;
 
 impl Plugin for BraidTransportPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BraidTransportState>()
-            .add_systems(Update, (sync_braid_subscription, drain_braid_messages));
+            .add_message::<crate::game::events::NetworkMoveResult>()
+            .add_systems(
+                Update,
+                (sync_braid_subscription, drain_braid_messages)
+                    .chain()
+                    .in_set(crate::core::schedule::ReceiveSet::Transport),
+            )
+            .add_systems(
+                Update,
+                acknowledge_applied_moves.in_set(crate::core::schedule::SendSet::Ack),
+            );
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -705,8 +731,15 @@ mod tests {
         };
         assert_eq!(
             version_of(&session).unwrap(),
-            braid_chess::version_hash("session:wallet1", 0)
+            braid_chess::version_hash(&serde_json::to_string(&session).unwrap(), 0)
         );
+        let renewed = ChessMessage::SessionInfo {
+            player_pubkey: "wallet1".into(),
+            session_pubkey: "renewed".into(),
+            signing_pubkey: "g".into(),
+            expires_at: 1,
+        };
+        assert_ne!(version_of(&session), version_of(&renewed));
     }
 
     #[test]

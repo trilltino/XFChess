@@ -206,7 +206,6 @@ pub fn plan_resume(
     })
 }
 
-
 struct ResumeInputs {
     plan: ResumePlan,
     /// Next `record_move` nonce from the chain (delegated games only).
@@ -258,8 +257,34 @@ fn gather(
         base_game
     };
 
-    let events = crate::multiplayer::vps_client::fetch_game_events(game_id)
+    let mut events = crate::multiplayer::vps_client::fetch_game_events(game_id)
         .map_err(ResumeError::Unavailable)?;
+    let journal = crate::multiplayer::network::braid_transport::open_journal(
+        &crate::multiplayer::vps_client::vps_base(),
+        &game_id.to_string(),
+    )
+    .map_err(|e| ResumeError::Unavailable(format!("pending game events: {e}")))?;
+    let pending = journal
+        .pending()
+        .map_err(|e| ResumeError::Unavailable(format!("pending game events: {e}")))?;
+    let mut known: std::collections::HashSet<String> = events
+        .iter()
+        .filter_map(|event| match event {
+            ChessMessage::Move(payload) => Some(braid_chess::version_hash(
+                &payload.fen_after,
+                payload.move_number,
+            )),
+            _ => None,
+        })
+        .collect();
+    for write in pending {
+        if write.sender == wallet.to_string()
+            && matches!(write.message, ChessMessage::Move(_))
+            && known.insert(write.version)
+        {
+            events.push(write.message);
+        }
+    }
     let plan = plan_resume(&game, game.move_count, is_delegated, &wallet, &events)?;
     let next_nonce = if is_delegated {
         Some(
@@ -271,7 +296,6 @@ fn gather(
     };
     Ok(ResumeInputs { plan, next_nonce })
 }
-
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum ResumeStatus {
@@ -300,7 +324,7 @@ impl ResumeState {
             return;
         }
         let (tx, rx) = oneshot::channel();
-        std::thread::spawn(move || {
+        crate::core::net_task::spawn_detached("resume", move || {
             let _ = tx.send(gather(game_id, wallet, rpc_url, er_url));
         });
         self.rx = Some(rx);
@@ -338,7 +362,7 @@ pub struct ResumeTransitions<'w> {
     started: MessageWriter<'w, crate::game::events::GameStartedEvent>,
 }
 
-fn poll_resume(mut resume: ResMut<ResumeState>, mut t: ResumeTargets, mut go: ResumeTransitions) {
+pub(crate) fn poll_resume(mut resume: ResMut<ResumeState>, mut t: ResumeTargets, mut go: ResumeTransitions) {
     let Some(rx) = resume.rx.as_mut() else {
         return;
     };
@@ -458,7 +482,7 @@ fn apply_plan(
     }
     crate::multiplayer::network::game_id_store::set(game_id);
 
-    go.ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
+    go.ai_config.mode = crate::game::ai::resource::AiMode::Multiplayer;
     *go.core_mode = crate::core::GameMode::OnlineMultiplayer;
     go.started
         .write(crate::game::events::GameStartedEvent { game_id });
@@ -524,10 +548,10 @@ pub struct ResumePlugin;
 impl Plugin for ResumePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ResumeState>()
-            .add_systems(Update, poll_resume)
+            .add_systems(Update, poll_resume.in_set(crate::core::schedule::SessionSet::Match))
             .add_systems(
                 Update,
-                apply_resume_board.run_if(in_state(crate::core::GameState::InGame)),
+                apply_resume_board.in_set(crate::core::schedule::MoveSource::Resume),
             )
             .add_systems(OnExit(crate::core::GameState::InGame), clear_resume_on_exit);
     }

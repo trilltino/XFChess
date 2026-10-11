@@ -5,7 +5,7 @@ param(
     [string]$Version,
     [switch]$Deploy,
     [string]$Server = "178.104.55.19",
-    [string]$Domain = "xfchess.com",   # pass -Domain "" explicitly to force deploy.ps1's self-signed path
+    [string]$Domain = "xfchess.com",
     [switch]$SkipBuild,
     [switch]$Force,
     [switch]$DryRun
@@ -167,7 +167,8 @@ Write-Host "Chrome OS release asset verified: $chromeOsAsset" -ForegroundColor G
 
 Write-Host ""
 Write-Host "=== Step 3: deploying to Hetzner ($Server) ===" -ForegroundColor Magenta
-$deployArgs = @{ Server = $Server; Domain = $Domain; SkipBuild = $SkipBuild }
+$deployArgs = @{ Server = $Server; Domain = $Domain }
+if ($SkipBuild) { throw "SkipBuild is unsupported for verified VPS releases." }
 & "$ROOT\ops\scripts\deploy.ps1" @deployArgs
 if ($LASTEXITCODE -ne 0) { throw "deploy.ps1 failed" }
 

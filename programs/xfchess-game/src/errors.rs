@@ -311,6 +311,9 @@ pub enum GameErrorCode {
 
     #[msg("Dynamic remaining accounts do not match expected set, order, or ownership.")]
     InvalidRemainingAccounts,
+
+    #[msg("Swiss places must be distinct registered players in non-increasing score order.")]
+    InvalidSwissPlaces,
 }
 
 pub use GameErrorCode as XfchessGameError;

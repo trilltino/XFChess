@@ -1,44 +1,24 @@
-# tauri/src
+# Desktop shell
 
-Rust shell of the desktop wrapper: entry point, wallet HTTP bridge, IPC commands, and
-window management. App-level overview: [../README.md](../README.md).
+`main.rs` configures Tauri and starts the wallet bridge. Wallet code lives in
+`wallet/`: HTTP routes, TCP framing, request completion, backend proxying, static
+assets, popup control, and game-process lifetime each have their own module.
 
-## Layout
+On Windows, the launcher supplies `XFCHESS_GAME_PID`; development games can
+register their PID through `/status`. The bridge retains a
+process handle and cancels signing, closes its wallet popup, removes its port
+announcements, and exits when that game ends. The Chromium popup is owned by the
+game window and identified by its port and random session ID. Browser processes
+are shared with ordinary tabs, so cleanup closes the wallet window.
 
-| Path | Contents |
-|------|----------|
-| [main.rs](main.rs) | Entry point: `xfchess://` deep link, shared state (`WalletPubkey`, `WalletJwt`, `PendingTx`), and the Axum wallet bridge on `:7454` (no tray icon — windows open via the bridge API or `XFCHESS_OPEN_ADMIN=1`) |
-| [services/ipc.rs](services/ipc.rs) | All `#[tauri::command]` handlers (windows, notifications, clipboard, URL opening) |
-| [services/auth.rs](services/auth.rs) | Auth state management |
-| [services/config.rs](services/config.rs) | Env-based configuration (tests: [services/config_tests.rs](services/config_tests.rs)) |
-| [services/notification_poller.rs](services/notification_poller.rs) | Polls the backend for notifications → OS toast notifications (no tray icon) |
-| [types/](types/) | Serde types for auth, config, and IPC payloads |
-| [utils/](utils/) | [logging.rs](utils/logging.rs) (+ tests) |
-| [windows/](windows/) | Window builders: [tournament_admin.rs](windows/tournament_admin.rs) (the wallet UI is a real Chrome `--app` popup opened via `open_in_browser` in main.rs, not a Tauri-managed window) |
-| [error.rs](error.rs) | Unified error type |
+The game submits signing requests over TCP; the browser receives them over SSE.
+Resolution and cancellation must match the active request ID. Signing and wallet
+state endpoints require the popup session ID; browser origins are checked.
 
-## Example
+`services/` contains IPC, configuration, authentication, and notifications.
+`windows/tournament_admin.rs` contains the optional admin window, SSH tunnel, and
+OS credential store. Admin routes and capabilities require `tournament-admin`;
+wallet pages never receive shell capabilities.
 
-```rust
-// main.rs — a game signing request flows through shared state:
-type PendingTxInner = Option<(Vec<u8>, oneshot::Sender<Result<Vec<u8>, String>>)>;
-// game POSTs tx → /pending queues it → wallet window signs → /resolved completes the oneshot
-```
-
-## Invariants
-
-- IPC commands must not `.unwrap()` on frontend-supplied input (frontend-triggerable
-  panic — see T7 in [../docs/TAURI_REMEDIATION.md](../docs/TAURI_REMEDIATION.md)).
-- `open_url` allowlists schemes (`http/https/mailto/xfchess`); keep it that way.
-- Shell capabilities are scoped to the tournament-admin window only
-  ([../capabilities/](../capabilities/)) — never re-grant them to the wallet window.
-- Everything that can create/serve the tournament-admin panel — `open_tournament_admin`,
-  the `/tournament-admin*` axum routes, the `dist_path`/`LocalState` plumbing, and the
-  `XFCHESS_OPEN_ADMIN` auto-open in `main.rs`'s `setup()` — is behind
-  `#[cfg(feature = "tournament-admin")]`. That feature is **not** in `default` and
-  `release.yml` never passes it, so a shipped consumer build has no route, window, or
-  IPC path that can open or serve the admin panel — not merely a missing `dist/` folder
-  best-effort-degrading it away. `show_tournament_admin_window` stays registered in
-  `invoke_handler!` either way (Tauri needs the symbol to exist); without the feature it
-  resolves to a no-op fallback that just logs a warning. If you add a new way to reach
-  the admin panel, gate it the same way — don't rely on the dist folder being absent.
+Run `cargo test -p xfchess-tauri --bin xfchess-tauri` for bridge and process tests.
+Packages build with `custom-protocol` to serve the embedded wallet assets.

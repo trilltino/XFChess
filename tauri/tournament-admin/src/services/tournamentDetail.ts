@@ -25,6 +25,11 @@ export interface TournamentDetail {
   current_round?: number;
   total_rounds?: number;
   round_deadline_at?: number | null;
+  min_players?: number | null;
+  prizes_distributed?: boolean;
+  prize_release_approved?: boolean;
+  /** A join password exists; the hash itself is never served. */
+  is_private?: boolean;
   swiss_data?: {
     current_round: number;
     total_rounds: number;
@@ -36,6 +41,11 @@ export interface TournamentDetail {
       rating: number;
       rank: number;
     }[];
+    withdrawn_players?: string[];
+    absent_players?: string[];
+    forbidden_pairs?: [string, string][];
+    manual_pairings_next_round?: { white: string; black: string }[];
+    round_deadline_at?: number | null;
     rounds: {
       round: number;
       pairings: { white: string; black: string; board: number }[];
@@ -59,5 +69,7 @@ export function normalizeTournamentDetail(raw: RawTournamentDetail): TournamentD
     swiss_data: swissData,
     current_round: raw.current_round ?? swissData?.current_round,
     total_rounds: raw.total_rounds ?? swissData?.total_rounds,
+    // The store keeps the Swiss round deadline inside swiss_data.
+    round_deadline_at: raw.round_deadline_at ?? swissData?.round_deadline_at ?? null,
   } as TournamentDetail;
 }

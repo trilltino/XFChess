@@ -1,45 +1,40 @@
 #!/usr/bin/env bash
-# Restore an age-encrypted DB with rclone from a trusted operator host.
-# Required: BACKUP_REMOTE, BACKUP_AGE_IDENTITY (private key path).
-# Usage: ./restore-db.sh <db-name> [<object-name.age>] [<dest-path>]
 set -euo pipefail
-
-NAME="${1:?usage: restore-db.sh <db-name> [object.age] [dest]}"
-OBJECT="${2:-}"
-DEST="${3:-/opt/xfchess/data/${NAME}.db}"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-
-log() { echo "[restore $(date -u +%H:%M:%S)] $*"; }
-die() { echo "[restore ERROR] $*" >&2; exit 1; }
-
-command -v age    >/dev/null || die "age not installed"
-command -v rclone >/dev/null || die "rclone not installed"
-[ -n "${BACKUP_REMOTE:-}" ]        || die "BACKUP_REMOTE not set"
-[ -n "${BACKUP_AGE_IDENTITY:-}" ]  || die "BACKUP_AGE_IDENTITY (private key file) not set"
-[ -f "$BACKUP_AGE_IDENTITY" ]      || die "identity file $BACKUP_AGE_IDENTITY not found"
-
-if [ -z "$OBJECT" ]; then
-  log "finding latest backup for '$NAME' in $BACKUP_REMOTE"
-  OBJECT="$(rclone lsf "$BACKUP_REMOTE" --include "${NAME}-*.db.age" | sort | tail -n1)"
-  [ -n "$OBJECT" ] || die "no backups found for $NAME"
+umask 077
+name=${1:?usage: restore-db.sh NAME OBJECT.db.age [--check]}
+object=${2:?Select an explicit backup object; do not infer a recovery point from latest.}
+mode=${3:-restore}
+data=${BACKUP_DATA_DIR:-/opt/xfchess/data}
+service=${BACKUP_SERVICE:-xfchess-backend}
+die() { echo "Restore: $*" >&2; exit 1; }
+[[ $name =~ ^[a-zA-Z0-9_-]+$ && $object =~ ^[a-zA-Z0-9_-]+\.db\.age$ && $object == "$name-"* ]] || die 'Invalid database name or object.'
+[[ $mode == restore || $mode == --check ]] || die 'Unknown restore option.'
+for tool in sqlite3 age rclone flock; do command -v "$tool" >/dev/null || die "$tool is required"; done
+[[ -n ${BACKUP_REMOTE:-} && -f ${BACKUP_AGE_IDENTITY:-} && -d $data ]] || die 'Set backup remote, identity and data directory.'
+exec 9>"$data/.restore.lock"
+flock -n 9 || die 'Another restore is running.'
+tmp=$(mktemp -d "$data/.restore.XXXXXX")
+trap 'rm -rf -- "$tmp"' EXIT
+rclone copyto "${BACKUP_REMOTE%/}/$object" "$tmp/object.age"
+age -d -i "$BACKUP_AGE_IDENTITY" -o "$tmp/restored.db" "$tmp/object.age"
+[[ $(sqlite3 "$tmp/restored.db" 'PRAGMA integrity_check;') == ok ]] || die 'Snapshot integrity check failed.'
+if [[ $mode == --check ]]; then echo 'Decryption and integrity check passed; database untouched.'; exit 0; fi
+command -v systemctl >/dev/null || die 'systemctl is required for live recovery.'
+[[ $(systemctl show "$service" -p ActiveState --value) == inactive ]] || die "Stop $service before restoring."
+read -r -p "Replace $name with $object, losing later writes? Type restore: " answer
+[[ $answer == restore ]] || die 'Cancelled.'
+dest="$data/$name.db"
+if [[ -f $dest ]]; then
+  mkdir -p "$data/recovery"
+  before="$data/recovery/$name.pre-restore-$(date -u +%Y%m%dT%H%M%S%NZ).db"
+  sqlite3 "$dest" ".backup '$before'"
+  [[ $(sqlite3 "$before" 'PRAGMA integrity_check;') == ok ]] || die 'Cannot preserve current database.'
+  chown --reference="$dest" "$tmp/restored.db"
+  chmod --reference="$dest" "$tmp/restored.db"
+else
+  chown "${BACKUP_RESTORE_OWNER:-xfchess:xfchess}" "$tmp/restored.db"
 fi
-log "selected: $OBJECT"
-
-rclone copyto "$BACKUP_REMOTE/$OBJECT" "$TMP/$OBJECT" || die "download failed"
-age -d -i "$BACKUP_AGE_IDENTITY" -o "$TMP/${NAME}.db" "$TMP/$OBJECT" || die "decrypt failed"
-
-# Integrity check before touching the live file.
-sqlite3 "$TMP/${NAME}.db" "PRAGMA integrity_check;" | grep -q '^ok$' \
-  || die "restored DB failed integrity_check — aborting"
-
-if [ -f "$DEST" ]; then
-  cp -a "$DEST" "${DEST}.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)"
-  log "backed up existing $DEST"
-fi
-log "STOP the backend before overwriting the live DB: sudo systemctl stop xfchess-backend"
-read -r -p "Backend stopped? Overwrite $DEST now? [yes/NO] " ans
-[ "$ans" = "yes" ] || die "aborted by operator"
-
-mv "$TMP/${NAME}.db" "$DEST"
-log "restored → $DEST  (start backend: sudo systemctl start xfchess-backend)"
+[[ $(systemctl show "$service" -p ActiveState --value) == inactive ]] || die 'Service started during restore; aborting.'
+rm -f -- "$dest-wal" "$dest-shm"
+mv -f -- "$tmp/restored.db" "$dest"
+echo "Restored $name. Start $service and verify /readyz and /health."

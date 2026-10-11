@@ -147,7 +147,6 @@ pub(crate) async fn session_funding_guard(
     Ok(())
 }
 
-
 #[derive(Deserialize, Serialize)]
 pub struct CreateSessionReq {
     pub game_id: u64,
@@ -282,7 +281,10 @@ pub async fn claim_seat(
         .await
         .map_err(|e| {
             error!("[seat] claim failed for game {game_id}: {e}");
-            (StatusCode::SERVICE_UNAVAILABLE, "seat claim failed".to_string())
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "seat claim failed".to_string(),
+            )
         })?;
     info!(
         "[seat] game {game_id}: {} seat held by device {} (epoch {})",
@@ -303,7 +305,10 @@ pub async fn get_seat(
         .map(Json)
         .map_err(|e| {
             error!("[seat] lookup failed for game {game_id}: {e}");
-            (StatusCode::SERVICE_UNAVAILABLE, "seat lookup failed".to_string())
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "seat lookup failed".to_string(),
+            )
         })
 }
 
@@ -327,13 +332,15 @@ pub(crate) async fn require_seat_holder(
         )),
         Err(e) => {
             error!("[seat] check failed for game {game_id}: {e}");
-            Err((StatusCode::SERVICE_UNAVAILABLE, "seat check failed".to_string()))
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "seat check failed".to_string(),
+            ))
         }
     }
 }
 
 // Wallet JWTs require signature-verified SIWS ownership proof.
-
 
 pub async fn create_session(
     State(state): State<AppState>,
@@ -559,7 +566,6 @@ pub async fn session_status(
         None => Err(StatusCode::NOT_FOUND),
     }
 }
-
 
 pub async fn record_move(
     State(state): State<AppState>,
@@ -1651,7 +1657,6 @@ pub struct FinalizeGameReq {
     pub wager_lamports: u64,
 }
 
-
 #[derive(Serialize)]
 pub struct StatsResp {
     pub active_games: u64,
@@ -1719,14 +1724,10 @@ async fn generate_san(
     let dst_file = (bytes[2].wrapping_sub(b'a')) as i8;
     let dst_rank = (bytes[3].wrapping_sub(b'1')) as i8;
 
-    if src_file < 0
-        || src_file > 7
-        || src_rank < 0
-        || src_rank > 7
-        || dst_file < 0
-        || dst_file > 7
-        || dst_rank < 0
-        || dst_rank > 7
+    if !(0..=7).contains(&src_file)
+        || !(0..=7).contains(&src_rank)
+        || !(0..=7).contains(&dst_file)
+        || !(0..=7).contains(&dst_rank)
     {
         return Err(anyhow::anyhow!("Invalid UCI move: {}", move_uci));
     }
@@ -1752,7 +1753,6 @@ async fn generate_san(
     Ok(san)
 }
 
-
 pub async fn get_move_nonce(
     Path(game_id): Path<u64>,
     State(state): State<AppState>,
@@ -1777,7 +1777,6 @@ async fn read_game_nonce(state: &AppState, game_id: u64) -> Option<u64> {
         .ok()?;
     solana::game_account::parse(&data).map(|g| g.nonce)
 }
-
 
 pub async fn update_free_rated_result(
     State(state): State<AppState>,
@@ -1866,7 +1865,6 @@ pub async fn update_free_rated_result(
     );
     Ok(StatusCode::OK)
 }
-
 
 pub async fn submit_dispute(
     State(_state): State<AppState>,

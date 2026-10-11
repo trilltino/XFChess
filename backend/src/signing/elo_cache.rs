@@ -1,9 +1,10 @@
+use parking_lot::Mutex;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::{
     collections::HashMap,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
@@ -50,10 +51,7 @@ impl EloCache {
     pub async fn get_elo(&self, pubkey: &str) -> Result<CachedElo, String> {
         // Check cache first
         {
-            let cache = self
-                .cache
-                .lock()
-                .expect("ELO cache mutex should not be poisoned");
+            let cache = self.cache.lock();
             if let Some(cached) = cache.get(pubkey) {
                 if cached.cached_at.elapsed() < self.ttl {
                     return Ok(cached.clone());
@@ -155,10 +153,7 @@ impl EloCache {
         };
 
         {
-            let mut cache = self
-                .cache
-                .lock()
-                .expect("ELO cache mutex should not be poisoned");
+            let mut cache = self.cache.lock();
             cache.insert(pubkey.to_string(), cached.clone());
         }
 
@@ -188,19 +183,13 @@ impl EloCache {
     }
 
     pub fn invalidate(&self, pubkey: &str) {
-        let mut cache = self
-            .cache
-            .lock()
-            .expect("ELO cache mutex should not be poisoned");
+        let mut cache = self.cache.lock();
         cache.remove(pubkey);
         info!("[EloCache] Invalidated cache for {}", pubkey);
     }
 
     pub fn clear(&self) {
-        let mut cache = self
-            .cache
-            .lock()
-            .expect("ELO cache mutex should not be poisoned");
+        let mut cache = self.cache.lock();
         cache.clear();
         info!("[EloCache] Cleared all cache entries");
     }

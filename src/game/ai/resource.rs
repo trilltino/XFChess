@@ -4,7 +4,7 @@ use bevy::prelude::*;
 #[derive(Resource, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct ChessAIResource {
-    pub mode: GameMode,
+    pub mode: AiMode,
 
     pub difficulty: AIDifficulty,
 
@@ -14,7 +14,7 @@ pub struct ChessAIResource {
 impl Default for ChessAIResource {
     fn default() -> Self {
         Self {
-            mode: GameMode::VsAI {
+            mode: AiMode::VsAI {
                 ai_color: PieceColor::Black,
             },
             difficulty: AIDifficulty::Level4,
@@ -31,17 +31,19 @@ pub enum AIEngine {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
-pub enum GameMode {
+/// Who plays against whom, from the AI's point of view. App-wide mode lives in
+/// [`crate::core::GameMode`].
+pub enum AiMode {
     Multiplayer,
     MultiplayerCompetitive,
     VsAI { ai_color: PieceColor },
 }
 
-impl GameMode {
+impl AiMode {
     pub fn ai_color(self) -> PieceColor {
         match self {
-            GameMode::VsAI { ai_color } => ai_color,
-            GameMode::Multiplayer | GameMode::MultiplayerCompetitive => PieceColor::Black,
+            AiMode::VsAI { ai_color } => ai_color,
+            AiMode::Multiplayer | AiMode::MultiplayerCompetitive => PieceColor::Black,
         }
     }
 }
@@ -206,7 +208,7 @@ mod tests {
         let ai_config = ChessAIResource::default();
         assert!(matches!(
             ai_config.mode,
-            GameMode::VsAI {
+            AiMode::VsAI {
                 ai_color: PieceColor::Black
             }
         ));
@@ -216,18 +218,18 @@ mod tests {
     #[test]
     fn test_game_mode_equality() {
         assert_eq!(
-            GameMode::VsAI {
+            AiMode::VsAI {
                 ai_color: PieceColor::White
             },
-            GameMode::VsAI {
+            AiMode::VsAI {
                 ai_color: PieceColor::White
             }
         );
         assert_ne!(
-            GameMode::VsAI {
+            AiMode::VsAI {
                 ai_color: PieceColor::White
             },
-            GameMode::VsAI {
+            AiMode::VsAI {
                 ai_color: PieceColor::Black
             }
         );
@@ -256,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_game_mode_clone() {
-        let original = GameMode::VsAI {
+        let original = AiMode::VsAI {
             ai_color: PieceColor::White,
         };
         let cloned = original.clone();
@@ -268,12 +270,12 @@ mod tests {
         let mut ai_config = ChessAIResource::default();
 
         // Start human vs AI with AI playing black
-        ai_config.mode = GameMode::VsAI {
+        ai_config.mode = AiMode::VsAI {
             ai_color: PieceColor::Black,
         };
         ai_config.difficulty = AIDifficulty::Level8;
 
-        if let GameMode::VsAI { ai_color } = ai_config.mode {
+        if let AiMode::VsAI { ai_color } = ai_config.mode {
             assert_eq!(ai_color, PieceColor::Black);
         } else {
             panic!("Expected VsAI mode");

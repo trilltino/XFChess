@@ -1,7 +1,7 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::GameState;
 use crate::xf_animate::viewport::MINI_LAYER;
 
 pub fn spawn_mini_lights(mut commands: Commands) {

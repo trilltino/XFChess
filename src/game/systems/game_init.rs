@@ -1,4 +1,4 @@
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::game_scene;
 
 use crate::engine::board_state::ChessEngine;
 use crate::game::ai::resource::ChessAIResource;
@@ -12,10 +12,7 @@ pub fn purge_stale_board_visuals(
     mut commands: Commands,
     leftovers: Query<
         (Entity, Option<&Name>),
-        Or<(
-            With<crate::states::main_menu::new_menu::MenuBg>,
-            With<Piece>,
-        )>,
+        Or<(With<crate::states::main_menu::menu::MenuBg>, With<Piece>)>,
     >,
 ) {
     for (entity, name) in leftovers.iter() {
@@ -29,7 +26,6 @@ pub fn purge_stale_board_visuals(
 }
 
 pub fn reset_game_resources(
-    mut commands: Commands,
     mut current_turn: ResMut<CurrentTurn>,
     mut game_phase: ResMut<CurrentGamePhase>,
     mut selection: ResMut<Selection>,
@@ -116,7 +112,7 @@ pub fn spawn_game_lights(mut commands: Commands) {
         })
         .insert(Transform::from_xyz(3.5, 20.0, 3.5))
         .insert(GlobalTransform::default())
-        .insert(DespawnOnExit(GameState::InGame))
+        .insert(game_scene())
         .insert(bevy::camera::visibility::RenderLayers::layer(
             crate::game::systems::camera::BOARD_LAYER,
         ))
@@ -130,6 +126,7 @@ pub fn initialize_players(
     core_mode: Res<crate::core::states::GameMode>,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
     player_identity: Res<crate::states::main_menu::PlayerIdentity>,
+    puzzle_board: Option<Res<crate::puzzle::PuzzleBoard>>,
 ) {
     if let crate::core::states::GameMode::MultiplayerLocal = *core_mode {
         let p1_name = player_identity.display_name().to_string();
@@ -138,6 +135,21 @@ pub fn initialize_players(
             player_2: Player::new(2, "Player 2".to_string(), PieceColor::Black, true),
         };
         info!("[GAME_INIT] Local PvP players initialized (both human)");
+    } else if let crate::core::states::GameMode::Puzzle = *core_mode {
+        // The human plays the puzzle's side; the server plays the other one.
+        let human = puzzle_board.map_or(PieceColor::White, |b| b.player_color);
+        let me = player_identity.display_name().to_string();
+        *players = match human {
+            PieceColor::White => Players {
+                player_1: Player::new(1, me, PieceColor::White, true),
+                player_2: Player::new(2, "Puzzle".to_string(), PieceColor::Black, false),
+            },
+            PieceColor::Black => Players {
+                player_1: Player::new(1, "Puzzle".to_string(), PieceColor::White, false),
+                player_2: Player::new(2, me, PieceColor::Black, true),
+            },
+        };
+        info!("[GAME_INIT] Puzzle players initialized: human={human:?}");
     } else if let crate::core::states::GameMode::OnlineMultiplayer = *core_mode {
         // Each instance only controls its assigned color; the other color is driven by the network.
         let my_color = p2p_conn

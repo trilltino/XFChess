@@ -4,9 +4,9 @@ use crate::game::systems::camera::CameraController;
 use crate::multiplayer::traits::MessageReader;
 use bevy::prelude::*;
 
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum CameraDirectorMode {
+    #[default]
     Free,
     ZoomIn {
         origin: Transform,
@@ -28,18 +28,11 @@ pub enum CameraDirectorMode {
     },
 }
 
-impl Default for CameraDirectorMode {
-    fn default() -> Self {
-        CameraDirectorMode::Free
-    }
-}
-
 #[derive(Resource, Default)]
 pub struct CameraDirector {
     pub mode: CameraDirectorMode,
     pub target_sq: Option<Vec3>,
 }
-
 
 pub fn camera_director_system(
     time: Res<Time>,

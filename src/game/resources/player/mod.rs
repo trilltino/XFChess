@@ -1,3 +1,5 @@
+//! The local player's in-progress choices: the selected piece and a pending promotion.
+
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
 

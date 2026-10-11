@@ -5,4 +5,5 @@ pub mod matchmaking;
 pub mod queue;
 pub mod settlement_worker;
 pub mod tournament_forfeit;
+pub mod tournament_games;
 pub mod tournament_scheduler;

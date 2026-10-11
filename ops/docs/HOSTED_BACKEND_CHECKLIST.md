@@ -1,90 +1,24 @@
-# XFChess Hosted Backend Checklist
+# Hosted backend verification
 
-This checklist ensures that all components and configurations for the XFChess backend on Hetzner are properly set up, deployed, and verified. Use this as a pre-deployment and post-deployment verification tool.
+- Commit the intended source; deployment refuses a dirty checkout.
+- Confirm the SSH host fingerprint and deployment identity before using strict SSH.
+- Provision dependencies separately; verify the `xfchess` Rust toolchain and
+  `/opt/xfchess/.env` against [the template](../backend/.env.example).
+- Keep session/vault databases under `/opt/xfchess/data`. Match the program,
+  authorities, RPC, router and USDC mint to one Solana network.
+- Obtain a trusted certificate and enable the nginx site. Only SSH and HTTP/HTTPS
+  should be public; backend, exporters and monitoring listen on loopback.
+- Run [deploy.ps1](../scripts/deploy.ps1). It checks private health/readiness,
+  the build commit and public HTTPS readiness before reporting success.
+- Check that the website, multiplayer Braid resume and tournament feeds work.
+  Public `/admin`, `/admin/*` and `/metrics` must close the connection.
+- In Tauri, choose the correct environment and verify the displayed backend commit.
+  Production admin calls use the restricted SSH tunnel; resource readings come
+  through the authenticated backend API.
+- Check Prometheus targets and Alertmanager. Telegram delivery is optional and
+  reports explicitly when unconfigured.
+- Verify an encrypted offsite backup with `restore-db.sh --check`. Confirm the
+  backup timer is enabled and the age identity/vault secrets are recoverable offline.
+- Before a schema change, assess [rollback compatibility](ROLLBACK_GUIDE.md).
 
-## Pre-Deployment Checklist
-
-- [ ] **Environment Configuration**
-  - [ ] `.env.production` file created from `ops/.env.example`.
-  - [ ] Required secrets set: `JWT_SECRET`, `IDENTITY_ENCRYPTION_KEY`, `IDENTITY_SALT`.
-  - [ ] `ALLOWED_ORIGINS` set to the correct server address (e.g., `http://178.104.55.19`).
-  - [ ] Database URLs point to correct paths: `SESSION_DB_URL` and `VAULT_DB_URL`.
-  - [ ] Solana configuration correct: `SOLANA_RPC_URL`, `PROGRAM_ID`, `USDC_MINT`.
-  - [ ] Key files available at expected paths: `FEE_PAYER_KEYS`, `VPS_AUTHORITY_KEY`, `KYC_AUTHORITY_KEY`.
-
-- [ ] **Local Build Preparation**
-  - [ ] Frontend build completed (`npm run build` in `xfchessdotcom`).
-  - [ ] Git repository up-to-date and no uncommitted changes unless intentional.
-  - [ ] Commit to be deployed is verified and tagged if necessary.
-
-- [ ] **Server Access and Setup**
-  - [ ] SSH access confirmed to Hetzner server (`root@178.104.55.19`).
-  - [ ] SSH key for deployment set up and working (`~/.ssh/xfchess_vps`).
-
-## Deployment Checklist
-
-- [ ] **Run Deployment Script**
-  - [ ] Execute `powershell -ExecutionPolicy Bypass -File ops\deploy.ps1 -Server 178.104.55.19 -User root`.
-  - [ ] Monitor script output for errors during server setup, build, and upload phases.
-
-- [ ] **Server-Side Build and Installation**
-  - [ ] Linux build dependencies installed on Hetzner server.
-  - [ ] Rust and Cargo installed for backend compilation.
-  - [ ] Backend source synced to `/opt/xfchess/src/` with correct commit checked out.
-  - [ ] Backend binary built on server and installed to `/opt/xfchess/signing-server-http`.
-
-- [ ] **Configuration and Service Setup**
-  - [ ] `.env` file uploaded to `/opt/xfchess/.env` with correct permissions.
-  - [ ] Systemd service file uploaded to `/etc/systemd/system/xfchess-backend.service`.
-  - [ ] Nginx configuration uploaded and enabled at `/etc/nginx/sites-available/xfchess`.
-  - [ ] Frontend files uploaded to `/opt/xfchess/web/`.
-
-- [ ] **Service Start and Verification**
-  - [ ] `xfchess-backend` service restarted and enabled.
-  - [ ] Nginx reloaded and configuration tested.
-
-## Post-Deployment Verification
-
-- [ ] **API and Health Endpoints**
-  - [ ] API endpoint responds: `http://178.104.55.19/api/user/status/11111111111111111111111111111111`.
-  - [ ] Health endpoint responds with 'OK': `http://178.104.55.19/health`.
-
-- [ ] **Frontend Accessibility**
-  - [ ] Frontend loads correctly at `http://178.104.55.19`.
-
-- [ ] **Logs and Service Status**
-  - [ ] Check service status with `systemctl status xfchess-backend`.
-  - [ ] Review logs for errors: `journalctl -u xfchess-backend -n 50`.
-
-- [ ] **Backup Confirmation**
-  - [ ] Database backups created during deployment in `/opt/xfchess/backups/`.
-  - [ ] Previous binary backed up as `/opt/xfchess/signing-server-http.prev`.
-
-## Rollback Preparedness
-
-- [ ] **Rollback Script Ready**
-  - [ ] `rollback.ps1` script available and understood.
-  - [ ] Know how to rollback binary only or binary with databases.
-
-- [ ] **Manual Rollback Options**
-  - [ ] Understand manual rollback if script fails: copy previous binary, restore database backups.
-
-## Security and Hardening
-
-- [ ] **Systemd Hardening**
-  - [ ] Service runs as non-root user `xfchess`.
-  - [ ] Hardening directives in place: `NoNewPrivileges`, `ProtectSystem`, `ReadWritePaths`, etc.
-  - [ ] Environment validation checks in `ExecStartPre` ensure required variables are set.
-
-- [ ] **File Permissions**
-  - [ ] Sensitive files like `.env` and keys have restricted permissions (`chmod 600`).
-  - [ ] Data directories owned by `xfchess` user.
-
-- [ ] **Network Security**
-  - [ ] Nginx configuration does not expose unnecessary endpoints.
-  - [ ] Only required ports open on Hetzner firewall (80 for HTTP, 22 for SSH).
-
-## Additional Notes
-- If any checklist item fails, do not proceed with deployment or usage until resolved.
-- Document any deviations or issues encountered during deployment for future reference.
-- Consider setting up a staging environment for testing deployments before production.
+See [ops/README.md](../README.md) for setup, commands and persistent paths.

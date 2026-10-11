@@ -10,11 +10,32 @@ const BREAKER_THRESHOLD: u32 = 3;
 const BREAKER_COOLDOWN_SECS: i64 = 30;
 
 pub fn make_rpc(url: &str) -> RpcClient {
-    RpcClient::new_with_timeout_and_commitment(
-        url.to_string(),
-        RPC_TIMEOUT,
-        CommitmentConfig::confirmed(),
+    RpcClient::new_sender(
+        measured_sender(url),
+        solana_client::rpc_client::RpcClientConfig::with_commitment(CommitmentConfig::confirmed()),
     )
+}
+
+pub fn make_async_rpc(url: &str) -> solana_client::nonblocking::rpc_client::RpcClient {
+    solana_client::nonblocking::rpc_client::RpcClient::new_sender(
+        measured_sender(url),
+        solana_client::rpc_client::RpcClientConfig::with_commitment(CommitmentConfig::confirmed()),
+    )
+}
+
+fn measured_sender(url: &str) -> solana_rpc_client::http_sender::HttpSender {
+    use solana_client::client_error::reqwest;
+    crate::telemetry::rpc::register(url);
+    let client = reqwest::Client::builder()
+        .timeout(RPC_TIMEOUT)
+        .pool_idle_timeout(RPC_TIMEOUT)
+        .default_headers(solana_rpc_client::http_sender::HttpSender::default_headers())
+        .build()
+        .expect("build RPC client");
+    let client = reqwest_middleware::ClientBuilder::new(client)
+        .with(crate::telemetry::rpc::RpcMetrics)
+        .build();
+    solana_rpc_client::http_sender::HttpSender::new_with_client_with_middleware(url, client)
 }
 
 pub fn rpc_url_or_devnet() -> String {

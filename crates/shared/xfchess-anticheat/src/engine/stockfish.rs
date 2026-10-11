@@ -13,7 +13,7 @@ pub struct PosResult {
 }
 
 pub struct StockfishHandle {
-    _child: Child,
+    child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
 }
@@ -41,7 +41,7 @@ impl StockfishHandle {
         );
 
         let mut sf = StockfishHandle {
-            _child: child,
+            child,
             stdin,
             stdout,
         };
@@ -59,6 +59,16 @@ impl StockfishHandle {
         writeln!(self.stdin, "{cmd}").map_err(|e| AcError::Stockfish(format!("write error: {e}")))
     }
 
+    /// Reads one line into `line` (cleared first); an exited engine is an error.
+    fn read_line(&mut self, line: &mut String) -> AcResult<()> {
+        line.clear();
+        match self.stdout.read_line(line) {
+            Ok(0) => Err(AcError::Stockfish("stockfish exited".into())),
+            Ok(_) => Ok(()),
+            Err(e) => Err(AcError::Stockfish(format!("read error: {e}"))),
+        }
+    }
+
     fn wait_for(&mut self, token: &str, timeout_ms: u64) -> AcResult<()> {
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let mut line = String::new();
@@ -66,10 +76,7 @@ impl StockfishHandle {
             if Instant::now() > deadline {
                 return Err(AcError::StockfishTimeout(timeout_ms));
             }
-            line.clear();
-            self.stdout
-                .read_line(&mut line)
-                .map_err(|e| AcError::Stockfish(format!("read error: {e}")))?;
+            self.read_line(&mut line)?;
             if line.contains(token) {
                 return Ok(());
             }
@@ -83,16 +90,14 @@ impl StockfishHandle {
 
         let mut scores: Vec<(i32, String)> = Vec::new(); // (cp, move_uci)
         let deadline = Instant::now() + Duration::from_millis(movetime_ms * 3);
+        let mut buf = String::new();
 
         loop {
             if Instant::now() > deadline {
                 return Err(AcError::StockfishTimeout(movetime_ms * 3));
             }
-            let mut line = String::new();
-            self.stdout
-                .read_line(&mut line)
-                .map_err(|e| AcError::Stockfish(format!("read error: {e}")))?;
-            let line = line.trim();
+            self.read_line(&mut buf)?;
+            let line = buf.trim();
 
             if line.starts_with("bestmove") {
                 break;
@@ -122,9 +127,9 @@ impl StockfishHandle {
             return Err(AcError::UciParse("no scores returned".into()));
         }
 
-        let top1_cp = scores.get(0).map(|(cp, _)| *cp).unwrap_or(0);
+        let top1_cp = scores.first().map(|(cp, _)| *cp).unwrap_or(0);
         let top2_cp = scores.get(1).map(|(cp, _)| *cp).unwrap_or(top1_cp);
-        let best_move = scores.get(0).map(|(_, mv)| mv.clone()).unwrap_or_default();
+        let best_move = scores.first().map(|(_, mv)| mv.clone()).unwrap_or_default();
 
         debug!("[stockfish] fen={fen} top1={top1_cp} top2={top2_cp} best={best_move}");
 
@@ -140,6 +145,14 @@ impl StockfishHandle {
     }
 }
 
+impl Drop for StockfishHandle {
+    fn drop(&mut self) {
+        // Dropping a `Child` neither stops nor reaps it: without this, every
+        // analysed game would leave an engine (or a zombie) behind.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
 
 fn parse_cp(line: &str) -> Option<i32> {
     let mut parts = line.split_whitespace().peekable();

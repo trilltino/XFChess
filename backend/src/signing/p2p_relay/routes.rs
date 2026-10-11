@@ -59,10 +59,7 @@ pub async fn announce_game(
     let game_id = req.game_id.clone();
     let host_node_id = req.host_node_id.clone();
     let saved = {
-        let mut games = state
-            .p2p_relay
-            .write()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut games = state.p2p_relay.write();
 
         match games.get_mut(&game_id) {
             // Same-host re-announcements refresh the room without resetting the joiner or handshake.
@@ -121,10 +118,8 @@ pub async fn list_games(
     State(state): State<AppState>,
     Query(filter): Query<LobbyFilter>,
 ) -> Result<AxumJson<Vec<GameListing>>, StatusCode> {
-    let relay_state = state.p2p_relay.clone();
-    let games = relay_state
-        .read()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let relay_state = state.p2p_relay;
+    let games = relay_state.read();
     let now = Utc::now();
 
     // List active games for spectators as well as open lobbies. Capacity guards
@@ -135,20 +130,18 @@ pub async fn list_games(
         .filter(|g| {
             // time_control filter
             let t = g.announcement.base_time_seconds;
-            filter.time_min.map_or(true, |mn| t >= mn) && filter.time_max.map_or(true, |mx| t <= mx)
+            filter.time_min.is_none_or(|mn| t >= mn) && filter.time_max.is_none_or(|mx| t <= mx)
         })
         .filter(|g| {
             let s = g.announcement.stake_amount;
-            filter.stake_min.map_or(true, |mn| s >= mn)
-                && filter.stake_max.map_or(true, |mx| s <= mx)
+            filter.stake_min.is_none_or(|mn| s >= mn) && filter.stake_max.is_none_or(|mx| s <= mx)
         })
         .filter(|g| {
             if filter.elo_min.is_none() && filter.elo_max.is_none() {
                 return true;
             }
             let elo = g.announcement.elo.unwrap_or(1200);
-            filter.elo_min.map_or(true, |mn| elo >= mn)
-                && filter.elo_max.map_or(true, |mx| elo <= mx)
+            filter.elo_min.is_none_or(|mn| elo >= mn) && filter.elo_max.is_none_or(|mx| elo <= mx)
         })
         .map(|g| {
             let elapsed = now.signed_duration_since(g.last_activity).num_seconds();
@@ -203,10 +196,7 @@ pub async fn join_game(
         }))
     };
     let (saved, host_node_id) = {
-        let mut games = state
-            .p2p_relay
-            .write()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut games = state.p2p_relay.write();
 
         let Some(game) = games.get_mut(&req.game_id) else {
             return rejected();
@@ -264,10 +254,7 @@ pub async fn accept_join(
     Json(req): Json<AcceptJoinReq>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
     let (saved, joiner_node_id) = {
-        let mut games = state
-            .p2p_relay
-            .write()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut games = state.p2p_relay.write();
 
         let Some(game) = games.get_mut(&req.game_id) else {
             return Ok(AxumJson(AnnounceGameResponse { success: false }));
@@ -312,10 +299,7 @@ pub async fn leave_game(
     Json(req): Json<LeaveGameRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
     let saved = {
-        let mut games = state
-            .p2p_relay
-            .write()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut games = state.p2p_relay.write();
 
         let Some(game) = games.get_mut(&req.game_id) else {
             return Ok(AxumJson(AnnounceGameResponse { success: true }));
@@ -381,10 +365,7 @@ pub async fn send_message(
     }
 
     let saved = {
-        let mut games = state
-            .p2p_relay
-            .write()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut games = state.p2p_relay.write();
 
         let Some(game) = games.get_mut(&req.game_id) else {
             return Ok(AxumJson(AnnounceGameResponse { success: false }));
@@ -419,10 +400,8 @@ pub async fn poll_messages(
     State(state): State<AppState>,
     Json(req): Json<PollMessagesRequest>,
 ) -> Result<AxumJson<PollMessagesResponse>, StatusCode> {
-    let relay_state = state.p2p_relay.clone();
-    let games = relay_state
-        .read()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let relay_state = state.p2p_relay;
+    let games = relay_state.read();
 
     let Some(game) = games.get(&req.game_id) else {
         return Ok(AxumJson(PollMessagesResponse {
@@ -452,10 +431,7 @@ pub async fn heartbeat_game(
     Json(req): Json<HeartbeatRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
     let saved = {
-        let mut games = state
-            .p2p_relay
-            .write()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut games = state.p2p_relay.write();
 
         match games.get_mut(&req.game_id) {
             Some(game) if game.announcement.host_node_id == req.host_node_id => {

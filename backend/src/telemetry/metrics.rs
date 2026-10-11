@@ -1,6 +1,9 @@
+use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::RwLock;
+
+use parking_lot::RwLock;
 
 const DURATION_BUCKETS_MS: [f64; 9] = [5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0];
 
@@ -49,30 +52,33 @@ impl DurationHistogram {
     }
 }
 
-fn bump<K: std::hash::Hash + Eq + Clone>(map: &RwLock<HashMap<K, AtomicU64>>, key: &K) {
-    if let Some(counter) = map.read().unwrap().get(key) {
+/// Adds one to `key`'s counter. The key is only copied the first time it is seen.
+fn bump<K, Q>(map: &RwLock<HashMap<K, AtomicU64>>, key: &Q)
+where
+    K: Borrow<Q> + Hash + Eq,
+    Q: ToOwned<Owned = K> + Hash + Eq + ?Sized,
+{
+    if let Some(counter) = map.read().get(key) {
         counter.fetch_add(1, Ordering::Relaxed);
         return;
     }
     map.write()
-        .unwrap()
-        .entry(key.clone())
+        .entry(key.to_owned())
         .or_insert_with(|| AtomicU64::new(0))
         .fetch_add(1, Ordering::Relaxed);
 }
 
-fn observe<K: std::hash::Hash + Eq + Clone>(
-    map: &RwLock<HashMap<K, DurationHistogram>>,
-    key: &K,
-    duration_ms: f64,
-) {
-    if let Some(hist) = map.read().unwrap().get(key) {
+fn observe<K, Q>(map: &RwLock<HashMap<K, DurationHistogram>>, key: &Q, duration_ms: f64)
+where
+    K: Borrow<Q> + Hash + Eq,
+    Q: ToOwned<Owned = K> + Hash + Eq + ?Sized,
+{
+    if let Some(hist) = map.read().get(key) {
         hist.record(duration_ms);
         return;
     }
     map.write()
-        .unwrap()
-        .entry(key.clone())
+        .entry(key.to_owned())
         .or_insert_with(DurationHistogram::new)
         .record(duration_ms);
 }
@@ -103,11 +109,7 @@ impl Metrics {
 
     pub fn record_http_request(&self, endpoint: &str, status: u16, duration_ms: f64) {
         bump(&self.http_requests_total, &(endpoint.to_string(), status));
-        observe(
-            &self.http_request_duration_ms,
-            &endpoint.to_string(),
-            duration_ms,
-        );
+        observe(&self.http_request_duration_ms, endpoint, duration_ms);
     }
 
     pub fn record_solana_rpc_call(&self, method: &str, success: bool, latency_ms: f64) {
@@ -116,18 +118,18 @@ impl Metrics {
             &self.solana_rpc_calls_total,
             &(method.to_string(), status.to_string()),
         );
-        observe(&self.solana_rpc_latency_ms, &method.to_string(), latency_ms);
+        observe(&self.solana_rpc_latency_ms, method, latency_ms);
     }
 
     pub fn record_transaction_submitted(&self, chain_type: &str) {
-        bump(&self.transactions_submitted_total, &chain_type.to_string());
+        bump(&self.transactions_submitted_total, chain_type);
     }
 
     pub fn record_transaction_confirmed(&self, chain_type: &str, confirmation_time_ms: f64) {
-        bump(&self.transactions_confirmed_total, &chain_type.to_string());
+        bump(&self.transactions_confirmed_total, chain_type);
         observe(
             &self.transaction_confirmation_ms,
-            &chain_type.to_string(),
+            chain_type,
             confirmation_time_ms,
         );
     }
@@ -140,18 +142,12 @@ impl Metrics {
     }
 
     pub fn update_feepayer_balance(&self, key_index: usize, lamports: u64) {
-        if let Some(gauge) = self
-            .feepayer_balance_lamports
-            .read()
-            .unwrap()
-            .get(&key_index)
-        {
+        if let Some(gauge) = self.feepayer_balance_lamports.read().get(&key_index) {
             gauge.store(lamports, Ordering::Relaxed);
             return;
         }
         self.feepayer_balance_lamports
             .write()
-            .unwrap()
             .entry(key_index)
             .or_insert_with(|| AtomicU64::new(0))
             .store(lamports, Ordering::Relaxed);
@@ -160,7 +156,6 @@ impl Metrics {
     pub fn transactions_confirmed(&self, chain_type: &str) -> u64 {
         self.transactions_confirmed_total
             .read()
-            .unwrap()
             .get(chain_type)
             .map(|c| c.load(Ordering::Relaxed))
             .unwrap_or(0)
@@ -169,7 +164,6 @@ impl Metrics {
     pub fn feepayer_balance(&self, key_index: usize) -> u64 {
         self.feepayer_balance_lamports
             .read()
-            .unwrap()
             .get(&key_index)
             .map(|g| g.load(Ordering::Relaxed))
             .unwrap_or(0)
@@ -180,7 +174,7 @@ impl Metrics {
 
         output.push_str("# HELP http_requests_total Total HTTP requests\n");
         output.push_str("# TYPE http_requests_total counter\n");
-        for ((endpoint, status), count) in self.http_requests_total.read().unwrap().iter() {
+        for ((endpoint, status), count) in self.http_requests_total.read().iter() {
             let value = count.load(Ordering::Relaxed);
             output.push_str(&format!(
                 "http_requests_total{{endpoint=\"{}\",status=\"{}\"}} {}\n",
@@ -191,7 +185,7 @@ impl Metrics {
         output
             .push_str("\n# HELP http_request_duration_ms HTTP request duration in milliseconds\n");
         output.push_str("# TYPE http_request_duration_ms histogram\n");
-        for (endpoint, hist) in self.http_request_duration_ms.read().unwrap().iter() {
+        for (endpoint, hist) in self.http_request_duration_ms.read().iter() {
             hist.write_prometheus(
                 &mut output,
                 "http_request_duration_ms",
@@ -201,7 +195,7 @@ impl Metrics {
 
         output.push_str("\n# HELP solana_rpc_calls_total Total Solana RPC calls\n");
         output.push_str("# TYPE solana_rpc_calls_total counter\n");
-        for ((method, status), count) in self.solana_rpc_calls_total.read().unwrap().iter() {
+        for ((method, status), count) in self.solana_rpc_calls_total.read().iter() {
             output.push_str(&format!(
                 "solana_rpc_calls_total{{method=\"{}\",status=\"{}\"}} {}\n",
                 method,
@@ -212,7 +206,7 @@ impl Metrics {
 
         output.push_str("\n# HELP solana_rpc_latency_ms Solana RPC latency in milliseconds\n");
         output.push_str("# TYPE solana_rpc_latency_ms histogram\n");
-        for (method, hist) in self.solana_rpc_latency_ms.read().unwrap().iter() {
+        for (method, hist) in self.solana_rpc_latency_ms.read().iter() {
             hist.write_prometheus(
                 &mut output,
                 "solana_rpc_latency_ms",
@@ -222,7 +216,7 @@ impl Metrics {
 
         output.push_str("\n# HELP transactions_submitted_total Total transactions submitted\n");
         output.push_str("# TYPE transactions_submitted_total counter\n");
-        for (chain_type, count) in self.transactions_submitted_total.read().unwrap().iter() {
+        for (chain_type, count) in self.transactions_submitted_total.read().iter() {
             output.push_str(&format!(
                 "transactions_submitted_total{{chain=\"{}\"}} {}\n",
                 chain_type,
@@ -232,7 +226,7 @@ impl Metrics {
 
         output.push_str("\n# HELP transactions_confirmed_total Total transactions confirmed\n");
         output.push_str("# TYPE transactions_confirmed_total counter\n");
-        for (chain_type, count) in self.transactions_confirmed_total.read().unwrap().iter() {
+        for (chain_type, count) in self.transactions_confirmed_total.read().iter() {
             output.push_str(&format!(
                 "transactions_confirmed_total{{chain=\"{}\"}} {}\n",
                 chain_type,
@@ -242,9 +236,7 @@ impl Metrics {
 
         output.push_str("\n# HELP transactions_failed_total Total transactions failed\n");
         output.push_str("# TYPE transactions_failed_total counter\n");
-        for ((chain_type, error_type), count) in
-            self.transactions_failed_total.read().unwrap().iter()
-        {
+        for ((chain_type, error_type), count) in self.transactions_failed_total.read().iter() {
             output.push_str(&format!(
                 "transactions_failed_total{{chain=\"{}\",error_type=\"{}\"}} {}\n",
                 chain_type,
@@ -257,7 +249,7 @@ impl Metrics {
             "\n# HELP transaction_confirmation_ms Transaction confirmation time in milliseconds\n",
         );
         output.push_str("# TYPE transaction_confirmation_ms histogram\n");
-        for (chain_type, hist) in self.transaction_confirmation_ms.read().unwrap().iter() {
+        for (chain_type, hist) in self.transaction_confirmation_ms.read().iter() {
             hist.write_prometheus(
                 &mut output,
                 "transaction_confirmation_ms",
@@ -267,7 +259,7 @@ impl Metrics {
 
         output.push_str("\n# HELP feepayer_balance_lamports Fee payer balance in lamports\n");
         output.push_str("# TYPE feepayer_balance_lamports gauge\n");
-        for (key_index, gauge) in self.feepayer_balance_lamports.read().unwrap().iter() {
+        for (key_index, gauge) in self.feepayer_balance_lamports.read().iter() {
             output.push_str(&format!(
                 "feepayer_balance_lamports{{key_index=\"{}\"}} {}\n",
                 key_index,

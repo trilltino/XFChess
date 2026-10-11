@@ -13,9 +13,13 @@ The smart contract stores scores as integers to avoid floating-point on-chain.
 | Loss    | 0      |
 | Bye     | 2      |
 
+A bye is reported as its own board slot after the round's real boards
+(`SwissMatchResult::Bye`, the bye player passed as both `white` and `black`), so
+on-chain scores match the backend's exactly.
+
 Source: `programs/xfchess-game/src/tournament_ix/matches/record_swiss_result.rs`
 
-## Backend / pairing engine (`crates/swiss-pairing`)
+## Backend / pairing engine (`crates/shared/swiss-pairing`)
 
 The pairing engine uses FIDE standard floating-point scores.
 
@@ -26,7 +30,18 @@ The pairing engine uses FIDE standard floating-point scores.
 | Loss    | 0.0    |
 | Bye     | 1.0    |
 
-Source: `crates/swiss-pairing/src/types.rs` — `MatchResult::white_score()` / `black_score()`
+Source: `crates/shared/swiss-pairing/src/types.rs` — `MatchResult::white_score()` / `black_score()`
+
+## Tiebreaks and final places
+
+Tiebreaks (Buchholz, then Sonneborn-Berger, then rating) need every player's full
+opponent history, which only the pairing engine has. They are computed off-chain
+(`calculate_standings`) and are the order the backend shows.
+
+`complete_swiss_tournament` takes the backend's top 10 as an argument. The program
+accepts it only if the players are distinct and registered, on-chain scores never
+increase down the list, and no unlisted player outscores the last listed one. The
+on-chain `SwissStanding.buchholz`/`sonneborn` fields are no longer written.
 
 ## Conversion
 

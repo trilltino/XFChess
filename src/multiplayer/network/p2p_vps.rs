@@ -123,12 +123,19 @@ pub struct P2PVpsPlugin;
 impl Plugin for P2PVpsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<P2PVpsState>()
-            .add_systems(Update, sync_vps_relay_settings)
-            .add_systems(Update, poll_vps_game_list)
-            .add_systems(Update, poll_for_joiner_messages)
-            .add_systems(Update, poll_for_game_start_message)
-            .add_systems(Update, handle_vps_responses)
-            .add_systems(Update, send_vps_messages)
+            .add_systems(
+                Update,
+                (
+                    sync_vps_relay_settings,
+                    poll_vps_game_list,
+                    poll_for_joiner_messages,
+                    poll_for_game_start_message,
+                    handle_vps_responses,
+                    send_vps_messages,
+                )
+                    .chain()
+                    .in_set(crate::core::schedule::ReceiveSet::Relay),
+            )
             // Observe AppExit after ExitSystems in Last; there may be no next frame.
             .add_systems(
                 Last,
@@ -243,14 +250,17 @@ fn poll_vps_game_list(mut vps_state: ResMut<P2PVpsState>) {
     vps_state.last_poll = Some(std::time::Instant::now());
 
     let tx = vps_state.response_tx.clone();
-    std::thread::spawn(move || match vps_client::p2p_list_games() {
-        Ok(games) => {
-            let _ = tx.send(VpsResponse::GameList(games));
-        }
-        Err(e) => {
-            let _ = tx.send(VpsResponse::Error(e));
-        }
-    });
+    crate::core::net_task::spawn_detached(
+        "p2p-list-games",
+        move || match vps_client::p2p_list_games() {
+            Ok(games) => {
+                let _ = tx.send(VpsResponse::GameList(games));
+            }
+            Err(e) => {
+                let _ = tx.send(VpsResponse::Error(e));
+            }
+        },
+    );
 }
 
 fn poll_for_joiner_messages(mut vps_state: ResMut<P2PVpsState>) {
@@ -274,7 +284,7 @@ fn poll_for_joiner_messages(mut vps_state: ResMut<P2PVpsState>) {
     vps_state.host_poll_last = Some(std::time::Instant::now());
 
     let tx = vps_state.response_tx.clone();
-    std::thread::spawn(move || {
+    crate::core::net_task::spawn_detached("p2p_vps", move || {
         match vps_client::p2p_poll_messages(game_id.clone(), &node_id, 0) {
             Ok((messages, _)) => {
                 for msg in &messages {
@@ -328,8 +338,8 @@ fn poll_for_game_start_message(
     vps_state.joiner_poll_last = Some(std::time::Instant::now());
 
     let tx = vps_state.response_tx.clone();
-    std::thread::spawn(
-        move || match vps_client::p2p_poll_messages(game_id.clone(), &node_id, 0) {
+    crate::core::net_task::spawn_detached("p2p-poll-start", move || {
+        match vps_client::p2p_poll_messages(game_id.clone(), &node_id, 0) {
             Ok((messages, _)) => {
                 for msg in &messages {
                     if let Some(rest) = msg.strip_prefix("GAME_START:") {
@@ -348,8 +358,8 @@ fn poll_for_game_start_message(
                 }
             }
             Err(e) => warn!("[P2P VPS] Joiner relay poll failed: {}", e),
-        },
-    );
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -566,7 +576,7 @@ fn handle_vps_responses(
                     competitive.as_deref_mut(),
                 );
 
-                ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
+                ai_config.mode = crate::game::ai::resource::AiMode::Multiplayer;
                 *core_mode = crate::core::GameMode::OnlineMultiplayer;
                 p2p_conn.status = P2PConnectionStatus::InGame;
                 if !host_display_name.is_empty() {

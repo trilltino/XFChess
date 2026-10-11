@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Command } from "@tauri-apps/plugin-shell";
-import { OPS_SSH } from "../config/environments";
+import { opsSsh, getOpsConfig, opsConfigProblem } from "../config/environments";
+import { operatorCommand } from "../services/operations";
 
 interface TerminalLine {
   type: "cmd" | "out" | "err" | "info";
@@ -15,14 +16,18 @@ export default function HetznerSsh() {
   ]);
   const [running, setRunning] = useState(false);
   const termRef = useRef<HTMLDivElement>(null);
-  const serverIp = OPS_SSH.host;
-  const sshTarget = `${OPS_SSH.user}@${serverIp}`;
+  const ops = opsSsh();
+  const configError = opsConfigProblem(getOpsConfig());
+  const busy = useRef(false);
+  const serverIp = ops.host;
+  const sshTarget = `${ops.user}@${serverIp}`;
 
   useEffect(() => {
     // Ping to check reachability
     (async () => {
       try {
-        const cmd = Command.create("ssh", ["-i", OPS_SSH.key, "-o", "ConnectTimeout=3", "-o", "BatchMode=yes", sshTarget, "echo ok"]);
+        // Scope names are pinned per argument layout in capabilities/admin-shell.json.
+        const cmd = Command.create("ssh-probe", ["-i", ops.key, "-o", "ConnectTimeout=3", "-o", "BatchMode=yes", sshTarget, "echo ok"]);
         const out = await cmd.execute();
         setStatus(out.stdout.trim() === "ok" ? "online" : "offline");
       } catch { setStatus("offline"); }
@@ -34,14 +39,16 @@ export default function HetznerSsh() {
   }, [lines]);
 
   const push = (type: TerminalLine["type"], text: string) =>
-    setLines(prev => [...prev, { type, text }]);
+    setLines(prev => [...prev.slice(-499), { type, text: text.slice(0, 8192) }]);
 
   const runSshCommand = async (remoteCmd: string) => {
-    if (running) return;
+    if (busy.current) return;
+    if (configError) { push("err", configError); return; }
+    busy.current = true;
     setRunning(true);
     push("cmd", `$ ssh ${sshTarget} "${remoteCmd}"`);
     try {
-      const child = Command.create("ssh", ["-i", OPS_SSH.key, sshTarget, remoteCmd]);
+      const child = Command.create("ssh-exec", operatorCommand(getOpsConfig(), remoteCmd));
       child.stdout.on("data", data => push("out", data));
       child.stderr.on("data", data => push("err", data));
       const result = await child.execute();
@@ -49,6 +56,7 @@ export default function HetznerSsh() {
     } catch (err: any) {
       push("err", `Error: ${err?.message ?? String(err)}`);
     }
+    busy.current = false;
     setRunning(false);
   };
 
@@ -62,7 +70,7 @@ export default function HetznerSsh() {
 
   const openNativeTerminal = async () => {
     try {
-      await Command.create("powershell", ["-NoExit", "-Command", `ssh -i ${OPS_SSH.key} ${sshTarget}`]).spawn();
+      await Command.create("powershell", ["-NoExit", "-Command", `ssh -i ${ops.key} ${sshTarget}`]).spawn();
     } catch (err: any) {
       push("err", `Failed to open native terminal: ${err?.message}`);
     }
@@ -73,7 +81,7 @@ export default function HetznerSsh() {
     { label: "JOURNAL ERRORS", cmd: "journalctl -p err -n 30 --no-pager" },
     { label: "BACKEND STATUS", cmd: "systemctl status xfchess-backend --no-pager -l" },
     { label: "DISK USAGE", cmd: "df -h" },
-    { label: "RESTART BACKEND", cmd: "sudo systemctl restart xfchess-backend && echo 'backend restarted'", confirm: true },
+    { label: "RESTART BACKEND", cmd: "sudo -n systemctl restart xfchess-backend && echo 'backend restarted'", confirm: true },
     { label: "NGINX ERRORS", cmd: "tail -n 50 /var/log/nginx/error.log" },
   ];
 

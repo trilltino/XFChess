@@ -12,7 +12,6 @@ use tracing::{error, info, warn};
 
 use crate::signing::{solana, AppState};
 
-
 #[derive(Deserialize)]
 pub struct LinkStartReq {
     pub pubkey: String,
@@ -78,10 +77,22 @@ struct PendingLink {
 }
 
 use once_cell::sync::Lazy;
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
 
-static PENDING_LINKS: Lazy<Arc<Mutex<std::collections::HashMap<String, PendingLink>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));
+/// How long a started link waits for its confirmation.
+const LINK_TTL: Duration = Duration::from_secs(300);
+
+/// One client (and connection pool) for Lichess profile lookups, with a deadline
+/// so a slow Lichess cannot hold requests open.
+static LICHESS: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_default()
+});
+
+static PENDING_LINKS: Lazy<Mutex<std::collections::HashMap<String, PendingLink>>> =
+    Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 pub fn external_elo_routes() -> Router<AppState> {
     Router::new()
@@ -90,7 +101,6 @@ pub fn external_elo_routes() -> Router<AppState> {
         .route("/external-elo/status/{pubkey}", get(link_status))
         .route("/external-elo/sync", post(link_sync))
 }
-
 
 async fn link_start(
     State(_state): State<AppState>,
@@ -131,7 +141,7 @@ async fn link_start(
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs()
-        + 300; // 5 minute expiry
+        + LINK_TTL.as_secs();
 
     let pending = PendingLink {
         pubkey: req.pubkey.clone(),
@@ -141,9 +151,9 @@ async fn link_start(
     };
 
     {
-        let mut links = PENDING_LINKS
-            .lock()
-            .expect("Pending links mutex should not be poisoned");
+        let mut links = PENDING_LINKS.lock();
+        // Unconfirmed links would otherwise accumulate for the life of the process.
+        links.retain(|_, link| link.created_at.elapsed() < LINK_TTL);
         links.insert(link_id.clone(), pending);
     }
 
@@ -164,9 +174,7 @@ async fn link_confirm(
     Json(req): Json<LinkConfirmReq>,
 ) -> Result<Json<LinkConfirmResp>, (StatusCode, String)> {
     let pending = {
-        let mut links = PENDING_LINKS
-            .lock()
-            .expect("Pending links mutex should not be poisoned");
+        let mut links = PENDING_LINKS.lock();
         links.remove(&req.link_id)
     };
 
@@ -180,13 +188,12 @@ async fn link_confirm(
         }
     };
 
-    if pending.created_at.elapsed() > Duration::from_secs(300) {
+    if pending.created_at.elapsed() > LINK_TTL {
         return Err((StatusCode::BAD_REQUEST, "Link expired".to_string()));
     }
 
     let lichess_url = format!("https://lichess.org/api/user/{}", pending.username);
-    let client = reqwest::Client::new();
-    let response = client
+    let response = LICHESS
         .get(&lichess_url)
         .header("Accept", "application/json")
         .send()
@@ -403,8 +410,7 @@ async fn link_sync(
         })?;
 
     let lichess_url = format!("https://lichess.org/api/user/{}", db_link.username);
-    let client = reqwest::Client::new();
-    let response = client
+    let response = LICHESS
         .get(&lichess_url)
         .header("Accept", "application/json")
         .send()
@@ -506,7 +512,6 @@ async fn link_sync(
         new_elo,
     }))
 }
-
 
 #[derive(sqlx::FromRow)]
 struct DbExternalEloLink {

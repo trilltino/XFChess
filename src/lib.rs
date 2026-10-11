@@ -201,7 +201,7 @@ pub fn build_app(game_config: GameConfig) -> App {
 
     // Configure AI if requested
     if let Some(diff_val) = game_config.ai_difficulty {
-        use crate::game::ai::resource::{AIDifficulty, ChessAIResource, GameMode};
+        use crate::game::ai::resource::{AIDifficulty, AiMode, ChessAIResource};
         use crate::rendering::pieces::PieceColor;
 
         let difficulty = AIDifficulty::from_u8(diff_val);
@@ -217,7 +217,7 @@ pub fn build_app(game_config: GameConfig) -> App {
         );
 
         app.insert_resource(ChessAIResource {
-            mode: GameMode::VsAI { ai_color },
+            mode: AiMode::VsAI { ai_color },
             difficulty,
             engine: crate::game::ai::resource::AIEngine::Stockfish,
         });
@@ -228,7 +228,7 @@ pub fn build_app(game_config: GameConfig) -> App {
     #[cfg(not(target_os = "android"))]
     app.insert_resource(bevy::winit::WinitSettings::game());
 
-    app.insert_resource(game_config.clone())
+    app.insert_resource(game_config)
         .init_resource::<PersistentEguiCamera>()
         .insert_resource(bevy_egui::EguiGlobalSettings {
             auto_create_primary_context: false,
@@ -248,18 +248,12 @@ pub fn build_app(game_config: GameConfig) -> App {
                     let cwd_assets = std::path::PathBuf::from("assets");
                     let exe_assets = std::env::current_exe()
                         .ok()
-                        .and_then(|p| p.parent().map(|d| d.join("assets")));
-                    if cwd_assets.exists() && cwd_assets.is_dir() {
+                        .and_then(|p| p.parent().map(|d| d.join("assets")))
+                        .filter(|p| p.is_dir());
+                    if cwd_assets.is_dir() {
                         "assets".to_string()
-                    } else if exe_assets
-                        .as_ref()
-                        .map(|p| p.exists() && p.is_dir())
-                        .unwrap_or(false)
-                    {
-                        exe_assets
-                            .unwrap()
-                            .to_string_lossy()
-                            .into_owned()
+                    } else if let Some(exe_assets) = exe_assets {
+                        exe_assets.to_string_lossy().into_owned()
                     } else {
                         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                             .join("assets")
@@ -287,9 +281,9 @@ pub fn build_app(game_config: GameConfig) -> App {
             })
             .set(LogPlugin {
                 filter: if cfg!(debug_assertions) {
-                    "info,wgpu_core=warn,wgpu_hal=warn,xfchess=info,bevy_gltf=error,bevy_image=error,iroh=warn,iroh_relay=warn,iroh_gossip=warn,netwatch=warn,portmapper=warn,braid_chess=warn,braid_http=warn,braid_core=warn".to_string()
+                    "info,wgpu_core=warn,wgpu_hal=warn,xfchess=info,bevy_gltf=error,bevy_image=error,iroh=warn,iroh_relay=warn,iroh_gossip=warn,netwatch=warn,portmapper=warn,braid_chess=warn,braid_http=warn".to_string()
                 } else {
-                    "error,xfchess=info,iroh=warn,iroh_relay=warn,iroh_gossip=warn,braid_chess=warn,braid_http=warn,braid_core=warn".to_string()
+                    "error,xfchess=info,iroh=warn,iroh_relay=warn,iroh_gossip=warn,braid_chess=warn,braid_http=warn".to_string()
                 },
                 custom_layer: file_log_layer,
                 ..default()
@@ -312,8 +306,6 @@ pub fn build_app(game_config: GameConfig) -> App {
     app.add_plugins((
         states::main_menu::MainMenuPlugin,
         states::game_over::GameOverPlugin,
-        states::pause::PausePlugin,
-        states::settings::SettingsPlugin,
         xf_animate::XfAnimatePlugin,
         puzzle::PuzzlePlugin,
     ))

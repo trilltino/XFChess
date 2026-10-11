@@ -20,18 +20,13 @@ pub struct P2PGameAnnouncement {
     pub password_hash: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum GameStatus {
-    Open,       // Waiting for opponent
+    #[default]
+    Open, // Waiting for opponent
     Connecting, // Someone trying to join
     InProgress, // Game started
     Finished,   // Game ended
-}
-
-impl Default for GameStatus {
-    fn default() -> Self {
-        GameStatus::Open
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

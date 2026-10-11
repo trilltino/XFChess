@@ -1,105 +1,75 @@
-use crate::signing::storage::tournament::{MatchStatus, TournamentStore};
-use crate::signing::swiss::service::SwissService;
-use serde::{Deserialize, Serialize};
+//! Routes settled Swiss games into [`SwissService`] and mirrors the result onto the
+//! chain.
+//!
+//! It holds no state of its own. A Swiss game id encodes its `(round, board)`
+//! ([`TournamentStore::swiss_game_id`]); chain progress comes from the store
+//! (`chain_boards_recorded`, `chain_completed`) and the on-chain `Tournament` account
+//! (`current_round`). So a restart, a dropped event or a failed transaction is
+//! repaired by the next reconcile pass, which also runs on a timer.
+
+use crate::signing::solana::instructions::{
+    SWISS_BLACK_WIN, SWISS_BYE, SWISS_DRAW, SWISS_WHITE_WIN,
+};
+use crate::signing::solana::tournament_account::{
+    fetch_swiss_progress, TOURNAMENT_STATUS_ACTIVE, TOURNAMENT_STATUS_COMPLETED,
+};
+use crate::signing::storage::tournament::{TournamentFormat, TournamentStatus, TournamentStore};
+use crate::signing::swiss::service::{SwissService, SwissServiceError};
+use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use swiss_pairing::{MatchResult, Pairing};
-use tokio::sync::{mpsc, RwLock};
+use std::time::Duration;
+use swiss_pairing::MatchResult;
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
-use xfchess_braid_server::{bridge, ResourceHub};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActiveGame {
-    pub tournament_id: u64,
-    pub round: u8,
-    pub board: u16,
-    pub white: String,
-    pub black: String,
-    pub game_id: u64,
-    pub finished: bool,
-}
+/// Anchor code for `GameErrorCode::BoardAlreadyRecorded` (6000 + variant index): the
+/// board landed on an earlier attempt whose confirmation was lost.
+const BOARD_ALREADY_RECORDED: &str = "custom program error: 0x17cf";
+
+const RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub enum OrchestratorEvent {
-    RoundPaired {
-        tournament_id: u64,
-        round: u8,
-        pairings: Vec<Pairing>,
-    },
+    /// A tournament game settled on-chain. `white`/`black` are the on-chain Game's
+    /// players, checked against the pairing the game id points at.
     GameEnded {
         tournament_id: u64,
         game_id: u64,
+        white: String,
+        black: String,
         result: MatchResult,
     },
-}
-
-#[derive(Clone, Default)]
-pub struct OrchestratorState {
-    inner: Arc<RwLock<OrchestratorInner>>,
-}
-
-#[derive(Default)]
-struct OrchestratorInner {
-    games: HashMap<u64, ActiveGame>,
-    finished_counts: HashMap<(u64, u8), usize>,
-    total_counts: HashMap<(u64, u8), usize>,
-    next_game_id: u64,
-}
-
-impl OrchestratorState {
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(OrchestratorInner {
-                next_game_id: chrono::Utc::now().timestamp() as u64,
-                ..Default::default()
-            })),
-        }
-    }
-
-    pub async fn get_game(&self, game_id: u64) -> Option<ActiveGame> {
-        self.inner.read().await.games.get(&game_id).cloned()
-    }
-
-    pub async fn is_round_complete(&self, tournament_id: u64, round: u8) -> bool {
-        let inner = self.inner.read().await;
-        let key = (tournament_id, round);
-        let finished = inner.finished_counts.get(&key).copied().unwrap_or(0);
-        let total = inner.total_counts.get(&key).copied().unwrap_or(0);
-        total > 0 && finished >= total
-    }
-}
-
-pub struct SwissOrchestrator {
-    store: TournamentStore,
-    swiss: Arc<SwissService>,
-    braid_hub: Option<Arc<ResourceHub>>,
-    state: OrchestratorState,
-    event_rx: mpsc::Receiver<OrchestratorEvent>,
-    on_chain: Option<SwissOnChainConfig>,
+    /// Off-chain state changed (admin result, forfeit, new round); mirror it now.
+    Reconcile { tournament_id: u64 },
 }
 
 #[derive(Clone)]
 pub struct SwissOnChainConfig {
     pub program_id: String,
     pub rpc_url: String,
-    pub cranker: Arc<Keypair>,
+    /// Must be the tournament's on-chain `authority`.
+    pub authority: Arc<Keypair>,
+}
+
+pub struct SwissOrchestrator {
+    store: TournamentStore,
+    swiss: Arc<SwissService>,
+    event_rx: mpsc::Receiver<OrchestratorEvent>,
+    on_chain: Option<SwissOnChainConfig>,
 }
 
 impl SwissOrchestrator {
     pub fn new(
         store: TournamentStore,
         swiss: Arc<SwissService>,
-        braid_hub: Option<Arc<ResourceHub>>,
         on_chain: Option<SwissOnChainConfig>,
     ) -> (Self, mpsc::Sender<OrchestratorEvent>) {
         let (tx, rx) = mpsc::channel(256);
         let orchestrator = Self {
             store,
             swiss,
-            braid_hub,
-            state: OrchestratorState::new(),
             event_rx: rx,
             on_chain,
         };
@@ -107,303 +77,349 @@ impl SwissOrchestrator {
     }
 
     pub async fn run(mut self) {
-        info!("[orchestrator] Swiss match orchestrator started");
-        while let Some(event) = self.event_rx.recv().await {
-            match event {
-                OrchestratorEvent::RoundPaired {
-                    tournament_id,
-                    round,
-                    pairings,
-                } => {
-                    self.handle_round_paired(tournament_id, round, pairings)
-                        .await;
-                }
-                OrchestratorEvent::GameEnded {
-                    tournament_id,
-                    game_id,
-                    result,
-                } => {
-                    self.handle_game_ended(tournament_id, game_id, result).await;
-                }
-            }
-        }
-        info!("[orchestrator] Swiss match orchestrator stopped");
-    }
-
-    async fn handle_round_paired(&self, tournament_id: u64, round: u8, pairings: Vec<Pairing>) {
-        info!(
-            "[orchestrator] Creating {} games for tournament {} round {}",
-            pairings.len(),
-            tournament_id,
-            round
-        );
-
-        let total = pairings.len();
-        {
-            let mut inner = self.state.inner.write().await;
-            inner.total_counts.insert((tournament_id, round), total);
-            inner
-                .finished_counts
-                .entry((tournament_id, round))
-                .or_insert(0);
-        }
-
-        for pairing in &pairings {
-            let game_id = {
-                let mut inner = self.state.inner.write().await;
-                let id = inner.next_game_id;
-                inner.next_game_id += 1;
-                id
-            };
-
-            let active = ActiveGame {
-                tournament_id,
-                round,
-                board: pairing.board,
-                white: pairing.white.clone(),
-                black: pairing.black.clone(),
-                game_id,
-                finished: false,
-            };
-
-            {
-                let mut inner = self.state.inner.write().await;
-                inner.games.insert(game_id, active.clone());
-            }
-
-            // Store game_id in tournament match record
-            self.store
-                .update(tournament_id, |t| {
-                    let idx = (round as usize - 1) * 100 + pairing.board as usize;
-                    if idx < t.matches.len() {
-                        if let Some(ref mut m) = t.matches[idx] {
-                            m.game_id = Some(game_id);
-                            m.status = MatchStatus::Active;
-                        }
+        info!("[orchestrator] Swiss orchestrator started");
+        let mut tick = tokio::time::interval(RECONCILE_INTERVAL);
+        loop {
+            tokio::select! {
+                event = self.event_rx.recv() => match event {
+                    Some(OrchestratorEvent::GameEnded { tournament_id, game_id, white, black, result }) => {
+                        self.handle_game_ended(tournament_id, game_id, &white, &black, result).await;
+                        self.reconcile(tournament_id).await;
                     }
-                })
-                .await;
-
-            info!(
-                "[orchestrator] Game {} created: {} (W) vs {} (B) — tournament {} round {} board {}",
-                game_id, pairing.white, pairing.black, tournament_id, round, pairing.board
-            );
+                    Some(OrchestratorEvent::Reconcile { tournament_id }) => {
+                        self.reconcile(tournament_id).await;
+                    }
+                    None => break,
+                },
+                _ = tick.tick() => self.reconcile_all().await,
+            }
         }
-
-        // Push updated pairings with game IDs to Braid subscribers
-        if let Some(hub) = &self.braid_hub {
-            let pairings_with_ids: Vec<serde_json::Value> = pairings
-                .iter()
-                .enumerate()
-                .map(|(_, p)| {
-                    serde_json::json!({
-                        "board": p.board,
-                        "white": p.white,
-                        "black": p.black,
-                        "game_id": self.lookup_game_id_sync(tournament_id, round, p.board),
-                    })
-                })
-                .collect();
-
-            bridge::push_pairings(
-                hub,
-                tournament_id,
-                round,
-                serde_json::Value::Array(pairings_with_ids),
-            );
-        }
-
-        info!(
-            "[orchestrator] All {} games created for tournament {} round {}",
-            total, tournament_id, round
-        );
+        info!("[orchestrator] Swiss orchestrator stopped");
     }
 
-    async fn handle_game_ended(&self, tournament_id: u64, game_id: u64, result: MatchResult) {
-        let active = match self.state.get_game(game_id).await {
-            Some(g) => g,
-            None => {
-                warn!("[orchestrator] GameEnded for unknown game_id {}", game_id);
-                return;
-            }
+    async fn handle_game_ended(
+        &self,
+        tournament_id: u64,
+        game_id: u64,
+        white: &str,
+        black: &str,
+        result: MatchResult,
+    ) {
+        let Some((round, board)) = TournamentStore::swiss_board_for_game_id(tournament_id, game_id)
+        else {
+            warn!(
+                "[orchestrator] game {} is not a Swiss board of tournament {}",
+                game_id, tournament_id
+            );
+            return;
         };
 
-        if active.finished {
-            warn!("[orchestrator] Duplicate GameEnded for game_id {}", game_id);
+        let Some(tournament) = self.store.get(tournament_id).await else {
             return;
-        }
-
-        info!(
-            "[orchestrator] Game {} ended ({:?}): {} vs {} — tournament {} round {} board {}",
-            game_id, result, active.white, active.black, tournament_id, active.round, active.board
-        );
-
-        // Mark game as finished
-        {
-            let mut inner = self.state.inner.write().await;
-            if let Some(g) = inner.games.get_mut(&game_id) {
-                g.finished = true;
-            }
-            *inner
-                .finished_counts
-                .entry((tournament_id, active.round))
-                .or_insert(0) += 1;
-        }
-
-        // Record result via swiss service (updates standings + pushes to Braid)
-        if let Err(e) = self
-            .swiss
-            .record_result(tournament_id, active.round, active.board, result)
-            .await
-        {
+        };
+        let pairing = tournament
+            .swiss_data
+            .as_ref()
+            .and_then(|sd| sd.round(round))
+            .and_then(|r| r.pairings.iter().find(|p| p.board == board));
+        let Some(pairing) = pairing else {
+            warn!(
+                "[orchestrator] game {} maps to unknown round {} board {} in tournament {}",
+                game_id, round, board, tournament_id
+            );
+            return;
+        };
+        if pairing.white != white || pairing.black != black {
             error!(
-                "[orchestrator] Failed to record result for game {}: {}",
-                game_id, e
+                "[orchestrator] game {} players {} / {} do not match pairing {} / {} \
+                 (tournament {} round {} board {}) — result ignored",
+                game_id, white, black, pairing.white, pairing.black, tournament_id, round, board
             );
             return;
         }
 
-        if self
-            .state
-            .is_round_complete(tournament_id, active.round)
+        match self
+            .swiss
+            .record_result(tournament_id, round, board, result)
             .await
         {
-            self.crank_round(tournament_id, active.round).await;
+            Ok(_) => info!(
+                "[orchestrator] game {} recorded: tournament {} round {} board {} {:?}",
+                game_id, tournament_id, round, board, result
+            ),
+            Err(SwissServiceError::ResultAlreadyRecorded) => {}
+            Err(e) => error!(
+                "[orchestrator] recording game {} (tournament {} round {} board {}) failed: {}",
+                game_id, tournament_id, round, board, e
+            ),
         }
+    }
 
-        // Check if round is complete → auto-start next round
-        if self
-            .state
-            .is_round_complete(tournament_id, active.round)
-            .await
-        {
-            let current_round = match self.swiss.get_current_round(tournament_id).await {
-                Ok(round) => round,
-                Err(e) => {
-                    error!(
-                        "[orchestrator] Failed to read current round for tournament {}: {}",
-                        tournament_id, e
-                    );
-                    return;
-                }
-            };
-
-            if current_round > active.round {
-                info!(
-                    "[orchestrator] Tournament {} already advanced to round {}",
-                    tournament_id, current_round
-                );
-                return;
-            }
-
-            info!(
-                "[orchestrator] Round {} complete for tournament {}. Starting next round.",
-                active.round, tournament_id
-            );
-            match self.swiss.start_round(tournament_id).await {
-                Ok(next_round) => {
-                    info!(
-                        "[orchestrator] Round {} started for tournament {}",
-                        next_round.round, tournament_id
-                    );
-                    self.handle_round_paired(
-                        tournament_id,
-                        next_round.round,
-                        next_round.pairings.clone(),
-                    )
-                    .await;
-                }
-                Err(crate::signing::swiss::service::SwissServiceError::TournamentComplete) => {
-                    info!("[orchestrator] Tournament {} is complete!", tournament_id);
-                }
-                Err(e) => {
-                    error!(
-                        "[orchestrator] Failed to start next round for tournament {}: {}",
-                        tournament_id, e
-                    );
-                }
+    async fn reconcile_all(&self) {
+        if self.on_chain.is_none() {
+            return;
+        }
+        for t in self.store.list().await {
+            let pending = matches!(t.format, TournamentFormat::Swiss { .. })
+                && matches!(
+                    t.status,
+                    TournamentStatus::Active | TournamentStatus::Completed
+                )
+                && t.swiss_data.as_ref().is_some_and(|sd| !sd.chain_completed);
+            if pending {
+                self.reconcile(t.tournament_id).await;
             }
         }
     }
 
-    async fn crank_round(&self, tournament_id: u64, round: u8) {
-        let Some(cfg) = &self.on_chain else { return };
-        let program_id = match solana_sdk::pubkey::Pubkey::from_str(&cfg.program_id) {
-            Ok(id) => id,
-            Err(e) => {
-                error!("[orchestrator] Invalid Swiss program ID: {}", e);
-                return;
-            }
+    /// Brings the on-chain tournament up to the store: record every decided board of
+    /// the on-chain round, advance once all are in, and complete after the last round.
+    async fn reconcile(&self, tournament_id: u64) {
+        let Some(cfg) = self.on_chain.clone() else {
+            return;
         };
-        let rpc_url = cfg.rpc_url.clone();
-        let cranker = cfg.cranker.clone();
-        let max_players = match self.store.get(tournament_id).await {
-            Some(t) => t.max_players,
-            None => return,
+        let Some(tournament) = self.store.get(tournament_id).await else {
+            return;
         };
-        let is_final = self
-            .store
-            .get(tournament_id)
-            .await
-            .and_then(|t| t.swiss_data.map(|s| round >= s.total_rounds))
-            .unwrap_or(false);
-        let result = tokio::task::spawn_blocking(move || {
-            let rpc = crate::signing::solana::make_rpc(&rpc_url);
-            if !is_final {
-                let ix = crate::signing::solana::advance_round_ix(
-                    &program_id,
-                    tournament_id,
-                    &cranker.pubkey(),
-                );
-                crate::signing::solana::sign_and_submit(&rpc, &cranker, &[ix])
-                    .map_err(|e| format!("advance_round: {e}"))?;
-            } else {
-                let ix = crate::signing::solana::complete_swiss_tournament_ix(
-                    &program_id,
-                    tournament_id,
-                    max_players,
-                    &cranker.pubkey(),
-                );
-                crate::signing::solana::sign_and_submit(&rpc, &cranker, &[ix])
-                    .map_err(|e| format!("complete_swiss_tournament: {e}"))?;
-            }
-            Ok::<(), String>(())
+        let Some(sd) = tournament.swiss_data.clone() else {
+            return;
+        };
+        if sd.chain_completed {
+            return;
+        }
+        let Ok(program_id) = Pubkey::from_str(&cfg.program_id) else {
+            error!("[orchestrator] invalid program ID {}", cfg.program_id);
+            return;
+        };
+        let max_players = tournament.max_players;
+        let off_chain_completed = tournament.status == TournamentStatus::Completed;
+        let places: Vec<String> = sd
+            .standings
+            .iter()
+            .take(10)
+            .map(|s| s.player_id.clone())
+            .collect();
+
+        let outcome = tokio::task::spawn_blocking(move || {
+            mirror_to_chain(
+                &cfg,
+                &program_id,
+                tournament_id,
+                max_players,
+                &sd,
+                off_chain_completed,
+                &places,
+            )
         })
         .await;
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => error!(
-                "[orchestrator] Swiss on-chain crank failed for tournament {} round {}: {}",
-                tournament_id, round, e
-            ),
-            Err(e) => error!(
-                "[orchestrator] Swiss on-chain crank task failed for tournament {} round {}: {}",
-                tournament_id, round, e
-            ),
+
+        let progress = match outcome {
+            Ok(progress) => progress,
+            Err(e) => {
+                error!(
+                    "[orchestrator] reconcile task for tournament {tournament_id} panicked: {e}"
+                );
+                return;
+            }
+        };
+        if let Some(e) = &progress.error {
+            warn!("[orchestrator] tournament {tournament_id} chain reconcile stopped: {e}");
+        }
+        if progress.recorded.is_empty() && !progress.completed {
+            return;
+        }
+        self.store
+            .update(tournament_id, |t| {
+                if let Some(sd) = t.swiss_data.as_mut() {
+                    for board in &progress.recorded {
+                        if !sd.chain_boards_recorded.contains(board) {
+                            sd.chain_boards_recorded.push(*board);
+                        }
+                    }
+                    sd.chain_completed |= progress.completed;
+                }
+            })
+            .await;
+        if progress.completed {
+            info!("[orchestrator] tournament {tournament_id} completed on-chain");
         }
     }
+}
 
-    fn lookup_game_id_sync(&self, tournament_id: u64, round: u8, board: u16) -> u64 {
-        // Use try_read because this context already holds references and could deadlock.
-        if let Ok(inner) = self.state.inner.try_read() {
-            for game in inner.games.values() {
-                if game.tournament_id == tournament_id && game.round == round && game.board == board
+#[derive(Default)]
+struct ChainProgress {
+    /// `(round, board)` pairs (backend numbering) newly confirmed on-chain.
+    recorded: Vec<(u8, u16)>,
+    completed: bool,
+    error: Option<String>,
+}
+
+fn chain_result(result: MatchResult) -> Option<u8> {
+    match result {
+        MatchResult::WhiteWin | MatchResult::ForfeitWhiteWin => Some(SWISS_WHITE_WIN),
+        MatchResult::BlackWin | MatchResult::ForfeitBlackWin => Some(SWISS_BLACK_WIN),
+        MatchResult::Draw => Some(SWISS_DRAW),
+        MatchResult::Bye => None,
+    }
+}
+
+/// Blocking body of [`SwissOrchestrator::reconcile`]. Backend rounds and boards are
+/// 1-based; the program's are 0-based.
+fn mirror_to_chain(
+    cfg: &SwissOnChainConfig,
+    program_id: &Pubkey,
+    tournament_id: u64,
+    max_players: u16,
+    sd: &crate::signing::storage::tournament::SwissStorageData,
+    off_chain_completed: bool,
+    places: &[String],
+) -> ChainProgress {
+    use crate::signing::solana::{
+        advance_round_ix, complete_swiss_tournament_ix, make_rpc, record_swiss_result_ix,
+        sign_and_submit,
+    };
+
+    let mut progress = ChainProgress::default();
+    let rpc = make_rpc(&cfg.rpc_url);
+    let authority = cfg.authority.as_ref();
+    let mut chain = match fetch_swiss_progress(&rpc, program_id, tournament_id) {
+        Ok(chain) => chain,
+        Err(e) => {
+            progress.error = Some(e);
+            return progress;
+        }
+    };
+    if chain.status == TOURNAMENT_STATUS_COMPLETED {
+        progress.completed = true;
+        return progress;
+    }
+    if chain.status != TOURNAMENT_STATUS_ACTIVE {
+        // Not started on-chain yet; the scheduler's start will land first.
+        return progress;
+    }
+
+    while chain.current_round < chain.total_rounds {
+        let round = chain.current_round + 1;
+        let Some(paired) = sd.round(round) else {
+            return progress;
+        };
+
+        // Board slots for this round: decided pairings at their own board number,
+        // then each bye as a pseudo-board after the last real one.
+        let mut slots: Vec<(u16, u8, &str, &str)> = paired
+            .pairings
+            .iter()
+            .filter_map(|p| {
+                let (_, _, result) = sd
+                    .results
+                    .iter()
+                    .find(|(r, b, _)| *r == round && *b == p.board)?;
+                Some((
+                    p.board,
+                    chain_result(*result)?,
+                    p.white.as_str(),
+                    p.black.as_str(),
+                ))
+            })
+            .collect();
+        let first_bye_board = paired.pairings.len() as u16 + 1;
+        slots.extend(paired.byes.iter().enumerate().map(|(i, bye)| {
+            (
+                first_bye_board + i as u16,
+                SWISS_BYE,
+                bye.as_str(),
+                bye.as_str(),
+            )
+        }));
+        let total_slots = paired.pairings.len() + paired.byes.len();
+
+        for (board, variant, white, black) in slots {
+            let key = (round, board);
+            if sd.chain_boards_recorded.contains(&key) {
+                continue;
+            }
+            let (Ok(white), Ok(black)) = (Pubkey::from_str(white), Pubkey::from_str(black)) else {
+                progress.error = Some(format!("round {round} board {board}: non-pubkey player id"));
+                return progress;
+            };
+            let ix = record_swiss_result_ix(
+                program_id,
+                tournament_id,
+                max_players,
+                chain.current_round,
+                board - 1,
+                variant,
+                &white,
+                &black,
+                &authority.pubkey(),
+            );
+            match sign_and_submit(&rpc, authority, &[ix]) {
+                Ok(_) => progress.recorded.push(key),
+                Err(e)
+                    if e.to_string()
+                        .to_lowercase()
+                        .contains(BOARD_ALREADY_RECORDED) =>
                 {
-                    return game.game_id;
+                    progress.recorded.push(key)
+                }
+                Err(e) => {
+                    progress.error = Some(format!(
+                        "record_swiss_result round {round} board {board}: {e}"
+                    ));
+                    return progress;
                 }
             }
         }
-        0
+
+        let all_recorded = (1..=total_slots as u16).all(|board| {
+            sd.chain_boards_recorded.contains(&(round, board))
+                || progress.recorded.contains(&(round, board))
+        });
+        if !sd.round_complete(round) || !all_recorded {
+            return progress;
+        }
+
+        let ix = advance_round_ix(
+            program_id,
+            tournament_id,
+            total_slots as u16,
+            &authority.pubkey(),
+        );
+        if let Err(e) = sign_and_submit(&rpc, authority, &[ix]) {
+            progress.error = Some(format!("advance_round from round {round}: {e}"));
+            return progress;
+        }
+        chain.current_round += 1;
     }
+
+    if !off_chain_completed {
+        return progress;
+    }
+    let places: Result<Vec<Pubkey>, _> = places.iter().map(|p| Pubkey::from_str(p)).collect();
+    let Ok(places) = places else {
+        progress.error = Some("final standings contain a non-pubkey player id".into());
+        return progress;
+    };
+    let ix = complete_swiss_tournament_ix(
+        program_id,
+        tournament_id,
+        max_players,
+        &places,
+        &authority.pubkey(),
+    );
+    match sign_and_submit(&rpc, authority, &[ix]) {
+        Ok(_) => progress.completed = true,
+        Err(e) => progress.error = Some(format!("complete_swiss_tournament: {e}")),
+    }
+    progress
 }
 
 pub fn spawn_orchestrator(
     store: TournamentStore,
     swiss: Arc<SwissService>,
-    braid_hub: Option<Arc<ResourceHub>>,
     on_chain: Option<SwissOnChainConfig>,
 ) -> mpsc::Sender<OrchestratorEvent> {
-    let (orchestrator, tx) = SwissOrchestrator::new(store, swiss, braid_hub, on_chain);
+    let (orchestrator, tx) = SwissOrchestrator::new(store, swiss, on_chain);
     tokio::spawn(orchestrator.run());
     tx
 }
@@ -413,41 +429,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn active_game_serializes() {
-        let game = ActiveGame {
-            tournament_id: 1,
-            round: 1,
-            board: 1,
-            white: "alice".into(),
-            black: "bob".into(),
-            game_id: 42,
-            finished: false,
-        };
-        let json = serde_json::to_string(&game).expect("serialization should succeed");
-        assert!(json.contains("alice"));
-        assert!(json.contains("bob"));
-    }
-
-    #[tokio::test]
-    async fn orchestrator_state_round_tracking() {
-        let state = OrchestratorState::new();
-        assert!(!state.is_round_complete(1, 1).await);
-
-        {
-            let mut inner = state.inner.write().await;
-            inner.total_counts.insert((1, 1), 2);
-            inner.finished_counts.insert((1, 1), 1);
-        }
-        assert!(!state.is_round_complete(1, 1).await);
-
-        {
-            let mut inner = state.inner.write().await;
-            let count = inner
-                .finished_counts
-                .get_mut(&(1, 1))
-                .expect("finished_counts should contain (1, 1)");
-            *count = 2;
-        }
-        assert!(state.is_round_complete(1, 1).await);
+    fn every_scored_result_maps_to_a_chain_variant() {
+        assert_eq!(chain_result(MatchResult::WhiteWin), Some(SWISS_WHITE_WIN));
+        assert_eq!(
+            chain_result(MatchResult::ForfeitWhiteWin),
+            Some(SWISS_WHITE_WIN)
+        );
+        assert_eq!(chain_result(MatchResult::BlackWin), Some(SWISS_BLACK_WIN));
+        assert_eq!(
+            chain_result(MatchResult::ForfeitBlackWin),
+            Some(SWISS_BLACK_WIN)
+        );
+        assert_eq!(chain_result(MatchResult::Draw), Some(SWISS_DRAW));
+        assert_eq!(chain_result(MatchResult::Bye), None);
     }
 }

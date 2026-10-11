@@ -1,0 +1,15 @@
+# Disposable validation stack: different ports/names and no persistent data volumes.
+services:
+  prometheus:
+    container_name: xfchess-ops-audit-prometheus
+    ports: !override ['127.0.0.1:19090:9090']
+    volumes: !override
+      - ./prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
+    tmpfs: ['/prometheus:mode=1777']
+  grafana:
+    container_name: xfchess-ops-audit-grafana
+    ports: !override ['127.0.0.1:13000:3000']
+    volumes: !override
+      - ./grafana/datasources-local:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    tmpfs: ['/var/lib/grafana:mode=1777,exec']

@@ -1,4 +1,4 @@
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::{game_scene, GameState};
 use crate::game::view_mode::ViewMode;
 use bevy::prelude::*;
 
@@ -31,7 +31,7 @@ pub fn create_coordinate_labels(
             TextColor(Color::srgb(0.0, 0.0, 0.0)),
             Transform::from_translation(Vec3::new(-0.7, 0.1, z_pos)),
             CoordinateLabel,
-            DespawnOnExit(GameState::InGame),
+            game_scene(),
             Name::new(format!("Label Rank {}", rank)),
         ));
 
@@ -42,7 +42,7 @@ pub fn create_coordinate_labels(
             TextColor(Color::srgb(0.0, 0.0, 0.0)),
             Transform::from_translation(Vec3::new(7.7, 0.1, z_pos)),
             CoordinateLabel,
-            DespawnOnExit(GameState::InGame),
+            game_scene(),
             Name::new(format!("Label Rank {} Right", rank)),
         ));
     }
@@ -60,7 +60,7 @@ pub fn create_coordinate_labels(
             TextColor(Color::srgb(0.0, 0.0, 0.0)),
             Transform::from_translation(Vec3::new(x_pos, 0.1, -0.7)),
             CoordinateLabel,
-            DespawnOnExit(GameState::InGame),
+            game_scene(),
             Name::new(format!("Label File {}", file_char)),
         ));
 
@@ -71,7 +71,7 @@ pub fn create_coordinate_labels(
             TextColor(Color::srgb(0.0, 0.0, 0.0)),
             Transform::from_translation(Vec3::new(x_pos, 0.1, 7.7)),
             CoordinateLabel,
-            DespawnOnExit(GameState::InGame),
+            game_scene(),
             Name::new(format!("Label File {} Back", file_char)),
         ));
     }

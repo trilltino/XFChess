@@ -11,9 +11,7 @@ pub fn required_shards(max_players: u16) -> u8 {
 }
 
 pub fn contains_player(shards: &[&TournamentPlayersShard], player: Pubkey) -> bool {
-    shards
-        .iter()
-        .any(|shard| shard.players.iter().any(|candidate| *candidate == player))
+    shards.iter().any(|shard| shard.players.contains(&player))
 }
 
 pub fn find_player(shards: &[&TournamentPlayersShard], player: Pubkey) -> Option<(usize, usize)> {

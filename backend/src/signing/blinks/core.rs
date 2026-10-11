@@ -244,10 +244,7 @@ pub async fn build_start_tournament_transactions(
     let round1_pairs = crate::tasks::tournament_scheduler::round1_pairings(&tournament);
     let mut match_idx = 0u16;
 
-    for chunk in std::iter::repeat(())
-        .take((total_matches + 19) / 20)
-        .zip(0..)
-    {
+    for chunk in std::iter::repeat_n((), total_matches.div_ceil(20)).zip(0..) {
         let _ = chunk;
         let end = ((match_idx as usize + 20).min(total_matches)) as u16;
         let ixs: Vec<_> = (match_idx..end)

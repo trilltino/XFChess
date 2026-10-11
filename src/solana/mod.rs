@@ -1,3 +1,6 @@
+//! Client-side Solana program access (`--features solana`): instruction builders
+//! and the session-key plugin. Nothing outside Solana-gated code may import this.
+
 // Solana program integration module
 
 pub mod program_interface;

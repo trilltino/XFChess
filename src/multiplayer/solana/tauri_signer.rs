@@ -9,7 +9,7 @@ use solana_sdk::{
     transaction::{Transaction, VersionedTransaction},
 };
 
-const SIGN_TIMEOUT_SECS: u64 = 60;
+const SIGN_TIMEOUT_SECS: u64 = 120;
 
 // wallet_bridge_port lives outside the solana feature gate so UI status polling can use it.
 use crate::multiplayer::network::vps::wallet_bridge_port;
@@ -19,10 +19,13 @@ pub fn wallet_bridge_base_url() -> String {
 }
 
 pub fn open_profile_step() {
-    bring_wallet_popup_to_front();
-    std::thread::spawn(|| {
+    crate::core::net_task::spawn_detached("profile-step", || {
+        if let Err(error) = configure_wallet_bridge() {
+            bevy::prelude::warn!(%error, "Wallet bridge configuration failed");
+            return;
+        }
         let url = format!("{}/api/open-profile-step", wallet_bridge_base_url());
-        match reqwest::blocking::Client::new().post(&url).send() {
+        match bridge_http_client().post(&url).send() {
             Ok(resp) if resp.status().is_success() => {}
             Ok(resp) => bevy::prelude::warn!(
                 "[open_profile_step] bridge at {url} responded {} — popup will not open",
@@ -38,19 +41,34 @@ pub fn open_profile_step() {
     });
 }
 
-fn sync_backend_url_to_bridge() {
-    let url = crate::multiplayer::network::vps::vps_base();
-    let bridge_url = format!("{}/api/set-backend-url", wallet_bridge_base_url());
-    if let Err(e) = reqwest::blocking::Client::new()
-        .post(&bridge_url)
-        .json(&serde_json::json!({ "url": url }))
+fn configure_wallet_bridge() -> Result<(), String> {
+    let client = bridge_http_client();
+    let response = client
+        .get(format!("{}/status", wallet_bridge_base_url()))
+        .header("X-Game-Pid", std::process::id())
         .send()
-    {
-        bevy::prelude::warn!(
-            "[sync_backend_url_to_bridge] could not reach this instance's Tauri bridge at \
-             {bridge_url}: {e} — the wallet popup may end up talking to the wrong backend"
-        );
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    if let Ok(status) = response.json::<serde_json::Value>() {
+        if let Some(pid) = status["bridge_pid"]
+            .as_u64()
+            .and_then(|pid| u32::try_from(pid).ok())
+        {
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(pid);
+            }
+        }
     }
+    #[cfg(not(windows))]
+    drop(response);
+    client
+        .post(format!("{}/api/set-backend-url", wallet_bridge_base_url()))
+        .json(&serde_json::json!({ "url": crate::multiplayer::network::vps::vps_base() }))
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn tcp_port_range() -> std::ops::RangeInclusive<u16> {
@@ -69,6 +87,7 @@ fn discovered_bridge_port() -> Option<u16> {
     std::fs::read_to_string(wallet_bridge_port_file())
         .ok()
         .and_then(|s| s.trim().parse().ok())
+        .filter(|port| tcp_port_range().contains(port))
 }
 
 pub fn candidate_ports() -> Vec<u16> {
@@ -85,64 +104,24 @@ pub fn candidate_ports() -> Vec<u16> {
 }
 
 pub fn open_wallet_browser() {
-    bring_wallet_popup_to_front();
-    std::thread::spawn(sync_backend_url_to_bridge);
-    std::thread::spawn(|| {
-        use std::io::Write;
-        use std::net::TcpStream;
-        for port in candidate_ports() {
-            if let Ok(mut s) = TcpStream::connect(format!("127.0.0.1:{}", port)) {
-                let _ = s.write_all(b"OPEN");
-                break;
-            }
+    crate::core::net_task::spawn_detached("open-wallet", || {
+        if let Err(error) = configure_wallet_bridge() {
+            bevy::prelude::warn!(%error, "Wallet bridge configuration failed");
+            return;
         }
+        let client = bridge_http_client();
+        let _ = client
+            .post(format!("{}/api/wallet/open", wallet_bridge_base_url()))
+            .send();
     });
 }
 
-#[cfg(windows)]
-fn bring_wallet_popup_to_front() {
-    let expected_title = format!("XFChess #{}", wallet_bridge_port());
-    std::thread::spawn(move || {
-        use windows::core::BOOL;
-        use windows::Win32::Foundation::{HWND, LPARAM};
-        use windows::Win32::UI::WindowsAndMessaging::{
-            EnumWindows, GetWindowTextW, SetForegroundWindow, ShowWindow, SW_SHOW,
-        };
-
-        extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-            unsafe {
-                let ctx = &mut *(lparam.0 as *mut (String, HWND));
-                let mut buf = [0u16; 256];
-                let len = GetWindowTextW(hwnd, &mut buf);
-                if len <= 0 || String::from_utf16_lossy(&buf[..len as usize]) != ctx.0 {
-                    return BOOL(1);
-                }
-                ctx.1 = hwnd;
-                BOOL(0)
-            }
-        }
-
-        // Poll for ~3s — a fresh Chrome/Edge process needs a moment to
-        // create its window and stamp its title.
-        for _ in 0..60 {
-            let mut ctx: (String, HWND) = (expected_title.clone(), HWND(std::ptr::null_mut()));
-            unsafe {
-                let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
-            }
-            if !ctx.1 .0.is_null() {
-                unsafe {
-                    let _ = ShowWindow(ctx.1, SW_SHOW);
-                    let _ = SetForegroundWindow(ctx.1);
-                }
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-    });
+fn bridge_http_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("wallet bridge HTTP client")
 }
-
-#[cfg(not(windows))]
-fn bring_wallet_popup_to_front() {}
 
 fn wallet_signable_blockhash(rpc: &RpcClient) -> Result<solana_sdk::hash::Hash, String> {
     rpc.get_latest_blockhash_with_commitment(CommitmentConfig::finalized())
@@ -172,7 +151,7 @@ pub fn sign_via_tauri_only(
     let mut tx = Transaction::new_with_payer(instructions, Some(&wallet_pubkey));
 
     for keypair in local_signers {
-        tx.try_sign(&[*keypair], blockhash)
+        tx.try_partial_sign(&[*keypair], blockhash)
             .map_err(|e| format!("local_sign: {}", e))?;
     }
 
@@ -180,6 +159,7 @@ pub fn sign_via_tauri_only(
         .map_err(|e| format!("partial_sign: {}", e))?;
 
     let tx_bytes = bincode::serialize(&tx).map_err(|e| format!("serialize_tx: {}", e))?;
+    simulate_before_signing(&rpc, &VersionedTransaction::from(tx))?;
     let step_start = Instant::now();
     let signed = send_to_tauri_blocking(&tx_bytes, label)?;
     info!(
@@ -222,6 +202,8 @@ pub fn sign_and_send_via_tauri(
 
     let tx_bytes = bincode::serialize(&tx).map_err(|e| format!("serialize_tx: {}", e))?;
 
+    simulate_before_signing(&rpc, &tx)?;
+
     let step_start = std::time::Instant::now();
     let signed_bytes = send_to_tauri_blocking(&tx_bytes, label)?;
     info!(
@@ -243,25 +225,90 @@ pub fn sign_and_send_b64_via_tauri(
         .decode(tx_b64)
         .map_err(|e| format!("decode_b64: {}", e))?;
 
+    let tx: VersionedTransaction =
+        bincode::deserialize(&tx_bytes).map_err(|e| format!("deserialize_tx: {e}"))?;
+    let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
+    simulate_before_signing(&rpc, &tx)?;
+
     let signed_bytes = send_to_tauri_blocking(&tx_bytes, label)?;
 
     submit_signed_to_rpc(rpc_url, &signed_bytes)
 }
 
 pub fn sign_message_via_tauri(message: &str, label: &str) -> Result<Vec<u8>, String> {
-    info!("[TAURI-SIGN] Requesting message signature: '{}'", message);
-    send_to_tauri_blocking(message.as_bytes(), label)
+    let status: serde_json::Value = bridge_http_client()
+        .get(format!("{}/status", wallet_bridge_base_url()))
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+    let wallet: Pubkey = status["pubkey"]
+        .as_str()
+        .ok_or("Wallet is disconnected")?
+        .parse()
+        .map_err(|e| format!("Invalid wallet: {e}"))?;
+    let bytes = send_request_blocking(message.as_bytes(), label, true)?;
+    let signature = Signature::try_from(bytes.as_slice())
+        .map_err(|e| format!("Invalid message signature: {e}"))?;
+    if !signature.verify(wallet.as_ref(), message.as_bytes()) {
+        return Err("Wallet returned an invalid message signature".into());
+    }
+    Ok(bytes)
+}
+
+fn simulate_before_signing(rpc: &RpcClient, tx: &VersionedTransaction) -> Result<(), String> {
+    let response = rpc
+        .simulate_transaction_with_config(
+            tx,
+            solana_client::rpc_config::RpcSimulateTransactionConfig {
+                sig_verify: false,
+                commitment: Some(CommitmentConfig::confirmed()),
+                ..Default::default()
+            },
+        )
+        .map_err(|e| format!("Transaction simulation: {e}"))?;
+    if let Some(error) = response.value.err {
+        return Err(format!("Transaction simulation failed: {error}"));
+    }
+    Ok(())
+}
+
+fn validate_signed_transaction(original: &[u8], signed: &[u8]) -> Result<(), String> {
+    let original: VersionedTransaction = bincode::deserialize(original)
+        .map_err(|e| format!("Invalid requested transaction: {e}"))?;
+    let signed: VersionedTransaction =
+        bincode::deserialize(signed).map_err(|e| format!("Invalid wallet transaction: {e}"))?;
+    if original.message != signed.message {
+        return Err("Wallet changed the requested transaction".into());
+    }
+    signed
+        .verify_and_hash_message()
+        .map_err(|e| format!("Invalid wallet signatures: {e}"))?;
+    if original.signatures.len() != signed.signatures.len()
+        || original
+            .signatures
+            .iter()
+            .zip(&signed.signatures)
+            .any(|(before, after)| *before != Signature::default() && before != after)
+    {
+        return Err("Wallet replaced an existing signature".into());
+    }
+    Ok(())
 }
 
 const MAX_RESP_LEN: u32 = 64 * 1024;
 
 fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, String> {
+    let signed = send_request_blocking(tx_bytes, label, false)?;
+    validate_signed_transaction(tx_bytes, &signed)?;
+    Ok(signed)
+}
+
+fn send_request_blocking(tx_bytes: &[u8], label: &str, message: bool) -> Result<Vec<u8>, String> {
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::{Duration, Instant};
-
-    // Raise the popup from this process on every signature request.
-    bring_wallet_popup_to_front();
 
     fn is_timeout(e: &std::io::Error) -> bool {
         matches!(
@@ -270,8 +317,9 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
         )
     }
 
+    configure_wallet_bridge()?;
     let write_timeout = Duration::from_secs(5);
-    let read_timeout = Duration::from_secs(SIGN_TIMEOUT_SECS);
+    let read_timeout = Duration::from_secs(SIGN_TIMEOUT_SECS + 5);
 
     // Server rejects anything longer (`MAX_LABEL_LEN` in tauri/src/main.rs) —
     // truncate defensively rather than let a long label sink the whole request.
@@ -281,7 +329,21 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
     let start = Instant::now();
 
     for port in candidate_ports() {
-        let mut stream = match TcpStream::connect(format!("127.0.0.1:{}", port)) {
+        let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let mut probe = match TcpStream::connect_timeout(&address, Duration::from_millis(500)) {
+            Ok(stream) => stream,
+            Err(_) => continue,
+        };
+        let _ = probe.set_read_timeout(Some(Duration::from_secs(1)));
+        let _ = probe.set_write_timeout(Some(Duration::from_secs(1)));
+        let mut identity = [0u8; 4];
+        if probe.write_all(b"INFO").is_err()
+            || probe.read_exact(&mut identity).is_err()
+            || u32::from_le_bytes(identity) != u32::from(wallet_bridge_port())
+        {
+            continue;
+        }
+        let mut stream = match TcpStream::connect_timeout(&address, Duration::from_millis(500)) {
             Ok(s) => s,
             Err(_) => continue,
         };
@@ -292,7 +354,8 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
 
         let label_len = label_bytes.len() as u32;
         let len = tx_bytes.len() as u32;
-        let write_ok = stream.write_all(&label_len.to_le_bytes()).is_ok()
+        let write_ok = (!message || stream.write_all(b"MSIG").is_ok())
+            && stream.write_all(&label_len.to_le_bytes()).is_ok()
             && stream.write_all(label_bytes).is_ok()
             && stream.write_all(&len.to_le_bytes()).is_ok()
             && stream.write_all(tx_bytes).is_ok();
@@ -313,8 +376,7 @@ fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, Strin
                     "Signing server closed connection before responding: {e}"
                 ));
             }
-            last_err = Some(format!("port {port} closed before sending a length prefix"));
-            continue;
+            return Err(format!("Wallet bridge closed before responding: {e}"));
         }
         let resp_len = u32::from_le_bytes(len_buf);
         if resp_len == 0xFFFF_FFFF {
@@ -363,4 +425,68 @@ fn submit_signed_to_rpc(rpc_url: &str, signed_bytes: &[u8]) -> Result<Signature,
 
     let rpc = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
     submit_and_poll(&rpc, &signed_tx, SubmitConfig::fast())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn transaction_pair() -> (Vec<u8>, Vec<u8>) {
+        let wallet = Keypair::new();
+        let local = Keypair::new();
+        let instruction = Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![solana_sdk::instruction::AccountMeta::new_readonly(
+                local.pubkey(),
+                true,
+            )],
+            data: vec![1],
+        };
+        let message = v0::Message::try_compile(
+            &wallet.pubkey(),
+            &[instruction],
+            &[],
+            solana_sdk::hash::Hash::new_unique(),
+        )
+        .unwrap();
+        let original = VersionedTransaction::try_new(
+            VersionedMessage::V0(message.clone()),
+            &[
+                &NullSigner::new(&wallet.pubkey()) as &dyn Signer,
+                &local as &dyn Signer,
+            ],
+        )
+        .unwrap();
+        let signed =
+            VersionedTransaction::try_new(VersionedMessage::V0(message), &[&wallet, &local])
+                .unwrap();
+        (
+            bincode::serialize(&original).unwrap(),
+            bincode::serialize(&signed).unwrap(),
+        )
+    }
+
+    #[test]
+    fn accepts_the_requested_message_with_all_signatures() {
+        let (original, signed) = transaction_pair();
+        assert!(validate_signed_transaction(&original, &signed).is_ok());
+    }
+
+    #[test]
+    fn rejects_an_altered_transaction() {
+        let (original, signed) = transaction_pair();
+        let mut signed: VersionedTransaction = bincode::deserialize(&signed).unwrap();
+        if let VersionedMessage::V0(message) = &mut signed.message {
+            message.recent_blockhash = solana_sdk::hash::Hash::new_unique();
+        }
+        assert!(
+            validate_signed_transaction(&original, &bincode::serialize(&signed).unwrap()).is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_an_unsigned_wallet_response() {
+        let (original, _) = transaction_pair();
+        assert!(validate_signed_transaction(&original, &original).is_err());
+    }
 }

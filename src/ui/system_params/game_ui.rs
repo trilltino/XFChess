@@ -1,8 +1,8 @@
-use crate::core::{GameMode as CoreGameMode, GameState, PreviousState};
+use crate::core::{GameMode, GameState};
 use crate::game::resources::{AIParams, GameStateParams};
 use crate::game::resources::{CurrentTurn, GameTimer, MoveHistory, Players};
-use crate::game::systems::input::InGameExitConfirmation;
 use crate::game::view_mode::ViewMode;
+use crate::input::board::InGameExitConfirmation;
 #[cfg(feature = "solana")]
 use crate::multiplayer::rollup::bridge::RecentTransactions;
 #[cfg(feature = "solana")]
@@ -32,8 +32,7 @@ pub struct GameUIParams<'w, 's> {
     pub exit_confirmation: ResMut<'w, InGameExitConfirmation>,
     pub game_timer: Res<'w, GameTimer>,
     pub next_state: ResMut<'w, NextState<GameState>>,
-    pub previous_state: ResMut<'w, PreviousState>,
-    pub game_mode: Res<'w, CoreGameMode>,
+    pub game_mode: Res<'w, GameMode>,
     pub view_mode: ResMut<'w, ViewMode>,
     pub hud_visibility: Res<'w, InGameHudVisibility>,
     #[cfg(feature = "solana")]

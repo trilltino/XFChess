@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{BraidError, Result};
 use crate::protocol;
 use crate::protocol::constants::headers;
 use crate::types::{Patch, Update};
@@ -17,7 +17,7 @@ pub fn format_update(update: &Update) -> Result<Bytes> {
             &mut buffer,
             headers::VERSION.as_str(),
             &protocol::format_version_header(&update.version),
-        );
+        )?;
     }
 
     if !update.parents.is_empty() {
@@ -25,19 +25,30 @@ pub fn format_update(update: &Update) -> Result<Bytes> {
             &mut buffer,
             headers::PARENTS.as_str(),
             &protocol::format_version_header(&update.parents),
-        );
+        )?;
     }
 
     if let Some(merge_type) = &update.merge_type {
-        write_header(&mut buffer, headers::MERGE_TYPE.as_str(), merge_type);
+        write_header(&mut buffer, headers::MERGE_TYPE.as_str(), merge_type)?;
     }
 
     if let Some(ct) = &update.content_type {
-        write_header(&mut buffer, headers::CONTENT_TYPE.as_str(), ct);
+        write_header(&mut buffer, headers::CONTENT_TYPE.as_str(), ct)?;
+    }
+
+    if let Some(versions) = &update.current_version {
+        write_header(
+            &mut buffer,
+            "current-version",
+            &protocol::format_version_header(versions),
+        )?;
+    }
+    if let Some(range) = &update.content_range {
+        write_header(&mut buffer, "content-range", &range.to_header_value())?;
     }
 
     for (k, v) in &update.extra_headers {
-        write_header(&mut buffer, k, v);
+        write_header(&mut buffer, k, v)?;
     }
 
     match (&update.body, &update.patches) {
@@ -47,7 +58,7 @@ pub fn format_update(update: &Update) -> Result<Bytes> {
                 &mut buffer,
                 headers::PATCHES.as_str(),
                 &patches.len().to_string(),
-            );
+            )?;
             end_headers(&mut buffer);
             // `Patches: 0` ends here: no patch blocks, no body, no separator.
             for patch in patches {
@@ -60,14 +71,14 @@ pub fn format_update(update: &Update) -> Result<Bytes> {
                 &mut buffer,
                 headers::CONTENT_LENGTH.as_str(),
                 &body.len().to_string(),
-            );
+            )?;
             end_headers(&mut buffer);
             buffer.extend_from_slice(body);
             end_payload(&mut buffer);
         }
         // Neither: an explicit empty snapshot.
         (None, None) => {
-            write_header(&mut buffer, headers::CONTENT_LENGTH.as_str(), "0");
+            write_header(&mut buffer, headers::CONTENT_LENGTH.as_str(), "0")?;
             end_headers(&mut buffer);
             end_payload(&mut buffer);
         }
@@ -76,11 +87,15 @@ pub fn format_update(update: &Update) -> Result<Bytes> {
     Ok(buffer.freeze())
 }
 
-fn write_header(buffer: &mut BytesMut, key: &str, value: &str) {
+fn write_header(buffer: &mut BytesMut, key: &str, value: &str) -> Result<()> {
+    http::HeaderName::from_bytes(key.as_bytes())
+        .map_err(|e| BraidError::HeaderParse(e.to_string()))?;
+    http::HeaderValue::from_str(value).map_err(|e| BraidError::HeaderParse(e.to_string()))?;
     write_canonical_name(buffer, key);
     buffer.extend_from_slice(b": ");
     buffer.extend_from_slice(value.as_bytes());
     buffer.extend_from_slice(b"\r\n");
+    Ok(())
 }
 
 fn write_canonical_name(buffer: &mut BytesMut, key: &str) {
@@ -103,18 +118,18 @@ fn end_payload(buffer: &mut BytesMut) {
     buffer.extend_from_slice(b"\r\n");
 }
 
-fn format_patch(buffer: &mut BytesMut, patch: &Patch) -> Result<()> {
+pub(crate) fn format_patch(buffer: &mut BytesMut, patch: &Patch) -> Result<()> {
     // Every patch MUST carry Content-Length — the parser rejects one that doesn't.
     write_header(
         buffer,
         headers::CONTENT_LENGTH.as_str(),
         &patch.content.len().to_string(),
-    );
+    )?;
     write_header(
         buffer,
         headers::CONTENT_RANGE.as_str(),
         &format!("{} {}", patch.unit, patch.range),
-    );
+    )?;
     end_headers(buffer);
     buffer.extend_from_slice(&patch.content);
     end_payload(buffer);
@@ -125,6 +140,15 @@ fn format_patch(buffer: &mut BytesMut, patch: &Patch) -> Result<()> {
 mod tests {
     use super::*;
     use crate::types::Version;
+
+    #[test]
+    fn metadata_cannot_inject_headers() {
+        assert!(format_update(&Update::snapshot(Version::new("bad\r\nheader"), "x")).is_err());
+        assert!(format_update(
+            &Update::snapshot(Version::new("v1"), "x").with_header("bad name", "x")
+        )
+        .is_err());
+    }
 
     fn rendered(update: &Update) -> String {
         String::from_utf8(format_update(update).unwrap().to_vec()).unwrap()

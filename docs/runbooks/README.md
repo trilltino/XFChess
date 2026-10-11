@@ -1,30 +1,16 @@
 # Runbooks
 
-One page per alert/incident so on-call can act at 3 a.m. without reverse-engineering the
-system. Every SLO-linked alert ([SLO.md](../SLO.md)) must link to a runbook here.
+| Incident or operation | Guide |
+| --- | --- |
+| Backend unhealthy | [Backend down](backend-down.md) |
+| RPC failing or throttled | [RPC degraded](rpc-degraded.md) |
+| Disk pressure | [Disk full](disk-full.md) |
+| Wager payout stuck | [Settlement](settlement-stuck.md), [program invariants](game-settlement.md) |
+| ER lifecycle/recovery | [MagicBlock devnet](magicblock-lifecycle-devnet.md) |
+| Tournament operations | [Tournament lifecycle](tournament-lifecycle.md) |
+| Program upgrade | [Upgrade and compatibility](program-upgrade.md) |
+| Android build/distribution | [Android release](android-release.md) |
 
-## Index
-- [backend-down.md](backend-down.md) — API/health failing
-- [settlement-stuck.md](settlement-stuck.md) — wagers not paying out
-- [rpc-degraded.md](rpc-degraded.md) — Solana/Triton RPC slow or failing
-- [disk-full.md](disk-full.md) — VPS disk pressure
-- [game-settlement.md](game-settlement.md) — settlement worker / finalize_game issues
-- [magicblock-lifecycle-devnet.md](magicblock-lifecycle-devnet.md) — ER delegate/undelegate lifecycle on devnet
-- [tournament-lifecycle.md](tournament-lifecycle.md) — tournament scheduling/pairing/prize-distribution issues
-- [program-upgrade.md](program-upgrade.md) — shipping the game-program lifecycle fixes (pre-flight, upgrade, post-upgrade drills)
-
-## Template
-```
-# <Alert name>
-**Symptom:** what the alert/user sees
-**Severity:** S1 (outage) / S2 (degraded) / S3 (minor)
-**Dashboards:** Grafana panel link(s)
-## Diagnose
-1. ...
-## Mitigate
-1. ...
-## Verify
-1. ...
-## Root cause / follow-up
-- postmortem link
-```
+[Operations](../../ops/README.md) owns service deployment and monitoring.
+[Rollback/database recovery](../../ops/docs/ROLLBACK_GUIDE.md) owns restore commands;
+[reliability](../../ops/docs/RELIABILITY.md) distinguishes targets from evidence.

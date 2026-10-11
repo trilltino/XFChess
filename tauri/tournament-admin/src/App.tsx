@@ -6,6 +6,7 @@ import TitleBar from "./components/common/TitleBar";
 import TournamentList from "./components/tournaments/TournamentList";
 import CreateTournament from "./components/tournaments/CreateTournament";
 import TournamentDetail from "./components/tournaments/TournamentDetail";
+import OfflineTournamentAdmin from "./components/tournaments/OfflineTournamentAdmin";
 import HetznerSsh from "./components/HetznerSsh";
 import GameExplorer from "./components/GameExplorer";
 import PlayerList from "./components/PlayerList";
@@ -18,7 +19,7 @@ import Puzzles from "./components/Puzzles";
 import Settings from "./components/Settings";
 import TransactionDebugger from "./components/TransactionDebugger";
 
-type Page = "login" | "tournaments" | "create" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc" | "treasury" | "puzzles" | "tx-debug" | "settings";
+type Page = "login" | "tournaments" | "create" | "offline" | "detail" | "dashboard" | "hetzner" | "deploy" | "explorer" | "players" | "matches" | "kyc" | "treasury" | "puzzles" | "tx-debug" | "settings";
 
 function AppContent() {
   const { authState, loading } = useAuth();
@@ -50,13 +51,11 @@ function AppContent() {
     );
   }
 
-  const handleTournamentSelect = (tournamentId: number) => {
+  // Opens a tournament's detail page: from the list, or straight after creating or
+  // duplicating one, so the next-step panel can say what to do.
+  const openTournament = (tournamentId: number) => {
     setSelectedTournamentId(tournamentId);
     setCurrentPage("detail");
-  };
-
-  const handleTournamentCreated = () => {
-    setCurrentPage("tournaments");
   };
 
   const handleBack = () => {
@@ -64,28 +63,26 @@ function AppContent() {
     setSelectedTournamentId(null);
   };
 
-  const handleEdit = (tournamentId: number) => {
-    setSelectedTournamentId(tournamentId);
-    setCurrentPage("create");
-  };
 
   const renderPage = () => {
     switch (currentPage) {
       case "tournaments":
-        return <TournamentList onTournamentSelect={handleTournamentSelect} />;
+        return <TournamentList onTournamentSelect={openTournament} />;
       case "create":
         return (
           <CreateTournament
-            onTournamentCreated={handleTournamentCreated}
+            onTournamentCreated={openTournament}
             onCancel={handleBack}
           />
         );
+      case "offline":
+        return <OfflineTournamentAdmin />;
       case "detail":
         return selectedTournamentId ? (
           <TournamentDetail
             tournamentId={selectedTournamentId}
             onBack={handleBack}
-            onEdit={handleEdit}
+            onOpenTournament={openTournament}
           />
         ) : null;
       case "dashboard":

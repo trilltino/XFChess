@@ -48,10 +48,10 @@ fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> Account {
     }
 }
 
-fn tournament(fee_payer: Pubkey, bump: u8, current_round: u8) -> Tournament {
+fn tournament(authority: Pubkey, fee_payer: Pubkey, bump: u8, current_round: u8) -> Tournament {
     Tournament {
         tournament_id: TOURNAMENT_ID,
-        authority: Pubkey::new_unique(),
+        authority,
         name: String::new(),
         entry_fee: 0,
         platform_fee: 0,
@@ -154,7 +154,7 @@ async fn start(accounts: Vec<(Pubkey, Account)>) -> ProgramTestContext {
     pt.start_with_context().await
 }
 
-fn complete_swiss_tournament_ix(cranker: Pubkey) -> Instruction {
+fn complete_swiss_tournament_ix(authority: Pubkey, places: Vec<Pubkey>) -> Instruction {
     let accounts =
         xfchess_game::__client_accounts_complete_swiss_tournament::CompleteSwissTournament {
             tournament: tournament_pda(TOURNAMENT_ID).0,
@@ -162,11 +162,12 @@ fn complete_swiss_tournament_ix(cranker: Pubkey) -> Instruction {
             tournament_players_shard_1: None,
             tournament_players_shard_2: None,
             tournament_players_shard_3: None,
-            cranker,
+            authority,
         }
         .to_account_metas(None);
     let data = xfchess_game::instruction::CompleteSwissTournament {
         tournament_id: TOURNAMENT_ID,
+        places,
     }
     .data();
     Instruction {
@@ -224,54 +225,54 @@ async fn fetch_tournament(ctx: &mut ProgramTestContext) -> Tournament {
     Tournament::try_deserialize(&mut &acc.data[..]).unwrap()
 }
 
-async fn setup(
-    current_round: u8,
+struct Field {
+    authority: Keypair,
     p1: Pubkey,
     p2: Pubkey,
     p3: Pubkey,
     p4: Pubkey,
-) -> ProgramTestContext {
+}
+
+async fn setup(current_round: u8) -> (ProgramTestContext, Field) {
+    let field = Field {
+        authority: Keypair::new(),
+        p1: Pubkey::new_unique(),
+        p2: Pubkey::new_unique(),
+        p3: Pubkey::new_unique(),
+        p4: Pubkey::new_unique(),
+    };
     let (_, t_bump) = tournament_pda(TOURNAMENT_ID);
-    start(vec![
+    let ctx = start(vec![
         (
             tournament_pda(TOURNAMENT_ID).0,
             serialize_padded(
-                &tournament(p1, t_bump, current_round),
+                &tournament(field.authority.pubkey(), field.p1, t_bump, current_round),
                 8 + Tournament::INIT_SPACE,
             ),
         ),
         (
             shard_pda(TOURNAMENT_ID, 0).0,
             serialize_padded(
-                &shard0(p1, p2, p3, p4),
+                &shard0(field.p1, field.p2, field.p3, field.p4),
                 8 + TournamentPlayersShard::space_for(),
             ),
         ),
     ])
-    .await
+    .await;
+    (ctx, field)
 }
 
 #[tokio::test]
-async fn completes_and_ranks_by_score_then_tiebreakers() {
-    let p1 = Keypair::new();
-    let p2 = Keypair::new();
-    let p3 = Keypair::new();
-    let p4 = Keypair::new();
-    let cranker = Keypair::new();
+async fn completes_with_authority_tiebreak_order() {
+    // current_round == total_rounds: both rounds already advanced.
+    let (mut ctx, f) = setup(2).await;
 
-    let mut ctx = setup(
-        2, // current_round == total_rounds: both rounds already advanced
-        p1.pubkey(),
-        p2.pubkey(),
-        p3.pubkey(),
-        p4.pubkey(),
-    )
-    .await;
-
+    // p2 and p3 tie on score (2); the off-chain tiebreak puts p3 first, and the
+    // program accepts any order that respects on-chain scores.
     send(
         &mut ctx,
-        complete_swiss_tournament_ix(cranker.pubkey()),
-        &[&cranker],
+        complete_swiss_tournament_ix(f.authority.pubkey(), vec![f.p1, f.p3, f.p2, f.p4]),
+        &[&f.authority],
     )
     .await
     .expect("complete_swiss_tournament should succeed once all rounds are in");
@@ -279,42 +280,71 @@ async fn completes_and_ranks_by_score_then_tiebreakers() {
     let t = fetch_tournament(&mut ctx).await;
     assert_eq!(t.status, TournamentStatus::Completed);
     assert!(t.completed_at.is_some());
-    // p1: score 4 (highest) -> 1st.
-    assert_eq!(t.winner, Some(p1.pubkey()));
-    // p2 and p3 tie on score (2) but p2 has the higher Buchholz (5 vs 3) -> 2nd.
-    assert_eq!(t.second_place, Some(p2.pubkey()));
-    assert_eq!(t.third_place, Some(p3.pubkey()));
-    // p4: score 0 (lowest) -> 4th.
-    assert_eq!(t.fourth_place, Some(p4.pubkey()));
+    assert_eq!(t.winner, Some(f.p1));
+    assert_eq!(t.second_place, Some(f.p3));
+    assert_eq!(t.third_place, Some(f.p2));
+    assert_eq!(t.fourth_place, Some(f.p4));
     assert_eq!(t.fifth_place, None);
 }
 
 #[tokio::test]
 async fn rejects_completion_before_final_round_advances() {
-    let p1 = Keypair::new();
-    let p2 = Keypair::new();
-    let p3 = Keypair::new();
-    let p4 = Keypair::new();
-    let cranker = Keypair::new();
-
-    let mut ctx = setup(
-        1, // only round 0 of 2 has been advanced past
-        p1.pubkey(),
-        p2.pubkey(),
-        p3.pubkey(),
-        p4.pubkey(),
-    )
-    .await;
+    // Only round 0 of 2 has been advanced past.
+    let (mut ctx, f) = setup(1).await;
 
     let err = send(
         &mut ctx,
-        complete_swiss_tournament_ix(cranker.pubkey()),
-        &[&cranker],
+        complete_swiss_tournament_ix(f.authority.pubkey(), vec![f.p1, f.p2, f.p3, f.p4]),
+        &[&f.authority],
     )
     .await
     .unwrap_err();
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::SwissTournamentNotFinished))
+    );
+}
+
+#[tokio::test]
+async fn rejects_places_that_contradict_scores() {
+    let (mut ctx, f) = setup(2).await;
+
+    let bad_orders = [
+        vec![f.p2, f.p1, f.p3, f.p4], // lower score above a higher one
+        vec![f.p1, f.p1, f.p2, f.p3], // duplicate
+        vec![f.p1, f.p2, f.p3],       // wrong length
+        vec![f.p1, f.p2, f.p3, Pubkey::new_unique()], // not registered
+    ];
+    for places in bad_orders {
+        let err = send(
+            &mut ctx,
+            complete_swiss_tournament_ix(f.authority.pubkey(), places.clone()),
+            &[&f.authority],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            custom_code(&err),
+            Some(ec(GameErrorCode::InvalidSwissPlaces)),
+            "places {places:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn rejects_completion_by_non_authority() {
+    let (mut ctx, f) = setup(2).await;
+    let outsider = Keypair::new();
+
+    let err = send(
+        &mut ctx,
+        complete_swiss_tournament_ix(outsider.pubkey(), vec![f.p1, f.p2, f.p3, f.p4]),
+        &[&outsider],
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(GameErrorCode::NotTournamentAuthority))
     );
 }

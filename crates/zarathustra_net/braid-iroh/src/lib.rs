@@ -1,9 +1,11 @@
 pub mod discovery;
 pub mod node;
+mod persistence;
 #[cfg(feature = "proxy")]
 pub mod protocol;
 #[cfg(feature = "proxy")]
 pub mod proxy;
+mod store;
 pub mod subscription;
 
 pub use discovery::*;
@@ -27,21 +29,19 @@ pub async fn spawn_node(
     let secret_key = if let Some(sk) = secret_key_override {
         sk
     } else {
-        get_or_create_secret_key(name).await
+        iroh::SecretKey::generate()
     };
 
-    let proxy_port = port.unwrap_or(8080);
-
-    tracing::info!("[INIT] Spawning Node: {} | Port: {}", name, proxy_port);
-
     #[cfg(feature = "proxy")]
-    let proxy_config = Some(crate::node::ProxyConfig {
-        listen_addr: format!("127.0.0.1:{}", proxy_port).parse().unwrap(),
-        default_peer: iroh::EndpointId::from_bytes(&[0u8; 32]).expect("Invalid placeholder key"),
+    let proxy_config = port.map(|port| crate::node::ProxyConfig {
+        listen_addr: std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        default_peer: secret_key.public(),
     });
 
     #[cfg(not(feature = "proxy"))]
     let proxy_config = None;
+    #[cfg(not(feature = "proxy"))]
+    let _ = port;
 
     let peer = BraidIrohNode::spawn(BraidIrohConfig {
         discovery,
@@ -63,16 +63,4 @@ pub async fn spawn_node(
     });
 
     Ok(state)
-}
-
-pub async fn get_or_create_secret_key(name: &str) -> iroh::SecretKey {
-    if name == "alice" {
-        return iroh::SecretKey::from_bytes(&[1u8; 32]);
-    }
-    if name == "bob" {
-        return iroh::SecretKey::from_bytes(&[2u8; 32]);
-    }
-
-    let hash = blake3::hash(name.as_bytes());
-    iroh::SecretKey::from_bytes(hash.as_bytes())
 }

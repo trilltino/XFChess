@@ -95,7 +95,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
             .layer(middleware::from_fn(require_api_key)),
     );
 
-    let metrics_router = base.clone().route(
+    let metrics_router = base.route(
         "/metrics",
         axum::routing::get(|State(app_state): State<AppState>| async move {
             let mut out = format!(
@@ -109,6 +109,19 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
             );
             out.push('\n');
             out.push_str(&app_state.metrics.export_prometheus_format());
+            out.push_str(&crate::telemetry::resources::render_prometheus());
+            out.push_str(&crate::telemetry::rpc::render_prometheus());
+            let pool = app_state.store.pool();
+            out.push_str(&format!(
+                "# TYPE xfchess_session_db_connections gauge\nxfchess_session_db_connections {}\n\
+                 # TYPE xfchess_session_db_idle_connections gauge\nxfchess_session_db_idle_connections {}\n",
+                pool.size(), pool.num_idle()));
+            let filename = pool.connect_options().get_filename().to_path_buf();
+            if let Ok(metadata) = std::fs::metadata(&filename) {
+                let wal = std::path::PathBuf::from(format!("{}-wal", filename.display()));
+                let bytes = metadata.len().saturating_add(std::fs::metadata(wal).map(|m| m.len()).unwrap_or(0));
+                out.push_str(&format!("# TYPE xfchess_session_database_bytes gauge\nxfchess_session_database_bytes {bytes}\n"));
+            }
             out.push('\n');
             out.push_str(&crate::telemetry::worker_metrics::render_prometheus());
             out.push_str(&format!(
@@ -121,7 +134,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                 app_state.presence.count_in_game(),
                 app_state.presence.count_games_in_progress(),
             ));
-            out
+            ([(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], out)
         }),
     );
 

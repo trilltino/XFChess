@@ -120,7 +120,7 @@ pub fn replay_2d_annotation_system(
             fill: egui::Color32::from_rgb(20, 20, 20),
             ..Default::default()
         })
-        .show(ctx, |ui| {
+        .show(&mut crate::ui::egui_ext::viewport_ui(ctx, "replay_shorts_root"), |ui| {
             // Board is 8×8 squares. Leave 260px on the right for the move list panel.
             let avail = ui.available_size();
             let right_panel_w = 260.0;
@@ -205,12 +205,11 @@ pub fn replay_2d_annotation_system(
                 }
 
                 // ── Last-move highlight ──
-                if pgn.is_some() {
-                    if replay.current_ply > 0 {
+                if pgn.is_some()
+                    && replay.current_ply > 0 {
                         // Highlight is shown via the engine state — we just tint lightly
                         // (actual from/to squares would require parsing the last SAN)
                     }
-                }
 
                 // ── Square highlights ──
                 for &(hf, hr, hk) in &annotations.highlights {
@@ -679,7 +678,7 @@ pub fn cinematic_effect_system(
         .order(egui::Order::Foreground)
         .interactable(false)
         .show(ctx, |ui| {
-            let screen = ctx.screen_rect();
+            let screen = ctx.content_rect();
             let painter = ui.painter_at(screen);
             painter.rect_filled(
                 screen,
@@ -731,7 +730,7 @@ pub fn quality_badge_system(
         .order(egui::Order::Foreground)
         .interactable(false)
         .show(ctx, |ui| {
-            let screen = ctx.screen_rect();
+            let screen = ctx.content_rect();
             let cx = screen.center().x;
             let cy = screen.center().y - 60.0;
             let bg_rect =
@@ -787,7 +786,7 @@ pub fn hook_text_system(
 
     use crate::game::shorts_state::HookStyle;
     let a = (shorts.hook_text_alpha * 255.0) as u8;
-    let screen = ctx.screen_rect();
+    let screen = ctx.content_rect();
 
     egui::Area::new(egui::Id::new("hook_text"))
         .fixed_pos(egui::Pos2::ZERO)

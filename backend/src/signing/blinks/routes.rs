@@ -85,7 +85,7 @@ async fn register_transaction(
         &wallet_pubkey,
         &state.tournament_store,
         &program_id,
-        &state.feepayer.next(),
+        state.feepayer.next(),
         &state.tournament_fee_recipient,
     )
     .await
@@ -166,7 +166,7 @@ async fn get_registration_chain(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<ActionChain>, StatusCode> {
-    let wallet = params.get("wallet").map(|s| s.clone());
+    let wallet = params.get("wallet").cloned();
 
     let tournament = state
         .tournament_store
@@ -191,7 +191,7 @@ async fn get_onboarding_chain(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<ActionChain>, StatusCode> {
-    let wallet = params.get("wallet").map(|s| s.clone());
+    let wallet = params.get("wallet").cloned();
 
     let tournament = state
         .tournament_store
@@ -260,7 +260,7 @@ async fn claim_prize_transaction(
         &claimant,
         &state.tournament_store,
         &program_id,
-        &state.feepayer.next(),
+        state.feepayer.next(),
     )
     .await
     .map_err(|e| {

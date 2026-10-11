@@ -1,185 +1,109 @@
-#[cfg(feature = "proxy")]
-pub mod bridge {
-    use axum::{
-        body::Body,
-        extract::{Request, State},
-        response::Response,
-        routing::any,
-        Router,
-    };
-    use iroh::{Endpoint, EndpointId};
-    use iroh_h3_client::IrohH3Client;
-    use std::net::SocketAddr;
-    use tower_http::trace::TraceLayer;
+use axum::{
+    body::Body,
+    extract::{Request, State},
+    http::{HeaderMap, HeaderName, StatusCode},
+    response::Response,
+    routing::any,
+    Router,
+};
+use iroh::{Endpoint, EndpointId};
+use iroh_h3_client::IrohH3Client;
+use tokio::net::TcpListener;
+use tower::ServiceExt;
 
-    #[derive(Clone)]
-    pub struct ProxyState {
-        client: IrohH3Client,
-        default_peer: EndpointId,
-    }
-
-    impl ProxyState {
-        pub fn new(client: IrohH3Client, default_peer: EndpointId) -> Self {
-            Self {
-                client,
-                default_peer,
-            }
-        }
-    }
-
-    pub async fn start_proxy(
-        endpoint: &Endpoint,
-        listen_addr: SocketAddr,
-        default_peer: EndpointId,
-    ) -> anyhow::Result<()> {
-        let alpn = super::super::node::BRAID_H3_ALPN.to_vec();
-        let client = IrohH3Client::new(endpoint.clone(), alpn);
-
-        let state = ProxyState::new(client, default_peer);
-
-        let app = Router::new()
-            .route("/{*path}", any(proxy_handler))
-            .with_state(state)
-            .layer(TraceLayer::new_for_http());
-
-        tracing::info!("Starting TCP Proxy Bridge on http://{}", listen_addr);
-
-        let listener = tokio::net::TcpListener::bind(listen_addr).await?;
-        axum::serve(listener, app).await?;
-
-        Ok(())
-    }
-
-    async fn proxy_handler(
-        State(state): State<ProxyState>,
-        req: Request,
-    ) -> Result<Response, String> {
-        let path = req.uri().path();
-        let query = req
-            .uri()
-            .query()
-            .map(|q| format!("?{}", q))
-            .unwrap_or_default();
-
-        // Construct target URL: https://<peer_id>/<path>?<query>
-        // The peer_id is used as the authority/host in the URL
-        let target_url = format!("https://{}{}{}", state.default_peer, path, query);
-
-        tracing::info!(
-            method = %req.method(),
-            path = %path,
-            target = %target_url,
-            "Proxying request"
-        );
-
-        // Buffer the entire request body; large uploads would benefit from streaming.
-        let (parts, body) = req.into_parts();
-        let body_bytes = axum::body::to_bytes(body, 10 * 1024 * 1024) // 10MB limit
-            .await
-            .map_err(|e| format!("Failed to read request body: {}", e))?;
-
-        let mut builder = state.client.request(parts.method.clone(), &target_url);
-
-        // Copy headers from the original request, skipping hop-by-hop headers
-        for (key, value) in &parts.headers {
-            let key_str = key.as_str().to_lowercase();
-            // Skip hop-by-hop headers that shouldn't be forwarded
-            if matches!(
-                key_str.as_str(),
-                "host"
-                    | "connection"
-                    | "keep-alive"
-                    | "proxy-authenticate"
-                    | "proxy-authorization"
-                    | "te"
-                    | "trailers"
-                    | "transfer-encoding"
-                    | "upgrade"
-            ) {
-                continue;
-            }
-            builder = builder.header(key, value);
-        }
-
-        // Set the body and build the request
-        // Use the .bytes() method on RequestBuilder to set body with octet-stream content-type
-        let client_req = if body_bytes.is_empty() {
-            builder
-                .build()
-                .map_err(|e| format!("Failed to build request: {}", e))?
-        } else {
-            builder
-                .bytes(body_bytes)
-                .map_err(|e| format!("Failed to build request: {}", e))?
-        };
-
-        let resp = client_req
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
-
-        let status = resp.status;
-        let headers = resp.headers.clone();
-
-        let response_bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| format!("Failed to read response body: {}", e))?;
-
-        tracing::debug!(
-            status = %status,
-            body_len = response_bytes.len(),
-            "Received response from P2P network"
-        );
-
-        let mut response_builder = Response::builder().status(status);
-
-        let response_headers = response_builder
-            .headers_mut()
-            .ok_or_else(|| "Failed to get response headers mut".to_string())?;
-
-        for (key, value) in headers.iter() {
-            let key_str = key.as_str().to_lowercase();
-            // Skip hop-by-hop headers in response
-            if matches!(
-                key_str.as_str(),
-                "connection" | "keep-alive" | "transfer-encoding" | "upgrade"
-            ) {
-                continue;
-            }
-            response_headers.insert(key, value.clone());
-        }
-
-        response_builder
-            .body(Body::from(response_bytes))
-            .map_err(|e| format!("Failed to build response: {}", e))
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn test_proxy_state_new() {
-            // This is a compile-time test to verify the API
-            fn assert_proxy_state<T: Clone + Send + Sync + 'static>() {}
-            assert_proxy_state::<ProxyState>();
-        }
-    }
+#[derive(Clone)]
+struct ProxyState {
+    client: IrohH3Client,
+    default_peer: EndpointId,
+    local_router: Option<Router>,
 }
 
-#[cfg(not(feature = "proxy"))]
-pub mod bridge {
-    use iroh::{Endpoint, EndpointId};
-    use std::net::SocketAddr;
+pub(crate) async fn serve(
+    endpoint: Endpoint,
+    listener: TcpListener,
+    default_peer: EndpointId,
+    local_router: Router,
+) -> anyhow::Result<()> {
+    let local_router = (default_peer == endpoint.id()).then_some(local_router);
+    let state = ProxyState {
+        client: IrohH3Client::new(endpoint, crate::node::BRAID_H3_ALPN.to_vec()),
+        default_peer,
+        local_router,
+    };
+    let router = Router::new()
+        .route("/", any(proxy_handler))
+        .route("/{*path}", any(proxy_handler))
+        .with_state(state);
+    axum::serve(listener, router).await?;
+    Ok(())
+}
 
-    pub async fn start_proxy(
-        _endpoint: &Endpoint,
-        _listen_addr: SocketAddr,
-        _default_peer: EndpointId,
-    ) -> anyhow::Result<()> {
-        Err(anyhow::anyhow!(
-            "Proxy feature is not enabled. Rebuild with --features proxy"
-        ))
+fn hop_header(name: &HeaderName, headers: &HeaderMap) -> bool {
+    matches!(
+        name.as_str(),
+        "host"
+            | "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+    ) || headers
+        .get_all("connection")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .any(|token| token.trim().eq_ignore_ascii_case(name.as_str()))
+}
+
+async fn proxy_handler(
+    State(state): State<ProxyState>,
+    request: Request,
+) -> Result<Response, StatusCode> {
+    if let Some(router) = state.local_router {
+        let (mut parts, body) = request.into_parts();
+        // Route parameters from the bridge must not reach the resource router.
+        parts.extensions.clear();
+        let request = Request::from_parts(parts, body);
+        return router
+            .oneshot(request)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
     }
+    let path = request
+        .uri()
+        .path_and_query()
+        .map(|p| p.as_str())
+        .unwrap_or("/");
+    let target = format!("https://{}{path}", state.default_peer);
+    let (parts, body) = request.into_parts();
+    let body = axum::body::to_bytes(body, 10 * 1024 * 1024)
+        .await
+        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    let mut builder = state.client.request(parts.method, &target);
+    for (name, value) in &parts.headers {
+        if !hop_header(name, &parts.headers) {
+            builder = builder.header(name, value);
+        }
+    }
+    let response = builder
+        .bytes(body)
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!("TCP bridge upstream failed: {e}");
+            StatusCode::BAD_GATEWAY
+        })?;
+    let mut builder = Response::builder().status(response.status);
+    for (name, value) in &response.headers {
+        if !hop_header(name, &response.headers) {
+            builder = builder.header(name, value);
+        }
+    }
+    builder
+        .body(Body::from_stream(response.bytes_stream()))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }

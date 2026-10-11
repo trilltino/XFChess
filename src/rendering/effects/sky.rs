@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 #[cfg(feature = "sky")]
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::{game_scene, GameState};
 // Atmosphere and ScatteringMedium live in bevy_light; only AtmosphereSettings is re-exported by pbr.
 #[cfg(feature = "sky")]
 use bevy::light::{atmosphere::ScatteringMedium, Atmosphere};
@@ -34,7 +34,7 @@ fn setup_sky(
     // auto-positions) a `GlobalTransform`, so we only despawn it on exit.
     commands.spawn((
         Atmosphere::earth(medium),
-        DespawnOnExit(GameState::InGame),
+        game_scene(),
         Name::new("Sky Atmosphere"),
     ));
 

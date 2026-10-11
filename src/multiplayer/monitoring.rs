@@ -11,7 +11,12 @@ pub struct GameHealthMonitorPlugin;
 
 impl Plugin for GameHealthMonitorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, log_game_health_snapshot_core);
+        app.add_systems(
+            Update,
+            log_game_health_snapshot_core
+                .in_set(crate::core::schedule::SessionSet::Social)
+                .run_if(in_state(crate::core::GameState::InGame)),
+        );
     }
 }
 
@@ -85,7 +90,12 @@ pub struct RollupHealthMonitorPlugin;
 #[cfg(feature = "solana")]
 impl Plugin for RollupHealthMonitorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, log_game_health_snapshot_rollup);
+        app.add_systems(
+            Update,
+            log_game_health_snapshot_rollup
+                .in_set(crate::core::schedule::SessionSet::Social)
+                .run_if(in_state(crate::core::GameState::InGame)),
+        );
     }
 }
 

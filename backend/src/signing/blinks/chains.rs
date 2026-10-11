@@ -71,9 +71,9 @@ pub fn create_onboarding_chain(
     wallet_pubkey: Option<String>,
     required_sol: f64,
 ) -> ActionChain {
-    let steps = if wallet_pubkey.is_none() {
+    let steps = match wallet_pubkey {
         // User has no wallet
-        vec![
+        None => vec![
             ChainStep {
                 step: 1,
                 label: "Create Wallet".to_string(),
@@ -115,11 +115,9 @@ pub fn create_onboarding_chain(
                 },
                 completed: false,
             },
-        ]
-    } else {
+        ],
         // User has wallet but needs funding
-        let wallet = wallet_pubkey.clone().unwrap();
-        vec![
+        Some(wallet) => vec![
             ChainStep {
                 step: 1,
                 label: "Fund Wallet".to_string(),
@@ -156,7 +154,7 @@ pub fn create_onboarding_chain(
                 },
                 completed: false,
             },
-        ]
+        ],
     };
 
     ActionChain {

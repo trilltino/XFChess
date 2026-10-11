@@ -148,6 +148,27 @@ pub async fn detailed_health_check(State(state): State<AppState>) -> impl IntoRe
         response_time_ms: feepayer_start.elapsed().as_millis() as u64,
     });
 
+    // An empty puzzle bank means `just puzzles-refresh` never ran on this host.
+    let puzzles_start = std::time::Instant::now();
+    let puzzles: Result<i64, _> =
+        sqlx::query_scalar("SELECT COUNT(*) FROM puzzles WHERE enabled = 1")
+            .fetch_one(&state.store.pool())
+            .await;
+    checks.push(HealthCheck {
+        name: "puzzle_bank".to_string(),
+        status: match puzzles {
+            Ok(n) if n > 0 => "ok",
+            Ok(_) => "warning",
+            Err(_) => "error",
+        }
+        .to_string(),
+        message: Some(match puzzles {
+            Ok(n) => format!("{n} enabled puzzles"),
+            Err(e) => e.to_string(),
+        }),
+        response_time_ms: puzzles_start.elapsed().as_millis() as u64,
+    });
+
     // Check disk space
     let disk_start = std::time::Instant::now();
     let disk_check = check_disk_space().await;

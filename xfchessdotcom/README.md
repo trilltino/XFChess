@@ -30,8 +30,6 @@ npm run preview   # serve the production build locally
 | [src/pages/](src/pages/) | Routes: SignIn, Play, Tournaments/TournamentPlay, Spectate, FundWallet, Kyc, … |
 | [src/components/](src/components/) | Shared UI: LoginModal, KycModal, MatchHistory, wallet selection |
 | [src/lib/](src/lib/) | Backend API client ([api/](src/lib/api/)), Anchor client, MagicBlock helpers |
-| [src/hooks/](src/hooks/) | e.g. `useWalletUsdBalance` |
-| [src/privy/](src/privy/) | Privy embedded-wallet provider + auth button |
 
 See [src/README.md](src/README.md) for module details.
 
@@ -49,4 +47,4 @@ const base =
   program instructions change.
 - Build transactions through Anchor's `Program` class — never raw transactions.
 - Every `VITE_*` variable is baked into the public bundle; secrets must stay
-  server-side (see F3 in [ops/docs/FRONTEND_REMEDIATION.md](../ops/docs/FRONTEND_REMEDIATION.md)).
+  server-side (see [website deployment](../ops/docs/FRONTEND_REMEDIATION.md)).

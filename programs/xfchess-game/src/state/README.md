@@ -46,6 +46,7 @@ pub struct Game {
   transitions are enforced in `src/lifecycle/`, not ad hoc in instructions.
 - `Game.turn` is `u16` on purpose — a `u8` overflows past half-move 255.
 - Tournaments are both single-elimination and Swiss; Swiss pairing itself happens
-  off-chain (`crates/shared/swiss-pairing`), the program records results and standings.
+  off-chain (`crates/shared/swiss-pairing`); the program records authority-reported
+  results and scores, and checks the final places against those scores.
 - Struct layout is ABI: add fields only at the end, and only with a coordinated
   program + client migration.

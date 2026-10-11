@@ -1,38 +1,10 @@
-﻿# iroh-h3-axum
+# iroh-h3-axum
 
-## Purpose
+`IrohAxum` serves an Axum router through the Iroh HTTP/3 adapter. Requests include
+`RemoteId`, the authenticated Iroh peer identifier. Response bodies stream without
+buffering; a body error resets the stream instead of finishing a truncated response.
 
-Axum integration for iroh-h3. Allows building HTTP/3 servers with the Axum web framework over Iroh's QUIC transport.
+Used by `braid-iroh` for resource reads, writes and HTTP 209 subscriptions.
+Native integration tests exercise peer identity extraction.
 
-## Role in XFChess
-
-**Currently NOT actively used in the chess program.**
-
-Provides Axum compatibility layer for `iroh-h3`:
-- Axum handlers over Iroh QUIC
-- Router compatibility
-- Middleware support
-
-## Status
-
-| Aspect | Status |
-|--------|--------|
-| In workspace |  Yes |
-| Used by main app |  No |
-| Depends on | `iroh-h3` |
-
-## Recommendation
-
-**Consider removing** unless `iroh-h3` is actively used. This is a companion crate to `iroh-h3`.
-
-## Dependencies
-
-- `iroh-h3` - HTTP/3 over Iroh
-- `axum` - Web framework
-
-## Notes
-
-- **Companion crate** to `iroh-h3`
-- Only needed if building HTTP/3 Axum servers over Iroh
-- Not required for current chess functionality
-
+Maintained fork of [Le-Maz/iroh-h3](https://github.com/Le-Maz/iroh-h3), MIT licensed.

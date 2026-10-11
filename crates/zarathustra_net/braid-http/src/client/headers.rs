@@ -155,6 +155,20 @@ impl BraidHeaders {
             );
         }
 
+        if let Some(value) = &self.retry_after {
+            headers.insert(
+                "retry-after",
+                HeaderValue::from_str(value).map_err(|e| BraidError::Config(e.to_string()))?,
+            );
+        }
+        for (name, value) in &self.extra {
+            let name = http::header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|e| BraidError::Config(e.to_string()))?;
+            headers.insert(
+                name,
+                HeaderValue::from_str(value).map_err(|e| BraidError::Config(e.to_string()))?,
+            );
+        }
         Ok(headers)
     }
 
@@ -190,7 +204,10 @@ impl BraidHeaders {
                     braid_headers.merge_type = Some(value_str.to_string());
                 }
                 "patches" => {
-                    braid_headers.patches_count = value_str.parse().ok();
+                    braid_headers.patches_count =
+                        Some(value_str.parse().map_err(|_| {
+                            BraidError::HeaderParse("Invalid Patches count".into())
+                        })?);
                 }
                 "content-range" => {
                     braid_headers.content_range = Some(value_str.to_string());
@@ -206,27 +223,11 @@ impl BraidHeaders {
             }
         }
 
+        braid_headers.patches_count = protocol::headers::parse_patch_count(
+            headers.get("patches").and_then(|v| v.to_str().ok()),
+            headers.get("content-type").and_then(|v| v.to_str().ok()),
+        )?;
         Ok(braid_headers)
-    }
-}
-
-pub struct HeaderParser;
-
-impl HeaderParser {
-    pub fn parse_version(value: &str) -> Result<Vec<Version>> {
-        protocol::parse_version_header(value)
-    }
-
-    pub fn parse_content_range(value: &str) -> Result<(String, String)> {
-        protocol::parse_content_range(value)
-    }
-
-    pub fn format_version(versions: &[Version]) -> String {
-        protocol::format_version_header(versions)
-    }
-
-    pub fn format_content_range(unit: &str, range: &str) -> String {
-        protocol::format_content_range(unit, range)
     }
 }
 

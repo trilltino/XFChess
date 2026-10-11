@@ -1,37 +1,14 @@
-﻿# iroh-h3-client
+# iroh-h3-client
 
-## Purpose
+`IrohH3Client` sends HTTP/3 requests to an Iroh peer identifier in the URI authority.
+Concurrent requests share connection setup and reuse an established sender. Failed
+setup is evicted, and generation checks prevent an old connection from deleting a
+new cache entry. Request and response bodies can stream; JSON helpers are optional.
+Cached setup futures hold weak cache references. Connection drivers stop when the last
+client and response body drop; an active response can outlive its client handle.
 
-HTTP/3 client implementation over Iroh's QUIC transport. Provides an HTTP client that can communicate over Iroh's P2P network using HTTP/3.
+Used by the multiplayer TCP bridge. Native integration tests cover requests, payloads,
+streaming, concurrent reuse, missing peers and response metadata. Unused cookie,
+redirect and retry middleware has been removed; callers own retry policy.
 
-## Role in XFChess
-
-**Currently NOT actively used in the chess program.**
-
-Client-side counterpart to `iroh-h3`:
-- HTTP/3 requests over Iroh QUIC
-- P2P HTTP client capabilities
-
-## Status
-
-| Aspect | Status |
-|--------|--------|
-| In workspace |  Yes |
-| Used by main app |  No |
-| Depends on | `iroh-h3` |
-
-## Recommendation
-
-**Consider removing** unless `iroh-h3` is actively used. This is a companion crate to `iroh-h3`.
-
-## Dependencies
-
-- `iroh-h3` - HTTP/3 over Iroh
-- `h3` - HTTP/3 protocol
-
-## Notes
-
-- **Companion crate** to `iroh-h3`
-- Only needed for HTTP/3 client connections over Iroh
-- Not required for current chess functionality
-
+Maintained fork of [Le-Maz/iroh-h3](https://github.com/Le-Maz/iroh-h3), MIT licensed.

@@ -1,35 +1,6 @@
-use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_notification::NotificationExt;
-
-pub struct IpcServer;
-
-impl IpcServer {
-  pub fn new() -> Self {
-    Self
-  }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum WindowCommands {
-  ShowTournamentAdmin,
-  HideTournamentAdmin,
-  SetTournamentAdminTitle { title: String },
-  SetTournamentAdminSize { width: f64, height: f64 },
-  SetTournamentAdminPosition { x: f64, y: f64 },
-  MinimizeTournamentAdmin,
-  MaximizeTournamentAdmin,
-  CloseTournamentAdmin,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum IpcCommands {
-  GetWindowInfo,
-  ShowNotification { title: String, body: String },
-  OpenUrl { url: String },
-  CopyToClipboard { text: String },
-}
 
 #[tauri::command]
 pub fn show_tournament_admin(app: AppHandle) {

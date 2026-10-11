@@ -47,7 +47,7 @@ members = [
     # crates/solana/* removed — chess-logic-on-chain consolidated into
     # programs/xfchess-game/src/chess_logic_on_chain.rs
     "crates/shared/*",
-    "crates/er-cu-benchmark",
+    "crates/cu_benchmark",
     "programs/*",
     "tauri",
     "tauri/viz/src-tauri",
@@ -111,10 +111,10 @@ borsh = "=1.8.0"
 chrono = { version = "=0.4.44", features = ["serde"] }
 serde_bytes = "=0.11.17"
 clap = { version = "=4.5", features = ["derive", "env"] }
-egui = "=0.34"
-iroh = "=1.0.3"
-iroh-base = "=1.0.3"
-bevy_egui = "=0.40.1"
+egui = "=0.36"
+iroh = "=1.3.0"
+iroh-base = "=1.3.0"
+bevy_egui = "=0.43.1"
 
 webbrowser = "=1.1.0"
 # Require canonical undelegation-buffer PDA checks; see the MagicBlock lifecycle runbook.
@@ -124,7 +124,6 @@ solana-security-txt = "=1.1.3"
 axum = "=0.8.9"
 tower-http = "=0.7.0"
 xfchess-game = { path = "programs/xfchess-game", version = "0.1.0" }
-braid-core = { path = "crates/zarathustra_net/braid-core" }
 braid-http = { path = "crates/zarathustra_net/braid-http" }
 braid-iroh = { path = "crates/zarathustra_net/braid-iroh" }
 braid_chess = { path = "crates/zarathustra_net/braid_chess" }
@@ -134,10 +133,10 @@ nimzovich_engine = { git = "https://github.com/trilltino/xfchess-contracts.git",
 xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
 # The exact Bevy pin matches release-candidate APIs used by feature-gated code;
 # check those paths when upgrading.
-bevy = { version = "=0.19.0", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg", "hdr", "android-game-activity"] }
-bevy_sprite = "=0.19.0"
-bevy_text = "=0.19.0"
-bevy_ui = "=0.19.0"
+bevy = { version = "=0.20.0", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg", "hdr", "android-game-activity"] }
+bevy_sprite = "=0.20.0"
+bevy_text = "=0.20.0"
+bevy_ui = "=0.20.0"
 image = { version = "=0.25.5", default-features = false, features = ["png"] }
 # Match Bevy’s winit version so window Icon types unify.
 winit = "=0.30.13"
@@ -218,7 +217,7 @@ solana-client = { workspace = true, optional = true }
 webbrowser.workspace = true
 braid_chess.workspace = true
 braid-iroh = { workspace = true, features = ["proxy"] }
-braid-core.workspace = true
+braid-http.workspace = true
 iroh-gossip.workspace = true
 sha2 = "0.10.8"
 aes-gcm = "0.10.3"
@@ -239,6 +238,7 @@ zstd.workspace = true
 futures = { workspace = true }
 base64.workspace = true
 regex.workspace = true
+parking_lot.workspace = true
 ed25519-dalek = "2"
 ephemeral-rollups-sdk = { workspace = true, optional = true }
 solana-system-interface = { version = "3", features = ["bincode"], optional = true }
@@ -248,7 +248,13 @@ xfchess-game = { workspace = true, optional = true }
 [dev-dependencies]
 proptest = "1"
 
-# Used by tauri_signer::bring_wallet_popup_to_front — same feature set and
+[lints.clippy]
+# Bevy systems take one parameter per resource or query and nest query types;
+# Bevy's own lint guidance allows both.
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+# Used by the wallet bridge foreground grant — same feature set and
 # version as tauri/Cargo.toml's own `windows` dependency.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [

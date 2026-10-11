@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 use tracing::info;
 
 pub const ONLINE_FRESHNESS_SECS: i64 = 6;
@@ -35,49 +37,40 @@ impl PresenceStore {
     }
 
     pub fn upsert(&self, p: Presence) {
-        if let Ok(mut map) = self.inner.write() {
-            let changed = map
-                .get(&p.node_id)
-                .map(|prev| prev.status != p.status)
-                .unwrap_or(true);
-            if changed {
-                info!("[Presence] {} is {:?}", p.display_name, p.status);
-            }
-            map.insert(p.node_id.clone(), p);
+        let mut map = self.inner.write();
+        let changed = map
+            .get(&p.node_id)
+            .is_none_or(|prev| prev.status != p.status);
+        if changed {
+            info!("[Presence] {} is {:?}", p.display_name, p.status);
         }
+        map.insert(p.node_id.clone(), p);
     }
 
     pub fn get_all_online(&self) -> Vec<Presence> {
+        let cutoff = Utc::now() - chrono::Duration::seconds(ONLINE_FRESHNESS_SECS);
         self.inner
             .read()
-            .map(|m| {
-                let cutoff = Utc::now() - chrono::Duration::seconds(ONLINE_FRESHNESS_SECS);
-                m.values()
-                    .filter(|p| p.updated_at > cutoff && p.status != PresenceStatus::Offline)
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default()
+            .values()
+            .filter(|p| p.updated_at > cutoff && p.status != PresenceStatus::Offline)
+            .cloned()
+            .collect()
     }
 
     pub fn get(&self, node_id: &str) -> Option<Presence> {
-        self.inner.read().ok()?.get(node_id).cloned()
+        self.inner.read().get(node_id).cloned()
     }
 
     pub fn set_offline(&self, node_id: &str) {
-        if let Ok(mut map) = self.inner.write() {
-            if let Some(p) = map.get_mut(node_id) {
-                p.status = PresenceStatus::Offline;
-                p.updated_at = Utc::now();
-            }
+        if let Some(p) = self.inner.write().get_mut(node_id) {
+            p.status = PresenceStatus::Offline;
+            p.updated_at = Utc::now();
         }
     }
 
     pub fn sweep_stale(&self) {
-        if let Ok(mut map) = self.inner.write() {
-            let cutoff = Utc::now() - chrono::Duration::minutes(10);
-            map.retain(|_, p| p.updated_at > cutoff);
-        }
+        let cutoff = Utc::now() - chrono::Duration::minutes(10);
+        self.inner.write().retain(|_, p| p.updated_at > cutoff);
     }
 
     pub fn count_in_game(&self) -> usize {

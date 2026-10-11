@@ -1,21 +1,17 @@
-use bevy::prelude::*;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::panic;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use bevy::prelude::*;
+use bevy::time::common_conditions::on_timer;
 
 use super::{
-    settings_persistence::load_settings_system,
-    state_lifecycle::*,
-    states::{log_game_state_system, validate_and_log_state_transitions},
-    GameSettings, GameState, GameStatistics, InGameplay, InMenus, MenuState, PreviousState,
-    StateLoggerTimer, WindowConfig,
-};
-
-// State-specific cleanup systems (needed because state.get() returns NEW state during OnExit)
-use super::state_lifecycle::{
-    cleanup_game_over, cleanup_gameplay_scene_on_game_over_exit, cleanup_in_game,
-    cleanup_main_menu, cleanup_paused,
+    state_lifecycle::{audit_cross_state_leaks, periodic_entity_audit},
+    states::log_state_transitions,
+    support_bundle::SupportBundleUi,
+    GameSettings, GameState, GameStatistics, InGameplay, MenuState, WindowConfig,
 };
 
 static PANIC_STATE_TRACKER: OnceLock<Mutex<PanicStateInfo>> = OnceLock::new();
@@ -31,58 +27,46 @@ pub struct CorePlugin;
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WindowConfig>();
+        super::schedule::configure(app);
 
         app.init_state::<GameState>()
             .add_sub_state::<MenuState>()
-            .add_computed_state::<InMenus>()
-            .add_computed_state::<InGameplay>()
-            .init_resource::<PreviousState>()
-            .init_resource::<StateLoggerTimer>();
+            .add_computed_state::<InGameplay>();
 
-        // Initialize core game resources
-        // Note: GameSettings will be loaded from file in load_settings_system
         app.init_resource::<GameStatistics>()
-            .init_resource::<super::states::GameMode>();
-
-        app.insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)));
-
-        app.init_resource::<StateAuditTimer>();
-
-        // Register types for reflection
-        app.register_type::<WindowConfig>()
-            .register_type::<PreviousState>()
+            .init_resource::<super::states::GameMode>()
+            .init_resource::<SupportBundleUi>()
+            .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
+            .register_type::<WindowConfig>()
             .register_type::<GameSettings>()
             .register_type::<GameStatistics>();
 
-        // Add settings persistence system (runs in Startup schedule)
-        // Initialize settings
-        app.add_systems(Startup, load_settings_system);
-
-        // Startup banner so every daily log file (and every exported support
-        // bundle) is self-describing: version, OS, arch, build mode, log path.
+        super::settings_persistence::register(app);
         app.add_systems(Startup, log_runtime_banner);
 
+        // Diagnostics run only when there is something to report.
         app.add_systems(
             Update,
             (
-                log_game_state_system,
-                validate_and_log_state_transitions,
-                update_panic_state_tracker,
-                log_menu_state_transitions,
-                periodic_entity_audit,
-                audit_cross_state_leaks,
-                verify_picking_scope,
+                log_state_transitions.run_if(on_message::<StateTransitionEvent<GameState>>),
+                log_menu_state.run_if(state_changed::<MenuState>),
+                update_panic_state_tracker
+                    .run_if(state_changed::<GameState>.or_else(state_changed::<MenuState>)),
+                audit_cross_state_leaks.run_if(state_changed::<GameState>),
+                periodic_entity_audit.run_if(on_timer(Duration::from_secs(10))),
             ),
+        );
+
+        #[cfg(not(target_os = "android"))]
+        app.add_systems(
+            Update,
+            super::support_bundle::run_requested_export
+                .run_if(|ui: Res<SupportBundleUi>| ui.export_requested),
         );
 
         // Pause and resume Android audio explicitly; WinitSettings handles background rendering.
         #[cfg(target_os = "android")]
         app.add_systems(Update, crate::android::handle_app_lifecycle);
-
-        app.add_systems(OnEnter(GameState::MainMenu), log_state_entry);
-        app.add_systems(OnEnter(GameState::InGame), log_state_entry);
-        app.add_systems(OnEnter(GameState::Paused), log_state_entry);
-        app.add_systems(OnEnter(GameState::GameOver), log_state_entry);
 
         // A [GAME-START] marker for every game — online, local, or vs AI —
         // so a support bundle can be cut around a single reported game.
@@ -91,28 +75,6 @@ impl Plugin for CorePlugin {
             |game_mode: Res<super::states::GameMode>| {
                 info!("[GAME-START] mode={:?}", *game_mode);
             },
-        );
-
-        app.add_systems(
-            OnExit(GameState::MainMenu),
-            (log_state_exit, audit_despawn_markers, cleanup_main_menu),
-        );
-        app.add_systems(
-            OnExit(GameState::InGame),
-            (log_state_exit, audit_despawn_markers, cleanup_in_game),
-        );
-        app.add_systems(
-            OnExit(GameState::Paused),
-            (log_state_exit, audit_despawn_markers, cleanup_paused),
-        );
-        app.add_systems(
-            OnExit(GameState::GameOver),
-            (
-                log_state_exit,
-                audit_despawn_markers,
-                cleanup_game_over,
-                cleanup_gameplay_scene_on_game_over_exit,
-            ),
         );
     }
 
@@ -207,12 +169,18 @@ fn log_runtime_banner() {
     let build = "release";
     info!(
         "[runtime] XFChess v{} {} {} {} — logs → {}",
-        env!("CARGO_PKG_VERSION"),
+        super::updates::CURRENT_VERSION,
         std::env::consts::OS,
         std::env::consts::ARCH,
         build,
         crate::multiplayer::network::identity::log_dir().display()
     );
+}
+
+fn log_menu_state(state: Option<Res<State<MenuState>>>) {
+    if let Some(state) = state {
+        debug!("[STATE] Menu: {:?}", state.get());
+    }
 }
 
 fn update_panic_state_tracker(

@@ -1,6 +1,6 @@
 # src/multiplayer
 
-Online play for the Bevy client: WebSocket auth against the backend, Iroh QUIC P2P
+Online play for the Bevy client: wallet-signed JWT login to the backend, Iroh QUIC P2P
 transport, Braid HTTP-209 state subscriptions, and (behind `--features solana`) the
 on-chain wager/session flows. `MultiplayerPlugin` in [mod.rs](mod.rs) owns a shared
 Tokio runtime and registers all sub-plugins.
@@ -26,7 +26,6 @@ keep the two distinct (see [crates/zarathustra_net/](../../crates/zarathustra_ne
 | [solana/](solana/) *(solana)* | Wallet + session-key managers, lobby, tournaments, Tauri signer bridge |
 | [wager_state/](wager_state/) *(solana)* | Escrow/payout state machine + UI |
 | [tournament/](tournament/) | Tournament client + events |
-| [auth_ws.rs](auth_ws.rs) | WebSocket auth handshake with the backend |
 | [social.rs](social.rs) / [spectator.rs](spectator.rs) | Friends/chat, spectating |
 | [join_link.rs](join_link.rs) | Shareable game join links |
 | [ui/](ui/) | Spectator overlay, transaction debugger |

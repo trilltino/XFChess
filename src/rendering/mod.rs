@@ -1,3 +1,6 @@
+//! 3D presentation: board, pieces, cameras, lighting and move feedback. It reads
+//! game state and never changes it. See [README.md](README.md).
+
 pub mod board;
 pub mod camera;
 pub mod effects;
@@ -25,14 +28,7 @@ impl Plugin for RenderingPlugin {
             pieces::PiecePlugin,
             effects::DynamicLightingPlugin,
             effects::SkyPlugin,
-        ))
-        .add_systems(
-            Update,
-            (
-                graphics_quality::apply_graphics_quality_camera_system,
-                graphics_quality::update_graphics_quality_camera_system,
-                graphics_quality::apply_graphics_quality_lights_system,
-            ),
-        );
+        ));
+        graphics_quality::register(app);
     }
 }

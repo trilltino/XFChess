@@ -107,18 +107,13 @@ pub fn handler(
     let profile = {
         let data = profile_info.try_borrow_data()?;
         let mut profile = profile_init::load_or_new_profile(&data, player.key(), now)?;
-        profile_init::update_identity_fields(
-            &mut profile,
-            username.clone(),
-            country,
-            date_of_birth,
-        );
+        profile_init::update_identity_fields(&mut profile, username, country, date_of_birth);
         profile
     };
 
     let mut data = profile_info.try_borrow_mut_data()?;
     let disc = PlayerProfile::DISCRIMINATOR;
-    data[..8].copy_from_slice(&disc);
+    data[..8].copy_from_slice(disc);
 
     let mut writer = &mut data[8..];
     profile.serialize(&mut writer)?;

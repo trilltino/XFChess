@@ -4,6 +4,7 @@
 
 use std::{
     error::Error,
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -19,7 +20,7 @@ use iroh::{
     protocol::{AcceptError, ProtocolHandler},
 };
 use iroh_h3::{Connection as IrohH3Connection, RecvStream};
-use n0_future::task; // unifies wasm/tokio task spawning.
+use n0_future::task::JoinSet;
 use tower_service::Service;
 
 type H3ServerConnection = server::Connection<IrohH3Connection, Bytes>;
@@ -41,26 +42,22 @@ impl IrohAxum {
         &self,
         remote_id: EndpointId,
         request_resolver: RequestResolver<IrohH3Connection, Bytes>,
-    ) {
+    ) -> impl Future<Output = Result<(), Box<dyn Error + Send + Sync>>> + Send + 'static {
         let router = self.router.clone();
 
-        task::spawn(async move {
+        async move {
             let mut router = router;
 
             let (request, stream) = request_resolver.resolve_request().await?;
 
-            // Extract request parts (headers, method, etc.).
             let parts = request.into_parts().0;
 
-            // Split the bidirectional stream into sender and receiver halves.
             let (mut send, recv) = stream.split();
 
-            // Wrap the receive half in an Axum-compatible body.
             let request_body = RequestBody { inner: recv };
             let mut request = Request::from_parts(parts, request_body);
             request.extensions_mut().insert(RemoteId(remote_id));
 
-            // Call into the Axum router.
             let response = router.call(request).await?;
 
             let (parts, body) = response.into_parts();
@@ -68,15 +65,20 @@ impl IrohAxum {
             send.send_response(response_head).await?;
 
             let mut response_stream = body.into_data_stream();
-            while let Some(Ok(chunk)) = response_stream.next().await {
-                send.send_data(chunk).await?;
+            while let Some(chunk) = response_stream.next().await {
+                match chunk {
+                    Ok(chunk) => send.send_data(chunk).await?,
+                    Err(error) => {
+                        send.stop_stream(h3::error::Code::H3_INTERNAL_ERROR);
+                        return Err(error.into());
+                    }
+                }
             }
 
-            // Gracefully finish the response.
             send.finish().await?;
 
             Ok::<(), Box<dyn Error + Send + Sync>>(())
-        });
+        }
     }
 }
 
@@ -88,10 +90,15 @@ impl ProtocolHandler for IrohAxum {
             .await
             .map_err(AcceptError::from_err)?;
 
-        while let Some(request_resolver) =
-            connection.accept().await.map_err(AcceptError::from_err)?
-        {
-            self.handle_request(remote_id, request_resolver);
+        let mut requests = JoinSet::new();
+        loop {
+            tokio::select! {
+                resolver = connection.accept() => {
+                    let Some(resolver) = resolver.map_err(AcceptError::from_err)? else { break };
+                    requests.spawn(self.handle_request(remote_id, resolver));
+                }
+                _ = requests.join_next(), if !requests.is_empty() => {},
+            }
         }
 
         Ok(())

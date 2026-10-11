@@ -52,7 +52,7 @@ impl TournamentResource {
         }
         let tournament_id: u64 = parts.next()?.parse().ok()?;
 
-        match parts.next()? {
+        let resource = match parts.next()? {
             "meta" => Some(Self::Meta { tournament_id }),
             "schedule-status" => Some(Self::ScheduleStatus { tournament_id }),
             "roster" => Some(Self::Roster { tournament_id }),
@@ -66,6 +66,11 @@ impl TournamentResource {
                 })
             }
             _ => None,
+        };
+        if parts.next().is_some() {
+            None
+        } else {
+            resource
         }
     }
 }

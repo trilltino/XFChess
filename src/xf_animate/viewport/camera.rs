@@ -3,7 +3,7 @@ use bevy::camera::ClearColorConfig;
 use bevy::prelude::*;
 
 use super::resource::MINI_LAYER;
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::GameState;
 
 #[derive(Component)]
 pub struct MiniShowcaseCamera;

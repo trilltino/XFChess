@@ -26,7 +26,6 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, info, warn};
 
-
 #[derive(Clone, Serialize)]
 struct IpBanEntry {
     ip: String,
@@ -87,7 +86,6 @@ async fn add_audit(pool: Option<sqlx::SqlitePool>, action: &str, target: &str, r
     }
 }
 
-
 #[derive(Deserialize)]
 pub struct ListQuery {
     pub limit: Option<i32>,
@@ -102,7 +100,6 @@ struct BanReq {
     reason: String,
     duration_days: Option<u32>,
 }
-
 
 #[derive(Deserialize)]
 struct ForceResignReq {
@@ -332,7 +329,6 @@ async fn delete_template(
     Ok(Json(json!({ "ok": true, "name": name })))
 }
 
-
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
         .merge(crate::signing::routes::money_actions::admin_money_action_routes())
@@ -412,7 +408,6 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/admin/moderation/ip-bans", get(list_ip_bans))
         .route("/admin/disputes/{game_id}/assign", post(assign_dispute))
 }
-
 
 async fn anti_cheat_reports(
     State(state): State<AppState>,
@@ -565,7 +560,10 @@ async fn linked_tournament_context(state: &AppState, game_id: &str) -> Option<Va
     None
 }
 
-async fn related_game_transactions(state: &AppState, game: &GameRecord) -> Result<Vec<Value>, sqlx::Error> {
+async fn related_game_transactions(
+    state: &AppState,
+    game: &GameRecord,
+) -> Result<Vec<Value>, sqlx::Error> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     if let Some(sig) = game.finalize_sig.as_ref().filter(|s| !s.trim().is_empty()) {
@@ -717,7 +715,9 @@ async fn game_debug_transactions(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
-    let transactions = related_game_transactions(&state, &game).await.map_err(reporting::query_error)?;
+    let transactions = related_game_transactions(&state, &game)
+        .await
+        .map_err(reporting::query_error)?;
     Ok(Json(
         json!({ "game_id": game_id, "transactions": transactions }),
     ))
@@ -912,15 +912,29 @@ async fn game_debug_bundle(
     };
     let dispute = match sqlx::query_as::<_, crate::db::repository::DisputeRecord>(
         "SELECT * FROM disputes WHERE CAST(game_id AS TEXT) = ?",
-    ).bind(&game_id).fetch_optional(&state.store.pool()).await {
+    )
+    .bind(&game_id)
+    .fetch_optional(&state.store.pool())
+    .await
+    {
         Ok(value) => json!(value),
         Err(e) => {
             lookup_errors.push(json!({"section": "dispute", "error": e.to_string()}));
             Value::Null
         }
     };
-    section_state(&mut available_sections, &mut missing_sections, "sessions", !sessions.is_null());
-    section_state(&mut available_sections, &mut missing_sections, "dispute", !dispute.is_null());
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "sessions",
+        !sessions.is_null(),
+    );
+    section_state(
+        &mut available_sections,
+        &mut missing_sections,
+        "dispute",
+        !dispute.is_null(),
+    );
 
     info!(
         "[admin-debug] bundle actor={} game_id={} available={:?} missing={:?} errors={}",
@@ -1084,12 +1098,14 @@ async fn ban_player(
     Ok(Json(json!({ "ok": true, "wallet": wallet })))
 }
 
-async fn elo_override(
-) -> (StatusCode, Json<Value>) {
-    (StatusCode::NOT_IMPLEMENTED, Json(json!({
-        "ok": false,
-        "error": "authoritative_rating_mutation_unavailable"
-    })))
+async fn elo_override() -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(json!({
+            "ok": false,
+            "error": "authoritative_rating_mutation_unavailable"
+        })),
+    )
 }
 
 async fn list_active_sessions(
@@ -1293,7 +1309,9 @@ async fn treasury_fee_report(
     State(state): State<AppState>,
     Query(q): Query<FeeReportQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    reporting::fee_report(&state.store.pool(), q).await.map(Json)
+    reporting::fee_report(&state.store.pool(), q)
+        .await
+        .map(Json)
 }
 
 async fn treasury_refund(
@@ -1526,9 +1544,13 @@ async fn metrics_summary(
         }
     };
     let n = |m: &std::sync::atomic::AtomicU64| m.load(Ordering::Relaxed);
+    let resources = tokio::task::spawn_blocking(crate::telemetry::host::snapshot)
+        .await
+        .map_err(reporting::query_error)?;
 
     Ok(Json(json!({
         "online_count": state.presence.count_in_game(),
+        "resources": resources,
         "games_in_progress": state.presence.count_games_in_progress(),
         "transactions_confirmed_solana": state.metrics.transactions_confirmed("solana"),
         "er_stale_delegated_count": SETTLEMENT_STALE_DELEGATED_GAUGE.load(Ordering::Relaxed),
@@ -1593,15 +1615,17 @@ async fn db_stats(State(state): State<AppState>) -> Result<Json<serde_json::Valu
         .fetch_one(&pool)
         .await
         .map_err(reporting::query_error)?;
-    let users_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users_v2 WHERE deleted_at IS NULL")
-        .fetch_one(&pool)
-        .await
-        .map_err(reporting::query_error)?;
+    let users_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM users_v2 WHERE deleted_at IS NULL")
+            .fetch_one(&pool)
+            .await
+            .map_err(reporting::query_error)?;
 
-    let db_path = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sessions.db".to_string())
-        .replace("sqlite://", "");
-    let db_bytes = std::fs::metadata(&db_path).ok().map(|m| m.len());
+    let db_path = pool.connect_options().get_filename().to_path_buf();
+    let db_bytes = std::fs::metadata(&db_path).ok().map(|m| {
+        let wal = std::path::PathBuf::from(format!("{}-wal", db_path.display()));
+        m.len() + std::fs::metadata(wal).map_or(0, |m| m.len())
+    });
 
     Ok(Json(json!({
         "sessions_rows": sessions_rows,

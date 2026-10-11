@@ -87,6 +87,9 @@ pub(crate) fn register(app: &mut App) {
     app.add_systems(OnExit(GameState::InGame), reset_first_move_deadline);
     app.add_systems(
         Update,
-        tick_first_move_deadline.run_if(in_state(GameState::InGame)),
+        tick_first_move_deadline
+            .after(crate::ui::game::drain_chat_messages)
+            .before(super::check_game_over_state)
+            .in_set(crate::core::schedule::GameSystems::Execution),
     );
 }

@@ -2,13 +2,14 @@
 
 Shared library crates consumed by the game client (`src/`), the backend (`backend/`),
 the Solana program (`programs/xfchess-game/`), and the web frontend. Organized into
-four groups:
+the following groups:
 
 | Group | Path | Contents |
 |-------|------|----------|
 | Engine | [`engine/`](engine/) | `nimzovich_engine` (chess AI: move gen + alpha-beta search) and `nimzovich-uci` (UCI adapter for engine-vs-engine testing) |
 | Shared types & logic | [`shared/`](shared/) | `swiss-pairing` (FIDE Dutch pairing), `xfchess-anticheat` (post-game Stockfish analysis) |
-| Solana | [`solana/`](solana/) | `chess-logic-on-chain` (no_std move validation compiled into the program), `solana-chess-client` (client-side transaction builders), `er-cu-benchmark` (Ephemeral Rollup compute-unit benchmarks) |
+| Solana | [`solana/`](solana/) | `chess-logic-on-chain` (no_std move validation compiled into the program), `solana-chess-client` (client-side transaction builders) |
+| Benchmarks | [`cu_benchmark/`](cu_benchmark/) | Game-cost estimates, ER measurements and RPC probes |
 | Networking | [`zarathustra_net/`](zarathustra_net/) | The Braid-HTTP (209) protocol stack and Iroh QUIC/H3 transports powering live game subscriptions and P2P relay |
 
 ## Hard constraints

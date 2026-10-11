@@ -1,3 +1,7 @@
+//! Transports and identities: the P2P mesh protocol and reorder buffer, the Braid
+//! move transport, VPS relay lobbies, the backend HTTP client ([`vps`]), and the
+//! local node and device identities.
+
 pub mod braid_transport;
 pub mod device_id;
 pub mod game_id_store;

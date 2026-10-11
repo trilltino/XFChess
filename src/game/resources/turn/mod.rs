@@ -1,3 +1,5 @@
+//! Whose move it is, the deferred turn flip, game phase, and the clocks.
+
 pub mod current;
 pub mod pending;
 pub mod state;

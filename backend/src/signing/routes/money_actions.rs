@@ -229,8 +229,13 @@ fn tx_has_expected_instruction(
         .ok_or_else(|| format!("unsupported money action type: {action_type}"))?;
     let discriminator = instruction_discriminator(instruction_name);
     // Positions follow the program's Accounts structs, including optional slots.
-    let (is_game, min_accounts, escrow_slot, role_slots, role_signs):
-        (bool, usize, Option<usize>, &[usize], bool) = match action_type {
+    let (is_game, min_accounts, escrow_slot, role_slots, role_signs): (
+        bool,
+        usize,
+        Option<usize>,
+        &[usize],
+        bool,
+    ) = match action_type {
         "cancel_game" => (true, 6, Some(1), &[2], true),
         "claim_timeout" => (true, 2, None, &[1], true),
         "finalize_game" => (true, 9, Some(5), &[3, 4, 7], false),
@@ -246,7 +251,10 @@ fn tx_has_expected_instruction(
     if (is_game && tournament_id.is_some()) || (!is_game && game_id.is_some()) {
         return Err("conflicting action scope IDs".to_string());
     }
-    let wallet = wallet.map(Pubkey::from_str).transpose().map_err(|e| e.to_string())?;
+    let wallet = wallet
+        .map(Pubkey::from_str)
+        .transpose()
+        .map_err(|e| e.to_string())?;
     let seed: &[u8] = if is_game { b"game" } else { b"tournament" };
     let escrow_seed: &[u8] = if is_game { b"escrow" } else { b"t_escrow" };
     let pda = |seed: &[u8]| Pubkey::find_program_address(&[seed, &id.to_le_bytes()], &program_id).0;
@@ -258,11 +266,19 @@ fn tx_has_expected_instruction(
             || !ix.data.starts_with(&discriminator)
             || ix.data.get(8..16) != Some(id.to_le_bytes().as_slice())
             || ix.accounts.len() < min_accounts
-            || ix.accounts.iter().any(|index| usize::from(*index) >= keys.len())
+            || ix
+                .accounts
+                .iter()
+                .any(|index| usize::from(*index) >= keys.len())
         {
             return false;
         }
-        let account = |slot: usize| ix.accounts.get(slot).and_then(|index| keys.get(*index as usize)).copied();
+        let account = |slot: usize| {
+            ix.accounts
+                .get(slot)
+                .and_then(|index| keys.get(*index as usize))
+                .copied()
+        };
         if account(0) != Some(pda(seed))
             || escrow_slot.is_some_and(|slot| account(slot) != Some(pda(escrow_seed)))
         {
@@ -320,7 +336,11 @@ fn landed_transaction(
     }
     let fetched = crate::signing::solana::fetch_transaction_v1_aware(rpc, signature)
         .map_err(|e| e.to_string())?;
-    let meta = fetched.confirmed.transaction.meta.as_ref()
+    let meta = fetched
+        .confirmed
+        .transaction
+        .meta
+        .as_ref()
         .ok_or_else(|| "transaction metadata is missing".to_string())?;
     if meta.err.is_some() || meta.status.is_err() {
         return Err(format!("transaction failed on-chain: {:?}", meta.err));

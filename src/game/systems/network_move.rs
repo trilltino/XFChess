@@ -28,6 +28,7 @@ pub fn handle_network_moves(
     network_state: Option<Res<OnlineNetworkState>>,
     session: Option<Res<OnlineGameSession>>,
     mut causal: Option<ResMut<CausalChainState>>,
+    mut results: MessageWriter<crate::game::events::NetworkMoveResult>,
 ) {
     for event in events.read() {
         info!(
@@ -72,16 +73,24 @@ pub fn handle_network_moves(
                     engine.current_turn, piece.color
                 );
                 release_pending(&mut causal, &event.dedup_version, false);
+                results.write(crate::game::events::NetworkMoveResult {
+                    version: event.dedup_version.clone(),
+                    fen: None,
+                });
                 continue;
             }
 
             let legal_dests = engine.get_legal_moves_for_square(event.from, piece.color);
-            if !legal_dests.iter().any(|d| *d == event.to) {
+            if !legal_dests.contains(&event.to) {
                 warn!(
                     "[NETWORK_MOVE] Rejected illegal move {:?} -> {:?} for {:?}",
                     event.from, event.to, piece.color
                 );
                 release_pending(&mut causal, &event.dedup_version, false);
+                results.write(crate::game::events::NetworkMoveResult {
+                    version: event.dedup_version.clone(),
+                    fen: None,
+                });
                 continue;
             }
 
@@ -100,6 +109,10 @@ pub fn handle_network_moves(
                 } else {
                     warn!("[NETWORK_MOVE] Attempted move to occupied square of same color!");
                     release_pending(&mut causal, &event.dedup_version, false);
+                    results.write(crate::game::events::NetworkMoveResult {
+                        version: event.dedup_version.clone(),
+                        fen: None,
+                    });
                     None
                 }
             } else {
@@ -128,7 +141,7 @@ pub fn handle_network_moves(
                 game_id: None, // Remote moves don't need game_id for rollup submission
             };
 
-            execute_move(
+            if !execute_move(
                 &ctx,
                 &mut commands,
                 &mut pending_turn,
@@ -139,8 +152,14 @@ pub fn handle_network_moves(
                 Some(&mut move_events),
                 None, // BoardStateSync — network moves don't broadcast
                 &current_turn,
-            );
-            release_pending(&mut causal, &event.dedup_version, true);
+            ) {
+                release_pending(&mut causal, &event.dedup_version, false);
+                results.write(crate::game::events::NetworkMoveResult {
+                    version: event.dedup_version.clone(),
+                    fen: None,
+                });
+                continue;
+            }
 
             // Record the remote move after execute_move updates the engine’s FEN.
             {
@@ -160,6 +179,15 @@ pub fn handle_network_moves(
                     uci.push(promo_char);
                 }
                 let fen_after = engine.current_fen().to_string();
+                let matches_expected = event
+                    .expected_fen
+                    .as_ref()
+                    .is_none_or(|expected| expected == &fen_after);
+                release_pending(&mut causal, &event.dedup_version, matches_expected);
+                results.write(crate::game::events::NetworkMoveResult {
+                    version: event.dedup_version.clone(),
+                    fen: matches_expected.then(|| fen_after.clone()),
+                });
 
                 // FEN desync check: compare local result against what the remote reported.
                 if let Some(ref expected) = event.expected_fen {
@@ -181,10 +209,12 @@ pub fn handle_network_moves(
                     }
                 }
 
-                remote_applied.write(RemoteMoveApplied {
-                    uci,
-                    next_fen: fen_after,
-                });
+                if matches_expected {
+                    remote_applied.write(RemoteMoveApplied {
+                        uci,
+                        next_fen: fen_after,
+                    });
+                }
             }
 
             if let Some(selected_entity) = selection.selected_entity {
@@ -196,6 +226,10 @@ pub fn handle_network_moves(
                 }
             }
         } else {
+            results.write(crate::game::events::NetworkMoveResult {
+                version: event.dedup_version.clone(),
+                fen: None,
+            });
             warn!("[NETWORK_MOVE] Source piece not found at {:?}", event.from);
             if let (Some(causal), Some(version)) = (causal.as_mut(), &event.dedup_version) {
                 let game_id = session
@@ -219,6 +253,120 @@ pub fn handle_network_moves(
 #[derive(Resource, Default)]
 pub struct PendingDrawOffer {
     pub from_player: Option<String>,
+}
+
+#[cfg(test)]
+mod application_tests {
+    use super::*;
+    use crate::rendering::pieces::PieceColor;
+
+    fn game() -> App {
+        let mut app = App::new();
+        let mut engine = ChessEngine::default();
+        engine.rebuild_legal_move_cache();
+        app.insert_resource(engine);
+        app.init_resource::<Selection>();
+        app.init_resource::<PendingTurnAdvance>();
+        app.init_resource::<MoveHistory>();
+        app.init_resource::<CapturedPieces>();
+        app.init_resource::<CurrentTurn>();
+        app.insert_resource(OnlineGameSession {
+            game_id: "1".into(),
+            ..Default::default()
+        });
+        app.init_resource::<CausalChainState>();
+        app.add_message::<NetworkMoveEvent>();
+        app.add_message::<MoveMadeEvent>();
+        app.add_message::<RemoteMoveApplied>();
+        app.add_message::<crate::game::events::NetworkMoveResult>();
+        for color in [PieceColor::White, PieceColor::Black] {
+            let rank = if color == PieceColor::White { 0 } else { 7 };
+            let pawn_rank = if color == PieceColor::White { 1 } else { 6 };
+            for (file, kind) in [
+                PieceType::Rook,
+                PieceType::Knight,
+                PieceType::Bishop,
+                PieceType::Queen,
+                PieceType::King,
+                PieceType::Bishop,
+                PieceType::Knight,
+                PieceType::Rook,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                app.world_mut().spawn((
+                    Piece::new(color, kind, file as u8, rank),
+                    HasMoved::default(),
+                ));
+                app.world_mut().spawn((
+                    Piece::new(color, PieceType::Pawn, file as u8, pawn_rank),
+                    HasMoved::default(),
+                ));
+            }
+        }
+        app.add_systems(Update, handle_network_moves);
+        app
+    }
+
+    #[test]
+    fn accepted_move_produces_application_acknowledgment() {
+        let mut app = game();
+        app.world_mut().write_message(NetworkMoveEvent {
+            from: (4, 1),
+            to: (4, 3),
+            promotion: None,
+            expected_fen: None,
+            dedup_version: Some("v1".into()),
+        });
+        app.update();
+        let results = app
+            .world()
+            .resource::<Messages<crate::game::events::NetworkMoveResult>>();
+        let mut cursor = bevy::ecs::message::MessageCursor::default();
+        let result = cursor.read(results).next().unwrap();
+        assert_eq!(result.version.as_deref(), Some("v1"));
+        assert_eq!(
+            result.fen.as_deref(),
+            Some(app.world().resource::<ChessEngine>().current_fen())
+        );
+        assert!(app.world().resource::<CausalChainState>().applied_versions[&1].contains("v1"));
+    }
+
+    #[test]
+    fn illegal_turn_and_position_mismatch_never_acknowledge_a_move() {
+        for (from, to, expected_fen) in [
+            ((4, 1), (4, 4), None),
+            ((4, 6), (4, 4), None),
+            ((4, 2), (4, 3), None),
+            ((4, 1), (4, 3), Some("wrong-position".to_owned())),
+        ] {
+            let mut app = game();
+            app.world_mut().write_message(NetworkMoveEvent {
+                from,
+                to,
+                promotion: None,
+                expected_fen,
+                dedup_version: Some("rejected".into()),
+            });
+            app.update();
+            let results = app
+                .world()
+                .resource::<Messages<crate::game::events::NetworkMoveResult>>();
+            let mut cursor = bevy::ecs::message::MessageCursor::default();
+            assert!(cursor.read(results).next().unwrap().fen.is_none());
+            assert!(!app
+                .world()
+                .resource::<CausalChainState>()
+                .applied_versions
+                .get(&1)
+                .is_some_and(|versions| versions.contains("rejected")));
+            assert!(app
+                .world()
+                .resource::<Messages<RemoteMoveApplied>>()
+                .is_empty());
+        }
+    }
 }
 
 #[derive(Resource, Default)]

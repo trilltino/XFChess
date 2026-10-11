@@ -34,7 +34,7 @@ try {
     }
     cargo build --bin xfchess --features solana @buildFlags
     if ($LASTEXITCODE -ne 0) { throw 'Game build failed.' }
-    cargo build -p xfchess-tauri @buildFlags
+    cargo build -p xfchess-tauri --features custom-protocol @buildFlags
     if ($LASTEXITCODE -ne 0) { throw 'Tauri build failed.' }
 
     # Resolve and check the staging directory before removing a prior package.
@@ -51,9 +51,6 @@ try {
     Copy-Item -LiteralPath "$root/assets" -Destination "$stage/assets" -Recurse
     foreach ($binary in @('xfchess', 'xfchess-tauri')) {
         Copy-Item -LiteralPath "$root/target/$profile/$binary.exe" -Destination $stage
-    }
-    if (Test-Path "$root/stockfish.exe") {
-        Copy-Item -LiteralPath "$root/stockfish.exe" -Destination $stage
     }
 
     $backendLaunch = ''
@@ -84,9 +81,16 @@ set "SIGNING_SERVICE_URL=$BackendUrl"
 set "XFCHESS_BACKEND_PORT=8090"
 set "SIGNING_SERVER_PORT=8090"
 $backendLaunch
-start "XFChess" /D "%~dp0" "%~dp0xfchess-tauri.exe"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch.ps1"
 endlocal
 "@
     [IO.File]::WriteAllText("$stage/launch.bat", $launcher, [Text.Encoding]::ASCII)
+    $desktopLaunch = @'
+$ErrorActionPreference = 'Stop'
+$game = Start-Process -FilePath (Join-Path $PSScriptRoot 'xfchess.exe') -WorkingDirectory $PSScriptRoot -WindowStyle Normal -PassThru
+$env:XFCHESS_GAME_PID = $game.Id.ToString()
+Start-Process -FilePath (Join-Path $PSScriptRoot 'xfchess-tauri.exe') -WorkingDirectory $PSScriptRoot -WindowStyle Hidden
+'@
+    [IO.File]::WriteAllText("$stage/launch.ps1", $desktopLaunch, [Text.Encoding]::ASCII)
     Write-Host "Package staged at $stage"
 } finally { Pop-Location }

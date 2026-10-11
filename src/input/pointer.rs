@@ -2,25 +2,9 @@ use crate::game::components::GamePhase;
 use crate::game::resources::{CurrentGamePhase, CurrentTurn, Selection};
 use crate::rendering::pieces::Piece;
 use crate::rendering::utils::Square;
-use bevy::picking::events::{Out, Over, Pointer};
+use bevy::picking::events::{PointerOut, PointerOver};
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, SystemCursorIcon};
-
-#[derive(Resource, Debug, Reflect)]
-#[reflect(Resource)]
-pub struct CursorState {
-    pub position: Option<Vec2>,
-    pub last_update: f32,
-}
-
-impl Default for CursorState {
-    fn default() -> Self {
-        Self {
-            position: None,
-            last_update: 0.0,
-        }
-    }
-}
 
 #[derive(Resource, Debug, Reflect)]
 #[reflect(Resource)]
@@ -48,18 +32,8 @@ impl CursorStyle {
     }
 }
 
-#[derive(Resource, Debug, Reflect)]
-#[reflect(Resource)]
-pub struct HoverMaterials;
-
-impl Default for HoverMaterials {
-    fn default() -> Self {
-        Self
-    }
-}
-
 pub fn on_piece_hover(
-    hover: On<Pointer<Over>>,
+    hover: On<PointerOver>,
     piece_query: Query<&Piece>,
     current_turn: Res<CurrentTurn>,
     game_phase: Res<CurrentGamePhase>,
@@ -80,7 +54,7 @@ pub fn on_piece_hover(
     }
 }
 
-pub fn on_piece_unhover(unhover: On<Pointer<Out>>, mut cursor_style: Option<ResMut<CursorStyle>>) {
+pub fn on_piece_unhover(unhover: On<PointerOut>, mut cursor_style: Option<ResMut<CursorStyle>>) {
     if let Some(ref mut cs) = cursor_style {
         cs.active_hovers.remove(&unhover.entity);
         cs.update();
@@ -88,7 +62,7 @@ pub fn on_piece_unhover(unhover: On<Pointer<Out>>, mut cursor_style: Option<ResM
 }
 
 pub fn on_square_hover(
-    hover: On<Pointer<Over>>,
+    hover: On<PointerOver>,
     square_query: Query<&Square>,
     selection: Res<Selection>,
     game_phase: Res<CurrentGamePhase>,
@@ -111,7 +85,7 @@ pub fn on_square_hover(
     }
 }
 
-pub fn on_square_unhover(unhover: On<Pointer<Out>>, mut cursor_style: Option<ResMut<CursorStyle>>) {
+pub fn on_square_unhover(unhover: On<PointerOut>, mut cursor_style: Option<ResMut<CursorStyle>>) {
     if let Some(ref mut cs) = cursor_style {
         cs.active_hovers.remove(&unhover.entity);
         cs.update();

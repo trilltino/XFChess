@@ -190,9 +190,6 @@ impl SigningConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static APP_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn base_config() -> SigningConfig {
         SigningConfig {
@@ -220,7 +217,7 @@ mod tests {
 
     #[test]
     fn missing_authority_key_is_fine_outside_production() {
-        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        let _env = crate::test_env::lock();
         std::env::remove_var("APP_ENV");
         let mut config = base_config();
         config.vps_authority_key = None;
@@ -229,7 +226,7 @@ mod tests {
 
     #[test]
     fn missing_authority_key_is_fatal_in_production() {
-        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        let _env = crate::test_env::lock();
         std::env::set_var("APP_ENV", "production");
         std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let mut config = base_config();
@@ -243,7 +240,7 @@ mod tests {
 
     #[test]
     fn all_authority_keys_present_passes_in_production() {
-        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        let _env = crate::test_env::lock();
         std::env::set_var("APP_ENV", "production");
         std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let result = base_config().validate();
@@ -254,7 +251,7 @@ mod tests {
 
     #[test]
     fn missing_admin_api_key_is_fatal_in_production() {
-        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        let _env = crate::test_env::lock();
         std::env::set_var("APP_ENV", "production");
         std::env::remove_var("ADMIN_API_KEY");
         let result = base_config().validate();
@@ -265,7 +262,7 @@ mod tests {
 
     #[test]
     fn invalid_treasury_pubkey_is_fatal_in_production() {
-        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        let _env = crate::test_env::lock();
         std::env::set_var("APP_ENV", "production");
         std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let mut config = base_config();
@@ -279,7 +276,7 @@ mod tests {
 
     #[test]
     fn missing_allowed_origins_is_fatal_in_production() {
-        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        let _env = crate::test_env::lock();
         std::env::set_var("APP_ENV", "production");
         std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let mut config = base_config();
@@ -293,7 +290,7 @@ mod tests {
 
     #[test]
     fn is_production_reflects_app_env() {
-        let _guard = APP_ENV_TEST_LOCK.lock().unwrap();
+        let _env = crate::test_env::lock();
         std::env::set_var("APP_ENV", "production");
         assert!(base_config().is_production());
         std::env::set_var("APP_ENV", "development");

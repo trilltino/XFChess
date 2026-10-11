@@ -1,27 +1,46 @@
 import { useState } from "react";
 import { apiClient } from "../services/api";
+import { useAuth } from "../hooks/useAuth";
+import { saveAdminToken } from "../services/credentials";
+import { getOpsConfig, opsConfigProblem, saveOpsConfig, type OpsConfig } from "../config/environments";
 
 const FEEPAYER_THRESHOLD_KEY = "feepayer_threshold_sol";
 
-export default function Settings() {
-  // Token rotation
-  const [tokenMsg, setTokenMsg] = useState<string | null>(null);
+const fieldStyle = { background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" };
+const primaryButton = { padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" };
 
-  // Feepayer threshold
+export default function Settings() {
+  const { authState } = useAuth();
+  const [tokenMsg, setTokenMsg] = useState<string | null>(null);
+  const [ops, setOps] = useState<OpsConfig>(getOpsConfig);
+  const [opsMsg, setOpsMsg] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(
     parseFloat(localStorage.getItem(FEEPAYER_THRESHOLD_KEY) || "0.5").toString()
   );
   const [thresholdMsg, setThresholdMsg] = useState<string | null>(null);
 
   const handleRotateToken = async () => {
+    if (!window.confirm("Rotate the admin key? Every other panel using the old key will need the new one.")) return;
     const r = await apiClient.rotateToken();
-    if (r.ok) {
-      const newToken = r.data?.new_token as string;
-      apiClient.setCredentials(newToken, apiClient.getBaseUrl());
-      setTokenMsg(`Token rotated. New token saved to localStorage. Old token invalidated on next backend restart.`);
-    } else {
+    if (!r.ok) {
       setTokenMsg(`Error: ${r.error?.message}`);
+      return;
     }
+    const newToken = r.data?.new_token as string;
+    apiClient.setCredentials(newToken, apiClient.getBaseUrl());
+    try {
+      await saveAdminToken(authState.env, newToken);
+      setTokenMsg("Key rotated and saved to your OS credential store. The old key stops working on the next backend restart.");
+    } catch (e) {
+      setTokenMsg(`Error: key rotated but could not be saved (${String(e)}). Copy it from the backend before closing.`);
+    }
+  };
+
+  const handleSaveOps = () => {
+    const problem = opsConfigProblem(ops);
+    if (problem) { setOpsMsg(`Error: ${problem}`); return; }
+    saveOpsConfig(ops);
+    setOpsMsg("Saved. Used the next time you log on to PRODUCTION or open the ops console.");
   };
 
   const handleSaveThreshold = () => {
@@ -36,45 +55,47 @@ export default function Settings() {
     <div style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: "2rem", maxWidth: "700px" }}>
       <div>
         <h1 style={{ margin: 0, color: "#fff", fontSize: "1.5rem" }}>ADMIN <span style={{ color: "var(--primary)" }}>SETTINGS</span></h1>
-        <p style={{ color: "var(--text-dim)", margin: "0.25rem 0 0" }}>Key rotation, token management, and alert thresholds</p>
+        <p style={{ color: "var(--text-dim)", margin: "0.25rem 0 0" }}>Connection, key rotation and alert thresholds</p>
       </div>
+
+      <SettingsCard title="OPS CONNECTION">
+        <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 1rem", lineHeight: "1.6" }}>
+          The production VPS and SSH key used for the PRODUCTION tunnel and the Hetzner console. Stored on this machine only.
+        </p>
+        <div style={{ display: "grid", gap: "8px" }}>
+          <input aria-label="Production VPS host" value={ops.vpsHost} onChange={e => setOps(o => ({ ...o, vpsHost: e.target.value }))} placeholder="VPS host (IPv4)" style={fieldStyle} />
+          <input aria-label="SSH key path" value={ops.sshKeyPath} onChange={e => setOps(o => ({ ...o, sshKeyPath: e.target.value }))} placeholder="~/.ssh/xfchess_vps" style={fieldStyle} />
+          <button onClick={handleSaveOps} style={{ ...primaryButton, justifySelf: "start" }}>SAVE</button>
+        </div>
+        {opsMsg && <div style={{ marginTop: "8px", fontSize: "12px", color: opsMsg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{opsMsg}</div>}
+      </SettingsCard>
 
       {/* VPS Authority rotation — runbook, not a button */}
       <SettingsCard title="VPS AUTHORITY KEY ROTATION" danger>
         <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: 0, lineHeight: "1.6" }}>
-          Authority-key rotation is a deliberate operational procedure, not a one-click action — the
-          old "rotate" button only logged and told you to hand-edit <code style={{ color: "var(--primary)" }}>.env</code> anyway.
+          Authority-key rotation is a deliberate operational procedure, not a one-click action.
           Follow <code style={{ color: "var(--primary)" }}>ops/SECRETS_ROTATION.md</code>: generate the new keypair
           offline, update <code style={{ color: "var(--primary)" }}>VPS_AUTHORITY_KEY</code> in <code style={{ color: "var(--primary)" }}>/opt/xfchess/.env</code>,
-          and restart <code style={{ color: "var(--primary)" }}>xfchess-backend</code>. Treasury/dispute authorities move to a Squads multisig in Phase 5.
+          and restart <code style={{ color: "var(--primary)" }}>xfchess-backend</code>.
         </p>
       </SettingsCard>
 
-      {/* Admin token rotation */}
-      <SettingsCard title="ADMIN TOKEN ROTATION">
+      <SettingsCard title="ADMIN KEY ROTATION">
         <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 1rem", lineHeight: "1.6" }}>
-          Generate a new admin Bearer token. The new token is saved to localStorage and this session automatically. Old token is invalidated on next backend restart (update <code style={{ color: "var(--primary)" }}>ADMIN_TOKEN</code> in .env).
+          Generate a new admin key for {authState.env.toUpperCase()}. It replaces the saved key in your OS credential store; the old key stops working on the next backend restart (update <code style={{ color: "var(--primary)" }}>ADMIN_TOKEN</code> in .env).
         </p>
-        <button onClick={handleRotateToken}
-          style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
-          ROTATE TOKEN
-        </button>
+        <button onClick={handleRotateToken} style={primaryButton}>ROTATE KEY</button>
         {tokenMsg && <div style={{ marginTop: "8px", fontSize: "12px", color: tokenMsg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{tokenMsg}</div>}
       </SettingsCard>
 
-      {/* Feepayer alert threshold */}
       <SettingsCard title="FEEPAYER ALERT THRESHOLD">
         <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 1rem", lineHeight: "1.6" }}>
           Dashboard shows a red banner when feepayer balance drops below this threshold.
         </p>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <input value={threshold} onChange={e => setThreshold(e.target.value)} type="number" step="0.1" min="0"
-            style={{ width: "120px", background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", color: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }} />
+          <input value={threshold} onChange={e => setThreshold(e.target.value)} type="number" step="0.1" min="0" style={{ ...fieldStyle, width: "120px" }} />
           <span style={{ color: "var(--text-dim)", fontSize: "12px" }}>SOL</span>
-          <button onClick={handleSaveThreshold}
-            style={{ padding: "8px 20px", borderRadius: "8px", backgroundColor: "var(--primary)", color: "#000", border: "none", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
-            SAVE
-          </button>
+          <button onClick={handleSaveThreshold} style={primaryButton}>SAVE</button>
         </div>
         {thresholdMsg && <div style={{ marginTop: "8px", fontSize: "12px", color: "#4ade80" }}>{thresholdMsg}</div>}
       </SettingsCard>

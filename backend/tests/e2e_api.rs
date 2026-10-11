@@ -15,6 +15,107 @@ use backend::signing::storage::SessionStore;
 use backend::signing::{AppState, SigningConfig};
 use std::sync::Mutex;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cu_benchmark_runs_100_games_through_backend() {
+    use cu_benchmark::system::{report, runner, scenario::Scenario};
+    use solana_sdk::signature::{Keypair, Signer};
+
+    let databases = tempfile::tempdir().unwrap();
+    let session_url = format!(
+        "sqlite:{}?mode=rwc",
+        databases.path().join("session.db").display()
+    );
+    let vault_url = format!(
+        "sqlite:{}?mode=rwc",
+        databases.path().join("vault.db").display()
+    );
+    let app = spawn_app_on(&session_url, &vault_url).await;
+    let white = Keypair::new();
+    let black = Keypair::new();
+    for (key, name) in [(&white, "bench-white"), (&black, "bench-black")] {
+        app.state
+            .store
+            .create_wallet_user(&key.pubkey().to_string(), name, None)
+            .await
+            .unwrap();
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let router = app.router();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let mut config: Value = serde_json::from_str(include_str!(
+        "../../crates/cu_benchmark/scenarios/backend.json"
+    ))
+    .unwrap();
+    config["backend_url"] = json!(base);
+    config["stages"] = json!([{"name":"100-games","games":100,"concurrency":10}]);
+    config["variables"] = json!({"white_wallet":white.pubkey().to_string(),"black_wallet":black.pubkey().to_string()});
+    let timestamp = chrono::Utc::now().timestamp() as u64;
+    let message = format!("xfchess:login:{timestamp}");
+    let mut login = Vec::new();
+    for (name, key, capture) in [
+        ("login-white", &white, "white_token"),
+        ("login-black", &black, "black_token"),
+    ] {
+        login.push(json!({"name":name,"method":"POST","path":"/api/auth/login",
+            "body":{"wallet":key.pubkey().to_string(),"signature":key.sign_message(message.as_bytes()).to_string(),"timestamp":timestamp},
+            "capture":{capture:"/token"},"expect":{"/wallet":key.pubkey().to_string()}}));
+    }
+    login.extend(config["workflow"]["setup"].as_array().unwrap().clone());
+    config["workflow"]["setup"] = json!(login);
+    config["workflow"]["move_interval_ms"] = json!(10);
+    config["sampling_ms"] = json!(50);
+    config["baseline_ms"] = json!(100);
+    config["drain_ms"] = json!(100);
+    config["limits"] = json!({"request_p95_ms":10000,"error_ratio":0.1,"min_duration_ms":0,"max_schedule_lag_ms":10000});
+    let telemetry = config["telemetry"].as_array_mut().unwrap();
+    telemetry.retain(|metric| {
+        !metric["name"].as_str().unwrap().starts_with("host-") && metric["name"] != "egress"
+    });
+    for metric in telemetry {
+        metric["url"] = json!(format!("{base}/metrics"));
+    }
+    config["pricing"] = json!({"configured":true,"currency":"GBP","monthly_games":10000,
+        "fixed":[{"name":"fixture-only VPS assumption","monthly_minor_units":2000}],
+        "metered":[{"name":"fixture-only RPC assumption","metric":"rpc-calls","quantity_per_unit":1000,"minor_units_per_unit":1}]});
+    let scenario: Scenario = serde_json::from_value(config).unwrap();
+    scenario.validate().unwrap();
+    let observed = runner::execute(&scenario, false).await.unwrap();
+    let report = report::build(&scenario, observed).unwrap();
+    let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tmp/cu_benchmark-backend-e2e.json");
+    std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+    std::fs::write(&output, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    let stage = &report.stages[0];
+    assert_eq!(stage.observed.completed_games, 100, "{:?}", stage.reasons);
+    assert_eq!(stage.observed.cleanup_failed_games, 0);
+    assert_eq!(stage.observed.streams.connections, 200);
+    assert_eq!(stage.observed.streams.errors, 0);
+    assert!(stage.observed.streams.received_chunks >= 200);
+    assert!(stage.metrics["backend-memory"].complete);
+    assert!(stage.metrics["rpc-calls"].complete);
+    assert_eq!(stage.operating_costs.fixed_monthly_minor_units, Some(2000));
+    assert_eq!(stage.measured_transaction_fees_lamports, 0);
+    let moves: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM game_event_log WHERE kind = 'move'")
+        .fetch_one(&app.state.store.pool())
+        .await
+        .unwrap();
+    assert_eq!(moves, 400);
+    assert_eq!(
+        report.max_passing_observed_concurrency,
+        Some(10),
+        "{:?}",
+        stage.reasons
+    );
+    println!(
+        "100 games, 400 persisted moves, 200 spectator streams; report: {}",
+        output.display()
+    );
+    server.abort();
+}
+
 fn unique_db_url(tag: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -164,7 +265,6 @@ async fn spawn_app_on(session_url: &str, vault_url: &str) -> TestApp {
     TestApp { state }
 }
 
-
 #[tokio::test]
 async fn metrics_endpoint_exposes_worker_counters() {
     let app = spawn_app().await;
@@ -202,9 +302,16 @@ async fn metrics_endpoint_exposes_worker_counters() {
 async fn health_detailed_reports_real_memory_and_disk_state() {
     let app = spawn_app().await;
     let (status, body) = app.get("/health/detailed").await;
-    // "degraded" (e.g. the RPC check failing against this test's unreachable
-    // RPC URL) still returns 200 — only "critical" returns 503.
-    assert_eq!(status, StatusCode::OK, "{body}");
+    // Only "critical" returns 503; "degraded" (e.g. this test's unreachable RPC)
+    // stays 200. Whether the host is critical depends on the machine running the
+    // test (a nearly full disk is), so check the code matches the reported status.
+    let critical = body["status"] == "critical";
+    let expected = if critical {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
+    };
+    assert_eq!(status, expected, "{body}");
 
     let checks = body["checks"].as_array().expect("checks array");
     let find = |name: &str| {
@@ -214,24 +321,32 @@ async fn health_detailed_reports_real_memory_and_disk_state() {
             .unwrap_or_else(|| panic!("no '{name}' check in {checks:?}"))
     };
 
-    let memory = find("memory");
-    assert_eq!(memory["status"], "ok", "memory check: {memory}");
-    let memory_msg = memory["message"].as_str().unwrap_or_default();
-    assert!(
-        memory_msg.contains('%'),
-        "memory check should report a real usage percentage, not the old \
-         hardcoded placeholder string: {memory_msg}"
-    );
-
-    let disk = find("disk_space");
-    let disk_msg = disk["message"].as_str().unwrap_or_default();
-    assert!(
-        disk_msg.contains('%'),
-        "disk check should report a real usage percentage on every OS \
-         (including Windows), not the old always-warning placeholder: {disk_msg}"
-    );
+    // Both checks must report a real usage percentage (not the old placeholder
+    // strings) and classify it: over 90% critical, over 80% warning, else ok.
+    for name in ["memory", "disk_space"] {
+        let check = find(name);
+        let msg = check["message"].as_str().unwrap_or_default();
+        let percent = usage_percent(msg)
+            .unwrap_or_else(|| panic!("{name} check should report a usage percentage: {msg}"));
+        let expected = if percent > 90.0 {
+            "critical"
+        } else if percent > 80.0 {
+            "warning"
+        } else {
+            "ok"
+        };
+        assert_eq!(check["status"], expected, "{name} check: {check}");
+    }
 }
 
+/// The first `NN.N%` in a health-check message.
+fn usage_percent(msg: &str) -> Option<f64> {
+    let end = msg.find('%')?;
+    let start = msg[..end]
+        .rfind(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .map_or(0, |i| i + 1);
+    msg[start..end].parse().ok()
+}
 
 #[tokio::test]
 async fn blur_telemetry_requires_a_wallet_identity() {
@@ -321,7 +436,6 @@ async fn blur_telemetry_enforces_ply_parity() {
     assert_ne!(ok_parity, StatusCode::NO_CONTENT);
 }
 
-
 #[tokio::test]
 async fn broadcast_delay_gates_public_move_feed() {
     let app = spawn_app().await;
@@ -362,7 +476,6 @@ async fn broadcast_delay_gates_public_move_feed() {
     assert_eq!(body["delay_secs"].as_i64().unwrap(), 3600);
 }
 
-
 #[tokio::test]
 async fn completed_game_surfaces_in_history() {
     let app = spawn_app().await;
@@ -393,7 +506,6 @@ async fn completed_game_surfaces_in_history() {
     );
 }
 
-
 #[tokio::test]
 async fn dispute_notify_then_status() {
     let app = spawn_app().await;
@@ -423,7 +535,6 @@ async fn dispute_notify_then_status() {
     let (status, _) = app.get("/dispute/999999").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
-
 
 use solana_sdk::signature::{Keypair, Signer};
 
@@ -1030,7 +1141,6 @@ async fn treasury_refund_never_signs_in_process() {
     assert!(handoff.get("command").is_none(), "no shell line: {body}");
 }
 
-
 #[tokio::test]
 async fn tournament_template_round_trip_persists_and_is_audited() {
     let app = spawn_app().await;
@@ -1471,4 +1581,102 @@ async fn casual_player_can_write_more_than_one_move_in_the_same_backend_process(
         assert_eq!(put_move(&app, game_id, m, None).await, StatusCode::OK);
     }
     assert_eq!(move_log(&app, game_id).await.len(), 4);
+}
+
+const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+/// Adds a puzzle whose line is setup 1.e4, then player ...e5, reply 2.Nf3,
+/// player ...Nc6.
+async fn insert_puzzle(app: &TestApp, id: &str, themes: &str) {
+    sqlx::query("INSERT INTO puzzles (id, fen, line, rating, themes) VALUES (?, ?, ?, 1500, ?)")
+        .bind(id)
+        .bind(START_FEN)
+        .bind("e2e4 e7e5 g1f3 b8c6")
+        .bind(themes)
+        .execute(&app.state.store.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn puzzle_next_filters_by_theme_and_validates_input() {
+    let app = spawn_app().await;
+    insert_puzzle(&app, "pFork", "fork middlegame").await;
+    insert_puzzle(&app, "pPin", "pin short").await;
+
+    for _ in 0..5 {
+        let (status, body) = app
+            .get("/puzzle/next?wallet=themeW&theme=fork&difficulty=harder")
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["id"], "pFork", "{body}");
+        assert_eq!(body["themes"], json!(["fork", "middlegame"]));
+        assert_eq!(body["source"], "local");
+        assert_eq!(body["color"], "black");
+    }
+
+    let (status, _) = app.get("/puzzle/next?wallet=themeW&theme=nope").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = app.get("/puzzle/next?wallet=themeW&difficulty=insane").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, themes) = app.get("/puzzle/themes").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(themes
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["key"] == "fork" && t["label"] == "Fork"));
+}
+
+#[tokio::test]
+async fn puzzle_from_lichess_requires_wallet_auth() {
+    let app = spawn_app().await;
+    let (status, _) = app
+        .get("/puzzle/next?wallet=lichessW&source=lichess")
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// Plays the test line to the end and returns the final move's response.
+async fn solve(app: &TestApp, wallet: &str, hint: bool) -> Value {
+    let (_, puzzle) = app.get(&format!("/puzzle/next?wallet={wallet}")).await;
+    let nonce = puzzle["nonce"].as_str().expect("nonce").to_owned();
+    if hint {
+        let (status, h) = app
+            .post_json("/puzzle/hint", &json!({ "nonce": nonce }))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{h}");
+        assert_eq!(h, json!({ "from": "e7", "rated": false }));
+    }
+    let (_, first) = app
+        .post_json("/puzzle/move", &json!({ "nonce": nonce, "uci": "e7e5" }))
+        .await;
+    assert_eq!(first, json!({ "correct": true, "done": false, "reply": "g1f3" }));
+    let (_, last) = app
+        .post_json("/puzzle/move", &json!({ "nonce": nonce, "uci": "b8c6" }))
+        .await;
+    assert_eq!(last["win"], true, "{last}");
+    last
+}
+
+#[tokio::test]
+async fn puzzle_hint_makes_the_round_unrated() {
+    let app = spawn_app().await;
+    insert_puzzle(&app, "pLine", "opening").await;
+
+    let rated = solve(&app, "ratedW", false).await;
+    assert!(rated["rating_diff"].as_i64().unwrap() > 0, "{rated}");
+
+    let hinted = solve(&app, "hintW", true).await;
+    assert_eq!(hinted["rating_diff"], 0, "{hinted}");
+    let (_, rating) = app.get("/puzzle/rating/hintW").await;
+    assert_eq!(rating["rating"], hinted["rating"]);
+
+    let flags: Vec<(String, i64)> =
+        sqlx::query_as("SELECT wallet, rated FROM puzzle_rounds ORDER BY wallet")
+            .fetch_all(&app.state.store.pool())
+            .await
+            .unwrap();
+    assert_eq!(flags, [("hintW".into(), 0), ("ratedW".into(), 1)]);
 }

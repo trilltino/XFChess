@@ -20,6 +20,7 @@ export default function Layout({ children, currentPage = "dashboard", onPageChan
     { id: "dashboard", label: "Dashboard", icon: "" },
     { id: "tournaments", label: "Tournaments", icon: "" },
     { id: "create", label: "Create Tournament", icon: "" },
+    { id: "offline", label: "Offline Events", icon: "" },
     { id: "hetzner", label: "Hetzner Server", icon: "" },
     { id: "matches", label: "Match Management", icon: "" },
     { id: "players", label: "Players", icon: "" },

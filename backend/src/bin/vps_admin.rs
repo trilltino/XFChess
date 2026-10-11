@@ -96,7 +96,6 @@ fn client() -> reqwest::blocking::Client {
         .expect("Failed to build HTTP client - check system configuration")
 }
 
-
 #[derive(Debug, Deserialize)]
 struct TournamentSummary {
     tournament_id: u64,
@@ -160,7 +159,6 @@ struct SetMatchGameIdReq {
     match_index: usize,
     game_id: u64,
 }
-
 
 fn print_header() {
     println!("\n╔══════════════════════════════════════════════════════════════════╗");
@@ -247,7 +245,6 @@ fn confirm(prompt: &str) -> bool {
     input == "y" || input == "yes"
 }
 
-
 fn list_tournaments() {
     println!("\n[LIST] Fetching tournaments...\n");
 
@@ -332,10 +329,10 @@ fn create_tournament() {
             max_players
         );
         if confirm("Use custom prize shares?") {
-            let first = read_u16("1st place (basis points, 10000 = 100%)") as u16;
-            let second = read_u16("2nd place (basis points)") as u16;
-            let third = read_u16("3rd place (basis points)") as u16;
-            let fourth = read_u16("4th place (basis points)") as u16;
+            let first = read_u16("1st place (basis points, 10000 = 100%)");
+            let second = read_u16("2nd place (basis points)");
+            let third = read_u16("3rd place (basis points)");
+            let fourth = read_u16("4th place (basis points)");
             [first, second, third, fourth]
         } else {
             [5000, 3000, 1500, 500]
@@ -397,84 +394,81 @@ fn view_tournament() {
         .get(format!("{}/api/tournament/{}", vps_base(), id))
         .send()
     {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<TournamentDetail>() {
-                Ok(t) => {
-                    let actual_prize_pool = t.entry_fee_lamports * t.players.len() as u64;
-                    let is_free = t.entry_fee_lamports == 0;
+        Ok(resp) if resp.status().is_success() => match resp.json::<TournamentDetail>() {
+            Ok(t) => {
+                let actual_prize_pool = t.entry_fee_lamports * t.players.len() as u64;
+                let is_free = t.entry_fee_lamports == 0;
 
-                    println!("┌─────────────────────────────────────────────────────────────────┐");
+                println!("┌─────────────────────────────────────────────────────────────────┐");
+                println!(
+                    "│ TOURNAMENT #{} {:<48}│",
+                    t.tournament_id,
+                    &t.name[..t.name.len().min(48)]
+                );
+                println!("├─────────────────────────────────────────────────────────────────┤");
+                println!("│ Status:     {:<50}│", t.status);
+                println!(
+                    "│ Players:    {:>3}/{:<47}│",
+                    t.players.len(),
+                    t.max_players
+                );
+
+                if is_free {
+                    println!("│ Entry Fee:  FREE (Practice Tournament){:>25}│", "");
+                    println!("│ Prize Pool: N/A (No prizes){:>37}│", "");
+                } else {
+                    let fee_sol = t.entry_fee_lamports as f64 / 1_000_000_000.0;
+                    let pool_sol = actual_prize_pool as f64 / 1_000_000_000.0;
+                    println!("│ Entry Fee:  {:>10.6} SOL per player{:>25}│", fee_sol, "");
                     println!(
-                        "│ TOURNAMENT #{} {:<48}│",
-                        t.tournament_id,
-                        &t.name[..t.name.len().min(48)]
-                    );
-                    println!("├─────────────────────────────────────────────────────────────────┤");
-                    println!("│ Status:     {:<50}│", t.status);
-                    println!(
-                        "│ Players:    {:>3}/{:<47}│",
+                        "│ Prize Pool: {:>10.3} SOL ({} players x {:.6} SOL){:>10}│",
+                        pool_sol,
                         t.players.len(),
-                        t.max_players
-                    );
-
-                    if is_free {
-                        println!("│ Entry Fee:  FREE (Practice Tournament){:>25}│", "");
-                        println!("│ Prize Pool: N/A (No prizes){:>37}│", "");
-                    } else {
-                        let fee_sol = t.entry_fee_lamports as f64 / 1_000_000_000.0;
-                        let pool_sol = actual_prize_pool as f64 / 1_000_000_000.0;
-                        println!("│ Entry Fee:  {:>10.6} SOL per player{:>25}│", fee_sol, "");
-                        println!(
-                            "│ Prize Pool: {:>10.3} SOL ({} players x {:.6} SOL){:>10}│",
-                            pool_sol,
-                            t.players.len(),
-                            fee_sol,
-                            ""
-                        );
-                    }
-
-                    println!(
-                        "│ Prize Dist: {:>4}/{:>4}/{:>4}/{:>4} % (1st/2nd/3rd/4th){:>13}│",
-                        t.prize_shares[0] / 100,
-                        t.prize_shares[1] / 100,
-                        t.prize_shares[2] / 100,
-                        t.prize_shares[3] / 100,
+                        fee_sol,
                         ""
                     );
-
-                    if let Some(ref w) = t.winner {
-                        println!("│ Winner:     {:<50}│", &w[..w.len().min(50)]);
-                    }
-                    if let Some(ref s) = t.second_place {
-                        println!("│ 2nd Place:  {:<50}│", &s[..s.len().min(50)]);
-                    }
-                    if let Some(ref t3) = t.third_place {
-                        println!("│ 3rd Place:  {:<50}│", &t3[..t3.len().min(50)]);
-                    }
-                    if let Some(ref t4) = t.fourth_place {
-                        println!("│ 4th Place:  {:<50}│", &t4[..t4.len().min(50)]);
-                    }
-
-                    println!("├─────────────────────────────────────────────────────────────────┤");
-                    println!("│ REGISTERED PLAYERS (sorted by ELO):                             │");
-                    println!("├─────────────────────────────────────────────────────────────────┤");
-
-                    for (i, (player, elo)) in t.players.iter().zip(t.player_elos.iter()).enumerate()
-                    {
-                        let seed = i + 1;
-                        let short_id = if player.len() > 40 {
-                            format!("{}...{}", &player[..20], &player[player.len() - 17..])
-                        } else {
-                            player.clone()
-                        };
-                        println!("│ #{} {:<6} ELO: {:<5} {:<43}│", seed, "", elo, short_id);
-                    }
-
-                    println!("└─────────────────────────────────────────────────────────────────┘");
                 }
-                Err(e) => println!("  [ERROR] Error parsing: {}", e),
+
+                println!(
+                    "│ Prize Dist: {:>4}/{:>4}/{:>4}/{:>4} % (1st/2nd/3rd/4th){:>13}│",
+                    t.prize_shares[0] / 100,
+                    t.prize_shares[1] / 100,
+                    t.prize_shares[2] / 100,
+                    t.prize_shares[3] / 100,
+                    ""
+                );
+
+                if let Some(ref w) = t.winner {
+                    println!("│ Winner:     {:<50}│", &w[..w.len().min(50)]);
+                }
+                if let Some(ref s) = t.second_place {
+                    println!("│ 2nd Place:  {:<50}│", &s[..s.len().min(50)]);
+                }
+                if let Some(ref t3) = t.third_place {
+                    println!("│ 3rd Place:  {:<50}│", &t3[..t3.len().min(50)]);
+                }
+                if let Some(ref t4) = t.fourth_place {
+                    println!("│ 4th Place:  {:<50}│", &t4[..t4.len().min(50)]);
+                }
+
+                println!("├─────────────────────────────────────────────────────────────────┤");
+                println!("│ REGISTERED PLAYERS (sorted by ELO):                             │");
+                println!("├─────────────────────────────────────────────────────────────────┤");
+
+                for (i, (player, elo)) in t.players.iter().zip(t.player_elos.iter()).enumerate() {
+                    let seed = i + 1;
+                    let short_id = if player.len() > 40 {
+                        format!("{}...{}", &player[..20], &player[player.len() - 17..])
+                    } else {
+                        player.clone()
+                    };
+                    println!("│ #{} {:<6} ELO: {:<5} {:<43}│", seed, "", elo, short_id);
+                }
+
+                println!("└─────────────────────────────────────────────────────────────────┘");
             }
-        }
+            Err(e) => println!("  [ERROR] Error parsing: {}", e),
+        },
         Ok(resp) if resp.status() == 404 => println!("  [ERROR] Tournament not found."),
         Ok(resp) => println!("  [ERROR] HTTP error: {}", resp.status()),
         Err(e) => println!("  [ERROR] Request failed: {}", e),
@@ -810,7 +804,6 @@ fn fund_prize() {
         Err(e) => println!("  [ERROR] Request failed: {}", e),
     }
 }
-
 
 fn main() {
     print_header();

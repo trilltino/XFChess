@@ -2,7 +2,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use super::coordinates::{square_world, SQUARE_SIZE};
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::GameState;
 use crate::xf_animate::viewport::MINI_LAYER;
 
 #[derive(Component)]

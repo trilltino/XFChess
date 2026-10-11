@@ -326,11 +326,9 @@ fn scan(wallet: &Pubkey, rpc_url: &str) -> WagerScan {
 }
 
 pub fn spawn_scan(wallet: Pubkey, rpc_url: String, tx: oneshot::Sender<WagerScan>) {
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            let _ = tx.send(scan(&wallet, &rpc_url));
-        })
-        .detach();
+    crate::core::net_task::spawn_detached("wager_recovery", move || {
+        let _ = tx.send(scan(&wallet, &rpc_url));
+    });
 }
 
 #[cfg(test)]

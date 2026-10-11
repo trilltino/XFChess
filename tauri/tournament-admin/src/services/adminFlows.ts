@@ -40,11 +40,10 @@ export function swissResult(round: number, board: number | undefined, outcome: R
   return { round, board, result: outcome.result, ...(outcome.reason ? { reason: outcome.reason } : {}) };
 }
 
-export function duplicateConfig(source: TournamentDetail, newId: number): CreateTournamentRequest {
-  if (!Number.isSafeInteger(newId) || newId <= 0 || newId === source.tournament_id) throw new Error("A new tournament ID is required.");
+export function duplicateConfig(source: TournamentDetail): CreateTournamentRequest {
   if (source.format !== "Swiss" && source.format !== "SingleElimination") throw new Error("Unsupported format.");
   return {
-    tournament_id: newId, name: `${source.max_players}-player ${source.format}`,
+    name: `${source.name} (copy)`,
     format: source.format, max_players: source.max_players as CreateTournamentRequest["max_players"],
     entry_fee_lamports: source.entry_fee_lamports, platform_fee_lamports: source.platform_fee_lamports ?? 0,
     prize_shares: source.prize_shares ? [...source.prize_shares] : undefined,

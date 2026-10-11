@@ -1,4 +1,4 @@
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::panic;
 use std::time::SystemTime;

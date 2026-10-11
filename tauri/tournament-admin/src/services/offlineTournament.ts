@@ -73,20 +73,20 @@ function createBracket(participants: OfflineParticipant[]): OfflineMatch[] {
   const seeded = [...participants].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
   const matches: OfflineMatch[] = [];
   let index = 0;
-  let roundSize = size / 2;
-  let round = 1;
-  while (roundSize >= 1) {
+  for (let roundSize = size / 2, round = 1; roundSize >= 1; roundSize = Math.floor(roundSize / 2), round++) {
     for (let board = 1; board <= roundSize; board++) {
-      const match: OfflineMatch = { index: index++, round, board, white: null, black: null, result: null };
-      if (round === 1) {
-        match.white = seeded[(board - 1) * 2]?.identity ?? null;
-        match.black = seeded[(board - 1) * 2 + 1]?.identity ?? null;
-        if (!match.black) match.result = "white";
-      }
-      matches.push(match);
+      matches.push({ index: index++, round, board, white: null, black: null, result: null });
     }
-    roundSize = Math.floor(roundSize / 2);
-    round++;
+  }
+  // Seed b meets seed size+1-b (as the on-chain bracket does), so a field short of a
+  // power of two hands its top seeds byes, which advance immediately.
+  for (const match of matches.filter(m => m.round === 1)) {
+    match.white = seeded[match.board - 1]?.identity ?? null;
+    match.black = seeded[size - match.board]?.identity ?? null;
+    if (match.white && !match.black) {
+      match.result = "white";
+      advanceWinner(matches, match, match.white);
+    }
   }
   return matches;
 }
@@ -131,6 +131,31 @@ export function recordOfflineSwissResult(tournament: OfflineTournament, white: s
   else { whiteStanding.score += 0.5; blackStanding.score += 0.5; }
   standings.sort((a, b) => b.score - a.score || a.identity.localeCompare(b.identity)).forEach((s, i) => { s.rank = i + 1; });
   return update(tournament, { standings });
+}
+
+/** Swiss events finish when the organiser says so; brackets finish on their final. */
+export function completeOfflineTournament(tournament: OfflineTournament): OfflineTournament {
+  if (tournament.status !== "active") throw new Error("Only an active tournament can be completed");
+  return update(tournament, { status: "completed" });
+}
+
+export function cancelOfflineTournament(tournament: OfflineTournament): OfflineTournament {
+  if (tournament.status === "completed" || tournament.status === "cancelled") {
+    throw new Error("Tournament is already finished");
+  }
+  return update(tournament, { status: "cancelled" });
+}
+
+/**
+ * Accepts a stored state, rebuilding a draft saved without a bracket or standings
+ * (the earlier panel stored participants only).
+ */
+export function loadOfflineTournament(state: any): OfflineTournament {
+  if (Array.isArray(state?.matches) && Array.isArray(state?.standings)) return state as OfflineTournament;
+  if (state?.status && state.status !== "draft") throw new Error("Stored event has no bracket and is past draft");
+  const participants: OfflineParticipant[] = (state?.participants ?? []).map((p: any) =>
+    typeof p === "string" ? { identity: p, name: p } : p);
+  return { ...createOfflineTournament({ id: state.id, name: state.name, format: state.format, participants }), revision: state.revision ?? 0 };
 }
 
 function update(tournament: OfflineTournament, changes: Partial<OfflineTournament>): OfflineTournament {

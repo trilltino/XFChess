@@ -33,8 +33,11 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // The puzzle tables live in the server's store database (server.rs).
     let db_url = std::env::var("DATABASE_URL")
-        .map_err(|_| anyhow::anyhow!("DATABASE_URL not set (e.g. sqlite://backend.db)"))?;
+        .or_else(|_| std::env::var("SESSION_DB_URL"))
+        .unwrap_or_else(|_| "sqlite://sessions.db".into());
+    eprintln!("importing into {db_url}");
     let pool = SqlitePoolOptions::new().connect(&db_url).await?;
 
     // Reader that transparently handles a zstd-compressed CSV.
@@ -70,9 +73,14 @@ async fn main() -> anyhow::Result<()> {
             continue;
         }
 
+        // Re-imports refresh only Lichess' columns; admin curation (name,
+        // featured, enabled) and local play counts survive.
         sqlx::query(
-            "INSERT OR REPLACE INTO puzzles (id, fen, line, rating, rating_dev, themes)
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO puzzles (id, fen, line, rating, rating_dev, themes)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET fen = excluded.fen, line = excluded.line,
+                 rating = excluded.rating, rating_dev = excluded.rating_dev,
+                 themes = excluded.themes",
         )
         .bind(&r[0])
         .bind(&r[1])
@@ -84,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
         imported += 1;
-        if imported % 50_000 == 0 {
+        if imported.is_multiple_of(50_000) {
             tx.commit().await?;
             tx = pool.begin().await?;
             eprintln!("  … {imported} imported ({skipped} skipped)");

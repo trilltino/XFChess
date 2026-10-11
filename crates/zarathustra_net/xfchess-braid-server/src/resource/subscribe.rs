@@ -40,7 +40,6 @@ async fn subscribe_stream(hub: Arc<ResourceHub>, path: String) -> Response {
     let braid = SubscriptionResponse::with_heartbeat_secs(HEARTBEAT_SECS);
     let snapshot_chunk = format_chunk(&snapshot);
     let heartbeat = format_heartbeat();
-    let rx_stream = BroadcastStream::new(rx);
     let interval_duration = braid.heartbeat_interval;
 
     let stream = async_stream::stream! {
@@ -51,14 +50,18 @@ async fn subscribe_stream(hub: Arc<ResourceHub>, path: String) -> Response {
         let mut ticker = interval(interval_duration);
         ticker.tick().await; // consume the immediate first tick
 
-        tokio::pin!(rx_stream);
+        let mut rx_stream = BroadcastStream::new(rx);
         loop {
             tokio::select! {
                 maybe_update = rx_stream.next() => {
                     match maybe_update {
                         Some(Ok(update)) => yield Ok(format_chunk(&update)),
-                        // Keep lagging subscribers open; reconnecting replays the snapshot.
-                        Some(Err(e)) => warn!("[braid] broadcast lag on {}: {}", path, e),
+                        Some(Err(e)) => {
+                            warn!("[braid] broadcast lag on {}: {}; sending a fresh snapshot", path, e);
+                            let Some((snapshot, rx)) = hub.subscribe(&path).await else { break };
+                            rx_stream = BroadcastStream::new(rx);
+                            yield Ok(format_chunk(&snapshot));
+                        }
                         None => {
                             debug!("[braid] channel closed for {}", path);
                             break;

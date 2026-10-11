@@ -991,6 +991,8 @@ async fn finalize_on_chain(
                     .send(OrchestratorEvent::GameEnded {
                         tournament_id,
                         game_id,
+                        white: white.clone(),
+                        black: black.clone(),
                         result,
                     })
                     .await

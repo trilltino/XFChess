@@ -83,22 +83,8 @@ fn fuzz_parser_with_mutated_messages(seed: u64) {
 }
 
 #[test]
-fn test_parser_fuzz_random_once() {
-    fuzz_parser_with_random_bytes(42);
-}
-
-#[test]
-fn test_parser_fuzz_mutated_once() {
-    fuzz_parser_with_mutated_messages(42);
-}
-
-#[test]
-#[ignore]
-fn test_parser_fuzz_forever() {
-    for seed in 0.. {
-        if seed % 1000 == 0 {
-            println!("Fuzzing seed {}", seed);
-        }
+fn malformed_and_fragmented_streams_do_not_panic() {
+    for seed in 0..256 {
         fuzz_parser_with_random_bytes(seed);
         fuzz_parser_with_mutated_messages(seed);
     }

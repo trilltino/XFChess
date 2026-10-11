@@ -34,6 +34,10 @@ bin := "target/debug"
 default:
     @just --list
 
+# Check protocol models and expected counterexamples.
+check-specs *args:
+    {{if os() == "windows" { "py -3" } else { "python3" }}} specs/check.py {{args}}
+
 
 # Stop all running XFChess processes (PID file first, then port owner, then name)
 kill:
@@ -242,7 +246,7 @@ viz-build: build-viz-ui
 
 # Run the CLI RPC benchmark — text output, no GUI (uses $SOLANA_RPC_URL from .env)
 viz-bench:
-    cargo run -p er-cu-benchmark --bin triton-bench -- read-load
+    cargo run -p cu_benchmark --bin triton-bench -- read-load
 
 
 # Build everything then launch full local stack (uses Windows Terminal tabs if available)
@@ -352,12 +356,12 @@ verify-program *args:
 
 # Start local Prometheus + Grafana monitoring stack
 monitoring:
-    docker-compose -f ops/monitoring/docker-compose.local.yml up -d
+    docker compose -f ops/monitoring/docker-compose.local.yml up -d
     @Write-Host "Grafana: http://localhost:3000" -ForegroundColor Green
 
 # Stop monitoring stack
 monitoring-down:
-    docker-compose -f ops/monitoring/docker-compose.local.yml down
+    docker compose -f ops/monitoring/docker-compose.local.yml down
 
 
 # Fast type-check all workspace crates (no codegen — much faster than build)
@@ -367,6 +371,13 @@ check:
 # Fast type-check backend only
 check-backend:
     cargo check -p backend
+
+# Download the CC0 Lichess puzzle dump and upsert it into the local store DB
+# (backend/sessions.db). Admin curation survives re-imports.
+puzzles-refresh min_rating="600" max_dev="90":
+    Invoke-WebRequest https://database.lichess.org/lichess_db_puzzle.csv.zst -OutFile target/lichess_db_puzzle.csv.zst
+    cargo build -p backend --bin import_puzzles --release
+    Set-Location backend; ../target/release/import_puzzles.exe ../target/lichess_db_puzzle.csv.zst --min-rating {{min_rating}} --max-dev {{max_dev}}
 
 # Run all workspace tests
 test:

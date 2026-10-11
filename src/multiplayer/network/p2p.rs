@@ -140,7 +140,9 @@ impl Plugin for P2PConnectionPlugin {
                     handle_accept_invite,
                     handle_reject_invite,
                     tick_connection_timeout,
-                ),
+                )
+                    .chain()
+                    .in_set(crate::core::schedule::ReceiveSet::Invites),
             );
     }
 }
@@ -153,7 +155,7 @@ fn handle_host_game(
     for event in events.read() {
         let game_id: u64 = rand::random();
 
-        connection_state.local_node_id = network_state.node_id.clone();
+        connection_state.local_node_id = network_state.node_id;
         connection_state.game_id = Some(game_id);
         connection_state.is_host = true;
         connection_state.status = P2PConnectionStatus::Hosting;
@@ -188,7 +190,7 @@ fn handle_connect_to_peer(
 
         let game_id: u64 = rand::random();
 
-        connection_state.local_node_id = network_state.node_id.clone();
+        connection_state.local_node_id = network_state.node_id;
         connection_state.peer_node_id = Some(event.peer_node_id.clone());
         connection_state.game_id = Some(game_id);
         connection_state.is_host = event.is_host;
@@ -465,7 +467,7 @@ fn handle_network_events(
                                         connection_state.status = P2PConnectionStatus::InGame;
                                         *core_mode = crate::core::GameMode::OnlineMultiplayer;
                                         ai_config.mode =
-                                            crate::game::ai::resource::GameMode::Multiplayer;
+                                            crate::game::ai::resource::AiMode::Multiplayer;
                                         // Clear on-chain context left by a previous Solana lobby or tournament match.
                                         #[cfg(feature = "solana")]
                                         crate::multiplayer::solana::addon::clear_on_chain_game_state(
@@ -501,8 +503,8 @@ fn handle_network_events(
                         initial_fen: _,
                         white_display,
                         black_display,
-                    } => {
-                        if connection_state.game_id == Some(*game_id) {
+                    }
+                        if connection_state.game_id == Some(*game_id) => {
                             if connection_state.drive_game_start {
                                 info!(
                                     "Game {} started! White: {}, Black: {}",
@@ -521,7 +523,7 @@ fn handle_network_events(
                                 }
                                 connection_state.status = P2PConnectionStatus::InGame;
                                 *core_mode = crate::core::GameMode::OnlineMultiplayer;
-                                ai_config.mode = crate::game::ai::resource::GameMode::Multiplayer;
+                                ai_config.mode = crate::game::ai::resource::AiMode::Multiplayer;
 
                                 // Clear on-chain context left by a previous Solana lobby or tournament match.
                                 #[cfg(feature = "solana")]
@@ -541,19 +543,17 @@ fn handle_network_events(
                                 );
                             }
                         }
-                    }
 
                     _ => {}
                 }
             }
-            NetworkEvent::PeerDisconnected(reason) => {
+            NetworkEvent::PeerDisconnected(reason)
                 // Only meaningful mid-game: during lobby setup a dropped/failed
                 // link is already surfaced via explicit Error(...) transitions.
-                if connection_state.status == P2PConnectionStatus::InGame {
+                if connection_state.status == P2PConnectionStatus::InGame => {
                     warn!("PeerDisconnected during game: {}", reason);
                     connection_state.status = P2PConnectionStatus::Disconnected;
                 }
-            }
             _ => {}
         }
     }

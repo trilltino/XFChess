@@ -8,7 +8,7 @@ Tournament instructions manage lifecycle, registration, matches, prizes, and tou
 |------|--------------|
 | [lifecycle/](lifecycle/) | `initialize`, `initialize_escrow`, `initialize_shards`, `start`, `cancel`, `close_tournament` |
 | [registration/](registration/) | `register`, `leave` |
-| [matches/](matches/) | `initialize_match`, `record_result`, `record_swiss_result` (+ shared [guards.rs](matches/guards.rs)) |
+| [matches/](matches/) | `initialize_match`, `record_result`, and the Swiss trio `record_swiss_result` → `advance_round` → `complete_swiss_tournament` (all signed by `tournament.authority`; pairings and tiebreaks are off-chain) (+ shared [guards.rs](matches/guards.rs)) |
 | [prizes/](prizes/) | `fund_prize`, `fund_sol_prize`, `claim_prize`, `distribute` (permissionless crank), share math in [ledger.rs](prizes/ledger.rs) |
 | [session/](session/) | `authorize_tournament_session`, `session_create_game`, `session_join_game` |
 | [shards.rs](shards.rs) | Player-list shard operations shared by the groups above |

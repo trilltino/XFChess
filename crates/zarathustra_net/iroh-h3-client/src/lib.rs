@@ -1,13 +1,10 @@
-#![warn(missing_docs)]
-
 mod body;
 mod connection_manager;
 pub mod error;
-pub mod middleware;
 pub mod request;
 pub mod response;
+pub mod service;
 
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use http::request::Builder;
@@ -17,25 +14,13 @@ use iroh::Endpoint;
 use crate::body::Body;
 use crate::connection_manager::ConnectionManager;
 use crate::error::Error;
-use crate::middleware::{Middleware, Pipeline, Service};
 use crate::request::RequestBuilder;
+use crate::service::Service;
 
 #[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct IrohH3Client {
-    inner: Arc<ClientInner>,
-}
-
-struct ClientInner {
-    service: Pipeline,
-}
-
-impl Debug for ClientInner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClientInner")
-            .field("service", &"...")
-            .finish()
-    }
+    inner: Arc<ConnectionManager>,
 }
 
 macro_rules! http_method {
@@ -54,26 +39,10 @@ macro_rules! http_method {
 impl IrohH3Client {
     pub fn new(endpoint: Endpoint, alpn: Vec<u8>) -> Self {
         let connection_manager = ConnectionManager::new(endpoint, alpn);
-        let inner = ClientInner {
-            service: Pipeline::new(connection_manager),
-        };
         Self {
-            inner: Arc::new(inner),
+            inner: Arc::new(connection_manager),
         }
     }
-
-    pub fn with_middleware(
-        endpoint: Endpoint,
-        alpn: Vec<u8>,
-        middleware: impl Middleware + 'static,
-    ) -> Self {
-        let service = Pipeline::with_middleware(middleware, ConnectionManager::new(endpoint, alpn));
-        let inner = ClientInner { service };
-        Self {
-            inner: Arc::new(inner),
-        }
-    }
-
     pub fn request<U>(&self, method: http::Method, uri: U) -> RequestBuilder<Self>
     where
         U: TryInto<Uri>,
@@ -96,6 +65,6 @@ impl IrohH3Client {
 impl Service for IrohH3Client {
     #[tracing::instrument(skip(self))]
     async fn handle(&self, request: http::Request<Body>) -> Result<http::Response<Body>, Error> {
-        self.inner.service.handle(request).await
+        self.inner.handle(request).await
     }
 }

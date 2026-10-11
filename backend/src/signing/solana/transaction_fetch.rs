@@ -15,17 +15,13 @@ pub const MAX_SUPPORTED_TX_VERSION: u8 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum TransactionBuildPolicy {
     Legacy,
     V0,
     V1,
+    #[default]
     Auto,
-}
-
-impl Default for TransactionBuildPolicy {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl TransactionBuildPolicy {

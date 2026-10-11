@@ -1,3 +1,6 @@
+//! The in-game HUD: the 2D board, side panels, player bars, chat and promotion
+//! picker.
+
 pub mod chat_ui;
 pub mod game_2d;
 pub mod game_ui;

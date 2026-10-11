@@ -15,7 +15,7 @@ inject remote moves through [systems/network_move.rs](systems/network_move.rs), 
 
 | Path | Contents |
 |------|----------|
-| [plugin.rs](plugin.rs) / [system_sets.rs](system_sets.rs) | `GamePlugin`; `GameSystems` sets ordered `Input → Validation → Execution → Visual` |
+| [plugin.rs](plugin.rs) | `GamePlugin`; systems go in the `GameSystems` sets (`Input → Validation → Execution → Visual`) configured in [core/schedule.rs](../core/schedule.rs) |
 | [systems/](systems/) | Move input, game init/logic, promotion, network-move apply, spectator sync, camera |
 | [components/](components/) | `Piece` markers, `GamePhase`, `MoveRecord`, animation components |
 | [resources/](resources/) | Turn state ([turn/](resources/turn/)), selection/promotion ([player/](resources/player/)), move history ([history/](resources/history/)), sounds, time control |

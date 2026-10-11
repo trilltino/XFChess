@@ -1,3 +1,6 @@
+//! Move feedback and atmosphere: check highlight, last move, move hints, lighting
+//! and sky.
+
 pub mod check_highlight;
 pub mod dynamic_lighting;
 pub mod last_move;

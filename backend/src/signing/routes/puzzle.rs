@@ -13,8 +13,10 @@ use tracing::{error, info, warn};
 
 use solana_sdk::{pubkey::Pubkey, signature::Signer};
 
+use crate::signing::lichess_puzzles::{
+    difficulty_offset, load_puzzle_token, LichessClient, LichessError, THEMES,
+};
 use crate::signing::AppState;
-
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct PuzzleRow {
@@ -22,6 +24,8 @@ struct PuzzleRow {
     fen: String,
     line: String,
     rating: i64,
+    /// Space-separated Lichess theme tags.
+    themes: String,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -39,6 +43,10 @@ struct ChallengeRow {
     expires_at: i64,
     consumed: i64,
     progress: i64,
+    /// The player took a hint: the round is unrated and unpaid.
+    hinted: i64,
+    /// `local` or `lichess` (see lichess_puzzles).
+    source: String,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -50,48 +58,80 @@ struct BountyRow {
     max_per_wallet: i64,
 }
 
-
 const CHALLENGE_TTL_SECS: i64 = 600; // 10 min to submit
 const RATING_WINDOW: i64 = 150; // ±band around player rating
 const DEFAULT_RATING: i64 = 1500;
 const DEFAULT_RATING_DEV: i64 = 350;
 const DAILY_PAYOUT_CAP: i64 = 5; // max paid solves per wallet per day
 
-
 pub fn puzzle_routes() -> Router<AppState> {
     Router::new()
         .route("/puzzle/next", get(get_next))
-        .route("/puzzle/solve", post(post_solve))
         .route("/puzzle/move", post(post_move))
+        .route("/puzzle/hint", post(post_hint))
         .route("/puzzle/daily", get(get_daily))
+        .route("/puzzle/themes", get(get_themes))
         .route("/puzzle/rating/{wallet}", get(get_rating))
 }
-
 
 #[derive(Deserialize)]
 struct NextQuery {
     wallet: String,
     mode: Option<String>,
+    /// Lichess theme key (`fork`, `mateIn2`, ...); `mix` or absent means any theme.
+    theme: Option<String>,
+    /// Lichess difficulty name, relative to the player's puzzle rating.
+    difficulty: Option<String>,
+    /// `local` (default: the imported puzzle bank) or `lichess` (the player's
+    /// linked Lichess account; needs a wallet JWT).
+    source: Option<String>,
+}
+
+impl NextQuery {
+    fn theme(&self) -> Option<&str> {
+        self.theme
+            .as_deref()
+            .filter(|t| !t.is_empty() && *t != "mix")
+    }
+
+    fn difficulty(&self) -> Option<&str> {
+        self.difficulty.as_deref().filter(|d| !d.is_empty())
+    }
 }
 
 async fn get_next(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(q): Query<NextQuery>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<Value>, (StatusCode, String)> {
     let pool = state.store.pool();
     let mode = q.mode.as_deref().unwrap_or("solve");
     if q.wallet.trim().is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err((StatusCode::BAD_REQUEST, "wallet is required".into()));
+    }
+    if q.theme()
+        .is_some_and(|t| !THEMES.iter().any(|(key, _)| *key == t))
+    {
+        return Err((StatusCode::BAD_REQUEST, "unknown theme".into()));
+    }
+    let offset = match q.difficulty() {
+        None => 0,
+        Some(d) => difficulty_offset(d)
+            .ok_or((StatusCode::BAD_REQUEST, "unknown difficulty".to_string()))?,
+    };
+
+    if q.source.as_deref() == Some("lichess") {
+        return next_from_lichess(&state, &headers, &q).await;
     }
 
     let (player_rating, _) = load_rating(&pool, &q.wallet).await;
 
-    // Select a puzzle the wallet has not attempted, in the rating band; for
+    // Select a puzzle the wallet has not attempted near the target rating; for
     // `earn` restrict to puzzles covered by an active bounty.
     let puzzle = if mode == "earn" {
         select_funded_puzzle(&pool, &q.wallet).await
     } else {
-        select_puzzle(&pool, &q.wallet, player_rating).await
+        select_puzzle(&pool, &q.wallet, player_rating + offset, q.theme()).await
     };
 
     let Some(puzzle) = puzzle else {
@@ -106,9 +146,85 @@ async fn get_next(
         None
     };
 
-    serve_puzzle(&pool, &q.wallet, &puzzle, mode, reward).await
+    serve_puzzle(&pool, &q.wallet, &puzzle, mode, reward, "local")
+        .await
+        .map_err(|code| (code, "could not start the puzzle".into()))
 }
 
+/// Serves a puzzle the player has not seen on Lichess. The caller must own the
+/// wallet (JWT), because the stored Lichess token acts on their account.
+async fn next_from_lichess(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+    q: &NextQuery,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    crate::signing::routes::auth::require_caller_owns_wallet(state, headers, &q.wallet).await?;
+    let pool = state.store.pool();
+    let token = load_puzzle_token(&pool, &state.identity_vault, &q.wallet)
+        .await
+        .ok_or((
+            StatusCode::PRECONDITION_FAILED,
+            "Link your Lichess account (with puzzle permission) first".to_string(),
+        ))?;
+
+    // Lichess only serves puzzles unseen on Lichess; skip any already played here.
+    for _ in 0..3 {
+        let puzzle = LichessClient::global()
+            .next_puzzle(&q.wallet, &token, q.theme(), q.difficulty())
+            .await
+            .map_err(lichess_error_status)?;
+        let row = PuzzleRow {
+            id: puzzle.id.clone(),
+            fen: puzzle.fen.clone(),
+            line: puzzle.line.join(" "),
+            rating: puzzle.rating,
+            themes: puzzle.themes.join(" "),
+        };
+        upsert_puzzle(&pool, &row).await;
+        if !round_exists(&pool, &q.wallet, &row.id).await {
+            return serve_puzzle(&pool, &q.wallet, &row, "solve", None, "lichess")
+                .await
+                .map_err(|code| (code, "could not start the puzzle".into()));
+        }
+    }
+    Ok(Json(json!({ "exhausted": true })))
+}
+
+fn lichess_error_status(e: LichessError) -> (StatusCode, String) {
+    let status = match e {
+        LichessError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+        LichessError::Busy => StatusCode::CONFLICT,
+        LichessError::Unauthorized => StatusCode::PRECONDITION_FAILED,
+        LichessError::Http(_) | LichessError::Malformed(_) => StatusCode::BAD_GATEWAY,
+    };
+    (status, e.to_string())
+}
+
+/// Adds a Lichess-served puzzle to the bank so verification, ratings and the admin
+/// browser treat it like an imported one (ids are the same Lichess ids).
+async fn upsert_puzzle(pool: &sqlx::SqlitePool, p: &PuzzleRow) {
+    if let Err(e) = sqlx::query(
+        "INSERT INTO puzzles (id, fen, line, rating, themes) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET fen = excluded.fen, line = excluded.line",
+    )
+    .bind(&p.id)
+    .bind(&p.fen)
+    .bind(&p.line)
+    .bind(p.rating)
+    .bind(&p.themes)
+    .execute(pool)
+    .await
+    {
+        warn!("[puzzle] could not store Lichess puzzle {}: {e}", p.id);
+    }
+}
+
+async fn get_themes() -> Json<Value> {
+    Json(json!(THEMES
+        .iter()
+        .map(|(key, label)| json!({ "key": key, "label": label }))
+        .collect::<Vec<_>>()))
+}
 
 async fn get_daily(
     State(state): State<AppState>,
@@ -133,7 +249,7 @@ async fn get_daily(
         .await
         .map(|b| b.reward_lamports);
 
-    serve_puzzle(&pool, &q.wallet, &puzzle, "daily", reward).await
+    serve_puzzle(&pool, &q.wallet, &puzzle, "daily", reward, "local").await
 }
 
 async fn serve_puzzle(
@@ -142,6 +258,7 @@ async fn serve_puzzle(
     puzzle: &PuzzleRow,
     mode: &str,
     reward: Option<i64>,
+    source: &str,
 ) -> Result<Json<Value>, StatusCode> {
     let line: Vec<&str> = puzzle.line.split(' ').collect();
     let setup_move = line.first().copied().unwrap_or("").to_string();
@@ -152,8 +269,8 @@ async fn serve_puzzle(
     let nonce = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
     let res = sqlx::query(
-        "INSERT INTO puzzle_challenges (nonce, wallet, puzzle_id, mode, issued_at, expires_at, consumed)
-         VALUES (?, ?, ?, ?, ?, ?, 0)",
+        "INSERT INTO puzzle_challenges (nonce, wallet, puzzle_id, mode, issued_at, expires_at, consumed, source)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
     )
     .bind(&nonce)
     .bind(wallet)
@@ -161,6 +278,7 @@ async fn serve_puzzle(
     .bind(mode)
     .bind(now)
     .bind(now + CHALLENGE_TTL_SECS)
+    .bind(source)
     .execute(pool)
     .await;
 
@@ -177,62 +295,14 @@ async fn serve_puzzle(
         "color": player_color,
         "rating": puzzle.rating,
         "solution_len": solution_len,
+        "themes": puzzle.themes.split_whitespace().collect::<Vec<_>>(),
+        "source": source,
     });
     if let Some(r) = reward {
         body["reward_lamports"] = json!(r);
     }
     Ok(Json(body))
 }
-
-
-#[derive(Deserialize)]
-struct SolveReq {
-    nonce: String,
-    moves: Vec<String>,
-}
-
-async fn post_solve(
-    State(state): State<AppState>,
-    Json(req): Json<SolveReq>,
-) -> Result<Json<Value>, StatusCode> {
-    let pool = state.store.pool();
-    let now = chrono::Utc::now().timestamp();
-
-    let ch = match consume_challenge(&pool, &req.nonce, now).await {
-        Ok(c) => c,
-        Err(code) => return Err(code),
-    };
-
-    if round_exists(&pool, &ch.wallet, &ch.puzzle_id).await {
-        return Err(StatusCode::CONFLICT);
-    }
-
-    let Some(puzzle) = load_puzzle(&pool, &ch.puzzle_id).await else {
-        return Err(StatusCode::NOT_FOUND);
-    };
-
-    // 4. Win condition: submitted == the player's moves (odd indices of the
-    //    line; even indices are the opponent's replies, never submitted).
-    let line: Vec<&str> = puzzle.line.split(' ').collect();
-    let expected: Vec<&str> = line.iter().skip(1).step_by(2).copied().collect();
-    let submitted: Vec<String> = req.moves.iter().map(|s| s.trim().to_string()).collect();
-    let win = !expected.is_empty()
-        && submitted.len() == expected.len()
-        && submitted.iter().zip(&expected).all(|(a, b)| a == b);
-
-    let solve_ms = (now - ch.issued_at).max(0) * 1000;
-
-    let outcome = finalize(&state, &pool, &ch, &puzzle, win, solve_ms, now).await;
-
-    Ok(Json(json!({
-        "win": win,
-        "rating": outcome.new_rating,
-        "rating_diff": outcome.rating_diff,
-        "payout_sig": outcome.payout_sig,
-        "paid_lamports": outcome.paid_lamports,
-    })))
-}
-
 
 #[derive(Deserialize)]
 struct MoveReq {
@@ -246,28 +316,8 @@ async fn post_move(
 ) -> Result<Json<Value>, StatusCode> {
     let pool = state.store.pool();
     let now = chrono::Utc::now().timestamp();
-
-    // Load the challenge WITHOUT consuming — it lives across the whole sequence.
-    let ch = sqlx::query_as::<_, ChallengeRow>(
-        "SELECT wallet, puzzle_id, mode, issued_at, expires_at, consumed, progress
-         FROM puzzle_challenges WHERE nonce = ?",
-    )
-    .bind(&req.nonce)
-    .fetch_optional(&pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
-
-    if ch.consumed != 0 || now > ch.expires_at {
-        return Err(StatusCode::GONE);
-    }
-    if round_exists(&pool, &ch.wallet, &ch.puzzle_id).await {
-        return Err(StatusCode::CONFLICT);
-    }
-
-    let Some(puzzle) = load_puzzle(&pool, &ch.puzzle_id).await else {
-        return Err(StatusCode::NOT_FOUND);
-    };
+    // The challenge is loaded, not consumed: it lives across the whole sequence.
+    let (ch, puzzle) = open_challenge(&pool, &req.nonce, now).await?;
     let line: Vec<&str> = puzzle.line.split(' ').collect();
     let pidx = 1 + 2 * ch.progress as usize; // this player move's index in the line
     if pidx >= line.len() {
@@ -277,7 +327,9 @@ async fn post_move(
 
     if req.uci.trim() != line[pidx] {
         // Wrong move ends the puzzle as a loss.
-        consume(&pool, &req.nonce).await;
+        if !consume(&pool, &req.nonce).await {
+            return Err(StatusCode::GONE);
+        }
         let solve_ms = (now - ch.issued_at).max(0) * 1000;
         let outcome = finalize(&state, &pool, &ch, &puzzle, false, solve_ms, now).await;
         return Ok(Json(json!({
@@ -288,17 +340,28 @@ async fn post_move(
 
     let oidx = pidx + 1;
     if oidx < line.len() {
-        // Correct, more to go: advance and reveal the opponent's reply.
-        let _ = sqlx::query("UPDATE puzzle_challenges SET progress = progress + 1 WHERE nonce = ?")
-            .bind(&req.nonce)
-            .execute(&pool)
-            .await;
+        // Correct, more to go: advance and reveal the opponent's reply. Only from
+        // the progress this request read, so a repeated submission cannot skip ahead.
+        let advanced = sqlx::query(
+            "UPDATE puzzle_challenges SET progress = progress + 1
+             WHERE nonce = ? AND progress = ? AND consumed = 0",
+        )
+        .bind(&req.nonce)
+        .bind(ch.progress)
+        .execute(&pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if advanced.rows_affected() != 1 {
+            return Err(StatusCode::CONFLICT);
+        }
         Ok(Json(
             json!({ "correct": true, "done": false, "reply": line[oidx] }),
         ))
     } else {
         // That was the final move — solved.
-        consume(&pool, &req.nonce).await;
+        if !consume(&pool, &req.nonce).await {
+            return Err(StatusCode::GONE);
+        }
         let solve_ms = (now - ch.issued_at).max(0) * 1000;
         let outcome = finalize(&state, &pool, &ch, &puzzle, true, solve_ms, now).await;
         Ok(Json(json!({
@@ -307,6 +370,62 @@ async fn post_move(
             "payout_sig": outcome.payout_sig, "paid_lamports": outcome.paid_lamports,
         })))
     }
+}
+
+/// Loads an open challenge and its puzzle: not consumed, not expired, and not
+/// already finished by this wallet.
+async fn open_challenge(
+    pool: &sqlx::SqlitePool,
+    nonce: &str,
+    now: i64,
+) -> Result<(ChallengeRow, PuzzleRow), StatusCode> {
+    let ch = sqlx::query_as::<_, ChallengeRow>(
+        "SELECT wallet, puzzle_id, mode, issued_at, expires_at, consumed, progress, hinted, source
+         FROM puzzle_challenges WHERE nonce = ?",
+    )
+    .bind(nonce)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    if ch.consumed != 0 || now > ch.expires_at {
+        return Err(StatusCode::GONE);
+    }
+    if round_exists(pool, &ch.wallet, &ch.puzzle_id).await {
+        return Err(StatusCode::CONFLICT);
+    }
+    let puzzle = load_puzzle(pool, &ch.puzzle_id)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok((ch, puzzle))
+}
+
+#[derive(Deserialize)]
+struct HintReq {
+    nonce: String,
+}
+
+/// Reveals the square the next solution move starts from. Asking for a hint makes
+/// the round unrated and unpaid; the move itself is still never sent.
+async fn post_hint(
+    State(state): State<AppState>,
+    Json(req): Json<HintReq>,
+) -> Result<Json<Value>, StatusCode> {
+    let pool = state.store.pool();
+    let now = chrono::Utc::now().timestamp();
+    let (ch, puzzle) = open_challenge(&pool, &req.nonce, now).await?;
+    let line: Vec<&str> = puzzle.line.split(' ').collect();
+    let next = line
+        .get(1 + 2 * ch.progress as usize)
+        .ok_or(StatusCode::CONFLICT)?;
+    let from = next.get(..2).ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    sqlx::query("UPDATE puzzle_challenges SET hinted = 1 WHERE nonce = ?")
+        .bind(&req.nonce)
+        .execute(&pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(json!({ "from": from, "rated": false })))
 }
 
 struct Outcome {
@@ -325,49 +444,62 @@ async fn finalize(
     solve_ms: i64,
     now: i64,
 ) -> Outcome {
+    // A hinted round counts as played but moves no rating and pays nothing.
+    let rated = ch.hinted == 0;
     let (player_rating, player_dev) = load_rating(pool, &ch.wallet).await;
-    let (new_rating, new_dev) = rating_update(player_rating, player_dev, puzzle.rating, win);
-    save_rating(pool, &ch.wallet, new_rating, new_dev, now).await;
+    let new_rating = if rated {
+        let (new_rating, new_dev) = rating_update(player_rating, player_dev, puzzle.rating, win);
+        save_rating(pool, &ch.wallet, new_rating, new_dev, now).await;
+        new_rating
+    } else {
+        player_rating
+    };
+
+    if ch.source == "lichess" {
+        sync_result_to_lichess(state, &ch.wallet, &puzzle.id, win, rated);
+    }
 
     let mut payout_sig: Option<String> = None;
     let mut paid_lamports: i64 = 0;
-    if win && (ch.mode == "earn" || ch.mode == "daily") {
+    if rated && win && (ch.mode == "earn" || ch.mode == "daily") {
         if let Some(bounty) = find_active_bounty(pool, &puzzle.id, puzzle.rating).await {
-            if let PayoutDecision::Pay =
-                payout_decision(pool, &ch.wallet, &bounty, solve_ms, puzzle.rating, now).await
-            {
-                match pay_sol(state, &ch.wallet, bounty.reward_lamports as u64).await {
-                    Ok(sig) => {
-                        paid_lamports = bounty.reward_lamports;
-                        debit_bounty(
-                            pool,
-                            bounty.id,
-                            bounty.reward_lamports,
-                            bounty.budget_lamports,
-                            bounty.spent_lamports,
-                        )
-                        .await;
-                        info!(
-                            "[puzzle] paid {} lamports to {} (sig {})",
-                            bounty.reward_lamports, ch.wallet, sig
-                        );
-                        payout_sig = Some(sig);
+            match payout_decision(pool, &ch.wallet, &bounty, solve_ms, puzzle.rating, now).await {
+                PayoutDecision::Pay => {
+                    match pay_sol(state, &ch.wallet, bounty.reward_lamports as u64).await {
+                        Ok(sig) => {
+                            paid_lamports = bounty.reward_lamports;
+                            debit_bounty(
+                                pool,
+                                bounty.id,
+                                bounty.reward_lamports,
+                                bounty.budget_lamports,
+                                bounty.spent_lamports,
+                            )
+                            .await;
+                            info!(
+                                "[puzzle] paid {} lamports to {} (sig {})",
+                                bounty.reward_lamports, ch.wallet, sig
+                            );
+                            payout_sig = Some(sig);
+                        }
+                        Err(e) => warn!("[puzzle] payout failed for {}: {e}", ch.wallet),
                     }
-                    Err(e) => warn!("[puzzle] payout failed for {}: {e}", ch.wallet),
                 }
-            } else {
-                warn!("[puzzle] payout withheld for {}", ch.wallet);
+                PayoutDecision::Withhold(reason) => {
+                    warn!("[puzzle] payout withheld for {}: {reason}", ch.wallet)
+                }
             }
         }
     }
 
     let _ = sqlx::query(
         "INSERT OR IGNORE INTO puzzle_rounds (wallet, puzzle_id, win, rated, solve_ms, paid_sig, created_at)
-         VALUES (?, ?, ?, 1, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&ch.wallet)
     .bind(&puzzle.id)
     .bind(win as i64)
+    .bind(rated as i64)
     .bind(solve_ms)
     .bind(&payout_sig)
     .bind(now)
@@ -394,13 +526,16 @@ async fn finalize(
     }
 }
 
-async fn consume(pool: &sqlx::SqlitePool, nonce: &str) {
-    let _ = sqlx::query("UPDATE puzzle_challenges SET consumed = 1 WHERE nonce = ?")
+/// Marks an open challenge finished. Only one request can win this, so concurrent
+/// submissions of the same final move cannot both be scored and paid; a failed
+/// write counts as lost.
+async fn consume(pool: &sqlx::SqlitePool, nonce: &str) -> bool {
+    sqlx::query("UPDATE puzzle_challenges SET consumed = 1 WHERE nonce = ? AND consumed = 0")
         .bind(nonce)
         .execute(pool)
-        .await;
+        .await
+        .is_ok_and(|done| done.rows_affected() == 1)
 }
-
 
 async fn get_rating(State(state): State<AppState>, Path(wallet): Path<String>) -> Json<Value> {
     let pool = state.store.pool();
@@ -408,19 +543,30 @@ async fn get_rating(State(state): State<AppState>, Path(wallet): Path<String>) -
     Json(json!({ "wallet": wallet, "rating": rating, "rating_dev": dev }))
 }
 
-
-async fn select_puzzle(pool: &sqlx::SqlitePool, wallet: &str, rating: i64) -> Option<PuzzleRow> {
-    // Widen the band on retry until we find an unplayed puzzle.
+/// An unplayed puzzle near `rating`, optionally carrying `theme`. The band widens
+/// on each miss so thin themes or extreme ratings still find something.
+async fn select_puzzle(
+    pool: &sqlx::SqlitePool,
+    wallet: &str,
+    rating: i64,
+    theme: Option<&str>,
+) -> Option<PuzzleRow> {
+    // Themes are stored space-separated; pad both sides so `fork` never matches
+    // inside another tag.
+    let theme_pattern = theme.map(|t| format!("% {t} %"));
     for mult in [1i64, 2, 4, 12] {
         let win = RATING_WINDOW * mult;
         let row = sqlx::query_as::<_, PuzzleRow>(
-            "SELECT id, fen, line, rating FROM puzzles
+            "SELECT id, fen, line, rating, themes FROM puzzles
              WHERE enabled = 1 AND rating BETWEEN ? AND ?
+               AND (? IS NULL OR (' ' || themes || ' ') LIKE ?)
                AND id NOT IN (SELECT puzzle_id FROM puzzle_rounds WHERE wallet = ?)
              ORDER BY RANDOM() LIMIT 1",
         )
         .bind(rating - win)
         .bind(rating + win)
+        .bind(&theme_pattern)
+        .bind(&theme_pattern)
         .bind(wallet)
         .fetch_optional(pool)
         .await
@@ -435,7 +581,7 @@ async fn select_puzzle(pool: &sqlx::SqlitePool, wallet: &str, rating: i64) -> Op
 
 async fn select_funded_puzzle(pool: &sqlx::SqlitePool, wallet: &str) -> Option<PuzzleRow> {
     sqlx::query_as::<_, PuzzleRow>(
-        "SELECT DISTINCT p.id, p.fen, p.line, p.rating FROM puzzles p
+        "SELECT DISTINCT p.id, p.fen, p.line, p.rating, p.themes FROM puzzles p
          JOIN puzzle_bounties b
            ON (b.scope = 'puzzle' AND b.puzzle_id = p.id)
            OR (b.scope = 'band' AND p.rating BETWEEN b.band_lo AND b.band_hi)
@@ -464,7 +610,7 @@ async fn select_daily_puzzle(pool: &sqlx::SqlitePool) -> Option<PuzzleRow> {
     }
     let offset = day.rem_euclid(count);
     sqlx::query_as::<_, PuzzleRow>(
-        "SELECT id, fen, line, rating FROM puzzles
+        "SELECT id, fen, line, rating, themes FROM puzzles
          WHERE enabled = 1 AND rating BETWEEN 1200 AND 1800
          ORDER BY id LIMIT 1 OFFSET ?",
     )
@@ -476,7 +622,7 @@ async fn select_daily_puzzle(pool: &sqlx::SqlitePool) -> Option<PuzzleRow> {
 }
 
 async fn load_puzzle(pool: &sqlx::SqlitePool, id: &str) -> Option<PuzzleRow> {
-    sqlx::query_as::<_, PuzzleRow>("SELECT id, fen, line, rating FROM puzzles WHERE id = ?")
+    sqlx::query_as::<_, PuzzleRow>("SELECT id, fen, line, rating, themes FROM puzzles WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
         .await
@@ -495,40 +641,6 @@ async fn round_exists(pool: &sqlx::SqlitePool, wallet: &str, puzzle_id: &str) ->
     .unwrap_or(0)
         > 0
 }
-
-
-async fn consume_challenge(
-    pool: &sqlx::SqlitePool,
-    nonce: &str,
-    now: i64,
-) -> Result<ChallengeRow, StatusCode> {
-    let ch = sqlx::query_as::<_, ChallengeRow>(
-        "SELECT wallet, puzzle_id, mode, issued_at, expires_at, consumed, progress
-         FROM puzzle_challenges WHERE nonce = ?",
-    )
-    .bind(nonce)
-    .fetch_optional(pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
-
-    if ch.consumed != 0 || now > ch.expires_at {
-        return Err(StatusCode::GONE);
-    }
-
-    // Mark consumed atomically; if 0 rows changed someone else won the race.
-    let res =
-        sqlx::query("UPDATE puzzle_challenges SET consumed = 1 WHERE nonce = ? AND consumed = 0")
-            .bind(nonce)
-            .execute(pool)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if res.rows_affected() == 0 {
-        return Err(StatusCode::GONE);
-    }
-    Ok(ch)
-}
-
 
 async fn load_rating(pool: &sqlx::SqlitePool, wallet: &str) -> (i64, i64) {
     sqlx::query_as::<_, RatingRow>("SELECT rating, rating_dev FROM puzzle_ratings WHERE wallet = ?")
@@ -568,7 +680,6 @@ fn rating_update(player: i64, dev: i64, puzzle: i64, won: bool) -> (i64, i64) {
     let new_dev = ((dev as f64) * 0.96).round().max(60.0) as i64;
     (new.clamp(400, 3200), new_dev)
 }
-
 
 async fn find_active_bounty(
     pool: &sqlx::SqlitePool,
@@ -665,6 +776,25 @@ async fn debit_bounty(pool: &sqlx::SqlitePool, id: i64, reward: i64, budget: i64
     .await;
 }
 
+/// Mirrors a Lichess-sourced result onto the player's Lichess account, off the
+/// request path: a Lichess outage never blocks or changes the local result.
+fn sync_result_to_lichess(state: &AppState, wallet: &str, puzzle_id: &str, win: bool, rated: bool) {
+    let pool = state.store.pool();
+    let vault = state.identity_vault.clone();
+    let (wallet, puzzle_id) = (wallet.to_string(), puzzle_id.to_string());
+    tokio::spawn(async move {
+        let Some(token) = load_puzzle_token(&pool, &vault, &wallet).await else {
+            return;
+        };
+        if let Err(e) = LichessClient::global()
+            .record_result(&wallet, &token, &puzzle_id, win, rated)
+            .await
+        {
+            warn!("[puzzle] Lichess result sync failed for {wallet} / {puzzle_id}: {e}");
+        }
+    });
+}
+
 async fn pay_sol(state: &AppState, to: &str, lamports: u64) -> anyhow::Result<String> {
     let to_pk = Pubkey::from_str(to)?;
     let authority = state.vps_authority.clone();
@@ -685,7 +815,6 @@ async fn pay_sol(state: &AppState, to: &str, lamports: u64) -> anyhow::Result<St
     .await??;
     Ok(sig)
 }
-
 
 fn player_color_after_setup(fen: &str) -> &'static str {
     match fen.split_whitespace().nth(1) {
@@ -971,4 +1100,47 @@ async fn admin_close_bounty(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     info!("[puzzle-admin] closed bounty {id}");
     Ok(Json(json!({ "ok": true })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn pool_with_open_challenge(nonce: &str) -> sqlx::SqlitePool {
+        // One connection: each `sqlite::memory:` connection is its own database.
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE puzzle_challenges (
+                nonce TEXT PRIMARY KEY, consumed INTEGER NOT NULL DEFAULT 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO puzzle_challenges (nonce) VALUES (?)")
+            .bind(nonce)
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn only_one_submission_can_finish_a_challenge() {
+        // Two final moves for the same challenge arrive together: only one may
+        // be scored and paid.
+        let pool = pool_with_open_challenge("n").await;
+        let (first, second) = tokio::join!(consume(&pool, "n"), consume(&pool, "n"));
+        assert!(first ^ second, "first={first} second={second}");
+    }
+
+    #[tokio::test]
+    async fn a_finished_challenge_cannot_be_finished_again() {
+        let pool = pool_with_open_challenge("n").await;
+        assert!(consume(&pool, "n").await);
+        assert!(!consume(&pool, "n").await);
+    }
 }

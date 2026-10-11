@@ -10,7 +10,10 @@ impl Plugin for WagerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WagerState>()
             .add_systems(Startup, initialize_wager_state)
-            .add_systems(Update, wager_ui_system);
+            .add_systems(
+                bevy_egui::EguiPrimaryContextPass,
+                wager_ui_system.run_if(|wager: Res<WagerState>| wager.is_loaded),
+            );
     }
 }
 

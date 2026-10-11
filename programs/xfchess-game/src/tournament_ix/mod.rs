@@ -10,7 +10,8 @@ pub use lifecycle::{
     InitializeTournament, InitializeTournamentEscrow, InitializeTournamentShards, StartTournament,
 };
 pub use matches::{
-    AdvanceRound, AdvanceWinner, CompleteSwissTournament, InitializeMatch, RecordMatchResult,
+    AdvanceRound, AdvanceWinner, CompleteSwissTournament, CreateTournamentGame, InitializeMatch,
+    RecordMatchResult,
     RecordSwissResult, SwissMatchResult,
 };
 pub use prizes::{ClaimTournamentPrize, DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize};

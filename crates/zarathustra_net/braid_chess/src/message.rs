@@ -84,7 +84,6 @@ pub struct EngineHint {
     pub best_move: String,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

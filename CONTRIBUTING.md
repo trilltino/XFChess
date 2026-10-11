@@ -1,141 +1,59 @@
 # Contributing to XFChess
 
-Thank you for your interest in contributing to XFChess! We welcome contributions from everyone.
+Use a focused branch and pull request. Explain the problem, link related issues
+and include validation appropriate to the affected component. Report security
+issues privately through [SECURITY.md](SECURITY.md).
 
-## I want to contribute code to XFChess
+## Setup
 
-### Set up your development environment
+Clone the repository and install Rust stable. On Windows, install the MSVC C++
+build tools and `just` (`cargo install just`). Frontends need Node.js 20.19+
+or another supported version. Solana/Anchor tooling is needed for program work,
+not for ordinary offline gameplay.
 
-1. Clone the repository
-```bash
+```text
 git clone https://github.com/trilltino/XFChess.git
 cd XFChess
+cargo check --bin xfchess
+cargo run --bin xfchess
 ```
 
-2. Install dependencies
-- Rust toolchain (stable)
-- Node.js 20+ (for web interface; Vite 8 requires 20.19+)
-- Solana CLI (optional, for blockchain features)
+On Windows, `just dev` launches the local stack and `just dev2` launches two
+clients. Configure local secrets from `.env.example`; never commit real keys.
+The just launch recipes use Windows PowerShell. On other platforms, use the
+component Cargo/npm commands and install the native libraries from CI.
 
-3. Build the project
-```bash
-cargo build --release
-```
+[Development](docs/development/README.md) maps components to guides and checks.
+[Installation](docs/INSTALL.md) covers prebuilt releases.
 
-4. Run the project
-```bash
-cargo run --release
-```
+## Changes and validation
 
-For local development (install `just` with `cargo install just`):
-```bash
-just dev
-just monitoring  # optional Prometheus and Grafana
-```
+- Keep code idiomatic and functions focused; follow adjacent module conventions.
+- Format changed Rust files and run relevant checks/tests. Avoid incidental
+  workspace-wide formatting or generated-output changes.
+- Test feature-gated paths that your change touches.
+- Use meaningful tests for behavior and regressions; visual/lifecycle changes
+  also need a manual pass.
+- Explain non-obvious invariants, safety requirements and public API contracts.
+  Comments should add information; do not require boilerplate on every item.
+- Update the canonical component guide when behavior changes. Put implementation
+  history in commits and unresolved work in issues.
+- Do not change deployed account layouts or instruction contracts without a
+  coordinated migration/compatibility plan.
 
-### Pick a GitHub issue to work on
+Mark unvalidated work as draft. Include reproduction steps and platform details
+for bugs, and a concrete user need for feature proposals. Clear commit subjects
+such as `fix: ...` or `docs: ...` help reviewers scan changes.
 
-Look for issues tagged with:
-- `good first issue` - suitable for newcomers
-- `bug` - bug fixes
-- `enhancement` - new features
-- `documentation` - docs improvements
+## AI-assisted contributions
 
-### Communicate with other devs on Discord
+Review and understand generated code, and be able to explain it. Include the
+tool and relevant prompts with the pull request or commits. Provide manual-test
+evidence, such as screenshots/video, where the change affects user interaction.
 
-Join our [Discord](https://discord.gg/erZJCPCm) to discuss development and get help.
+## Artwork and documentation
 
-### Rules about AI-assisted code contributions
-
-Generated AI code can be accepted, under some conditions:
-
-- Carefully review and understand all the code you submit, and be able to explain it if asked
-- Provide proof of manual testing of the changes, with screenshots or ideally a video
-- Include in the pull-request message, or in commit messages, the prompts you used to generate the code, and the AI tool you used
-
-### General guidelines for pull requests
-
-- Explain why the change is needed, and what problem it solves
-- Link to any relevant issues or discussions
-- Prefer small, focused pull requests that only change one thing at a time
-- Mark the pull request as a draft if you have not run the code
-- Only mark the pull request as ready when you have confirmed that it works as intended - be on the lookout for edge cases
-- Run tests: `cargo test`
-- Ensure the code follows Rust best practices and idioms
-- Add tests for new features
-- Update documentation as needed
-
-If you're unsure about something, or want to ask if the change is desired before doing the work, ask us in the programming channels on [Discord](https://discord.gg/erZJCPCm).
-
-## I want to contribute artwork or documentation
-
-Some issues that need artwork and documentation to be resolved are tagged `nontechnical`.
-
-### Artwork
-- 3D models and textures
-- UI assets
-- Icons and badges
-- Sound effects
-
-### Documentation
-- Code documentation (doc comments)
-- README improvements
-- Tutorial guides
-- API documentation
-
-## I want to report a bug or a problem about XFChess
-
-Make an issue. Before creating an issue, make sure that:
-
-- You list the steps to reproduce the problem to show that other users may experience it as well, if the issue is not self-descriptive
-- Search to make sure it isn't a duplicate. The advanced search syntax may come in handy
-- It is not a trivial problem or demands unrealistic dev time to fix. Such issues may be closed
-- Include system information (OS, Rust version, etc.)
-- Include error messages and logs if applicable
-
-## I want to suggest a feature for XFChess
-
-Issue tickets on features that lack potential or effectiveness are not useful and may be closed. Discussions regarding whether a proposed new feature would be useful can be done on the [Discord](https://discord.gg/erZJCPCm) to gauge feedback.
-
-When you're ready, make an issue ticket and link relevant, constructive comments regarding it in your issue ticket. Make sure the feature you propose:
-
-- Is effective in delivering a goal. A feature that adds nothing new is purely fancy; please consider if it's truly necessary
-- Doesn't rely on mundane assumptions. Non-technical people have the tendency to measure how difficult/easy a feature is to implement based on their unreliable instincts, and such assumptions waste everyone's time. Point out what needs to happen, not what you think will happen
-- Is unique, if you're aiming to solve a problem. Features that can easily be replaced by easier ideas have little value and may not have to be brought up to begin with
-- Is clear and concise. If ambiguities exist, define them or propose options
-
-## Development Guidelines
-
-### Code Style
-- Follow Rust best practices and idioms
-- Use `cargo fmt` to format code
-- Use `cargo clippy` to catch common issues
-- Keep functions focused and small
-- Write descriptive variable and function names
-
-### Documentation Standards
-- Write docs in finality tone: state what the code does and how it's used, present tense. Do not narrate history ("this replaced X", "added because of Y") or changelog-style rationale — that belongs in commit messages, not in docs or doc comments.
-- Every module (`//!` in Rust, a top-of-file comment in TS/TSX) documents its purpose, its role in the data flow, and any invariants it depends on.
-- Every public item (`///` in Rust, TSDoc in TS/TSX — `fn`, `struct`, `enum`, `trait`, exported component, exported hook) gets a doc comment describing what it does and when to call it. Don't restate the signature.
-- READMEs follow the existing per-directory convention (`Role in XFChess` / `Files` / `Submodules` / `Invariants` headings, depending on what fits the module) — match the style already used by sibling READMEs rather than inventing a new format.
-- Once a crate's public API is fully documented, add `#![warn(missing_docs)]` to its crate root so CI catches undocumented items added later.
-
-### Testing
-- Write unit tests for new functionality
-- Write integration tests for complex features
-- Test on multiple platforms if possible (Windows, macOS, Linux)
-- Test Solana program changes on devnet before mainnet
-
-### Commit Messages
-- Use clear, descriptive commit messages
-- Format: `type: description` (e.g., `feat: add tournament system`)
-- Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
-
-### Solana Development
-- Test contract changes on devnet first
-- Use `just build-program` to build the Solana program
-- Verify contract logic with unit tests
-- Check gas costs and rent requirements
-- Document any breaking changes
-
-Thank you for contributing to XFChess!
+Use [design references](docs/design/README.md) and existing runtime asset folders.
+Keep docs concise, link to one canonical guide and check paths/commands against
+the current tree. [The documentation index](docs/README.md) lists contributor,
+architecture and operator material.

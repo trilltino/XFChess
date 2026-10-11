@@ -146,7 +146,7 @@ fn find_event<T: AnchorDeserialize + Discriminator>(logs: &[String]) -> Option<T
 // keyfile, then run cargo test -- --ignored.
 
 #[tokio::test]
-#[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/PRE_MAINNET_E2E_PLAN.md §1.5/§6.1"]
+#[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
 async fn recover_stuck_delegation_splits_escrow_and_sweeps_game_rent() {
     let Some(authority) = dispute_authority_keypair() else {
         eprintln!("skip: keys/dispute_authority.json not present");
@@ -208,7 +208,7 @@ async fn recover_stuck_delegation_splits_escrow_and_sweeps_game_rent() {
 }
 
 #[tokio::test]
-#[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/PRE_MAINNET_E2E_PLAN.md §1.5/§6.1"]
+#[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
 async fn recover_stuck_delegation_emits_audit_event() {
     let Some(authority) = dispute_authority_keypair() else {
         eprintln!("skip: keys/dispute_authority.json not present");
@@ -256,7 +256,7 @@ async fn recover_stuck_delegation_emits_audit_event() {
 }
 
 #[tokio::test]
-#[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/PRE_MAINNET_E2E_PLAN.md §1.5/§6.1"]
+#[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
 async fn recover_stuck_delegation_rejects_non_stuck_game() {
     let Some(authority) = dispute_authority_keypair() else {
         eprintln!("skip: keys/dispute_authority.json not present");

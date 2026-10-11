@@ -1,40 +1,51 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../hooks/useAuth";
-import { ENVIRONMENTS, type EnvId } from "../config/environments";
+import { ENV_IDS, envById, getOpsConfig, opsConfigProblem, saveOpsConfig, type EnvId, type OpsConfig } from "../config/environments";
+import { clearAdminToken, loadAdminToken } from "../services/credentials";
 
 export default function TokenAuth() {
   const { login, lastError } = useAuth();
-  const [env, setEnv] = useState<EnvId>("local");
+  const [env, setEnv] = useState<EnvId>(() => localStorage.getItem("admin_last_env") === "production" ? "production" : "local");
   const [token, setToken] = useState("");
+  const [hasSavedToken, setHasSavedToken] = useState(false);
+  const [ops, setOps] = useState<OpsConfig>(getOpsConfig);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const cfg = ENVIRONMENTS[env];
+  const cfg = envById(env, ops);
 
-  // Prefill the per-environment token when the selected environment changes.
+  // Prefill the key saved for the selected environment (OS credential store).
   useEffect(() => {
-    const saved = localStorage.getItem(`admin_token_${env}`);
-    setToken(saved || "");
+    let cancelled = false;
     setError("");
+    loadAdminToken(env)
+      .then(saved => { if (!cancelled) { setToken(saved ?? ""); setHasSavedToken(Boolean(saved)); } })
+      .catch(() => { if (!cancelled) { setToken(""); setHasSavedToken(false); } });
+    return () => { cancelled = true; };
   }, [env]);
 
-  // Restore the last-used environment on mount.
-  useEffect(() => {
-    const last = localStorage.getItem("admin_last_env") as EnvId | null;
-    if (last === "local" || last === "production") setEnv(last);
-  }, []);
+  const forgetSavedKey = async () => {
+    await clearAdminToken(env).catch(() => {});
+    setToken("");
+    setHasSavedToken(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (cfg.isProduction) {
+      const problem = opsConfigProblem(ops);
+      if (problem) { setError(problem); return; }
+      saveOpsConfig(ops);
+    }
     setLoading(true);
     setError("");
     try {
       const ok = await login(token, env);
       if (!ok) {
         const fallback = cfg.isProduction
-          ? "Could not authenticate. Tunnel down, or bad token — check the 'tunnel' SSH user and key."
-          : "Invalid access credentials, or no local backend on 127.0.0.1:8090.";
-        // Show the actual auth error so token, tunnel, and permission failures remain distinct.
+          ? "Could not authenticate. Tunnel down, or bad key — check the 'tunnel' SSH user and key."
+          : "Invalid admin key, or no local backend on 127.0.0.1:8090.";
+        // Show the actual auth error so key, tunnel, and permission failures remain distinct.
         setError(lastError ? `${fallback}\n\nDetail: ${lastError}` : fallback);
       }
     } catch (err) {
@@ -56,10 +67,9 @@ export default function TokenAuth() {
 
         {/* Environment selector */}
         <div style={{ display: "flex", gap: "10px", marginBottom: "1.25rem" }}>
-          {(Object.keys(ENVIRONMENTS) as EnvId[]).map((id) => {
-            const e = ENVIRONMENTS[id];
+          {ENV_IDS.map((id) => {
             const active = env === id;
-            const prod = e.isProduction;
+            const prod = id === "production";
             return (
               <button
                 key={id}
@@ -74,35 +84,52 @@ export default function TokenAuth() {
                   letterSpacing: "1px",
                   cursor: "pointer",
                   transition: "all 0.15s ease",
-                  border: active
-                    ? `1px solid ${prod ? "#ef4444" : "#4ade80"}`
-                    : "1px solid var(--border)",
-                  background: active
-                    ? prod
-                      ? "rgba(239,68,68,0.15)"
-                      : "rgba(74,222,128,0.12)"
-                    : "rgba(0,0,0,0.25)",
+                  border: active ? `1px solid ${prod ? "#ef4444" : "#4ade80"}` : "1px solid var(--border)",
+                  background: active ? (prod ? "rgba(239,68,68,0.15)" : "rgba(74,222,128,0.12)") : "rgba(0,0,0,0.25)",
                   color: active ? (prod ? "#ef4444" : "#4ade80") : "var(--text-dim)",
                 }}
               >
-                {e.label}
+                {envById(id, ops).label}
               </button>
             );
           })}
         </div>
 
-
-
         <form onSubmit={handleSubmit} style={{ textAlign: "left" }}>
+          {cfg.isProduction && (
+            <div style={{ display: "grid", gap: "10px", marginBottom: "1rem" }}>
+              <input
+                value={ops.vpsHost}
+                onChange={(ev) => setOps(o => ({ ...o, vpsHost: ev.target.value }))}
+                style={inputStyle}
+                placeholder="Production VPS host (IPv4)"
+                aria-label="Production VPS host"
+              />
+              <input
+                value={ops.sshKeyPath}
+                onChange={(ev) => setOps(o => ({ ...o, sshKeyPath: ev.target.value }))}
+                style={inputStyle}
+                placeholder="SSH key path, e.g. ~/.ssh/xfchess_vps"
+                aria-label="SSH key path"
+              />
+            </div>
+          )}
           <div style={{ marginBottom: "1.75rem" }}>
             <input
               type="password"
               value={token}
               onChange={(ev) => setToken(ev.target.value)}
               style={inputStyle}
-              placeholder="••••••••••••••••"
+              placeholder="Admin API key"
+              aria-label="Admin API key"
               required
             />
+            {hasSavedToken && (
+              <button type="button" onClick={forgetSavedKey}
+                style={{ marginTop: "8px", background: "none", border: "none", color: "var(--text-dim)", fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}>
+                Using the key saved in your OS credential store — forget it
+              </button>
+            )}
           </div>
 
           {error && (

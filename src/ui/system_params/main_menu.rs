@@ -1,5 +1,5 @@
 use crate::assets::{GameAssets, LoadingProgress};
-use crate::core::{GameMode as CoreGameMode, GameSettings, GameState, PreviousState};
+use crate::core::{GameMode, GameSettings, GameState};
 use crate::game::ai::ChessAIResource;
 use crate::game::events::GameStartedEvent;
 use crate::game::resources::MenuSounds;
@@ -20,7 +20,7 @@ use crate::multiplayer::solana::lobby::SolanaLobbyState;
 use crate::multiplayer::solana::wager_rate::SolUsdRate;
 use crate::multiplayer::spectator::SpectateViaLinkEvent;
 use crate::multiplayer::{NetworkConfig, OnlineNetworkState};
-use crate::states::main_menu::new_menu::{MenuExitConfirm, MenuFocusMode};
+use crate::states::main_menu::menu::{MenuExitConfirm, MenuFocusMode};
 use crate::states::main_menu::{CompetitiveMenuState, PlayerColorChoice};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -37,10 +37,9 @@ pub struct MainMenuUIContext<'w, 's> {
     pub view_mode: ResMut<'w, ViewMode>,
     pub loading_progress: ResMut<'w, LoadingProgress>,
     pub game_assets: ResMut<'w, GameAssets>,
-    pub previous_state: ResMut<'w, PreviousState>,
 
     pub settings: ResMut<'w, GameSettings>,
-    pub core_mode: ResMut<'w, CoreGameMode>,
+    pub core_mode: ResMut<'w, GameMode>,
     pub competitive_menu: ResMut<'w, CompetitiveMenuState>,
     pub network_state: Option<Res<'w, OnlineNetworkState>>,
     pub p2p_ui: Option<ResMut<'w, P2PUIState>>,
@@ -84,7 +83,7 @@ pub struct MainMenuUIContext<'w, 's> {
     pub learn_viewport: ResMut<'w, crate::xf_animate::LearnViewportRect>,
     pub active_time_control:
         ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
-    pub new_menu_panel: ResMut<'w, crate::states::main_menu::NewMenuPanel>,
+    pub menu_panel: ResMut<'w, crate::states::main_menu::MenuPanel>,
     pub wallet_bridge: ResMut<'w, crate::states::main_menu::WalletBridgePoller>,
     pub menu_sounds: Option<Res<'w, MenuSounds>>,
     pub exit_confirm: ResMut<'w, MenuExitConfirm>,
@@ -93,5 +92,9 @@ pub struct MainMenuUIContext<'w, 's> {
     pub update_check: ResMut<'w, crate::core::updates::UpdateCheck>,
     pub spectate_events: Option<MessageWriter<'w, SpectateViaLinkEvent>>,
     pub tokio_runtime: Res<'w, crate::multiplayer::TokioRuntime>,
+    pub puzzle_hub: ResMut<'w, crate::puzzle::PuzzleHub>,
+    pub puzzle_session: Res<'w, crate::puzzle::PuzzleSession>,
+    pub start_puzzle: MessageWriter<'w, crate::puzzle::StartPuzzle>,
+    pub support_bundle: ResMut<'w, crate::core::support_bundle::SupportBundleUi>,
     pub app_exit: MessageWriter<'w, AppExit>,
 }

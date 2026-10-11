@@ -33,7 +33,7 @@ pub fn commit_and_undelegate_game_pda<'info>(
     magic_program: &AccountInfo<'info>,
 ) -> Result<()> {
     MagicIntentBundleBuilder::new(payer.clone(), magic_context.clone(), magic_program.clone())
-        .commit_and_undelegate(&[game.clone()])
+        .commit_and_undelegate(std::slice::from_ref(game))
         .build_and_invoke()?;
     Ok(())
 }

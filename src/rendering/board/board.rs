@@ -1,6 +1,6 @@
 use crate::game::systems::camera::BOARD_LAYER;
-use crate::game::systems::input::on_square_click;
 use crate::game::view_mode::ViewMode;
+use crate::input::board::on_square_click;
 use crate::input::pointer::{on_square_hover, on_square_unhover};
 use crate::rendering::utils::Square;
 use bevy::camera::visibility::RenderLayers;
@@ -22,7 +22,7 @@ pub fn create_board(
     mut materials: ResMut<Assets<StandardMaterial>>,
     square_materials: Res<crate::rendering::utils::SquareMaterials>,
 ) {
-    use crate::core::{DespawnOnExit, GameState};
+    use crate::core::game_scene;
 
     let boardmesh_3d = meshes.add(Cuboid::new(1.0, 0.1, 1.0));
     let boardmesh_hit = meshes.add(Rectangle::new(1.0, 1.0));
@@ -65,7 +65,7 @@ pub fn create_board(
                     square,
                     Board,
                     Name::new(square_name),
-                    DespawnOnExit(GameState::InGame),
+                    game_scene(),
                     mesh_3d.clone(),
                     base_mat_3d,
                     mesh_hit.clone(),
@@ -165,17 +165,17 @@ impl Plugin for BoardPlugin {
             )
             .add_systems(
                 Update,
+                // Square highlights after the selection highlight is rebuilt.
                 (
-                    update_move_hints_system.run_if(in_state(GameState::InGame)),
-                    update_last_move_highlight_system.run_if(in_state(GameState::InGame)),
-                    update_check_highlight_system.run_if(in_state(GameState::InGame)),
-                    board_view_mode_toggle_system.run_if(
-                        in_state(GameState::InGame)
-                            .and(resource_changed::<crate::game::view_mode::ViewMode>),
-                    ),
-                    crate::game::systems::debug_transform::debug_log_transforms
-                        .run_if(in_state(GameState::InGame)),
-                ),
+                    update_move_hints_system,
+                    update_last_move_highlight_system,
+                    update_check_highlight_system,
+                    board_view_mode_toggle_system
+                        .run_if(resource_changed::<crate::game::view_mode::ViewMode>),
+                )
+                    .chain()
+                    .after(crate::game::systems::highlight_possible_moves)
+                    .in_set(crate::core::schedule::GameSystems::Visual),
             );
 
         // TempleOS tribute theme — dev builds only (`--features templeos`).

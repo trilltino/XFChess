@@ -1,7 +1,11 @@
 /** Adapt Phantom and Solflare providers to WalletSource. */
 import bs58 from 'bs58';
+import { Buffer } from 'buffer';
+import { deserializeTransaction, validateSignedTransaction, assertWalletAddress } from './transactions';
 import type { WalletSource, WalletKind } from './types';
 import { detectSolanaTxCapabilities, WALLET_LABEL } from './types';
+import { withTimeout } from './bridge';
+export { withTimeout } from './bridge';
 
 export type ExtensionKind = Extract<WalletKind, 'phantom' | 'solflare'>;
 
@@ -20,15 +24,6 @@ export const EXTENSION_META: Record<
     provider: () => (window as any).solflare,
   },
 };
-
-export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
-    ),
-  ]);
-}
 
 /**
  * Connect with a real approval prompt rather than onlyIfTrusted so shared
@@ -66,12 +61,14 @@ export async function connectExtension(kind: ExtensionKind): Promise<WalletSourc
       );
       return bs58.encode(signature);
     },
-    signTransaction: async () => {
-      // Extension signing uses typed transactions in TransactionSigner to refresh
-      // blockhashes; do not add a redundant bytes conversion here.
-      throw new Error(
-        'signTransaction is not used for extension wallets — see TransactionSigner.signWithExtension'
-      );
+    signTransaction: async (bytes: Uint8Array) => {
+      assertWalletAddress(provider.publicKey?.toBase58?.() ?? provider.publicKey?.toString?.(), pubkey);
+      const original = Buffer.from(bytes).toString('base64');
+      const signed = await withTimeout<ReturnType<typeof deserializeTransaction>>(
+        provider.signTransaction(deserializeTransaction(bytes)), 60000, `${meta.label} signature`);
+      const result = signed.serialize();
+      validateSignedTransaction(original, Buffer.from(result).toString('base64'), pubkey);
+      return new Uint8Array(result);
     },
   };
 }

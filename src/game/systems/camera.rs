@@ -423,7 +423,7 @@ pub fn camera_rotate_on_turn_system(
     rotation_state.current_yaw += rotation_delta;
 
     // Normalize current_yaw to 0-2PI range
-    rotation_state.current_yaw = rotation_state.current_yaw % (2.0 * PI);
+    rotation_state.current_yaw %= 2.0 * PI;
     if rotation_state.current_yaw < 0.0 {
         rotation_state.current_yaw += 2.0 * PI;
     }
@@ -468,10 +468,10 @@ mod tests {
         assert_eq!(controller.smoothing, 0.3);
         assert_eq!(controller.zoom_speed, 2.0);
         assert_eq!(controller.zoom_smoothing, 0.15);
-        assert_eq!(controller.current_zoom, 15.0);
-        assert_eq!(controller.target_zoom, 15.0);
-        assert_eq!(controller.min_zoom, 5.0);
-        assert_eq!(controller.max_zoom, 30.0);
+        assert_eq!(controller.current_zoom, 11.5);
+        assert_eq!(controller.target_zoom, 11.5);
+        assert_eq!(controller.min_zoom, 3.5);
+        assert_eq!(controller.max_zoom, 20.0);
     }
 
     #[test]
@@ -627,7 +627,7 @@ mod tests {
         // Range should be wide enough for varied playstyles
         let zoom_range = controller.max_zoom - controller.min_zoom;
         assert!(
-            zoom_range >= 20.0,
+            zoom_range >= 15.0,
             "Range should allow significant zoom variation"
         );
     }
@@ -749,7 +749,7 @@ pub fn setup_game_camera(
                 RenderLayers::layer(BOARD_LAYER),
                 new_transform,
                 BoardCamera,
-                crate::core::DespawnOnExit(crate::core::GameState::InGame),
+                crate::core::game_scene(),
                 Name::new("Board Camera"),
             ))
             .id()
@@ -830,8 +830,8 @@ pub fn camera_reset_system(
     }
 }
 
+/// Switches between the 3D and 2D board (run on V, in a game).
 pub fn view_mode_toggle_input_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut view_mode: ResMut<crate::game::view_mode::ViewMode>,
     commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
@@ -842,22 +842,20 @@ pub fn view_mode_toggle_input_system(
     game_mode: Res<GameMode>,
     rotation_state: ResMut<CameraRotationState>,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyV) {
-        view_mode.toggle();
-        info!("[VIEW] Toggled view mode to {:?}", *view_mode);
+    view_mode.toggle();
+    info!("[VIEW] Toggled view mode to {:?}", *view_mode);
 
-        setup_game_camera(
-            commands,
-            persistent_camera,
-            view_mode.into(),
-            ui_cam_query,
-            board_cam_query,
-            players,
-            current_turn,
-            game_mode,
-            rotation_state,
-        );
-    }
+    setup_game_camera(
+        commands,
+        persistent_camera,
+        view_mode.into(),
+        ui_cam_query,
+        board_cam_query,
+        players,
+        current_turn,
+        game_mode,
+        rotation_state,
+    );
 }
 
 pub fn camera_controls_enabled(camera_lock: Res<CameraLockState>) -> bool {

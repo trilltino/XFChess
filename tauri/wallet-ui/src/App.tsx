@@ -1,5 +1,11 @@
-﻿import { useState, useEffect, useRef, type CSSProperties } from "react";
-import bs58 from "bs58";
+﻿import { fetchProfileStatus, resolveExistingUsername, getAuthToken, setAuthToken, authenticateWallet } from "./wallet/auth";
+import { API_BASE, SESSION_ID, apiGet, apiPost, closePopup, logLifecycle, withTimeout, getConnectedProvider, ensureDevnet, isNetworkMismatchError, NETWORK_MISMATCH_MESSAGE, refreshBlockhash, isStaleBlockhashError } from "./wallet/bridge";
+import { PRIMARY, PRIMARY_DIM, PRIMARY_BORDER, BG, CARD_BG, BORDER, TEXT, TEXT_DIM, TEXT_MUTED, INPUT_BG, RED, RED_DIM, RED_BORDER } from "./wallet/theme";
+import { PrimaryBtn, ErrorMsg } from "./wallet/components";
+import { TransactionSigner } from "./wallet/TransactionSigner";
+import { validateSignedTransaction, assertWalletAddress } from "./wallet/transactions";
+
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { usePrivy, useLogin, useLogout } from "@privy-io/react-auth";
 import { useWallets, useSignMessage, useSignTransaction, useCreateWallet } from "@privy-io/react-auth/solana";
 import type { WalletSource } from "./wallet/types";
@@ -7,255 +13,9 @@ import { connectExtension } from "./wallet/extension";
 import { privyWalletSource } from "./wallet/privy";
 import { PRIVY_ENABLED, SOLANA_CHAIN } from "./privy/config";
 
-// Production popups use their page port to address the owning bridge. Vite
-// dev pages need an explicit bridge override because their port belongs to Vite.
-const BRIDGE_PORT = import.meta.env.DEV
-  ? (import.meta.env.VITE_BRIDGE_PORT ?? "7454")
-  : (window.location.port || "7454");
-// Call the IPv4-only bridge at 127.0.0.1 to avoid failed ::1 attempts.
-// The popup page origin stays localhost for wallet and Privy trust.
-const API_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
-
-// Include the bridge port in the window title; Rust popup lookup uses
-// the same format to distinguish concurrent instances.
-document.title = `XFChess #${BRIDGE_PORT}`;
-
-// Bound injected provider calls because broken extension background relays
-// can leave promises pending indefinitely.
-export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`${label} timed out — try closing this window and reopening it.`)),
-      ms,
-    );
-    p.then((v) => { clearTimeout(timer); resolve(v); },
-           (e) => { clearTimeout(timer); reject(e); });
-  });
-}
-
-// Read sid from the popup URL and attach X-Session-Id to bridge calls.
-// Direct dev loads mint a local fallback ID.
-const SESSION_ID =
-  new URLSearchParams(window.location.search).get("sid") ||
-  `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-function logLifecycle(event: string, detail?: unknown) {
-  // eslint-disable-next-line no-console
-  console.log(`[Lifecycle sid=${SESSION_ID}] ${event}`, detail ?? "");
-}
-
-async function apiGet<T = unknown>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
-    headers: { "X-Session-Id": SESSION_ID },
-  });
-  if (!resp.ok) throw new Error(`GET ${path} failed: ${resp.status}`);
-  return resp.json() as Promise<T>;
-}
-
-// Ask the bridge to close its popup; Chrome may reject window.close for
-// windows not opened by script.
-async function closePopup() {
-  try {
-    const pending = await fetch(`${API_BASE}/pending`, {
-      headers: { "X-Session-Id": SESSION_ID },
-    });
-    if (pending.ok) {
-      const state = await pending.json() as { request_id?: string | null };
-      if (state.request_id) {
-        await fetch(`${API_BASE}/cancel`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Session-Id": SESSION_ID },
-          body: JSON.stringify({ request_id: state.request_id, reason: "Wallet window closed" }),
-        });
-      }
-    }
-    await fetch(`${API_BASE}/hide`, { method: "POST", headers: { "X-Session-Id": SESSION_ID } });
-  } catch {
-    window.close();
-  }
-}
-
-// Sign through the same extension used for authentication, even when
-// multiple providers are installed.
-export function getConnectedProvider(expectedKind?: string | null): any {
-  const kind = expectedKind ?? localStorage.getItem("xfchess_wallet_provider");
-  if (kind === "solflare") return (window as any).solflare;
-  if (kind === "phantom") return (window as any).phantom?.solana;
-  // Embedded-wallet sessions must use Privy; extension fallback would select
-  // a different signing key.
-  if (kind === "privy") return null;
-  // Unknown (e.g. state from before this was tracked) — fall back to the old
-  // best-effort behavior rather than refusing to sign at all.
-  return (window as any).phantom?.solana ?? (window as any).solflare;
-}
-
-/// Best-effort switch the extension wallet to devnet before signing.
-async function ensureDevnet(provider: any, kind: string | null): Promise<void> {
-  if (!provider) return;
-  // Phantom >=0.16 supports switchNetwork via request()
-  if (kind === "phantom" && provider.request) {
-    try {
-      await provider.request({ method: "switchNetwork", params: { network: "devnet" } });
-      return;
-    } catch { /* ignore — may be unsupported or already on devnet */ }
-  }
-  // Solflare supports cluster selection through connect() or setCluster()
-  if (kind === "solflare") {
-    if (provider.setCluster) {
-      try {
-        await provider.setCluster("devnet");
-        return;
-      } catch { /* ignore */ }
-    }
-    if (provider.request) {
-      try {
-        await provider.request({ method: "switchNetwork", params: { network: "devnet" } });
-        return;
-      } catch { /* ignore */ }
-    }
-  }
-}
-
-// Wallets may report a cluster mismatch when their finalized blockhash lookup
-// cannot find a newer blockhash. Wallet-signed transactions use finalized
-// blockhashes; retain this detection for actual network mismatches or lagging RPCs.
-export function isNetworkMismatchError(e: any): boolean {
-  const msg = String(e?.message ?? e ?? "").toLowerCase();
-  const mentionsNetwork = msg.includes("network") || msg.includes("cluster");
-  const mentionsClusterNames = msg.includes("devnet") || msg.includes("mainnet");
-  const mentionsMismatch =
-    msg.includes("mismatch") || msg.includes("but this transaction is for") || msg.includes("wrong network");
-  return mentionsNetwork && mentionsClusterNames && mentionsMismatch;
-}
-
-export const NETWORK_MISMATCH_MESSAGE =
-  "Your wallet could not verify this as a Devnet transaction. Try again — if it " +
-  "keeps happening, check that the extension's network is set to Devnet " +
-  "(extension → network/cluster settings → Devnet).";
-
-// Pass Bearer auth for proxied wallet-protected routes; local bridge routes
-// may omit the token.
-async function apiPost<T = unknown>(path: string, body?: unknown, token?: string | null): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json", "X-Session-Id": SESSION_ID };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const resp = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(text || `POST ${path} failed: ${resp.status}`);
-  }
-  const ct = resp.headers.get("content-type") ?? "";
-  if (ct.includes("application/json")) return resp.json() as Promise<T>;
-  return null as T;
-}
-
-// Retry stale-blockhash rejection separately from funds, program, network,
-// or user-rejection errors; approval may outlast a freshly fetched hash.
-export function isStaleBlockhashError(e: any): boolean {
-  const msg = String(e?.message ?? e ?? "").toLowerCase();
-  return msg.includes("blockhash not found") || msg.includes("-32002");
-}
-
-/**
- * Refresh the blockhash in place immediately before signing. On fetch
- * failure, leave the transaction untouched for the caller's retry/error path.
- */
-export async function refreshBlockhash(tx: web3.Transaction | web3.VersionedTransaction): Promise<boolean> {
-  try {
-    const resp = await fetch(`${API_BASE}/api/fresh-blockhash`, { headers: { "X-Session-Id": SESSION_ID } });
-    if (!resp.ok) {
-      apiPost("/api/debug-log", { msg: `refreshBlockhash: bridge responded ${resp.status}` }).catch(() => {});
-      return false;
-    }
-    const { blockhash } = await resp.json();
-    if (typeof blockhash !== "string" || !blockhash) {
-      apiPost("/api/debug-log", { msg: "refreshBlockhash: response had no blockhash string" }).catch(() => {});
-      return false;
-    }
-    if (tx instanceof web3.VersionedTransaction) {
-      tx.message.recentBlockhash = blockhash;
-    } else {
-      tx.recentBlockhash = blockhash;
-    }
-    return true;
-  } catch (e: any) {
-    // Log refresh failure while preserving best-effort signing with the existing hash.
-    apiPost("/api/debug-log", { msg: `refreshBlockhash: threw ${e?.message || e}` }).catch(() => {});
-    return false;
-  }
-}
-
-/** On-chain username setup determines the profile step; KYC is checked at wager time. */
-interface ProfileStatus {
-  has_profile: boolean;
-  username_set: boolean;
-  is_verified: boolean;
-  username: string | null;
-}
-
-async function fetchProfileStatus(token: string): Promise<ProfileStatus> {
-  const resp = await fetch(`${API_BASE}/api/auth/sync-profile`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "X-Session-Id": SESSION_ID },
-  });
-  if (!resp.ok) throw new Error(`sync-profile failed: ${resp.status}`);
-  return resp.json();
-}
-
-async function fetchMe(token: string): Promise<{ username: string }> {
-  const resp = await fetch(`${API_BASE}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}`, "X-Session-Id": SESSION_ID },
-  });
-  if (!resp.ok) throw new Error(`auth/me failed: ${resp.status}`);
-  return resp.json();
-}
-
-/**
- * Resolve a chosen handle from on-chain profile or off-chain auth/me.
- * Exclude registration pubkey-slice placeholders; an unwagered user may have
- * a real off-chain handle before on-chain setup.
- */
-export async function resolveExistingUsername(
-  token: string,
-  pubkey: string,
-  onChain: ProfileStatus,
-): Promise<string | null> {
-  if (onChain.username_set && onChain.username) return onChain.username;
-  try {
-    const me = await fetchMe(token);
-    const registrationPlaceholder = pubkey.slice(0, 8);
-    if (me.username && me.username !== registrationPlaceholder) return me.username;
-  } catch { /* /auth/me unavailable — caller falls back to needsProfile */ }
-  return null;
-}
-
 type Step = "wallet" | "profile" | "splash" | "sign";
 
-interface AuthResponse {
-  token: string;
-  username: string;
-  wallet?: string;
-}
 
-const PRIMARY    = "#ffffff";
-const PRIMARY_DIM    = "rgba(255,255,255,0.08)";
-const PRIMARY_BORDER = "rgba(255,255,255,0.30)";
-const ACCENT     = "#ffffff";
-const BG         = "#000000";
-const SURFACE    = "#0d0d0d";
-const CARD_BG    = "#111111";
-const BORDER     = "rgba(255,255,255,0.12)";
-const TEXT       = "#ffffff";
-const TEXT_DIM   = "#888888";
-const TEXT_MUTED = "rgba(255,255,255,0.25)";
-const INPUT_BG   = "rgba(255,255,255,0.04)";
-// Keep old names as aliases so unchanged code still compiles
-const RED        = PRIMARY;
-const RED_DIM    = PRIMARY_DIM;
-const RED_BORDER = PRIMARY_BORDER;
 
 const KEYFRAMES = `
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;800;900&display=swap');
@@ -383,25 +143,6 @@ function Card({ children, style, showClose = true, onClose }: { children: React.
   );
 }
 
-function PrimaryBtn({
-  children, onClick, disabled, loading, style,
-}: {
-  children: React.ReactNode; onClick?: () => void; disabled?: boolean; loading?: boolean; style?: CSSProperties;
-}) {
-  return (
-    <button onClick={onClick} disabled={disabled || loading} style={{
-      width: "100%", padding: "14px 0", borderRadius: 10, border: "none",
-      background: disabled || loading ? "rgba(255,255,255,0.12)" : "#ffffff",
-      color: disabled || loading ? TEXT_DIM : "#000000", fontSize: 15, fontWeight: 700, letterSpacing: "0.02em",
-      transition: "all 0.2s", boxShadow: disabled || loading ? "none" : `0 4px 20px rgba(255,255,255,0.15)`,
-      display: "flex", alignItems: "center", justifyContent: "center", gap: 8, ...style,
-    }}>
-      {loading && <div style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.3)", borderTop: "2px solid #fff", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
-      {children}
-    </button>
-  );
-}
-
 function GhostBtn({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {
   return (
     <button onClick={onClick} style={{
@@ -427,17 +168,6 @@ function InputField({
         width: "100%", padding: "12px 14px", borderRadius: 10, border: `1px solid ${BORDER}`,
         background: INPUT_BG, color: TEXT, fontSize: 15, transition: "border-color 0.2s",
       }} onFocus={e => (e.target.style.borderColor = RED_BORDER)} onBlur={e => (e.target.style.borderColor = BORDER)} />
-    </div>
-  );
-}
-
-function ErrorMsg({ msg }: { msg: string }) {
-  return (
-    <div style={{
-      padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)",
-      border: `1px solid rgba(255,255,255,0.20)`, color: TEXT, fontSize: 13, marginBottom: 16,
-    }}>
-      {msg}
     </div>
   );
 }
@@ -626,7 +356,7 @@ function WalletStep({
   onContinue, onAuth, onClose
 }: {
   onContinue: (pubkey: string, provider: any) => void;
-  onAuth: (token: string, user: string, pubkey: string) => void;
+  onAuth: (token: string, user: string, pubkey: string) => Promise<void>;
   onClose?: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -642,44 +372,10 @@ function WalletStep({
    * from this auth response: the popup profile and localStorage are shared across wallets.
    */
   const authenticateWithBackend = async (src: WalletSource) => {
-    const { pubkey, signRaw, kind } = src;
-    if (!pubkey) throw new Error("No public key returned from wallet");
-    localStorage.setItem("xfchess_wallet", pubkey);
-    localStorage.setItem("xfchess_wallet_provider", kind);
-
-    // Check registration status first — avoids redundant signing requests.
-    logLifecycle("BACKEND_VERIFY", { path: "check-wallet" });
-    const checkResp = await fetch(`${API_BASE}/api/auth/check-wallet/${pubkey}`, {
-      headers: { "X-Session-Id": SESSION_ID },
-    });
-    const isRegistered = checkResp.ok;
-
-    let auth: AuthResponse;
-    logLifecycle("SIGN_REQUEST_START");
-    if (isRegistered) {
-      const ts = Math.floor(Date.now() / 1000);
-      const sig = await signRaw(`xfchess:login:${ts}`);
-      logLifecycle("SIGNATURE_RECEIVED");
-      auth = await apiPost<AuthResponse>("/api/auth/login", {
-        wallet: pubkey, signature: sig, timestamp: ts,
-      });
-    } else {
-      const ts = Math.floor(Date.now() / 1000);
-      const sig = await signRaw(`xfchess:register:${ts}`);
-      logLifecycle("SIGNATURE_RECEIVED");
-      auth = await apiPost<AuthResponse>("/api/auth/register", {
-        wallet: pubkey, signature: sig, timestamp: ts,
-        username: pubkey.slice(0, 8),
-      });
-    }
-
-    // Post this auth response's username and provider; handleAuth later refines
-    // the profile-aware name, and provider gates embedded-session setup.
-    await apiPost("/wallet", { pubkey, username: auth.username, provider: kind });
-
-    logLifecycle("TX_COMPLETE", { pubkey });
-    onAuth(auth.token, auth.username, pubkey);
+    const auth = await authenticateWallet(src);
+    const { pubkey } = src;
     onContinue(pubkey, src.provider ?? null);
+    await onAuth(auth.token, auth.username, pubkey);
   };
 
   /**
@@ -833,299 +529,6 @@ function SplashStep({ username, onComplete }: { username: string; onComplete: ()
 }
 
 
-function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
-  const [pendingTx, setPendingTx] = useState<string | null>(null);
-  const [pendingLabel, setPendingLabel] = useState<string | null>(null);
-  const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
-  const [signing, setSigning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // Privy hooks return empty state safely when the provider wrapper is a passthrough.
-  const { ready: privyReady, authenticated: privyAuthenticated } = usePrivy();
-  const { wallets: privyWallets } = useWallets();
-  const { signTransaction: privySignTransaction } = useSignTransaction();
-  const hasPrivyWallet = PRIVY_ENABLED && !!privyWallets[0]?.address;
-  const [bridgeProvider, setBridgeProvider] = useState<string | null>(null);
-  const [bridgeStatusLoaded, setBridgeStatusLoaded] = useState(false);
-  const isPrivySession = bridgeProvider === "privy";
-  // Attempt each pending transaction once to avoid duplicate wallet prompts during polling.
-  const autoAttempted = useRef<string | null>(null);
-
-  // Read provider identity from the bridge; stale localStorage could route signing to the wrong wallet.
-  useEffect(() => {
-    let cancelled = false;
-    void withTimeout(apiGet<{ pubkey?: string; provider?: string | null }>("/status"), 5000, "Wallet session lookup")
-      .then((status) => {
-        if (cancelled) return;
-        if (status.pubkey && status.pubkey !== _pubkey) {
-          setError("The wallet session changed. Close this window and reopen the signing request.");
-          return;
-        }
-        setBridgeProvider(status.provider ?? null);
-        setBridgeStatusLoaded(true);
-      })
-      .catch((e: any) => {
-        if (!cancelled) setError(e?.message || String(e));
-      });
-    return () => { cancelled = true; };
-  }, [_pubkey]);
-
-  const cancelRequest = async (requestId: string, reason: string) => {
-    const response = await fetch(`${API_BASE}/cancel`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Session-Id": SESSION_ID },
-      body: JSON.stringify({ request_id: requestId, reason }),
-    });
-    if (!response.ok && response.status !== 409) {
-      throw new Error(`Wallet bridge rejected cancellation (${response.status})`);
-    }
-  };
-
-  const resolveAndHide = async (requestId: string, signedB64: string) => {
-    const response = await fetch(`${API_BASE}/resolved`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Session-Id": SESSION_ID },
-      body: JSON.stringify({ request_id: requestId, signed: signedB64 }),
-    });
-    if (!response.ok) throw new Error(`Wallet bridge rejected signing response (${response.status})`);
-    sessionStorage.removeItem("xfchess_auto_attempted_tx");
-    setPendingTx(null);
-    setPendingLabel(null);
-    setCurrentRequestId(null);
-    setError(null);
-    await closePopup();
-  };
-
-  // Accept versioned and legacy transaction bytes; tauri_signer sends legacy transactions.
-  const deserializeTx = (txBytes: Buffer): web3.VersionedTransaction | web3.Transaction => {
-    try {
-      return web3.VersionedTransaction.deserialize(txBytes);
-    } catch {
-      return web3.Transaction.from(txBytes);
-    }
-  };
-
-  const signTxBytes = async (txB64: string, kp: web3.Keypair): Promise<string> => {
-    const txBytes = Buffer.from(txB64, "base64");
-    const tx = deserializeTx(txBytes);
-    if (tx instanceof web3.VersionedTransaction) {
-      tx.sign([kp]);
-      return Buffer.from(tx.serialize()).toString("base64");
-    }
-    tx.partialSign(kp);
-    return tx.serialize().toString("base64");
-  };
-
-  const handleAutoSign = async (requestId: string, txB64: string, secret: string) => {
-    setSigning(true);
-    try {
-      const kp = web3.Keypair.fromSecretKey(new Uint8Array(JSON.parse(secret)));
-      await resolveAndHide(requestId, await signTxBytes(txB64, kp));
-    } catch (e: any) {
-      await cancelRequest(requestId, e.message).catch(() => {});
-      setError(e.message);
-    } finally {
-      setSigning(false);
-    }
-  };
-
-  // Privy signs raw serialized bytes. Skip extension cluster switching because
-  // embedded wallets have no user-selected network.
-  const signWithPrivy = async (requestId: string, txB64: string) => {
-    setSigning(true);
-    setError(null);
-    try {
-      const wallet = privyWallets[0];
-      if (!wallet?.address) throw new Error("No Privy wallet available to sign with");
-
-      const tx = deserializeTx(Buffer.from(txB64, "base64"));
-      await refreshBlockhash(tx);
-
-      logLifecycle("SIGN_REQUEST_START");
-      const { signedTransaction } = await withTimeout(
-        privySignTransaction({
-          transaction: new Uint8Array(
-            tx instanceof web3.VersionedTransaction ? tx.serialize() : tx.serialize({
-              requireAllSignatures: false,
-              verifySignatures: false,
-            }),
-          ),
-          wallet,
-          chain: SOLANA_CHAIN,
-        }),
-        60000,
-        "Privy signature",
-      );
-      logLifecycle("SIGNATURE_RECEIVED");
-
-      await resolveAndHide(requestId, Buffer.from(signedTransaction).toString("base64"));
-      logLifecycle("TX_COMPLETE");
-    } catch (e: any) {
-      logLifecycle("FAILED", { message: e?.message || String(e) });
-      await cancelRequest(requestId, e?.message || String(e)).catch(() => {});
-      setError(e?.message || String(e));
-    } finally {
-      setSigning(false);
-    }
-  };
-
-  // Automatically prompt the connected extension for a pending transaction;
-  // keep the button for retry after rejection or late connection.
-  const signWithExtension = async (requestId: string, txB64: string) => {
-    setSigning(true);
-    setError(null);
-    try {
-      const provider = getConnectedProvider(bridgeProvider);
-      if (!provider) throw new Error("No Phantom/Solflare extension detected");
-      // Reconnect this popup's provider before signing; stored preference and
-      // extension presence do not establish a live page session.
-      if (!provider.publicKey) {
-        try {
-          await withTimeout(provider.connect({ onlyIfTrusted: true }), 15000, "Wallet reconnect");
-        } catch {
-          await withTimeout(provider.connect(), 30000, "Wallet connection");
-        }
-      }
-      const txBytes = Buffer.from(txB64, "base64");
-      const tx = deserializeTx(txBytes);
-      await refreshBlockhash(tx);
-      await ensureDevnet(provider, localStorage.getItem("xfchess_wallet_provider"));
-      logLifecycle("SIGN_REQUEST_START");
-      const signed = await withTimeout<web3.VersionedTransaction | web3.Transaction>(
-        provider.signTransaction(tx),
-        60000,
-        "Wallet signature",
-      );
-      logLifecycle("SIGNATURE_RECEIVED");
-      await resolveAndHide(requestId, Buffer.from(signed.serialize()).toString("base64"));
-      logLifecycle("TX_COMPLETE");
-    } catch (e: any) {
-      logLifecycle("FAILED", { message: e?.message || String(e) });
-      await cancelRequest(requestId, e?.message || String(e)).catch(() => {});
-      setError(isNetworkMismatchError(e) ? NETWORK_MISMATCH_MESSAGE : e.message || String(e));
-    } finally {
-      setSigning(false);
-    }
-  };
-
-  // SSE pushes pending state immediately and on changes; EventSource reconnects natively.
-  useEffect(() => {
-    const handleUpdate = (data: { tx?: string | null; label?: string | null; request_id?: string | null }) => {
-      if (data.tx && data.tx !== pendingTx) {
-        if (!data.request_id) {
-          setError("Wallet bridge sent a signing request without a request ID.");
-          return;
-        }
-        setPendingTx(data.tx);
-        setPendingLabel(typeof data.label === "string" && data.label ? data.label : null);
-        setCurrentRequestId(data.request_id);
-        logLifecycle("SIGN_REQUEST_RECEIVED", {
-          request_id: data.request_id,
-          label: data.label ?? null,
-        });
-        const secret = sessionStorage.getItem("xfchess_session_key");
-        // Persist attempted transaction identity across reloads so reconnecting SSE
-        // cannot create a competing wallet prompt. Clear it on resolution or a new tx.
-        const alreadyAttempted = sessionStorage.getItem("xfchess_auto_attempted_tx") === data.tx;
-        if (secret) {
-          handleAutoSign(data.request_id, data.tx, secret);
-        } else if (
-          bridgeStatusLoaded &&
-          ((hasPrivyWallet && isPrivySession) ||
-            (!isPrivySession && (bridgeProvider === "phantom" || bridgeProvider === "solflare") &&
-              getConnectedProvider(bridgeProvider))) &&
-          autoAttempted.current !== data.tx &&
-          !alreadyAttempted
-        ) {
-          autoAttempted.current = data.tx;
-          sessionStorage.setItem("xfchess_auto_attempted_tx", data.tx);
-          // Prefer the embedded wallet for its authenticated session; an installed
-          // extension or stored preference may belong to another wallet.
-          if (hasPrivyWallet) signWithPrivy(data.request_id, data.tx);
-          else signWithExtension(data.request_id, data.tx);
-        }
-      } else if (!data.tx) {
-        sessionStorage.removeItem("xfchess_auto_attempted_tx");
-        setPendingTx(null);
-        setPendingLabel(null);
-        setCurrentRequestId(null);
-      }
-    };
-
-    const source = new EventSource(`${API_BASE}/pending/stream`);
-    source.onmessage = (ev) => {
-      try {
-        handleUpdate(JSON.parse(ev.data));
-      } catch (e) {
-        console.warn("[SIGNER] Bad SSE payload", e);
-      }
-    };
-    source.onopen = () => logLifecycle("SSE_CONNECTED");
-    source.onerror = (e) => console.warn(
-      `[SIGNER] SSE connection error (will auto-retry) base=${API_BASE} readyState=${source.readyState}`,
-      e,
-    );
-    return () => source.close();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingTx, hasPrivyWallet, isPrivySession, bridgeProvider, bridgeStatusLoaded]);
-
-  // Retry pending SSE transactions when the embedded wallet finishes hydrating.
-  useEffect(() => {
-    if (
-      !pendingTx ||
-      !hasPrivyWallet ||
-      !isPrivySession ||
-      !bridgeStatusLoaded ||
-      sessionStorage.getItem("xfchess_session_key") ||
-      autoAttempted.current === pendingTx
-    ) return;
-    autoAttempted.current = pendingTx;
-    sessionStorage.setItem("xfchess_auto_attempted_tx", pendingTx);
-    void signWithPrivy(currentRequestId ?? "", pendingTx);
-  }, [pendingTx, currentRequestId, hasPrivyWallet, isPrivySession, bridgeStatusLoaded]);
-
-  if (!pendingTx) return null;
-
-  return (
-    <div style={{
-      position: "fixed", bottom: 20, right: 20, zIndex: 100,
-      width: 300, padding: 20, background: CARD_BG, border: `1px solid ${PRIMARY_BORDER}`,
-      borderRadius: 16, backdropFilter: "blur(20px)", animation: "fadeUp 0.3s ease",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <div style={{ width: 10, height: 10, borderRadius: "50%", background: PRIMARY, animation: "pulse 1s infinite" }} />
-        <span style={{ fontWeight: 800, fontSize: 13, color: TEXT }}>
-          {pendingLabel ? pendingLabel.toUpperCase() : "PENDING TRANSACTION"}
-        </span>
-      </div>
-      <p style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 16 }}>
-        {signing
-          ? "Signing..."
-          : pendingLabel
-            ? `You're signing: ${pendingLabel}`
-            : "Awaiting signature."}
-      </p>
-      {error && <ErrorMsg msg={error} />}
-      {!signing && !sessionStorage.getItem("xfchess_session_key") && (
-        hasPrivyWallet ? (
-          <PrimaryBtn onClick={() => signWithPrivy(currentRequestId ?? "", pendingTx)}>Sign with Google</PrimaryBtn>
-        ) : !bridgeStatusLoaded ? (
-          <div style={{ color: TEXT_DIM, fontSize: 12, textAlign: "center" }}>
-            Checking your wallet session...
-          </div>
-        ) : isPrivySession ? (
-          <div style={{ color: TEXT_DIM, fontSize: 12, textAlign: "center" }}>
-            {!privyReady || !privyAuthenticated
-              ? "Reconnecting to Google..."
-              : "Loading your Google wallet..."}
-          </div>
-        ) : (
-          <PrimaryBtn onClick={() => signWithExtension(currentRequestId ?? "", pendingTx)}>Sign with Extension</PrimaryBtn>
-        )
-      )}
-    </div>
-  );
-}
-
 // Normal login chooses an off-chain handle. requireOnchain also submits
 // init_profile when the game blocks a wager on a missing PlayerProfile.
 function ProfileStep({
@@ -1173,7 +576,7 @@ function ProfileStep({
     setSaving(true);
     setError(null);
     try {
-      const token = localStorage.getItem("xfchess_token");
+      const token = await getAuthToken();
       if (requireOnchain) {
         const walletPubkey =
           pubkey ?? localStorage.getItem("xfchess_wallet_pubkey") ?? localStorage.getItem("xfchess_wallet");
@@ -1202,6 +605,7 @@ function ProfileStep({
               await withTimeout(provider.connect(), 30000, "Wallet connection");
             }
           }
+          assertWalletAddress(provider.publicKey?.toBase58?.() ?? provider.publicKey?.toString?.(), walletPubkey);
         }
 
         if (!token) {
@@ -1219,15 +623,21 @@ function ProfileStep({
         );
 
         const txBytes = Buffer.from(built.tx_b64, "base64");
-        const tx = web3.Transaction.from(txBytes);
 
         // Retry one stale-blockhash failure with a new hash and signature. Do not
         // retry program errors, insufficient funds, or user rejection.
         const MAX_ATTEMPTS = 2;
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          const tx = web3.Transaction.from(txBytes);
           let signedB64: string;
           try {
             await refreshBlockhash(tx);
+            const original = tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString("base64");
+            const simulation = await apiPost<{ error?: { message: string }; result?: { value?: { err: unknown } } }>(
+              "/api/simulate-tx", { tx_b64: original }, token);
+            if (simulation.error || !simulation.result?.value || simulation.result.value.err) {
+              throw new Error(`Transaction simulation failed: ${simulation.error?.message ?? JSON.stringify(simulation.result?.value?.err)}`);
+            }
             logLifecycle("SIGN_REQUEST_START", {
               attempt,
               wallet: signWithEmbedded ? "privy" : "extension",
@@ -1255,10 +665,11 @@ function ProfileStep({
               );
               signedB64 = Buffer.from(signed.serialize()).toString("base64");
             }
+            validateSignedTransaction(original, signedB64, pubkey!);
             logLifecycle("SIGNATURE_RECEIVED");
           } catch (e: any) {
             if (isNetworkMismatchError(e)) throw new Error(NETWORK_MISMATCH_MESSAGE);
-            throw new Error("Signature rejected — try again to finish on-chain setup.");
+            throw new Error(e?.message || "Signature rejected — try again to finish on-chain setup.");
           }
           try {
             await apiPost<{ signature: string }>(
@@ -1294,6 +705,7 @@ function ProfileStep({
               "X-Session-Id": SESSION_ID,
             },
             body: JSON.stringify({ username: handle }),
+            signal: AbortSignal.timeout(15000),
           });
           if (!r.ok) throw new Error(await r.text().catch(() => "Failed to save username"));
         }
@@ -1374,13 +786,12 @@ function Onboarding() {
     () => localStorage.getItem("xfchess_username") || "Player",
   );
   const [ready, setReady] = useState(false);
-  const [pubkey, setPubkey] = useState<string | null>(
-    () => localStorage.getItem("xfchess_wallet_pubkey") || localStorage.getItem("xfchess_wallet"),
-  );
+  const [pubkey, setPubkey] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [walletProvider, setWalletProvider] = useState<any>(null);
 
   useEffect(() => {
+    localStorage.removeItem("xfchess_token");
     setReady(true);
     // Report mounted React readiness; a discovered OS window alone cannot prove it.
     logLifecycle("REACT_READY");
@@ -1393,12 +804,13 @@ function Onboarding() {
       .catch(() => { /* bridge unreachable */ });
   }, []);
 
+  // Use the bridge identity for this game session.
   // Fall back to bridge wallet state when popup storage is empty so pending
   // transactions can still render their signer.
   useEffect(() => {
-    if (pubkey) return;
     apiGet<{ connected: boolean; pubkey: string | null }>("/status")
       .then((s) => {
+        setPubkey(s.pubkey ?? "");
         if (s.pubkey) {
           localStorage.setItem("xfchess_wallet_pubkey", s.pubkey);
           setPubkey(s.pubkey);
@@ -1406,6 +818,24 @@ function Onboarding() {
       })
       .catch(() => { /* bridge unreachable — nothing to fall back to */ });
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const source = new EventSource(API_BASE + "/pending/stream?sid=" + encodeURIComponent(SESSION_ID));
+    source.onmessage = event => {
+      try {
+        const state = JSON.parse(event.data);
+        if (state.tx) setStep("sign");
+        else if (state.step === "wallet") {
+          setStep("wallet");
+          void apiGet<{ pubkey: string | null }>("/status").then(status => setPubkey(status.pubkey));
+        } else if (state.step === "profile") {
+          setRequireOnchain(true);
+          setStep("profile");
+        }
+      } catch { /* Ignore malformed events; the bridge sends the next state. */ }
+    };
+    return () => source.close();
   }, []);
 
   // Poll for profile-step requests in every step except sign; a reused popup
@@ -1433,11 +863,12 @@ function Onboarding() {
   const [handleResolved, setHandleResolved] = useState(!requireOnchain);
   useEffect(() => {
     if (step !== "profile" || !requireOnchain || handleResolved) return;
-    const token = localStorage.getItem("xfchess_token");
     const activePubkey = pubkey ?? localStorage.getItem("xfchess_wallet_pubkey") ?? localStorage.getItem("xfchess_wallet");
-    if (!token || !activePubkey) { setHandleResolved(true); return; }
+    if (!activePubkey) { setHandleResolved(true); return; }
     (async () => {
       try {
+        const token = await getAuthToken();
+        if (!token) return;
         const status = await fetchProfileStatus(token);
         const existing = await resolveExistingUsername(token, activePubkey, status);
         if (existing) {
@@ -1453,11 +884,9 @@ function Onboarding() {
   }, [step, requireOnchain, handleResolved, pubkey]);
 
   const handleAuth = async (token: string, user: string, nextPubkey: string) => {
-    localStorage.setItem("xfchess_token", token);
+    setAuthToken(token);
     localStorage.setItem("xfchess_wallet_pubkey", nextPubkey);
     setPubkey(nextPubkey);
-    // Push JWT to bridge so the game client can pick it up via GET /token
-    apiPost("/token", { token }).catch(() => {});
 
     // An off-chain username does not prove an on-chain PlayerProfile exists.
     // Check on-chain setup even for returning users so failed initialization can be retried.
@@ -1539,7 +968,7 @@ function Onboarding() {
   };
 
   const handleGameLaunch = async (pk: string, user: string) => {
-    const token = localStorage.getItem("xfchess_token");
+    const token = await getAuthToken();
     try {
       // "hot" (guest/local-keypair) launches no longer exist — every launch
       // is backed by a real wallet that signed to prove ownership.
@@ -1599,17 +1028,13 @@ function Onboarding() {
           <div style={{ textAlign: "center" as const }}>
             <LogoMark size={40} />
             <p style={{ fontSize: 13, color: TEXT_DIM, marginTop: 16 }}>
-              Approve the pending transaction below to continue.
+              Approve the pending wallet request below to continue.
             </p>
           </div>
+          {pubkey && <TransactionSigner pubkey={pubkey} />}
         </Card>
       )}
 
-      {/*
-       * Mount the signer only for step=sign so pending transactions cannot
-       * interrupt a connect or onboarding popup.
-       */}
-      {step === "sign" && pubkey && <TransactionSigner pubkey={pubkey} />}
     </div>
   );
 }

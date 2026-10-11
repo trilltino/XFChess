@@ -14,7 +14,7 @@ path. Higher level wallet, lobby, tournament, and recovery flows live in
 [`src/multiplayer/solana/`](../multiplayer/solana/).
 
 ```
-game/ (move made) -> multiplayer/rollup/bridge.rs -> vps_client (HTTP) -> backend picks base RPC or Magic Router
+game/ (move made) -> multiplayer/rollup/bridge/ -> vps_client (HTTP) -> backend picks base RPC or Magic Router
 ```
 
 The native client does not pick between base RPC and the ER itself for gameplay

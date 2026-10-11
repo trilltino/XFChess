@@ -1,132 +1,114 @@
 use crate::client::parser::Message;
 use crate::error::{BraidError, Result};
 use crate::protocol;
-use crate::types::{Update, Version};
+use crate::types::{ContentRange, Update};
 use std::time::Duration;
 
 pub fn parse_content_range(header: &str) -> Result<(String, String)> {
     protocol::parse_content_range(header)
 }
-
 pub fn format_content_range(unit: &str, range: &str) -> String {
     protocol::format_content_range(unit, range)
 }
 
 pub fn parse_heartbeat(value: &str) -> Result<Duration> {
-    let trimmed = value.trim();
-    let num_str = if let Some(s) = trimmed.strip_suffix("ms") {
-        s
-    } else if let Some(s) = trimmed.strip_suffix('s') {
-        s
+    let value = value.trim();
+    let (number, scale) = if let Some(n) = value.strip_suffix("ms") {
+        (n, 0.001)
     } else {
-        trimmed
+        (value.strip_suffix('s').unwrap_or(value), 1.0)
     };
-
-    let num: f64 = num_str
+    let seconds: f64 = number
         .parse()
-        .map_err(|_| BraidError::HeaderParse(format!("Invalid heartbeat: {}", value)))?;
-    Ok(Duration::from_secs_f64(num))
+        .map_err(|_| BraidError::HeaderParse(format!("Invalid heartbeat: {value}")))?;
+    Duration::try_from_secs_f64(seconds * scale)
+        .map_err(|_| BraidError::HeaderParse(format!("Invalid heartbeat: {value}")))
 }
 
-pub fn message_to_update(msg: Message) -> Update {
-    let version = extract_version(&msg.headers).unwrap_or_else(|| {
-        // Deliver versionless updates with a placeholder; ordering callers must check primary_version.
-        tracing::warn!(
-            "[BraidHTTP] update from {} had no Version header — applying a placeholder, causal ordering may be affected",
-            msg.url.as_deref().unwrap_or("unknown"),
-        );
-        Version::new("temp-0")
-    });
-
-    // Snapshot vs. patch is decided by the wire, not by emptiness: a `Patches: 0`
-    // update has an empty patch list and is still a patch update.
-    let mut builder = match (msg.body, msg.patches) {
-        (_, Some(patches)) => Update::patched(version, patches),
-        (Some(body), None) => {
-            Update::snapshot(version, String::from_utf8_lossy(&body).into_owned())
-        }
-        (None, None) => Update::snapshot(version, ""),
-    };
-
-    if let Some(parents) = extract_parents(&msg.headers) {
-        for parent in parents {
-            builder = builder.with_parent(parent);
-        }
-    }
-
-    if let Some(merge_type) = msg.headers.get("merge-type") {
-        builder = builder.with_merge_type(merge_type.clone());
-    }
-
-    builder.url = msg.url;
-    builder
-}
-
-fn extract_version(headers: &std::collections::BTreeMap<String, String>) -> Option<Version> {
-    let version = headers
-        .get("current-version")
-        .or_else(|| headers.get("version"))
-        .or_else(|| headers.get("Version"))
-        .or_else(|| headers.get("Current-Version"))
-        .and_then(|v| {
-            let trimmed = v.trim();
-            if trimmed.is_empty() || trimmed == "\"\"" {
-                return None;
-            }
-            protocol::parse_version_header(v).ok()
-        })
-        .and_then(|mut v| v.pop());
-
-    if version.is_none() {
-        // The caller logs failures once; trace headers to avoid duplicate warnings.
-        tracing::trace!(
-            "[BraidHTTP] no version header found. Headers were: {:?}",
-            headers
-        );
-    } else {
-        tracing::debug!("[BraidHTTP] Parsed version: {:?}", version);
-    }
-    version
-}
-
-fn extract_parents(headers: &std::collections::BTreeMap<String, String>) -> Option<Vec<Version>> {
-    let parents = headers
+pub fn message_to_update(msg: Message) -> Result<Update> {
+    let status = msg.status().unwrap_or(209);
+    let version = msg
+        .headers
+        .get("version")
+        .map(|v| protocol::parse_version_header(v))
+        .transpose()?
+        .unwrap_or_default();
+    let parents = msg
+        .headers
         .get("parents")
-        .and_then(|v| protocol::parse_version_header(v).ok());
-
-    if parents.is_none() {
-        tracing::debug!(
-            "[BraidHTTP] Parents header missing or failed to parse. Headers: {:?}",
-            headers
-        );
-    } else {
-        tracing::debug!("[BraidHTTP] Parsed parents: {:?}", parents);
-    }
-    parents
+        .map(|v| protocol::parse_version_header(v))
+        .transpose()?
+        .unwrap_or_default();
+    let current_version = msg
+        .headers
+        .get("current-version")
+        .map(|v| protocol::parse_version_header(v))
+        .transpose()?;
+    let content_range = msg
+        .headers
+        .get("content-range")
+        .map(|v| {
+            protocol::parse_content_range(v).map(|(unit, range)| ContentRange::new(unit, range))
+        })
+        .transpose()?;
+    Ok(Update {
+        version,
+        parents,
+        current_version,
+        content_range,
+        merge_type: msg.headers.get("merge-type").cloned(),
+        content_type: msg.headers.get("content-type").cloned(),
+        body: msg.body,
+        patches: msg.patches,
+        status,
+        extra_headers: msg
+            .headers
+            .into_iter()
+            .filter(|(name, _)| {
+                !matches!(
+                    name.as_str(),
+                    "version"
+                        | ":status"
+                        | "parents"
+                        | "current-version"
+                        | "content-range"
+                        | "merge-type"
+                        | "content-type"
+                        | "content-length"
+                        | "patches"
+                )
+            })
+            .collect(),
+        url: msg.url,
+    })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub fn spawn_task<F>(future: F)
-where
-    F: std::future::Future<Output = ()> + Send + 'static,
-{
-    tokio::spawn(future);
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn spawn_task<F>(future: F)
-where
-    F: std::future::Future<Output = ()> + 'static,
-{
-    wasm_bindgen_futures::spawn_local(future);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 pub async fn sleep(duration: Duration) {
     tokio::time::sleep(duration).await;
 }
 
-#[cfg(target_arch = "wasm32")]
-pub async fn sleep(duration: Duration) {
-    gloo_timers::future::sleep(duration).await;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::MessageParser;
+    #[test]
+    fn conversion_preserves_binary_bodies_versions_and_patch_metadata() {
+        let mut parser = MessageParser::for_subscription();
+        let message = parser.feed(b"Version: \"a\", \"b\"\r\nParents: \"old\"\r\nContent-Type: application/json-patch+json\r\nContent-Length: 2\r\n\r\n\xff\xfe").unwrap().pop().unwrap();
+        let update = message_to_update(message).unwrap();
+        assert_eq!(update.version.len(), 2);
+        assert_eq!(update.parents[0].to_string(), "old");
+        assert_eq!(
+            update.content_type.as_deref(),
+            Some("application/json-patch+json")
+        );
+        assert_eq!(update.body.unwrap().as_ref(), &[255, 254]);
+    }
+    #[test]
+    fn heartbeat_units_and_invalid_values() {
+        assert_eq!(parse_heartbeat("20ms").unwrap(), Duration::from_millis(20));
+        for value in ["-1", "NaN", "inf", "1e300"] {
+            assert!(parse_heartbeat(value).is_err());
+        }
+    }
 }

@@ -28,7 +28,7 @@ pub struct JoinLinkPlugin;
 impl Plugin for JoinLinkPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<JoinViaLinkEvent>();
-        app.add_systems(Update, handle_join_via_link);
+        app.add_systems(Update, handle_join_via_link.in_set(crate::core::schedule::SessionSet::Match));
     }
 }
 

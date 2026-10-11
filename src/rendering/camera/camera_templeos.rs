@@ -1,5 +1,5 @@
 use crate::core::states::GameMode;
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::{game_scene, GameState};
 use crate::game::resources::{CurrentTurn, Players};
 use crate::game::systems::camera::get_is_black_view;
 use crate::game::view_mode::ViewMode;
@@ -58,7 +58,7 @@ pub fn setup_templeos_camera(
         TempleOSCameraLookAt {
             offset: look_at_offset,
         },
-        DespawnOnExit(GameState::InGame),
+        game_scene(),
         Name::new("TempleOS Camera"),
     ));
 

@@ -1,40 +1,13 @@
-# Mount the Telegram token from a secrets file. setup.sh substitutes chat_id
-# because Alertmanager does not interpolate environment variables.
-
 global: {}
-
 route:
-  group_by: ['alertname', 'severity']
+  group_by: [alertname, severity]
   group_wait: 10s
-  group_interval: 10s
+  group_interval: 1m
   repeat_interval: 1h
-  receiver: 'telegram'
-  routes:
-    # Critical alerts page immediately with no batching wait.
-    - match:
-        severity: critical
-      receiver: 'telegram'
-      group_wait: 0s
-      continue: false
-
+  receiver: local
 receivers:
-  - name: 'telegram'
-    telegram_configs:
-      - bot_token_file: /etc/alertmanager/secrets/telegram_bot_token
-        chat_id: __TELEGRAM_CHAT_ID__
-        api_url: 'https://api.telegram.org'
-        parse_mode: 'HTML'
-        message: |
-          {{ if eq .Status "firing" }}🔴{{ else }}✅{{ end }} <b>{{ .CommonLabels.alertname }}</b> ({{ .CommonLabels.severity }})
-          {{ range .Alerts }}{{ .Annotations.summary }}
-          {{ .Annotations.description }}
-          {{ end }}
-        send_resolved: true
-
+  - name: local
 inhibit_rules:
-  # If a critical alert is firing, suppress warning for same alert
-  - source_match:
-      severity: 'critical'
-    target_match:
-      severity: 'warning'
-    equal: ['alertname', 'instance']
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity="warning"']
+    equal: [alertname, instance]

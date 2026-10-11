@@ -1,100 +1,41 @@
-#!/bin/bash
-# Idempotent monitoring setup; preserves existing secrets.
-
-set -e
-
-echo "=========================================="
-echo "XFChess Monitoring Stack Setup"
-echo "=========================================="
-
-# Check if Docker is installed
-if ! command -v docker &> /dev/null; then
-    echo "Docker not found. Installing Docker..."
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    rm get-docker.sh
-    usermod -aG docker $USER
-    echo "Docker installed. Please log out and back in, then re-run this script."
-    exit 1
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+[[ $EUID == 0 ]] || { echo 'Production monitoring setup requires root.' >&2; exit 1; }
+source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "$source_dir/compose.sh"
+dest=/opt/xfchess/monitoring
+install -d -m 755 "$dest"
+touch "$dest/.env"
+chmod 600 "$dest/.env"
+if ! grep -q '^GRAFANA_ADMIN_PASSWORD=' "$dest/.env"; then
+  printf 'GRAFANA_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 24)" >>"$dest/.env"
 fi
-
-# Install standalone Compose when absent; the plugin package may be unavailable
-# for Ubuntu-packaged Docker without changing its package repository.
-if ! command -v docker-compose &> /dev/null; then
-    echo "Docker Compose not found. Installing static binary..."
-    curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
-fi
-
-echo "Creating directories..."
-mkdir -p /opt/xfchess/monitoring
-mkdir -p /opt/xfchess/monitoring/grafana/{datasources,dashboards}
-mkdir -p /opt/xfchess/monitoring/rules
-mkdir -p /opt/xfchess/monitoring/secrets
-
-# Copy configuration files (this repo's tracked files are the source of truth —
-# re-running this script always brings the server back in sync with them).
-echo "Copying configuration files..."
-cp docker-compose.yml /opt/xfchess/monitoring/
-cp prometheus.yml /opt/xfchess/monitoring/
-cp alertmanager.yml /opt/xfchess/monitoring/
-cp rules/*.yml /opt/xfchess/monitoring/rules/
-cp -r grafana/* /opt/xfchess/monitoring/grafana/
-
-ENV_FILE=/opt/xfchess/monitoring/.env
-touch "$ENV_FILE"
-chmod 600 "$ENV_FILE"
-
-if ! grep -q '^GRAFANA_ADMIN_PASSWORD=' "$ENV_FILE"; then
-    echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -hex 16)" >> "$ENV_FILE"
-    echo "Generated a new GRAFANA_ADMIN_PASSWORD in $ENV_FILE."
-fi
-if ! grep -q '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE"; then
-    echo "TELEGRAM_BOT_TOKEN=REPLACE_ME" >> "$ENV_FILE"
-    echo "ACTION REQUIRED: set TELEGRAM_BOT_TOKEN in $ENV_FILE (create a bot via @BotFather), then re-run this script."
-fi
-if ! grep -q '^TELEGRAM_CHAT_ID=' "$ENV_FILE"; then
-    echo "TELEGRAM_CHAT_ID=REPLACE_ME" >> "$ENV_FILE"
-    echo "ACTION REQUIRED: set TELEGRAM_CHAT_ID in $ENV_FILE (message your bot, then check https://api.telegram.org/bot<token>/getUpdates), then re-run this script."
-fi
-
-# docker-compose reads Grafana credentials from the adjacent .env.
-
-# Telegram bot token: Alertmanager reads it from a file (bot_token_file), not
-# an env var — it has no env-var interpolation of its own.
-BOT_TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
-printf '%s' "$BOT_TOKEN" > /opt/xfchess/monitoring/secrets/telegram_bot_token
-chmod 600 /opt/xfchess/monitoring/secrets/telegram_bot_token
-
-# Alertmanager lacks chat_id_file; substitute the placeholder in the deployed copy.
-CHAT_ID=$(grep '^TELEGRAM_CHAT_ID=' "$ENV_FILE" | cut -d= -f2-)
-sed -i "s/__TELEGRAM_CHAT_ID__/${CHAT_ID}/g" /opt/xfchess/monitoring/alertmanager.yml
-
-echo "Starting monitoring stack..."
-cd /opt/xfchess/monitoring
-docker-compose -f docker-compose.yml up -d
-
-echo ""
-echo "=========================================="
-echo "Monitoring Stack Started!"
-echo "=========================================="
-echo ""
-echo "Dashboards are internal-only — reach them via SSH tunnel, not a public URL:"
-echo "  ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 -L 9093:127.0.0.1:9093 deploy@<server>"
-echo "  Grafana:      http://localhost:3000  (user: admin, password: see GRAFANA_ADMIN_PASSWORD in $ENV_FILE)"
-echo "  Prometheus:   http://localhost:9090"
-echo "  Alertmanager: http://localhost:9093"
-echo ""
-if grep -q 'REPLACE_ME' "$ENV_FILE"; then
-    echo "WARNING: Telegram alerting is not fully configured yet — see the ACTION REQUIRED lines above."
-    echo "         Alerts will fire in Alertmanager but won't be delivered until you fill in $ENV_FILE and re-run this script."
-fi
-echo ""
-echo "Backend health endpoints (scraped by Prometheus, not for direct browsing):"
-echo "  Basic health:    http://127.0.0.1:8090/health"
-echo "  Detailed health: http://127.0.0.1:8090/health/detailed"
-echo "  Metrics:         http://127.0.0.1:8090/metrics"
-echo ""
-echo "To view logs:    docker-compose -f /opt/xfchess/monitoring/docker-compose.yml logs -f"
-echo "To stop:         docker-compose -f /opt/xfchess/monitoring/docker-compose.yml down"
-echo "=========================================="
+# Validate staged files before replacing configuration mounted by running containers.
+stage=$(mktemp -d /opt/xfchess/.monitoring.XXXXXX)
+trap 'rm -rf -- "$stage"' EXIT
+chmod 755 "$stage"
+cp "$dest/.env" "$stage/.env"
+cp "$source_dir/"{docker-compose.yml,prometheus.yml,alertmanager.yml} "$stage/"
+cp -R "$source_dir/"{rules,grafana} "$stage/"
+chmod 644 "$stage/"*.yml
+chmod -R a+rX "$stage/rules" "$stage/grafana"
+install -d -m 755 "$stage/secrets"
+touch "$stage/secrets/telegram_bot_token"
+chown root:65534 "$stage/secrets/telegram_bot_token"
+chmod 640 "$stage/secrets/telegram_bot_token"
+python3 "$source_dir/configure_alerts.py" "$stage"
+cd "$stage"
+"${COMPOSE[@]}" -p monitoring config --quiet
+"${COMPOSE[@]}" -p monitoring run --rm --no-deps --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yml
+"${COMPOSE[@]}" -p monitoring run --rm --no-deps --entrypoint amtool alertmanager check-config /etc/alertmanager/config.yml
+cp "$stage/"{docker-compose.yml,prometheus.yml,alertmanager.yml} "$dest/"
+cp -R "$stage/"{rules,grafana,secrets} "$dest/"
+chmod 644 "$dest/"*.yml
+chmod -R a+rX "$dest/rules" "$dest/grafana"
+chown root:65534 "$dest/secrets/telegram_bot_token"
+chmod 640 "$dest/secrets/telegram_bot_token"
+cd "$dest"
+"${COMPOSE[@]}" -p monitoring up -d --wait --wait-timeout 120
+echo 'Monitoring ready on loopback. Forward 3000/9090 using the deploy SSH user.'
+echo 'Grafana password remains in /opt/xfchess/monitoring/.env; no credentials printed.'

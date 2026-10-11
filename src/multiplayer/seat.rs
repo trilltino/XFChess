@@ -24,7 +24,7 @@ pub struct SeatState {
 impl SeatState {
     fn claim(&mut self, game_id: u64) {
         let (tx, rx) = oneshot::channel();
-        std::thread::spawn(move || {
+        crate::core::net_task::spawn_detached("seat", move || {
             let _ = tx.send(crate::multiplayer::vps_client::claim_seat(game_id));
         });
         self.game_id = game_id;
@@ -108,7 +108,7 @@ fn track_seat(mut seat: ResMut<SeatState>) {
     if due && seat.claim_rx.is_none() && seat.check_rx.is_none() {
         let game_id = seat.game_id;
         let (tx, rx) = oneshot::channel();
-        std::thread::spawn(move || {
+        crate::core::net_task::spawn_detached("seat", move || {
             let _ = tx.send(crate::multiplayer::vps_client::get_seat(game_id));
         });
         seat.check_rx = Some(rx);
@@ -123,19 +123,22 @@ fn seat_banner(mut contexts: EguiContexts, mut seat: ResMut<SeatState>) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-    egui::TopBottomPanel::top("seat_superseded_banner").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.colored_label(
-                egui::Color32::from_rgb(255, 210, 90),
-                "This game is being played on another device. This window is view-only.",
-            );
-            if ui.button("Play here instead").clicked() {
-                let game_id = seat.game_id;
-                seat.superseded = false;
-                seat.claim(game_id);
-            }
-        });
-    });
+    egui::Panel::top("seat_superseded_banner").show(
+        &mut crate::ui::egui_ext::viewport_ui(&ctx, "seat_superseded_banner"),
+        |ui| {
+            ui.horizontal(|ui| {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 210, 90),
+                    "This game is being played on another device. This window is view-only.",
+                );
+                if ui.button("Play here instead").clicked() {
+                    let game_id = seat.game_id;
+                    seat.superseded = false;
+                    seat.claim(game_id);
+                }
+            });
+        },
+    );
 }
 
 fn reset_seat(mut seat: ResMut<SeatState>) {
@@ -149,7 +152,12 @@ impl Plugin for SeatPlugin {
         // `GameStartedEvent` is written from the menu just before the switch
         // to `InGame`, so the claim reader runs in every state.
         app.init_resource::<SeatState>()
-            .add_systems(Update, claim_seat_on_game_start)
+            .add_systems(
+                Update,
+                claim_seat_on_game_start
+                    .after(crate::multiplayer::resume::poll_resume)
+                    .in_set(crate::core::schedule::SessionSet::Match),
+            )
             .add_systems(
                 Update,
                 track_seat

@@ -38,9 +38,9 @@ impl MoveWrapper {
 }
 
 pub struct UciSquare(pub (u8, u8));
-impl ToString for UciSquare {
-    fn to_string(&self) -> String {
-        ChessEngine::coords_to_uci(self.0 .0, self.0 .1)
+impl std::fmt::Display for UciSquare {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&ChessEngine::coords_to_uci(self.0 .0, self.0 .1))
     }
 }
 
@@ -64,25 +64,31 @@ impl Default for ChessEngine {
 }
 
 impl ChessEngine {
-
     pub fn coords_to_uci(x: u8, y: u8) -> String {
         let file = (b'a' + x) as char;
         let rank = (b'1' + y) as char;
         format!("{}{}", file, rank)
     }
 
+    /// Board coordinates of a square such as `e4`; `None` for anything else.
     pub fn uci_to_coords(sq: &str) -> Option<(u8, u8)> {
-        let chars: Vec<char> = sq.chars().collect();
-        if chars.len() < 2 {
+        let &[file, rank, ..] = sq.as_bytes() else {
             return None;
-        }
-        let file = chars[0] as u8 - b'a';
-        let rank = chars[1] as u8 - b'1';
-        if rank < 8 && file < 8 {
-            Some((file, rank))
-        } else {
-            None
-        }
+        };
+        let file = file.checked_sub(b'a').filter(|f| *f < 8)?;
+        let rank = rank.checked_sub(b'1').filter(|r| *r < 8)?;
+        Some((file, rank))
+    }
+
+    /// Splits a UCI move such as `e7e8q` into its squares and promotion piece.
+    pub fn parse_uci_move(uci: &str) -> Option<((u8, u8), (u8, u8), Option<char>)> {
+        let from = Self::uci_to_coords(uci.get(0..2)?)?;
+        let to = Self::uci_to_coords(uci.get(2..4)?)?;
+        let promotion = uci
+            .get(4..)
+            .and_then(|rest| rest.chars().next())
+            .filter(|c| "qrbn".contains(*c));
+        Some((from, to, promotion))
     }
 
     #[inline]
@@ -95,7 +101,6 @@ impl ChessEngine {
         ((index % 8) as u8, (index / 8) as u8)
     }
 
-
     pub fn piece_type_to_id(piece_type: PieceType) -> i8 {
         match piece_type {
             PieceType::Pawn => PAWN_ID,
@@ -106,7 +111,6 @@ impl ChessEngine {
             PieceType::King => KING_ID,
         }
     }
-
 
     pub fn sync_ecs_to_engine_mut(
         &mut self,
@@ -197,7 +201,6 @@ impl ChessEngine {
         set_game_from_fen(&mut self.game, &self.fen);
     }
 
-
     pub fn rebuild_legal_move_cache(&mut self) {
         self.move_cache.clear();
         let side = if self.fen.contains(" w ") { 1 } else { -1 };
@@ -237,7 +240,7 @@ impl ChessEngine {
             return self
                 .move_cache
                 .get(&from)
-                .map_or(false, |dsts| dsts.contains(&to));
+                .is_some_and(|dsts| dsts.contains(&to));
         }
 
         // Fallback: single legality check without cache
@@ -286,7 +289,6 @@ impl ChessEngine {
             .flat_map(|(&from, dsts)| dsts.iter().map(move |&to| MoveWrapper { from, to }))
             .collect()
     }
-
 
     pub fn to_fen(&self) -> String {
         let side = match self.current_turn {
@@ -433,6 +435,15 @@ mod tests {
         assert_eq!(ChessEngine::coords_to_uci(0, 0), "a1");
         assert_eq!(ChessEngine::coords_to_uci(4, 3), "e4");
         assert_eq!(ChessEngine::uci_to_coords("e4"), Some((4, 3)));
+    }
+
+    #[test]
+    fn malformed_squares_are_rejected_without_panicking() {
+        // Squares arrive from the network; none of these may underflow.
+        for bad in ["", "e", "5a", "a0", "i1", "a9", "\u{e9}1", "A1"] {
+            assert_eq!(ChessEngine::uci_to_coords(bad), None, "{bad:?}");
+        }
+        assert_eq!(ChessEngine::uci_to_coords("h8q"), Some((7, 7)));
     }
 
     const FOOLS_MATE_FEN: &str = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";

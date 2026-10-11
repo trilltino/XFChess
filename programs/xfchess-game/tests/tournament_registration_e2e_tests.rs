@@ -87,7 +87,7 @@ fn vps_authority_keypair() -> Option<Keypair> {
 // Ignored test requires the real VPS authority key; provision it before
 // running cargo test -- --ignored.
 #[tokio::test]
-#[ignore = "needs keys/vps_authority.json (devnet-only, gitignored) — see docs/PRE_MAINNET_E2E_PLAN.md §6.1"]
+#[ignore = "needs keys/vps_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
 async fn register_player_deposits_entry_fee_and_adds_to_shard() {
     let Some(authority) = vps_authority_keypair() else {
         eprintln!("skip: keys/vps_authority.json not present");

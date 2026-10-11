@@ -1,6 +1,6 @@
 use crate::types::{Patch, Version};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct BraidRequest {
     pub version: Option<Vec<Version>>,
     pub parents: Option<Vec<Version>>,
@@ -9,24 +9,40 @@ pub struct BraidRequest {
     pub heartbeat_interval: Option<u64>,
     pub peer: Option<String>,
     pub ack: Option<Vec<Version>>,
-    pub enable_multiplex: bool,
     pub merge_type: Option<String>,
     pub content_type: Option<String>,
     pub method: String,
     pub body: bytes::Bytes,
     pub extra_headers: std::collections::BTreeMap<String, String>,
     pub retry: Option<crate::client::retry::RetryConfig>,
+    pub manual_ack: bool,
+}
+
+impl Default for BraidRequest {
+    fn default() -> Self {
+        Self {
+            version: None,
+            parents: None,
+            subscribe: false,
+            patches: None,
+            heartbeat_interval: None,
+            peer: None,
+            ack: None,
+            merge_type: None,
+            content_type: None,
+            method: "GET".into(),
+            body: bytes::Bytes::new(),
+            extra_headers: Default::default(),
+            retry: None,
+            manual_ack: false,
+        }
+    }
 }
 
 impl BraidRequest {
     #[inline]
     pub fn new() -> Self {
-        Self {
-            method: "GET".to_string(),
-            body: bytes::Bytes::new(),
-            extra_headers: std::collections::BTreeMap::new(),
-            ..Default::default()
-        }
+        Self::default()
     }
 
     pub fn subscribe(mut self) -> Self {
@@ -84,11 +100,6 @@ impl BraidRequest {
         self
     }
 
-    pub fn with_multiplex(mut self, enable: bool) -> Self {
-        self.enable_multiplex = enable;
-        self
-    }
-
     pub fn with_merge_type(mut self, merge_type: impl Into<String>) -> Self {
         self.merge_type = Some(merge_type.into());
         self
@@ -121,6 +132,12 @@ impl BraidRequest {
 
     pub fn retry(self) -> Self {
         self.with_retry(crate::client::retry::RetryConfig::default())
+    }
+
+    /// Advance the resume cursor only after `Subscription::acknowledger` accepts an update.
+    pub fn with_manual_ack(mut self) -> Self {
+        self.manual_ack = true;
+        self
     }
 }
 

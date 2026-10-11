@@ -1,0 +1,67 @@
+name: Protocol models
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - specs/**
+      - src/multiplayer/systems/events.rs
+      - src/multiplayer/systems/mesh.rs
+      - src/multiplayer/types.rs
+      - src/multiplayer/network/online_game_session.rs
+      - src/multiplayer/network/braid_transport/**
+      - src/multiplayer/network/braid_transport.rs
+      - src/game/systems/network_move.rs
+      - backend/src/signing/routes/game_log/**
+      - backend/src/signing/routes/game_log.rs
+      - crates/zarathustra_net/braid_chess/src/journal.rs
+      - crates/zarathustra_net/braid_chess/src/subscriber.rs
+      - programs/xfchess-game/src/moves_ix/**
+      - justfile
+      - .github/workflows/specs.yml
+  pull_request:
+    paths:
+      - specs/**
+      - src/multiplayer/systems/events.rs
+      - src/multiplayer/systems/mesh.rs
+      - src/multiplayer/types.rs
+      - src/multiplayer/network/online_game_session.rs
+      - src/multiplayer/network/braid_transport/**
+      - src/multiplayer/network/braid_transport.rs
+      - src/game/systems/network_move.rs
+      - backend/src/signing/routes/game_log/**
+      - backend/src/signing/routes/game_log.rs
+      - crates/zarathustra_net/braid_chess/src/journal.rs
+      - crates/zarathustra_net/braid_chess/src/subscriber.rs
+      - programs/xfchess-game/src/moves_ix/**
+      - justfile
+      - .github/workflows/specs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python specs/test_check.py
+      - run: python specs/check.py --setup
+      - run: python specs/check.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: protocol-model-logs
+          path: specs/.runs/**/tlc.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7

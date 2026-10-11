@@ -1,18 +1,12 @@
-use braid_core::Update;
+use braid_http::Update;
 
+use crate::store::ResourceStore;
 use iroh::{endpoint::presets, protocol::Router, Endpoint, EndpointAddr, EndpointId, SecretKey};
 use iroh_gossip::api::GossipReceiver;
 use iroh_gossip::net::Gossip;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::RwLock;
-
-const MAX_UPDATES_PER_RESOURCE: usize = 500;
-
-const PERSIST_FLUSH_INTERVAL: Duration = Duration::from_secs(10);
+use tokio::task::JoinHandle;
 
 use crate::discovery::{DiscoveryConfig, MockDiscoveryMap};
 #[cfg(feature = "proxy")]
@@ -49,137 +43,107 @@ impl Default for BraidIrohConfig {
     }
 }
 
-async fn load_resources(data_dir: &Path) -> HashMap<String, Vec<Update>> {
-    let path = data_dir.join("resources.json");
-    match tokio::fs::read_to_string(&path).await {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => HashMap::new(),
-    }
-}
-
-async fn save_resources(data_dir: &Path, map: &HashMap<String, Vec<Update>>) {
-    let path = data_dir.join("resources.json");
-    let tmp = data_dir.join("resources.json.tmp");
-    let Ok(json) = serde_json::to_string(map) else {
-        return;
-    };
-    if tokio::fs::write(&tmp, &json).await.is_ok() {
-        tokio::fs::rename(&tmp, &path).await.ok();
-    }
-}
-
 pub struct BraidIrohNode {
     endpoint: Endpoint,
-    #[allow(dead_code)]
     router: Router,
     subscription_mgr: Arc<SubscriptionManager>,
-    resources: Arc<RwLock<HashMap<String, Vec<Update>>>>,
+    resources: Arc<ResourceStore>,
     data_dir: Option<PathBuf>,
-    dirty: Arc<AtomicBool>,
+    proxy_task: Option<JoinHandle<()>>,
+    flush_task: Option<crate::persistence::FlushTask>,
+    proxy_addr: Option<std::net::SocketAddr>,
 }
 
 impl BraidIrohNode {
     pub async fn spawn(config: BraidIrohConfig) -> anyhow::Result<Self> {
-        let mut builder = Endpoint::builder(presets::N0).alpns(vec![
-            BRAID_H3_ALPN.to_vec(),
-            iroh_gossip::net::GOSSIP_ALPN.to_vec(),
-        ]);
-
+        let mut builder = match config.discovery {
+            DiscoveryConfig::Mock(map) => Endpoint::builder(presets::Minimal).address_lookup(map),
+            DiscoveryConfig::Real => Endpoint::builder(presets::N0),
+        };
         if let Some(key) = config.secret_key {
             builder = builder.secret_key(key);
         }
-
-        match config.discovery {
-            DiscoveryConfig::Mock(map) => {
-                builder = builder.address_lookup(map);
-            }
-            DiscoveryConfig::Real => {
-                // The N0 preset above already wires up DNS + Pkarr discovery,
-                // so there's nothing more to add here.
-            }
-        }
-
+        #[cfg(not(feature = "proxy"))]
+        anyhow::ensure!(
+            config.proxy_config.is_none(),
+            "TCP bridge requires the proxy feature"
+        );
         let endpoint = builder.bind().await?;
 
         tracing::info!(id = %endpoint.id(), "iroh endpoint bound");
 
-        // 2. Start the gossip protocol on this endpoint
-        // In iroh 0.96, spawning gossip is synchronous and returns the Gossip handle directly
-        let gossip = Gossip::builder().spawn(endpoint.clone());
-
         let initial_data = if let Some(ref dir) = config.data_dir {
-            tokio::fs::create_dir_all(dir).await.ok();
-            let loaded = load_resources(dir).await;
-            tracing::info!("[braid] Loaded {} resource URLs from disk", loaded.len());
-            loaded
+            tokio::fs::create_dir_all(dir).await?;
+            crate::persistence::load(dir).await?
         } else {
-            HashMap::new()
+            Default::default()
         };
-        let resources: Arc<RwLock<HashMap<String, Vec<Update>>>> =
-            Arc::new(RwLock::new(initial_data));
-
+        let resources = Arc::new(ResourceStore::new(initial_data));
+        #[cfg(feature = "proxy")]
+        let proxy_listener = match &config.proxy_config {
+            Some(proxy) => Some(tokio::net::TcpListener::bind(proxy.listen_addr).await?),
+            None => None,
+        };
+        #[cfg(feature = "proxy")]
+        let proxy_addr = proxy_listener
+            .as_ref()
+            .map(|listener| listener.local_addr())
+            .transpose()?;
+        #[cfg(not(feature = "proxy"))]
+        let proxy_addr = None;
+        let gossip = Gossip::builder().spawn(endpoint.clone());
         let subscription_mgr = Arc::new(SubscriptionManager::new(gossip.clone()));
+        #[cfg(feature = "proxy")]
+        let app_state = BraidAppState {
+            subscriptions: subscription_mgr.clone(),
+            resources: resources.clone(),
+        };
 
-        // 4. Mount the Braid protocol handler on the iroh router (only when proxy feature is enabled)
         #[cfg(feature = "proxy")]
         let router = {
-            let app_state = BraidAppState {
-                subscriptions: subscription_mgr.clone(),
-                resources: resources.clone(),
-            };
-            let braid_handler = protocol::build_protocol_handler(app_state);
+            let braid_handler = protocol::build_protocol_handler(app_state.clone());
             Router::builder(endpoint.clone())
-                .accept(BRAID_H3_ALPN.to_vec(), braid_handler)
-                .accept(iroh_gossip::net::GOSSIP_ALPN.to_vec(), gossip.clone())
+                .accept(BRAID_H3_ALPN, braid_handler)
+                .accept(iroh_gossip::net::GOSSIP_ALPN, gossip)
                 .spawn()
         };
         #[cfg(not(feature = "proxy"))]
         let router = Router::builder(endpoint.clone())
-            .accept(iroh_gossip::net::GOSSIP_ALPN.to_vec(), gossip.clone())
+            .accept(iroh_gossip::net::GOSSIP_ALPN, gossip)
             .spawn();
 
         #[cfg(feature = "proxy")]
-        if let Some(proxy_conf) = config.proxy_config {
-            let endpoint_clone = endpoint.clone();
-            tokio::spawn(async move {
-                if let Err(e) = crate::proxy::bridge::start_proxy(
-                    &endpoint_clone,
-                    proxy_conf.listen_addr,
-                    proxy_conf.default_peer,
-                )
-                .await
+        let proxy_task = if let (Some(proxy_conf), Some(listener)) =
+            (config.proxy_config, proxy_listener)
+        {
+            let endpoint = endpoint.clone();
+            let local_router = protocol::router(app_state);
+            Some(tokio::spawn(async move {
+                if let Err(e) =
+                    crate::proxy::serve(endpoint, listener, proxy_conf.default_peer, local_router)
+                        .await
                 {
-                    tracing::error!("TCP Proxy failed: {}", e);
+                    tracing::error!("TCP bridge failed: {e}");
                 }
-            });
-        }
-
-        let dirty = Arc::new(AtomicBool::new(false));
-
-        // Flush only changed resource maps to avoid cloning and writing on every put.
-        if let Some(ref dir) = config.data_dir {
-            let dir = dir.clone();
-            let resources = resources.clone();
-            let dirty = dirty.clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(PERSIST_FLUSH_INTERVAL);
-                loop {
-                    interval.tick().await;
-                    if dirty.swap(false, Ordering::AcqRel) {
-                        let snapshot = resources.read().await.clone();
-                        save_resources(&dir, &snapshot).await;
-                    }
-                }
-            });
-        }
-
+            }))
+        } else {
+            None
+        };
+        #[cfg(not(feature = "proxy"))]
+        let proxy_task = None;
+        let flush_task = config
+            .data_dir
+            .as_ref()
+            .map(|dir| crate::persistence::FlushTask::spawn(dir.clone(), resources.clone()));
         Ok(Self {
             endpoint,
             router,
             subscription_mgr,
             resources,
             data_dir: config.data_dir,
-            dirty,
+            proxy_task,
+            flush_task,
+            proxy_addr,
         })
     }
 
@@ -208,133 +172,88 @@ impl BraidIrohNode {
     }
 
     pub async fn put(&self, url: &str, update: Update) -> anyhow::Result<()> {
-        // Normalize the URL for consistent storage (using same logic as SubscriptionManager)
-        let normalized = crate::subscription::SubscriptionManager::normalize_url(url);
-
-        tracing::debug!(
-            url = normalized.as_str(),
-            version = ?update.version,
-            parents = ?update.parents,
-            content_length = update.body.as_ref().map(|b| b.len()),
-            "outgoing braid PUT"
-        );
-        if tracing::enabled!(tracing::Level::TRACE) {
-            if let Some(body) = &update.body {
-                tracing::trace!(body = %String::from_utf8_lossy(body), "PUT body");
-            }
-        }
-
-        {
-            let mut guard = self.resources.write().await;
-            let history = guard.entry(normalized.clone()).or_insert_with(Vec::new);
-            history.push(update.clone());
-            if history.len() > MAX_UPDATES_PER_RESOURCE {
-                let overflow = history.len() - MAX_UPDATES_PER_RESOURCE;
-                history.drain(0..overflow);
-            }
-            if self.data_dir.is_some() {
-                self.dirty.store(true, Ordering::Release);
-            }
-        }
-        self.subscription_mgr
-            .broadcast(&normalized, &update)
-            .await?;
-        Ok(())
+        self.resources.append(url, update.clone()).await;
+        self.subscription_mgr.broadcast(url, &update).await
     }
 
     pub async fn store_update(&self, url: &str, update: Update) {
-        let mut guard = self.resources.write().await;
-        let history = guard.entry(url.to_string()).or_insert_with(Vec::new);
-        history.push(update);
-        if history.len() > MAX_UPDATES_PER_RESOURCE {
-            let overflow = history.len() - MAX_UPDATES_PER_RESOURCE;
-            history.drain(0..overflow);
-        }
-        if self.data_dir.is_some() {
-            self.dirty.store(true, Ordering::Release);
-        }
+        self.resources.append(url, update).await;
     }
 
-    #[allow(dead_code)]
     pub async fn get(&self, url: &str) -> Option<Update> {
-        self.resources
-            .read()
-            .await
-            .get(url)
-            .and_then(|h| h.last().cloned())
+        self.resources.latest(url).await
     }
 
     pub async fn get_version(&self, url: &str, version_id: &str) -> Option<Update> {
-        self.resources.read().await.get(url).and_then(|history| {
-            history
-                .iter()
-                .find(|u| u.version.iter().any(|v| v.to_string().contains(version_id)))
-                .cloned()
-        })
+        self.resources.version(url, version_id).await
     }
 
     pub async fn get_history(&self, url: &str) -> Vec<String> {
-        if let Some(history) = self.resources.read().await.get(url) {
-            history
-                .iter()
-                .map(|u| {
-                    u.version
-                        .iter()
-                        .map(|v| v.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                })
-                .collect()
-        } else {
-            Vec::new()
-        }
+        self.resources
+            .history(url)
+            .await
+            .iter()
+            .map(|u| {
+                u.version
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect()
     }
 
     pub async fn get_updates(&self, url: &str) -> Vec<Update> {
-        let normalized = SubscriptionManager::normalize_url(url);
-        self.resources
-            .read()
-            .await
-            .get(&normalized)
-            .cloned()
-            .unwrap_or_default()
+        self.resources.history(url).await
     }
 
     pub async fn get_updates_since(&self, url: &str, since_version: &str) -> Vec<Update> {
-        let normalized = SubscriptionManager::normalize_url(url);
-        let guard = self.resources.read().await;
-        let Some(history) = guard.get(&normalized) else {
-            return Vec::new();
-        };
-        let pos = history.iter().position(|u| {
-            u.version
-                .first()
-                .map(|v| v.to_string() == since_version)
-                .unwrap_or(false)
-        });
-        match pos {
-            Some(idx) => history[idx + 1..].to_vec(),
-            None => history.clone(),
+        let history = self.resources.history(url).await;
+        let offset = history
+            .iter()
+            .position(|u| u.version.iter().any(|v| v.to_string() == since_version))
+            .map_or(0, |i| i + 1);
+        history.into_iter().skip(offset).collect()
+    }
+
+    pub async fn shutdown(mut self) -> anyhow::Result<()> {
+        if let Some(task) = self.proxy_task.take() {
+            task.abort();
+            let _ = task.await;
         }
-    }
-
-    #[allow(dead_code)]
-    pub async fn shutdown(self) -> anyhow::Result<()> {
+        if let Some(task) = self.flush_task.as_mut() {
+            task.shutdown().await?;
+        }
+        let result = if let Some(dir) = &self.data_dir {
+            crate::persistence::save(dir, &self.resources.snapshot().await).await
+        } else {
+            Ok(())
+        };
         self.router.shutdown().await?;
-        Ok(())
+        result
     }
 
-    #[allow(dead_code)]
     pub fn subscriptions(&self) -> &Arc<SubscriptionManager> {
         &self.subscription_mgr
     }
-
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
+    }
+
+    pub fn proxy_addr(&self) -> Option<std::net::SocketAddr> {
+        self.proxy_addr
     }
 
     pub async fn join_peers(&self, url: &str, peers: Vec<EndpointId>) -> anyhow::Result<()> {
         tracing::debug!(url, peer_count = peers.len(), peers = ?peers, "joining peers to topic");
         self.subscription_mgr.join_peers(url, peers).await
+    }
+}
+
+impl Drop for BraidIrohNode {
+    fn drop(&mut self) {
+        if let Some(task) = &self.proxy_task {
+            task.abort();
+        }
     }
 }

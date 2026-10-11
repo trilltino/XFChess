@@ -1,3 +1,6 @@
+//! Game resources: turn and clock state, move history, selection and promotion,
+//! sounds, time control, and the system params that bundle them.
+
 // Submodules
 pub mod active_time_control;
 pub mod history;
