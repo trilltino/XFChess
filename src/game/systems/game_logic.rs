@@ -7,7 +7,6 @@ use bevy::prelude::*;
 pub fn update_game_phase(
     mut game_phase: ResMut<CurrentGamePhase>,
     mut game_over: ResMut<GameOverState>,
-    current_turn: Res<CurrentTurn>,
     pieces_query: Query<(
         Entity,
         &crate::rendering::pieces::Piece,
@@ -89,13 +88,17 @@ pub fn update_game_timer(
     game_mode: Res<crate::core::GameMode>,
     mut flag_timeout: MessageWriter<crate::game::events::FlagTimeoutEvent>,
 ) {
-    if !timer.is_running || !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check) {
+    // Puzzles are untimed here; the server measures solve time itself.
+    if !timer.is_running
+        || !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check)
+        || *game_mode == crate::core::GameMode::Puzzle
+    {
         return;
     }
 
     // In AI games, skip clock decrement when it is the AI's turn.
     if active_tc.ai_game {
-        if let crate::game::ai::resource::GameMode::VsAI { ai_color } = ai_config.mode {
+        if let crate::game::ai::resource::AiMode::VsAI { ai_color } = ai_config.mode {
             if current_turn.color == ai_color {
                 return;
             }
@@ -187,7 +190,12 @@ pub fn check_game_over_state(
     mut pending: ResMut<PendingGameOver>,
     animations: Query<(), (With<PieceMoveAnimation>, Without<FadingCapture>)>,
     fades: Query<(), With<FadingCapture>>,
+    game_mode: Res<crate::core::GameMode>,
 ) {
+    // A puzzle's last move often mates; its result screen is the puzzle HUD.
+    if *game_mode == crate::core::GameMode::Puzzle {
+        return;
+    }
     // Wait for animations and capture fades before ending the game so the last move remains visible.
     if *state.get() == crate::core::GameState::InGame
         && game_over.is_game_over()

@@ -1,4 +1,4 @@
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::{game_scene, GameState};
 use crate::game::view_mode::ViewMode;
 use bevy::prelude::*;
 
@@ -30,7 +30,7 @@ pub fn create_templeos_quote_ui(mut commands: Commands, view_mode: Res<ViewMode>
             ..default()
         },
         TempleOSQuote,
-        DespawnOnExit(GameState::InGame),
+        game_scene(),
         Name::new("TempleOS Quote"),
     ));
 
@@ -51,7 +51,7 @@ pub fn create_templeos_quote_ui(mut commands: Commands, view_mode: Res<ViewMode>
             ..default()
         },
         TempleOSQuote,
-        DespawnOnExit(GameState::InGame),
+        game_scene(),
         Name::new("TempleOS Attribution Name"),
     ));
 
@@ -71,7 +71,7 @@ pub fn create_templeos_quote_ui(mut commands: Commands, view_mode: Res<ViewMode>
             ..default()
         },
         TempleOSQuote,
-        DespawnOnExit(GameState::InGame),
+        game_scene(),
         Name::new("TempleOS Attribution Years"),
     ));
 

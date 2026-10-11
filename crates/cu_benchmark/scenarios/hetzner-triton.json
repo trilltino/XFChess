@@ -1,0 +1,306 @@
+{
+    "name":  "hetzner-casual-100",
+    "backend_url":  "https://xfchess.com",
+    "stages":  [
+                   {
+                       "name":  "100-concurrent",
+                       "games":  100,
+                       "concurrency":  100,
+                       "ramp_ms":  1000
+                   }
+               ],
+    "variables":  {
+                      "white_wallet":  "${env:BENCH_WHITE_WALLET}",
+                      "black_wallet":  "${env:BENCH_BLACK_WALLET}",
+                      "white_token":  "${env:BENCH_WHITE_TOKEN}",
+                      "black_token":  "${env:BENCH_BLACK_TOKEN}"
+                  },
+    "workflow":  {
+                     "setup":  [
+                                   {
+                                       "name":  "announce",
+                                       "method":  "POST",
+                                       "path":  "/p2p/announce",
+                                       "body":  {
+                                                    "game_id":  "${game_id}",
+                                                    "host_node_id":  "${white_wallet}",
+                                                    "display_name":  "Benchmark",
+                                                    "stake_amount":  0,
+                                                    "game_type":  "local_p2p",
+                                                    "base_time_seconds":  600,
+                                                    "increment_seconds":  0
+                                                },
+                                       "expect":  {
+                                                      "/success":  true
+                                                  }
+                                   },
+                                   {
+                                       "name":  "join",
+                                       "method":  "POST",
+                                       "path":  "/p2p/join",
+                                       "body":  {
+                                                    "game_id":  "${game_id}",
+                                                    "joiner_node_id":  "${black_wallet}"
+                                                },
+                                       "expect":  {
+                                                      "/success":  true
+                                                  }
+                                   },
+                                   {
+                                       "name":  "accept",
+                                       "method":  "POST",
+                                       "path":  "/p2p/accept",
+                                       "body":  {
+                                                    "game_id":  "${game_id}",
+                                                    "host_node_id":  "${white_wallet}"
+                                                },
+                                       "expect":  {
+                                                      "/success":  true
+                                                  }
+                                   }
+                               ],
+                     "move_interval_ms":  20000,
+                     "moves":  [
+                                   {
+                                       "uci":  "f2f3",
+                                       "from":  "f2",
+                                       "to":  "f3",
+                                       "ply":  1,
+                                       "parent":  "0",
+                                       "player":  "${white_wallet}",
+                                       "token":  "${white_token}",
+                                       "fen":  "rnbqkbnr/pppppppp/8/8/8/5P2/PPPPP1PP/RNBQKBNR b KQkq - 0 1"
+                                   },
+                                   {
+                                       "uci":  "e7e5",
+                                       "from":  "e7",
+                                       "to":  "e5",
+                                       "ply":  2,
+                                       "parent":  "${game_id}-m-1",
+                                       "player":  "${black_wallet}",
+                                       "token":  "${black_token}",
+                                       "fen":  "rnbqkbnr/pppp1ppp/8/4p3/8/5P2/PPPPP1PP/RNBQKBNR w KQkq e6 0 2"
+                                   },
+                                   {
+                                       "uci":  "g2g4",
+                                       "from":  "g2",
+                                       "to":  "g4",
+                                       "ply":  3,
+                                       "parent":  "${game_id}-m-2",
+                                       "player":  "${white_wallet}",
+                                       "token":  "${white_token}",
+                                       "fen":  "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2"
+                                   },
+                                   {
+                                       "uci":  "d8h4",
+                                       "from":  "d8",
+                                       "to":  "h4",
+                                       "ply":  4,
+                                       "parent":  "${game_id}-m-3",
+                                       "player":  "${black_wallet}",
+                                       "token":  "${black_token}",
+                                       "fen":  "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+                                   }
+                               ],
+                     "each_move":  [
+                                       {
+                                           "name":  "persist-move",
+                                           "method":  "PUT",
+                                           "path":  "/game/${game_id}/moves",
+                                           "headers":  {
+                                                           "Authorization":  "Bearer ${move.token}"
+                                                       },
+                                           "body":  {
+                                                        "player_pubkey":  "${move.player}",
+                                                        "session_token":  "",
+                                                        "message":  {
+                                                                        "type":  "move",
+                                                                        "from":  "${move.from}",
+                                                                        "to":  "${move.to}",
+                                                                        "promotion":  null,
+                                                                        "uci":  "${move.uci}",
+                                                                        "fen_after":  "${move.fen}",
+                                                                        "move_number":  "${move.ply}",
+                                                                        "player":  "${move.player}"
+                                                                    },
+                                                        "content_version":  "${game_id}-m-${move.ply}",
+                                                        "content_parent":  "${move.parent}"
+                                                    },
+                                           "idempotent":  true,
+                                           "retries":  2
+                                       }
+                                   ],
+                     "spectators":  [
+                                        {
+                                            "name":  "game-stream",
+                                            "path":  "/game/${game_id}/moves",
+                                            "count":  2
+                                        }
+                                    ],
+                     "finish":  [
+                                    {
+                                        "name":  "record-white-result",
+                                        "method":  "POST",
+                                        "path":  "/api/games/casual",
+                                        "headers":  {
+                                                        "Authorization":  "Bearer ${white_token}"
+                                                    },
+                                        "body":  {
+                                                     "opponent_type":  "local_p2p",
+                                                     "result":  "loss",
+                                                     "pgn":  "1. f3 e5 2. g4 Qh4# 0-1"
+                                                 },
+                                        "expect":  {
+                                                       "/ok":  true
+                                                   }
+                                    },
+                                    {
+                                        "name":  "record-black-result",
+                                        "method":  "POST",
+                                        "path":  "/api/games/casual",
+                                        "headers":  {
+                                                        "Authorization":  "Bearer ${black_token}"
+                                                    },
+                                        "body":  {
+                                                     "opponent_type":  "local_p2p",
+                                                     "result":  "win",
+                                                     "pgn":  "1. f3 e5 2. g4 Qh4# 0-1"
+                                                 },
+                                        "expect":  {
+                                                       "/ok":  true
+                                                   }
+                                    }
+                                ]
+                 },
+    "sampling_ms":  1000,
+    "baseline_ms":  10000,
+    "drain_ms":  1000,
+    "timeout_ms":  30000,
+    "limits":  {
+                   "request_p95_ms":  500,
+                   "error_ratio":  0.01,
+                   "min_duration_ms":  60000,
+                   "max_schedule_lag_ms":  500
+               },
+    "telemetry":  [
+                      {
+                          "name":  "backend-memory",
+                          "url":  "http://127.0.0.1:28090/metrics",
+                          "metric":  "xfchess_process_resident_memory_bytes",
+                          "kind":  "gauge",
+                          "unit":  "bytes",
+                          "required":  true,
+                          "max":  1073741824
+                      },
+                      {
+                          "name":  "rpc-calls",
+                          "url":  "http://127.0.0.1:28090/metrics",
+                          "metric":  "xfchess_rpc_http_requests_total",
+                          "kind":  "counter",
+                          "unit":  "requests",
+                          "required":  true,
+                          "labels":  {
+                                         "provider":  "https://xfsoluti-solanad-d155.devnet.rpcpool.com"
+                                     }
+                      },
+                      {
+                          "name":  "anticheat-queue",
+                          "url":  "http://127.0.0.1:28090/metrics",
+                          "metric":  "xfchess_anticheat_queue_depth",
+                          "kind":  "gauge",
+                          "unit":  "jobs",
+                          "required":  true,
+                          "max":  50
+                      },
+                      {
+                          "name":  "host-cpu",
+                          "url":  "http://127.0.0.1:29100/metrics",
+                          "metric":  "node_cpu_seconds_total",
+                          "kind":  "cpu_utilization",
+                          "unit":  "ratio",
+                          "required":  true,
+                          "max":  0.8
+                      },
+                      {
+                          "name":  "host-memory-available",
+                          "url":  "http://127.0.0.1:29100/metrics",
+                          "metric":  "node_memory_MemAvailable_bytes",
+                          "kind":  "gauge",
+                          "unit":  "bytes",
+                          "required":  true,
+                          "min":  536870912
+                      },
+                      {
+                          "name":  "egress",
+                          "url":  "http://127.0.0.1:29100/metrics",
+                          "metric":  "node_network_transmit_bytes_total",
+                          "labels":  {
+                                         "device":  "eth0"
+                                     },
+                          "kind":  "counter",
+                          "unit":  "bytes",
+                          "required":  true
+                      },
+                      {
+                          "name":  "triton-bandwidth",
+                          "url":  "http://127.0.0.1:28090/metrics",
+                          "metric":  "triton_billed_bandwidth_bytes_total",
+                          "kind":  "counter",
+                          "unit":  "bytes",
+                          "required":  false
+                      }
+                  ],
+    "pricing":  {
+                    "configured":  true,
+                    "currency":  "USD",
+                    "monthly_games":  10000,
+                    "fixed":  [
+                                  {
+                                      "name":  "Hetzner CX23 current replacement list price, invoice unverified",
+                                      "monthly_minor_units":  649
+                                  },
+                                  {
+                                      "name":  "Primary IPv4",
+                                      "monthly_minor_units":  60
+                                  }
+                              ],
+                    "metered":  [
+                                    {
+                                        "quantity_per_unit":  1000000,
+                                        "name":  "Triton standard RPC PAYG",
+                                        "metric":  "rpc-calls",
+                                        "minor_units_per_unit":  1000
+                                    },
+                                    {
+                                        "quantity_per_unit":  1000000000,
+                                        "name":  "Triton provider-reported bandwidth",
+                                        "metric":  "triton-bandwidth",
+                                        "minor_units_per_unit":  8
+                                    },
+                                    {
+                                        "quantity_per_unit":  1000000000000,
+                                        "name":  "Hetzner egress, conservative whole-interface estimate",
+                                        "metric":  "egress",
+                                        "included_monthly_quantity":  20000000000000,
+                                        "minor_units_per_unit":  120
+                                    }
+                                ],
+                    "prepaid":  [
+                                    {
+                                        "provider":  "Triton",
+                                        "validity_months":  12,
+                                        "deposit_minor_units":  12500,
+                                        "currency":  "USD"
+                                    }
+                                ],
+                    "assumptions":  [
+                                        "Researched 2026-10-10: https://triton.one/pricing and https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/",
+                                        "VPS confirmed: 2 Intel vCPUs, approximately 4 GB RAM, 40 GB disk, nbg1-dc3. CX22/CX23 class inferred; actual SKU, legacy invoice, account currency, VAT, backups and snapshots unverified.",
+                                        "USD list-price planning case, before tax. Triton endpoint is devnet; actual subscription may be free or negotiated. PAYG is a mainnet planning assumption.",
+                                        "Triton billed bandwidth must be supplied by a provider usage exporter. The backend does not expose this counter; total cost remains unknown until coverage exists.",
+                                        "GB assumed decimal pending provider confirmation. Host egress includes free internal traffic and unrelated services, so may overstate Hetzner billable traffic.",
+                                        "Four-ply casual games exercise auth, lobby, persistence and spectators. They do not cover paid game settlement, long-game anti-cheat or Iroh gameplay transport."
+                                    ],
+                    "sol_price_minor_units":  null
+                }
+}

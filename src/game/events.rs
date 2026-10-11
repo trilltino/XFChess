@@ -20,6 +20,12 @@ pub struct RemoteMoveApplied {
     pub next_fen: String,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct NetworkMoveResult {
+    pub version: Option<String>,
+    pub fen: Option<String>,
+}
+
 #[derive(Event, Message, Debug, Clone)]
 pub struct GameStartedEvent {
     pub game_id: u64,

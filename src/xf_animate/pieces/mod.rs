@@ -1,3 +1,5 @@
+//! Loading and spawning the mini board's pieces.
+
 mod assets;
 mod components;
 mod setup;

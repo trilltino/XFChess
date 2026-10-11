@@ -17,7 +17,12 @@ pub struct FocusTelemetryPlugin;
 impl Plugin for FocusTelemetryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FocusTelemetry>()
-            .add_systems(Update, (track_window_focus, report_move_blur).chain());
+            .add_systems(
+                Update,
+                (track_window_focus, report_move_blur)
+                    .chain()
+                    .in_set(crate::core::schedule::SendSet::Session),
+            );
     }
 }
 
@@ -73,18 +78,16 @@ fn report_move_blur(
 
         let move_number = telemetry.ply_count;
         let color = mv.player.to_lowercase();
-        bevy::tasks::IoTaskPool::get()
-            .spawn(async move {
-                if let Err(e) = crate::multiplayer::vps_client::report_blur(
-                    game_id,
-                    move_number,
-                    &color,
-                    blurred,
-                    think_ms,
-                ) {
-                    debug!("[telemetry] blur report failed for game {game_id}: {e}");
-                }
-            })
-            .detach();
+        crate::core::net_task::spawn_detached("telemetry", move || {
+            if let Err(e) = crate::multiplayer::vps_client::report_blur(
+                game_id,
+                move_number,
+                &color,
+                blurred,
+                think_ms,
+            ) {
+                debug!("[telemetry] blur report failed for game {game_id}: {e}");
+            }
+        });
     }
 }

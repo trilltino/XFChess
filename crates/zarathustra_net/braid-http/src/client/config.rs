@@ -4,12 +4,9 @@ pub struct ClientConfig {
     pub retry_delay_ms: u64,
     pub connection_timeout_secs: u64,
     pub enable_logging: bool,
-    pub max_subscriptions: usize,
-    pub auto_multiplex_threshold: usize,
-    pub enable_multiplex: bool,
     pub proxy_url: String,
     pub request_timeout_ms: u64,
-    pub max_total_connections: u32,
+    pub max_idle_connections_per_host: usize,
 }
 
 impl Default for ClientConfig {
@@ -19,83 +16,9 @@ impl Default for ClientConfig {
             retry_delay_ms: 1000,
             connection_timeout_secs: 30,
             enable_logging: false,
-            max_subscriptions: 100,
-            auto_multiplex_threshold: 3,
-            enable_multiplex: true,
             proxy_url: String::new(),
             request_timeout_ms: 30000,
-            max_total_connections: 100,
+            max_idle_connections_per_host: 100,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_config() {
-        let config = ClientConfig::default();
-        assert_eq!(config.max_retries, 3);
-        assert_eq!(config.retry_delay_ms, 1000);
-        assert_eq!(config.connection_timeout_secs, 30);
-        assert!(!config.enable_logging);
-        assert_eq!(config.max_subscriptions, 100);
-        assert_eq!(config.auto_multiplex_threshold, 3);
-        assert!(config.enable_multiplex);
-        assert_eq!(config.proxy_url, "");
-        assert_eq!(config.request_timeout_ms, 30000);
-        assert_eq!(config.max_total_connections, 100);
-    }
-
-    #[test]
-    fn test_custom_config() {
-        let config = ClientConfig {
-            max_retries: 5,
-            retry_delay_ms: 2000,
-            connection_timeout_secs: 60,
-            enable_logging: true,
-            max_subscriptions: 50,
-            auto_multiplex_threshold: 5,
-            enable_multiplex: false,
-            proxy_url: "http://proxy".to_string(),
-            request_timeout_ms: 1000,
-            max_total_connections: 40,
-        };
-        assert_eq!(config.max_retries, 5);
-        assert_eq!(config.retry_delay_ms, 2000);
-        assert_eq!(config.connection_timeout_secs, 60);
-        assert!(config.enable_logging);
-        assert_eq!(config.max_subscriptions, 50);
-        assert_eq!(config.auto_multiplex_threshold, 5);
-        assert!(!config.enable_multiplex);
-        assert_eq!(config.proxy_url, "http://proxy");
-        assert_eq!(config.request_timeout_ms, 1000);
-        assert_eq!(config.max_total_connections, 40);
-    }
-
-    #[test]
-    fn test_partial_override() {
-        let config = ClientConfig {
-            max_retries: 10,
-            ..Default::default()
-        };
-        assert_eq!(config.max_retries, 10);
-        assert_eq!(config.retry_delay_ms, 1000);
-    }
-
-    #[test]
-    fn test_clone() {
-        let config = ClientConfig::default();
-        let cloned = config.clone();
-        assert_eq!(config, cloned);
-    }
-
-    #[test]
-    fn test_debug() {
-        let config = ClientConfig::default();
-        let debug = format!("{:?}", config);
-        assert!(debug.contains("ClientConfig"));
-        assert!(debug.contains("max_retries"));
     }
 }

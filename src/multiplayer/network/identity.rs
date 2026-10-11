@@ -285,7 +285,7 @@ pub fn log_dir() -> PathBuf {
 fn compute_log_dir() -> PathBuf {
     load_active_profile()
         .map(|name| profile_pgn_dir(&name).join("logs"))
-        .unwrap_or_else(|| fallback_log_dir())
+        .unwrap_or_else(fallback_log_dir)
 }
 
 #[cfg(not(target_os = "android"))]

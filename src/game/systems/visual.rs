@@ -51,7 +51,7 @@ pub fn highlight_possible_moves(
                 Transform::from_translation(Vec3::new(square.x as f32, 0.03, square.y as f32)),
                 SelectedBorder,
                 Name::new("Selected Border"),
-                crate::core::DespawnOnExit(crate::core::GameState::InGame),
+                crate::core::game_scene(),
                 bevy::camera::visibility::RenderLayers::layer(
                     crate::game::systems::camera::BOARD_LAYER,
                 ),
@@ -66,7 +66,7 @@ pub fn highlight_possible_moves(
                     .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                 MoveHint,
                 Name::new("Move Hint"),
-                crate::core::DespawnOnExit(crate::core::GameState::InGame),
+                crate::core::game_scene(),
                 bevy::camera::visibility::RenderLayers::layer(
                     crate::game::systems::camera::BOARD_LAYER,
                 ),
@@ -160,15 +160,14 @@ pub fn setup_global_scene(mut commands: Commands) {
 }
 
 #[derive(Component)]
-pub(crate) struct CameraFollowLight;
+pub struct CameraFollowLight;
 
 pub fn setup_game_scene(
     mut commands: Commands,
     view_mode: Res<crate::game::view_mode::ViewMode>,
     mut global_ambient: ResMut<bevy::light::GlobalAmbientLight>,
 ) {
-    use crate::core::DespawnOnExit;
-    use crate::core::GameState;
+    use crate::core::game_scene;
 
     // Keep the same restrained ambient baseline as the menu so dark pieces and
     // board details remain readable alongside the overhead and fill lights.
@@ -201,7 +200,7 @@ pub fn setup_game_scene(
             },
             Transform::from_xyz(3.5, 12.0, 3.5),
             CameraFollowLight,
-            DespawnOnExit(GameState::InGame),
+            game_scene(),
             bevy::camera::visibility::RenderLayers::layer(
                 crate::game::systems::camera::BOARD_LAYER,
             ),

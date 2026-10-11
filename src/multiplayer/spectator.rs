@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::core::states::{GameMode, GameState};
+use crate::engine::board_state::ChessEngine;
 use crate::game::events::NetworkMoveEvent;
 #[cfg(feature = "solana")]
 use crate::multiplayer::network::protocol::NetworkMessage;
@@ -67,6 +68,8 @@ pub struct SpectatorSession {
     pub live_cancel: Option<Arc<AtomicBool>>,
     pub playlist: Vec<SpectatorPlaylistEntry>,
     pub playlist_index: usize,
+    poll_result: Option<crossbeam_channel::Receiver<Vec<String>>>,
+    in_flight: Option<(String, String)>,
 }
 
 impl SpectatorSession {
@@ -74,6 +77,10 @@ impl SpectatorSession {
 
     pub fn is_live_subscribed(&self) -> bool {
         self.live_feed.is_some()
+            && self
+                .live_cancel
+                .as_ref()
+                .is_some_and(|flag| !flag.load(Ordering::Relaxed))
     }
 
     pub fn end_session(&mut self) {
@@ -89,6 +96,8 @@ impl SpectatorSession {
         self.delay_result = None;
         self.live_feed = None;
         self.live_subscribed = false;
+        self.poll_result = None;
+        self.in_flight = None;
     }
 
     pub fn begin_session(&mut self, game_id: String, tournament_id: Option<u64>) {
@@ -137,6 +146,7 @@ impl Plugin for SpectatorPlugin {
             .init_resource::<SpectatorClockState>()
             .init_resource::<SpectatorMatchInfo>()
             .add_message::<SpectateViaLinkEvent>()
+            .add_message::<crate::game::events::NetworkMoveResult>()
             .add_systems(
                 Update,
                 (
@@ -146,12 +156,21 @@ impl Plugin for SpectatorPlugin {
                     drain_live_feed,
                     dispatch_pending_spectator_moves,
                     toggle_clock_side_on_move,
-                ),
+                )
+                    .chain()
+                    .in_set(crate::core::schedule::ReceiveSet::Feeds),
             );
+        app.add_systems(
+            Update,
+            confirm_spectator_move.in_set(crate::core::schedule::SendSet::Session),
+        );
         #[cfg(feature = "solana")]
         app.add_systems(
             Update,
-            (apply_braid_resync_to_spectator, tick_spectator_clock),
+            (apply_braid_resync_to_spectator, tick_spectator_clock)
+                .chain()
+                .after(toggle_clock_side_on_move)
+                .in_set(crate::core::schedule::ReceiveSet::Feeds),
         );
     }
 }
@@ -275,6 +294,9 @@ fn spawn_live_feed(game_id: &str, tokio: &TokioRuntime) -> (LiveFeedBuffer, Arc<
     let game_id_owned = game_id.to_string();
 
     tokio.0.spawn(async move {
+        struct Finished(Arc<AtomicBool>);
+        impl Drop for Finished { fn drop(&mut self) { self.0.store(true, Ordering::Relaxed); } }
+        let _finished = Finished(cancel_task.clone());
         use braid_chess::braid_http::types::BraidRequest;
         use braid_chess::braid_http::BraidClient;
         use braid_chess::ChessMessage;
@@ -287,7 +309,14 @@ fn spawn_live_feed(game_id: &str, tokio: &TokioRuntime) -> (LiveFeedBuffer, Arc<
             }
         };
 
-        let mut subscription = match client.subscribe(&url, BraidRequest::new().subscribe()).await {
+        let request = BraidRequest::new().subscribe().with_heartbeat(20)
+            .with_retry(braid_chess::braid_http::client::RetryConfig::default().with_max_retries(5));
+        let cancelled = async {
+            while !cancel_task.load(Ordering::Relaxed) { tokio::time::sleep(std::time::Duration::from_millis(100)).await; }
+        };
+        tokio::pin!(cancelled);
+        let opened = tokio::select! { _ = &mut cancelled => return, opened = client.subscribe(&url, request) => opened };
+        let mut subscription = match opened {
             Ok(s) => s,
             Err(e) => {
                 // Includes the deliberate 404 for delayed games — the poll
@@ -300,7 +329,8 @@ fn spawn_live_feed(game_id: &str, tokio: &TokioRuntime) -> (LiveFeedBuffer, Arc<
         info!("[spectator] live feed open for game {game_id_owned}");
 
         while !cancel_task.load(Ordering::Relaxed) {
-            match subscription.next().await {
+            let update = tokio::select! { _ = &mut cancelled => break, update = subscription.next() => update };
+            match update {
                 Some(Ok(update)) => {
                     let Some(body) = update.body_str() else { continue };
                     let Ok(ChessMessage::Move(payload)) =
@@ -312,13 +342,9 @@ fn spawn_live_feed(game_id: &str, tokio: &TokioRuntime) -> (LiveFeedBuffer, Arc<
                         buf.push(payload.uci);
                     }
                 }
-                // A heartbeat miss surfaces as an error; the client reconnects
-                // on its own, so keep waiting rather than tearing the feed down.
                 Some(Err(e)) => {
-                    if matches!(e, braid_chess::braid_http::BraidError::SubscriptionClosed) {
-                        info!("[spectator] live feed closed for game {game_id_owned}");
-                        break;
-                    }
+                    info!("[spectator] live feed ended for game {game_id_owned}: {e}; using polling");
+                    break;
                 }
                 None => break,
             }
@@ -333,7 +359,9 @@ fn drain_live_feed(mut session: ResMut<SpectatorSession>) {
     let Some(feed) = session.live_feed.clone() else {
         return;
     };
-    let already_queued = session.applied_move_count + session.pending_moves.len();
+    let already_queued = session.applied_move_count
+        + session.pending_moves.len()
+        + usize::from(session.in_flight.is_some());
     let Ok(buf) = feed.lock() else { return };
     if buf.len() > already_queued {
         let new_moves = buf[already_queued..].to_vec();
@@ -357,16 +385,35 @@ fn tick_spectator_poll(
         return;
     }
 
+    if let Some(rx) = session.poll_result.as_ref() {
+        match rx.try_recv() {
+            Ok(all_moves) => {
+                let queued = session.applied_move_count
+                    + session.pending_moves.len()
+                    + usize::from(session.in_flight.is_some());
+                if all_moves.len() > queued {
+                    session
+                        .pending_moves
+                        .extend_from_slice(&all_moves[queued..]);
+                }
+                session.poll_result = None;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => return,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                session.poll_result = None;
+            }
+        }
+    }
+
     session.poll_timer -= time.delta_secs();
     if session.poll_timer > 0.0 {
         return;
     }
     session.poll_timer = SpectatorSession::POLL_INTERVAL;
 
-    let applied = session.applied_move_count;
-
-    let (tx, rx) = std::sync::mpsc::channel::<Vec<String>>();
-    let game_id_clone = game_id.clone();
+    let (tx, rx) = crossbeam_channel::bounded::<Vec<String>>(1);
+    session.poll_result = Some(rx);
+    let game_id_clone = game_id;
     tokio.0.spawn(async move {
         let result = tokio::task::spawn_blocking(move || {
             crate::multiplayer::network::vps::get_game_moves_for_spectator(&game_id_clone)
@@ -376,13 +423,6 @@ fn tick_spectator_poll(
             let _ = tx.send(moves);
         }
     });
-
-    if let Ok(all_moves) = rx.try_recv() {
-        if all_moves.len() > applied {
-            let new_moves = all_moves[applied..].to_vec();
-            session.pending_moves.extend(new_moves);
-        }
-    }
 }
 
 fn dispatch_pending_spectator_moves(
@@ -393,25 +433,46 @@ fn dispatch_pending_spectator_moves(
     if *game_mode != GameMode::Spectator {
         return;
     }
+    if session.in_flight.is_some() {
+        return;
+    }
     if let Some(uci) = session.pending_moves.first().cloned() {
-        if uci.len() >= 4 {
-            let from_col = (uci.as_bytes()[0].wrapping_sub(b'a')) as u8;
-            let from_row = (uci.as_bytes()[1].wrapping_sub(b'1')) as u8;
-            let to_col = (uci.as_bytes()[2].wrapping_sub(b'a')) as u8;
-            let to_row = (uci.as_bytes()[3].wrapping_sub(b'1')) as u8;
-            let promotion = uci.chars().nth(4).filter(|c| "qrbn".contains(*c));
+        if let Some((from, to, promotion)) = ChessEngine::parse_uci_move(&uci) {
 
+            let version = format!(
+                "spectator:{}/{}",
+                session.game_id.as_deref().unwrap_or_default(),
+                session.applied_move_count + 1
+            );
             move_events.write(NetworkMoveEvent {
-                from: (from_col, from_row),
-                to: (to_col, to_row),
+                from,
+                to,
                 promotion,
                 expected_fen: None,
-                dedup_version: None,
+                dedup_version: Some(version.clone()),
             });
             session.pending_moves.remove(0);
-            session.applied_move_count += 1;
+            session.in_flight = Some((version, uci));
         } else {
             session.pending_moves.remove(0);
+        }
+    }
+}
+
+fn confirm_spectator_move(
+    mut session: ResMut<SpectatorSession>,
+    mut results: MessageReader<crate::game::events::NetworkMoveResult>,
+) {
+    for result in results.read() {
+        if let Some((_, uci)) = session
+            .in_flight
+            .take_if(|(version, _)| Some(&*version) == result.version.as_ref())
+        {
+            if result.fen.is_some() {
+                session.applied_move_count += 1;
+            } else {
+                session.pending_moves.insert(0, uci);
+            }
         }
     }
 }
@@ -432,6 +493,10 @@ pub fn apply_braid_resync_to_spectator(
         rollup_events.clear();
         return;
     }
+    if session.is_live_subscribed() {
+        rollup_events.clear();
+        return;
+    }
     for ev in rollup_events.read() {
         if let crate::multiplayer::rollup::manager::RollupEvent::ResyncedMove {
             move_uci,
@@ -439,17 +504,10 @@ pub fn apply_braid_resync_to_spectator(
             ..
         } = ev
         {
-            let uci = move_uci;
-            if uci.len() >= 4 {
-                let from_col = (uci.as_bytes()[0].wrapping_sub(b'a')) as u8;
-                let from_row = (uci.as_bytes()[1].wrapping_sub(b'1')) as u8;
-                let to_col = (uci.as_bytes()[2].wrapping_sub(b'a')) as u8;
-                let to_row = (uci.as_bytes()[3].wrapping_sub(b'1')) as u8;
-                let promotion = uci.chars().nth(4).filter(|c| "qrbn".contains(*c));
-
+            if let Some((from, to, promotion)) = ChessEngine::parse_uci_move(move_uci) {
                 move_events.write(NetworkMoveEvent {
-                    from: (from_col, from_row),
-                    to: (to_col, to_row),
+                    from,
+                    to,
                     promotion,
                     expected_fen: Some(next_fen.clone()),
                     dedup_version: None,
@@ -552,6 +610,97 @@ mod session_tests {
             black: format!("b{id}"),
             round: 0,
         }
+    }
+
+    #[test]
+    fn exhausted_live_feed_allows_polling_and_keeps_its_response_channel() {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(TokioRuntime(tokio::runtime::Runtime::new().unwrap()));
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let mut session = SpectatorSession::default();
+        session.begin_session("1".into(), None);
+        session.applied_move_count = 1;
+        session.pending_moves.push("e7e5".into());
+        session.poll_timer = 30.;
+        session.live_feed = Some(Arc::new(Mutex::new(vec![])));
+        session.live_cancel = Some(Arc::new(AtomicBool::new(true)));
+        session.poll_result = Some(rx);
+        assert!(!session.is_live_subscribed());
+        app.insert_resource(session);
+        app.add_systems(Update, tick_spectator_poll);
+        app.update();
+        assert!(app
+            .world()
+            .resource::<SpectatorSession>()
+            .poll_result
+            .is_some());
+        tx.send(vec!["e2e4".into(), "e7e5".into(), "g1f3".into()])
+            .unwrap();
+        app.update();
+        let session = app.world().resource::<SpectatorSession>();
+        assert_eq!(session.pending_moves, ["e7e5", "g1f3"]);
+        assert!(session.poll_result.is_none());
+    }
+
+    #[test]
+    fn spectator_counts_only_engine_accepted_moves() {
+        let mut app = App::new();
+        app.insert_resource(GameMode::Spectator);
+        let mut session = SpectatorSession::default();
+        session.begin_session("1".into(), None);
+        session.pending_moves.push("e2e4".into());
+        app.insert_resource(session);
+        app.add_message::<NetworkMoveEvent>();
+        app.add_message::<crate::game::events::NetworkMoveResult>();
+        app.add_systems(
+            Update,
+            (confirm_spectator_move, dispatch_pending_spectator_moves).chain(),
+        );
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<SpectatorSession>()
+                .applied_move_count,
+            0
+        );
+        let version = app
+            .world()
+            .resource::<SpectatorSession>()
+            .in_flight
+            .as_ref()
+            .unwrap()
+            .0
+            .clone();
+        app.world_mut()
+            .write_message(crate::game::events::NetworkMoveResult {
+                version: Some(version.clone()),
+                fen: None,
+            });
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<SpectatorSession>()
+                .applied_move_count,
+            0
+        );
+        app.world_mut()
+            .write_message(crate::game::events::NetworkMoveResult {
+                version: Some(version),
+                fen: Some("accepted".into()),
+            });
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<SpectatorSession>()
+                .applied_move_count,
+            1
+        );
+        assert!(app
+            .world()
+            .resource::<SpectatorSession>()
+            .in_flight
+            .is_none());
     }
 
     #[test]

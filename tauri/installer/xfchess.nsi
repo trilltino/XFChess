@@ -57,10 +57,13 @@ Section "Install"
 
   File "${PAYLOAD_DIR}\${APP_EXE}"
   File "${PAYLOAD_DIR}\${BRIDGE_EXE}"
-  File "${PAYLOAD_DIR}\stockfish.exe"
+
+  SetOutPath "$INSTDIR\assets\bin"
+  File "${PAYLOAD_DIR}\assets\bin\stockfish.exe"
+  Delete "$INSTDIR\stockfish.exe"
 
   SetOutPath "$INSTDIR\assets"
-  File /r "${PAYLOAD_DIR}\assets\*.*"
+  File /r /x bin "${PAYLOAD_DIR}\assets\*.*"
 
   ; Ship wallet-ui/dist beside the companion executable so its signing popup can load.
   SetOutPath "$INSTDIR\wallet-ui\dist"

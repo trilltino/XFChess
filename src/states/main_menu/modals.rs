@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::{GameMode as CoreGameMode, GameState};
-use crate::game::ai::GameMode;
+use crate::core::{GameMode, GameState};
+use crate::game::ai::AiMode;
 use crate::ui::styles::*;
 use bevy::prelude::NextState;
 use bevy_egui::egui;
@@ -10,7 +10,7 @@ pub(super) fn render_ai_setup_modal(
     ctx: &egui::Context,
     competitive: &mut CompetitiveMenuState,
     ai_config: &mut crate::game::ai::resource::ChessAIResource,
-    core_mode: &mut CoreGameMode,
+    core_mode: &mut GameMode,
     next_state: &mut NextState<GameState>,
     active_tc: &mut crate::game::resources::active_time_control::ActiveTimeControl,
 ) {
@@ -223,7 +223,7 @@ pub(super) fn render_ai_setup_modal(
                     );
                     ai_config.difficulty =
                         crate::game::ai::resource::AIDifficulty::from_u8(competitive.ai_difficulty);
-                    ai_config.mode = GameMode::VsAI {
+                    ai_config.mode = AiMode::VsAI {
                         ai_color: match competitive.ai_side {
                             AISide::Black => crate::rendering::pieces::PieceColor::White,
                             AISide::Random => {
@@ -237,7 +237,7 @@ pub(super) fn render_ai_setup_modal(
                         },
                     };
                     ai_config.engine = competitive.ai_engine;
-                    *core_mode = CoreGameMode::SinglePlayer;
+                    *core_mode = GameMode::SinglePlayer;
                     active_tc.control = competitive.ai_time_control;
                     active_tc.ai_game = true;
                     next_state.set(GameState::InGame);
@@ -316,7 +316,7 @@ pub(super) fn render_controls_popup(ctx: &egui::Context, competitive: &mut Compe
 pub(super) fn render_pgn_input_modal(
     ctx: &egui::Context,
     competitive: &mut CompetitiveMenuState,
-    core_mode: &mut CoreGameMode,
+    core_mode: &mut GameMode,
     next_state: &mut NextState<GameState>,
     commands: &mut bevy::ecs::system::Commands,
 ) {
@@ -395,7 +395,7 @@ pub(super) fn render_pgn_input_modal(
                                     puzzle_revealed: false,
                                 },
                             );
-                            *core_mode = CoreGameMode::PgnReplay;
+                            *core_mode = GameMode::PgnReplay;
                             next_state.set(GameState::InGame);
                             competitive.set_active_modal(None);
                             competitive.pgn_input_error = None;

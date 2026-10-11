@@ -1,7 +1,6 @@
-use std::ops::ControlFlow;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 
 use bytes::Buf;
 use bytes::Bytes;
@@ -17,7 +16,7 @@ use http_body_util::BodyExt;
 use iroh::{Endpoint, EndpointId};
 use iroh_h3::BidiStream;
 use iroh_h3::{Connection as IrohH3Connection, OpenStreams};
-use n0_future::{task, time}; // unifies wasm/tokio task spawning, time, etc.
+use n0_future::task;
 use tracing::instrument;
 use tracing::trace;
 use tracing::warn;
@@ -25,18 +24,21 @@ use tracing::warn;
 use crate::body::Body;
 use crate::error::Error;
 use crate::error::RequestValidationError;
-use crate::middleware::Service;
 use crate::response::IrohH3ResponseBody;
+use crate::service::Service;
 
 type Sender = h3::client::SendRequest<OpenStreams, Bytes>;
 type SenderFuture = Pin<Box<dyn futures::Future<Output = Result<Sender, Arc<Error>>> + Send>>;
 type CachedSender = Shared<SenderFuture>;
+type SenderCache = DashMap<EndpointId, (u64, CachedSender)>;
 
 #[derive(Clone, Debug)]
 pub struct ConnectionManager {
     endpoint: Endpoint,
     alpn: Vec<u8>,
-    sender_cache: Arc<DashMap<EndpointId, CachedSender>>,
+    sender_cache: Arc<SenderCache>,
+    generation: Arc<AtomicU64>,
+    lifetime: Arc<tokio::sync::watch::Sender<()>>,
 }
 
 impl ConnectionManager {
@@ -45,70 +47,39 @@ impl ConnectionManager {
             endpoint,
             alpn,
             sender_cache: Default::default(),
+            generation: Default::default(),
+            lifetime: Arc::new(tokio::sync::watch::channel(()).0),
         }
     }
 
-    #[instrument(skip(self, peer_id))]
     pub async fn get_sender(&self, peer_id: EndpointId) -> Result<Sender, Error> {
-        if let Some(sender) = self.try_get_cached_sender(peer_id).await {
-            return Ok(sender);
-        }
-        self.coordinate_connection_setup(peer_id).await
-    }
-
-    #[instrument(skip(self, peer_id))]
-    async fn try_get_cached_sender(&self, peer_id: EndpointId) -> Option<Sender> {
-        let cached_sender = self.sender_cache.get(&peer_id).as_deref().cloned();
-        if let Some(shared) = cached_sender
-            && let Ok(sender) = shared.await
-        {
-            return Some(sender);
-        }
-        None
-    }
-
-    #[instrument(skip(self, peer_id))]
-    async fn coordinate_connection_setup(&self, peer_id: EndpointId) -> Result<Sender, Error> {
-        loop {
-            let action = {
-                let entry = self.sender_cache.entry(peer_id);
-                if let Entry::Occupied(sender_future) = entry {
-                    ControlFlow::Continue(sender_future.get().clone())
-                } else {
-                    trace!("trying to connect to {}", peer_id.fmt_short());
-                    let future = self.create_connection(peer_id);
-                    entry.insert(future.clone());
-                    ControlFlow::Break(future)
-                }
-            };
-
-            match action {
-                ControlFlow::Continue(shared) => {
-                    if let Ok(sender) = shared.await {
-                        return Ok(sender);
-                    }
-                    time::sleep(Duration::from_millis(1)).await;
-                }
-                ControlFlow::Break(shared) => {
-                    return match shared.await {
-                        Ok(sender) => Ok(sender),
-                        Err(err) => {
-                            self.sender_cache.remove(&peer_id);
-                            Err(err.into())
-                        }
-                    };
-                }
+        let (generation, shared) = match self.sender_cache.entry(peer_id) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                let generation = self.generation.fetch_add(1, Ordering::Relaxed);
+                let shared = self.create_connection(peer_id, generation);
+                entry.insert((generation, shared.clone()));
+                (generation, shared)
+            }
+        };
+        match shared.await {
+            Ok(sender) => Ok(sender),
+            Err(error) => {
+                self.sender_cache
+                    .remove_if(&peer_id, |_, (cached, _)| *cached == generation);
+                Err(error.into())
             }
         }
     }
-
     #[instrument(skip(self, peer_id))]
-    fn create_connection(&self, peer_id: EndpointId) -> Shared<SenderFuture> {
-        let self_clone = self.clone();
+    fn create_connection(&self, peer_id: EndpointId, generation: u64) -> Shared<SenderFuture> {
+        let endpoint = self.endpoint.clone();
+        let alpn = self.alpn.clone();
+        let cache = Arc::downgrade(&self.sender_cache);
+        let lifetime = self.lifetime.subscribe();
         let fut: SenderFuture = Box::pin(async move {
-            let conn = self_clone
-                .endpoint
-                .connect(peer_id, &self_clone.alpn)
+            let conn = endpoint
+                .connect(peer_id, &alpn)
                 .await
                 .map_err(|err| Error::Transport(err.into()))
                 .map_err(Arc::new)?;
@@ -118,8 +89,9 @@ impl ConnectionManager {
                 .map_err(|err| Error::Transport(err.into()))
                 .map_err(Arc::new)?;
 
-            // Cleanup task when connection closes
-            task::spawn(self_clone.run_connection(conn, peer_id));
+            task::spawn(Self::run_connection(
+                conn, peer_id, generation, cache, lifetime,
+            ));
 
             Ok(sender)
         });
@@ -127,18 +99,21 @@ impl ConnectionManager {
         fut.shared()
     }
 
-    #[instrument(skip(self, conn))]
+    #[instrument(skip(conn, cache, lifetime))]
     async fn run_connection(
-        self,
         mut conn: Connection<iroh_h3::Connection, Bytes>,
         peer_id: EndpointId,
+        generation: u64,
+        cache: Weak<SenderCache>,
+        mut lifetime: tokio::sync::watch::Receiver<()>,
     ) {
-        let error = conn.wait_idle().await;
-        trace!(
-            "Connection with {} closed. Cause: {error}",
-            peer_id.fmt_short()
-        );
-        self.sender_cache.remove(&peer_id);
+        tokio::select! {
+            error = conn.wait_idle() => trace!("Connection with {} closed. Cause: {error}", peer_id.fmt_short()),
+            _ = lifetime.changed() => {},
+        }
+        if let Some(cache) = cache.upgrade() {
+            cache.remove_if(&peer_id, |_, (cached, _)| *cached == generation);
+        }
     }
 
     #[instrument(skip(stream, body))]
@@ -203,7 +178,7 @@ impl Service for ConnectionManager {
             .map_err(|err| Error::Transport(err.into()))?;
         let inner = response.into_parts().0;
 
-        let response_body = IrohH3ResponseBody::new(stream, sender);
+        let response_body = IrohH3ResponseBody::new(stream, sender, self.lifetime.clone());
         let boxed_response_body = response_body.boxed();
 
         Ok(Response::from_parts(inner, boxed_response_body.into()))
@@ -214,9 +189,33 @@ impl Service for ConnectionManager {
 pub(crate) fn peer_id(uri: &Uri) -> Result<EndpointId, Error> {
     let authority = uri
         .authority()
-        .ok_or_else(|| RequestValidationError::MissingAuthority)?
+        .ok_or(RequestValidationError::MissingAuthority)?
         .as_str();
     authority
         .parse()
         .map_err(|err| RequestValidationError::BadPeerId(err).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn abandoning_a_cached_connection_setup_releases_the_cache() {
+        let endpoint = Endpoint::bind(iroh::endpoint::presets::Minimal)
+            .await
+            .unwrap();
+        let manager = ConnectionManager::new(endpoint.clone(), b"test".to_vec());
+        let cache = Arc::downgrade(&manager.sender_cache);
+        let peer = iroh::SecretKey::generate().public();
+        manager
+            .sender_cache
+            .insert(peer, (0, manager.create_connection(peer, 0)));
+        drop(manager);
+        assert!(
+            cache.upgrade().is_none(),
+            "cached setup retained its own cache"
+        );
+        endpoint.close().await;
+    }
 }

@@ -5,16 +5,17 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::BTreeMap;
 
+const MAX_HEADER_BYTES: usize = 64 * 1024;
+const MAX_UPDATE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_PATCHES: usize = 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseState {
     WaitingForHeaders,
-    ParsingHeaders,
     WaitingForBody,
     WaitingForPatchHeaders,
     WaitingForPatchBody,
     SkippingSeparator,
-    Complete,
-    Error,
 }
 
 #[derive(Debug)]
@@ -30,8 +31,7 @@ pub struct MessageParser {
     patches_read: usize,
     patch_headers: BTreeMap<String, String>,
     expected_patch_length: usize,
-    read_patch_length: usize,
-    is_encoding_block: bool,
+    patch_bytes: usize,
 }
 
 static HTTP_STATUS_REGEX: Lazy<Regex> =
@@ -54,8 +54,7 @@ impl MessageParser {
             patches_read: 0,
             patch_headers: BTreeMap::new(),
             expected_patch_length: 0,
-            read_patch_length: 0,
-            is_encoding_block: false,
+            patch_bytes: 0,
         }
     }
 
@@ -74,21 +73,22 @@ impl MessageParser {
     }
 
     pub fn feed(&mut self, data: &[u8]) -> Result<Vec<Message>> {
-        tracing::debug!(
-            "[Parser] feed() called with {} bytes, state: {:?}",
-            data.len(),
-            self.state
-        );
+        if self
+            .buffer
+            .len()
+            .saturating_add(data.len())
+            .saturating_add(self.body_buffer.len())
+            .saturating_add(self.patch_bytes)
+            > MAX_UPDATE_BYTES
+        {
+            return Err(BraidError::Protocol("Update exceeds 16 MiB".into()));
+        }
         self.buffer.extend_from_slice(data);
         let mut messages = Vec::new();
 
         loop {
             match self.state {
                 ParseState::WaitingForHeaders => {
-                    tracing::debug!(
-                        "[Parser] WaitingForHeaders, buffer len: {}",
-                        self.buffer.len()
-                    );
                     while !self.buffer.is_empty()
                         && (self.buffer[0] == b'\r' || self.buffer[0] == b'\n')
                     {
@@ -96,38 +96,26 @@ impl MessageParser {
                     }
 
                     if self.buffer.is_empty() {
-                        tracing::debug!("[Parser] Buffer empty after trimming, breaking");
                         break;
                     }
 
                     if self.check_encoding_block()? {
-                        tracing::debug!("[Parser] Found encoding block");
                         self.state = ParseState::WaitingForBody;
                         continue;
                     }
 
                     if let Some(pos) = self.find_header_end() {
-                        tracing::debug!("[Parser] Found header end at pos {}", pos);
                         self.parse_headers(pos)?;
-                        tracing::debug!(
-                            "[Parser] Headers parsed, content-length: {}, patches: {:?}",
-                            self.expected_body_length,
-                            self.expected_patches
-                        );
                         self.state = ParseState::WaitingForBody;
                     } else {
-                        tracing::debug!("[Parser] Header end not found, waiting for more data");
+                        if self.buffer.len() > MAX_HEADER_BYTES {
+                            return Err(BraidError::HeaderParse("Headers exceed 64 KiB".into()));
+                        }
                         break;
                     }
                 }
                 ParseState::WaitingForBody => {
-                    tracing::debug!(
-                        "[Parser] WaitingForBody, expected_body_length: {}, buffer len: {}",
-                        self.expected_body_length,
-                        self.buffer.len()
-                    );
                     if let Some(n) = self.expected_patches {
-                        tracing::debug!("[Parser] Have {} patches to parse", n);
                         if n == 0 {
                             // `Patches: 0` is complete at the blank line: no patch
                             // blocks and no body follow it.
@@ -140,18 +128,12 @@ impl MessageParser {
                             self.state = ParseState::WaitingForPatchHeaders;
                         }
                     } else if self.try_parse_body()? {
-                        tracing::debug!("[Parser] Body parsed successfully, finalizing message");
                         if let Some(msg) = self.finalize_message()? {
-                            tracing::debug!(
-                                "[Parser] Message finalized with {} bytes body",
-                                msg.body.as_ref().map_or(0, bytes::Bytes::len)
-                            );
                             messages.push(msg);
                         }
                         self.reset();
                         self.state = ParseState::WaitingForHeaders;
                     } else {
-                        tracing::debug!("[Parser] Body incomplete, waiting for more data");
                         break;
                     }
                 }
@@ -160,6 +142,11 @@ impl MessageParser {
                         self.parse_patch_headers(pos)?;
                         self.state = ParseState::WaitingForPatchBody;
                     } else {
+                        if self.buffer.len() > MAX_HEADER_BYTES {
+                            return Err(BraidError::HeaderParse(
+                                "Patch headers exceed 64 KiB".into(),
+                            ));
+                        }
                         break;
                     }
                 }
@@ -194,10 +181,22 @@ impl MessageParser {
                         break;
                     }
                 }
-                _ => break,
             }
         }
         Ok(messages)
+    }
+
+    /// Checks that EOF falls between complete updates, allowing trailing heartbeats.
+    pub fn finish(&self) -> Result<()> {
+        if self.state == ParseState::WaitingForHeaders
+            && self.buffer.iter().all(|b| matches!(b, b'\r' | b'\n'))
+        {
+            Ok(())
+        } else {
+            Err(BraidError::BodyParse(
+                "Subscription ended mid-update".into(),
+            ))
+        }
     }
 
     fn check_encoding_block(&mut self) -> Result<bool> {
@@ -222,7 +221,9 @@ impl MessageParser {
                 self.headers
                     .insert("length".to_string(), length.to_string());
                 self.expected_body_length = length;
-                self.is_encoding_block = true;
+                if length > MAX_UPDATE_BYTES {
+                    return Err(BraidError::Protocol("Encoding block exceeds 16 MiB".into()));
+                }
                 return Ok(true);
             }
         }
@@ -240,15 +241,26 @@ impl MessageParser {
     }
 
     fn find_header_end(&self) -> Option<usize> {
-        self.buffer
-            .windows(4)
-            .position(|w| w == b"\r\n\r\n")
-            .map(|p| p + 4)
+        self.buffer.iter().enumerate().find_map(|(i, b)| {
+            if *b != b'\n' {
+                return None;
+            }
+            if self.buffer.get(i + 1) == Some(&b'\n') {
+                Some(i + 2)
+            } else if self.buffer.get(i + 1..i + 3) == Some(b"\r\n") {
+                Some(i + 3)
+            } else {
+                None
+            }
+        })
     }
 
     fn parse_headers(&mut self, end: usize) -> Result<()> {
+        if end > MAX_HEADER_BYTES {
+            return Err(BraidError::HeaderParse("Headers exceed 64 KiB".into()));
+        }
         let header_bytes = self.buffer.split_to(end);
-        let mut header_str = String::from_utf8(header_bytes[..header_bytes.len() - 4].to_vec())?;
+        let mut header_str = String::from_utf8(header_bytes.to_vec())?;
 
         if let Some(caps) = HTTP_STATUS_REGEX.captures(&header_str) {
             if let Some(status_match) = caps.get(1) {
@@ -261,17 +273,33 @@ impl MessageParser {
         }
 
         for line in header_str.lines() {
-            if let Some(colon_pos) = line.find(':') {
+            if line.is_empty() {
+                continue;
+            }
+            if let Some(colon_pos) = line[usize::from(line.starts_with(':'))..]
+                .find(':')
+                .map(|pos| pos + usize::from(line.starts_with(':')))
+            {
                 let key = line[..colon_pos].trim().to_lowercase();
                 let value = line[colon_pos + 1..].trim().to_string();
-                self.headers.insert(key, value);
+                let duplicate = self.headers.insert(key.clone(), value).is_some();
+                if duplicate && matches!(key.as_str(), "content-length" | "patches" | "length") {
+                    return Err(BraidError::HeaderParse("Duplicate framing header".into()));
+                }
+            } else {
+                return Err(BraidError::HeaderParse("Malformed update header".into()));
             }
         }
 
-        if let Some(patches_str) = self.headers.get("patches") {
-            self.expected_patches = Some(patches_str.parse().map_err(|_| {
-                BraidError::HeaderParse(format!("Invalid Patches count: {}", patches_str))
-            })?);
+        self.expected_patches = crate::protocol::headers::parse_patch_count(
+            self.headers.get("patches").map(String::as_str),
+            self.headers.get("content-type").map(String::as_str),
+        )?;
+        if self
+            .expected_patches
+            .is_some_and(|count| count > MAX_PATCHES)
+        {
+            return Err(BraidError::Protocol("Too many patches".into()));
         }
 
         if let Some(len_str) = self
@@ -282,20 +310,40 @@ impl MessageParser {
             self.expected_body_length = len_str.parse().map_err(|_| {
                 BraidError::HeaderParse(format!("Invalid content-length: {}", len_str))
             })?;
+        } else if self.expected_patches.is_none() {
+            return Err(BraidError::Protocol(
+                "Snapshot requires Content-Length".into(),
+            ));
+        }
+        if self.expected_body_length > MAX_UPDATE_BYTES {
+            return Err(BraidError::Protocol("Body exceeds 16 MiB".into()));
         }
         Ok(())
     }
 
     fn parse_patch_headers(&mut self, end: usize) -> Result<()> {
+        if end > MAX_HEADER_BYTES {
+            return Err(BraidError::HeaderParse(
+                "Patch headers exceed 64 KiB".into(),
+            ));
+        }
         let header_bytes = self.buffer.split_to(end);
-        let header_str = String::from_utf8(header_bytes[..header_bytes.len() - 4].to_vec())?;
+        let header_str = String::from_utf8(header_bytes.to_vec())?;
 
         self.patch_headers.clear();
         for line in header_str.lines() {
+            if line.is_empty() {
+                continue;
+            }
             if let Some(colon_pos) = line.find(':') {
                 let key = line[..colon_pos].trim().to_lowercase();
                 let value = line[colon_pos + 1..].trim().to_string();
-                self.patch_headers.insert(key, value);
+                let duplicate = self.patch_headers.insert(key.clone(), value).is_some();
+                if duplicate && key == "content-length" {
+                    return Err(BraidError::HeaderParse("Duplicate patch length".into()));
+                }
+            } else {
+                return Err(BraidError::HeaderParse("Malformed patch header".into()));
             }
         }
 
@@ -308,30 +356,29 @@ impl MessageParser {
                 "Every patch MUST include Content-Length".to_string(),
             ));
         }
-
-        self.read_patch_length = 0;
+        if self.expected_patch_length.saturating_add(self.patch_bytes) > MAX_UPDATE_BYTES {
+            return Err(BraidError::Protocol("Patches exceed 16 MiB".into()));
+        }
+        if !self.patch_headers.contains_key("content-range") {
+            return Err(BraidError::HeaderParse(
+                "Patch requires Content-Range".into(),
+            ));
+        }
         Ok(())
     }
 
     fn try_parse_patch_body(&mut self) -> Result<bool> {
-        let remaining = self.expected_patch_length - self.read_patch_length;
+        let remaining = self.expected_patch_length;
         if self.buffer.len() >= remaining {
             let body_chunk = self.buffer.split_to(remaining);
-            let unit = self
+            let content_range = self
                 .patch_headers
                 .get("content-range")
-                .and_then(|cr| cr.split_whitespace().next())
-                .unwrap_or("bytes")
-                .to_string();
-            let range = self
-                .patch_headers
-                .get("content-range")
-                .and_then(|cr| cr.split_whitespace().nth(1))
-                .unwrap_or("")
-                .to_string();
+                .ok_or_else(|| BraidError::HeaderParse("Patch requires Content-Range".into()))?;
+            let (unit, range) = crate::protocol::parse_content_range(content_range)?;
             let patch = Patch::with_length(unit, range, body_chunk, self.expected_patch_length);
             self.patches.push(patch);
-            self.read_patch_length += remaining;
+            self.patch_bytes += remaining;
             Ok(true)
         } else {
             Ok(false)
@@ -348,8 +395,12 @@ impl MessageParser {
         let remaining = self.expected_body_length - self.read_body_length;
         if self.buffer.len() >= remaining {
             let body_chunk = self.buffer.split_to(remaining);
-            self.body_buffer.extend_from_slice(&body_chunk);
-            self.read_body_length += body_chunk.len();
+            if self.body_buffer.is_empty() {
+                self.body_buffer = body_chunk;
+            } else {
+                self.body_buffer.extend_from_slice(&body_chunk);
+            }
+            self.read_body_length += remaining;
             Ok(true)
         } else {
             let chunk_len = self.buffer.len();
@@ -365,11 +416,20 @@ impl MessageParser {
         let url = headers.get("content-location").cloned();
         let encoding = headers.get("encoding").cloned();
 
-        // A `Patches` header — even `Patches: 0` — makes this a patch update with
-        // no body. Its absence makes it a snapshot.
+        // An explicit zero patch count is an empty patch update, not a snapshot.
         let (body, patches) = if self.expected_patches.is_some() {
             self.body_buffer.clear();
             (None, Some(std::mem::take(&mut self.patches)))
+        } else if let Some(range) = headers.get("content-range") {
+            let (unit, range) = crate::protocol::parse_content_range(range)?;
+            (
+                None,
+                Some(vec![Patch::new(
+                    unit,
+                    range,
+                    self.body_buffer.split().freeze(),
+                )]),
+            )
         } else {
             (Some(self.body_buffer.split().freeze()), None)
         };
@@ -394,8 +454,7 @@ impl MessageParser {
         self.patches_read = 0;
         self.patch_headers.clear();
         self.expected_patch_length = 0;
-        self.read_patch_length = 0;
-        self.is_encoding_block = false;
+        self.patch_bytes = 0;
     }
 
     pub fn state(&self) -> ParseState {
@@ -484,6 +543,22 @@ pub fn parse_status_line(line: &str) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_and_malformed_updates_are_rejected_before_allocating_bodies() {
+        for wire in [
+            b"Content-Length: 999999999\r\n\r\n".as_slice(),
+            b"Patches: 99999\r\n\r\n".as_slice(),
+            b"Patches: 1\r\n\r\nContent-Length: 999999999\r\nContent-Range: bytes 0:1\r\n\r\n"
+                .as_slice(),
+            b"Patches: 1\r\n\r\nContent-Length: 1\r\n\r\nx".as_slice(),
+        ] {
+            assert!(MessageParser::new().feed(wire).is_err());
+        }
+        assert!(MessageParser::new()
+            .feed(&vec![b'a'; MAX_HEADER_BYTES + 1])
+            .is_err());
+    }
 
     #[test]
     fn test_parser_creation() {

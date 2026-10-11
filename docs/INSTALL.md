@@ -1,213 +1,68 @@
 # Installing XFChess
 
-End-to-end install instructions for players downloading a prebuilt release from
-[GitHub Releases](https://github.com/trilltino/XFChess/releases) — no Rust
-toolchain or build step required. If you're setting up a dev environment instead,
-see the [Quick Start](../README.md#quick-start) in the root README.
+Download the asset for your platform from [GitHub Releases](https://github.com/trilltino/XFChess/releases).
+For source builds, see [contributing](../CONTRIBUTING.md).
 
-Every release publishes four assets, one per platform, all built by the same
-CI pipeline (`.github/workflows/release.yml` — see [PUBLISHING.md](PUBLISHING.md)
-for how they're cut):
+| Platform | Asset |
+| --- | --- |
+| Windows | `XFChess-Setup-<version>.exe` |
+| macOS | `XFChess-<version>.dmg` |
+| Linux | `XFChess-linux-x86_64-<version>.tar.gz` |
+| Chrome OS/Crostini | `XFChess-chromeos-x86_64-<version>.tar.gz` |
+| Android | Check the release/workflow for an APK; the current CI artifact is unsigned |
 
-| Platform | Asset | Format |
-|----------|-------|--------|
-| Windows | `XFChess-Setup-<version>.exe` | NSIS installer |
-| macOS | `XFChess-<version>.dmg` | Disk image |
-| Linux | `XFChess-linux-x86_64-<version>.tar.gz` | Tarball |
-| Chrome OS (Crostini) | `XFChess-chromeos-x86_64-<version>.tar.gz` | Tarball |
-| Android | `app-release.apk` | APK, arm64-v8a |
-
-Single-player vs the built-in engine works fully offline. Online multiplayer,
-tournaments, and wager play need an internet connection (the app talks to
-`https://xfchess.com`) and a Solana wallet (e.g. Phantom or Solflare) for
-on-chain features.
-
-Android builds target Android 12+ (`arm64-v8a`) and are landscape locked. The
-APK is intended for dApp Store distribution and sideload testing; see the
-[Android release runbook](runbooks/android-release.md) for prerequisites and
-device installation.
-
-**Signing status:** as of this writing, builds are unsigned (see
-[PUBLISHING.md](PUBLISHING.md#signing-status-check-before-assuming-a-build-is-signed)).
-That means Windows SmartScreen and macOS Gatekeeper will both flag the app on
-first run — this is expected, not a sign of a compromised download. The
-bypass steps for each are below.
+Offline single-player needs no wallet. Online features need network access;
+on-chain features also need wallet authorization. The game and desktop wallet
+bridge run together through the packaged launcher.
 
 ## Windows
 
-1. Go to the [Releases page](https://github.com/trilltino/XFChess/releases)
-   and download `XFChess-Setup-<version>.exe`.
-2. Double-click it. Windows SmartScreen will show **"Windows protected your
-   PC"** because the binary isn't code-signed yet. Click **More info**, then
-   **Run anyway**.
-3. The installer requests admin rights (it installs to
-   `C:\Program Files\XFChess`) — accept the UAC prompt.
-4. Click through the install wizard (Welcome → choose install directory →
-   Install). On the finish page, leave **Launch XFChess** checked and click
-   **Finish**.
-5. First launch starts two processes: `xfchess-tauri.exe` (the wallet bridge,
-   runs in the background) and `xfchess.exe` (the game window). Both are also
-   reachable later from the **XFChess** Start Menu folder or the desktop
-   shortcut, which launch them together via a hidden launcher script (no
-   console window flash).
-
-**Uninstalling:** Settings → Apps → XFChess → Uninstall, or run
-`C:\Program Files\XFChess\uninstall.exe` directly.
+Run the installer, then use the XFChess desktop or Start Menu shortcut.
+If Windows blocks an unsigned build, check the download source and signature
+before using More info / Run anyway. Signing depends on the release configuration;
+the dialog alone does not establish whether a download is trustworthy.
+Uninstall through Settings / Apps or the installed `uninstall.exe`.
 
 ## macOS
 
-1. Download `XFChess-<version>.dmg` from the
-   [Releases page](https://github.com/trilltino/XFChess/releases).
-2. Double-click the `.dmg` to mount it, then drag **XFChess.app** into the
-   **Applications** folder shown in the same window. Eject the mounted image
-   once the copy finishes.
-3. The app is unsigned and unnotarized, so Gatekeeper blocks a normal
-   double-click launch (**"XFChess" can't be opened because it is from an
-   unidentified developer** / **is damaged and can't be opened**). To bypass:
-   - Right-click (or Control-click) **XFChess.app** in Applications → **Open**
-     → confirm **Open** in the dialog. This only needs to be done once; later
-     launches work normally via Launchpad/Spotlight.
-   - If that dialog doesn't offer an Open button, instead go to
-     **System Settings → Privacy & Security**, scroll to the Security
-     section, and click **Open Anyway** next to the XFChess block message,
-     then confirm.
-4. On launch, the app starts the wallet-bridge helper (`xfchess-tauri`)
-   alongside the game window automatically.
+Mount the DMG, drag XFChess.app into Applications, eject the image and launch it.
+Check the release's architecture and signing/notarization information. If you
+choose to open a verified unsigned build, use the system's Open Anyway workflow.
+Uninstall by removing the app from Applications.
 
-**System requirement:** macOS 10.15+. Current builds target Intel x86_64 and
-run natively on Intel Macs or through Rosetta 2 on Apple Silicon Macs. There
-is no universal arm64 binary yet.
+## Linux and Chrome OS
 
-**Uninstalling:** drag `XFChess.app` from Applications to the Trash.
+Chrome OS requires the Linux development environment (Crostini) and a matching CPU
+architecture. Both tarballs contain a `linux/` directory.
 
-## Linux
+```bash
+tar -xzf XFChess-linux-x86_64-<version>.tar.gz
+cd linux
+sudo apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2 libgtk-3-0
+chmod +x xfchess xfchess-tauri launch.sh
+./launch.sh
+```
 
-1. Download `XFChess-linux-x86_64-<version>.tar.gz` from the
-   [Releases page](https://github.com/trilltino/XFChess/releases).
-2. Extract it and enter the folder:
-   ```bash
-   tar -xzf XFChess-linux-x86_64-<version>.tar.gz
-   cd linux
-   ```
-3. **Prerequisite:** the wallet-bridge binary is a Tauri/WebKitGTK app and is
-   dynamically linked against system libraries that aren't bundled in the
-   tarball. Install them first (Debian/Ubuntu):
-   ```bash
-   sudo apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2 libgtk-3-0
-   ```
-   (Package names vary on Fedora/Arch — look for `webkit2gtk`,
-   `libappindicator`/`libayatana-appindicator`, and `gtk3` equivalents.)
-4. Run both binaries together:
-   ```bash
-   ./launch.sh
-   ```
-   This starts `xfchess-tauri` (wallet bridge) in the background, then
-   `xfchess` (the game window) in the foreground. If the extracted files
-   aren't marked executable, run `chmod +x xfchess xfchess-tauri launch.sh`
-   first.
-5. There's no system-wide install step or `.desktop` entry yet — launch
-   `./launch.sh` from the extracted folder each time, or symlink/alias it
-   yourself.
+Runtime package names vary by distribution. Launch from the extracted directory
+so bundled assets can be found. Uninstall by deleting that directory.
 
-**Uninstalling:** delete the extracted folder.
+## Android
 
-## Chrome OS (via Crostini)
+The native app targets Android 12+ on arm64-v8a. Current CI builds an unsigned
+release APK; it needs signing before installation/distribution. Use a debug
+build for device testing. See [the Android runbook](runbooks/android-release.md).
 
-This is the exact same full-featured build as Linux above (Solana
-multiplayer/wagers, wallet bridge, bundled Stockfish — nothing removed) —
-Crostini is a genuine Debian container, so it just runs unmodified. It's
-published as a separate asset only so Chrome OS users can find it by name.
+## Troubleshooting and logs
 
-1. Enable Crostini first if you haven't: **Settings → Advanced → Developers
-   → Linux development environment → Turn on**.
-2. Download `XFChess-chromeos-x86_64-<version>.tar.gz` from the
-   [Releases page](https://github.com/trilltino/XFChess/releases) — either
-   directly inside the Linux/Crostini file browser, or into your regular
-   Chrome OS Downloads and then move it into the "Linux files" folder.
-3. Follow the same extract/prerequisite/run steps as the **Linux** section
-   above (the tarball's internal folder is still named `linux/`).
+- Test `https://xfchess.com/health` if online features cannot connect.
+- Choose the engine/difficulty in the Play vs Computer setup; packaged desktop
+  builds include Stockfish.
+- Settings / Help & Support / Export logs writes a diagnostic text file locally.
+  Review it before attaching it to an issue.
+- Profile logs live under the chosen profile directory, usually
+  `Documents/xfchess/profiles/<name>/logs`. Before profile creation, check
+  `%LOCALAPPDATA%\xfchess\logs` on Windows,
+  `~/Library/Application Support/xfchess/logs` on macOS or
+  `~/.local/share/xfchess/logs` on Linux.
 
-**Uninstalling:** delete the extracted folder.
-
-## Sending logs for debugging
-
-Every game writes diagnostics to your computer automatically — the same detail
-a local terminal run prints (moves, connections, P2P relay, errors) — so when
-something goes wrong you can send a copy straight to the devs.
-
-**The 30-second version:**
-
-1. Open XFChess → **Settings** → **Help & Support**.
-2. Click **Export logs as text file**, pick where to save (it starts in your
-   profile folder), and hit Save.
-3. The game writes one `xfchess-logs-<timestamp>.txt` containing your version,
-   OS, arch, the latest game logs, any crash reports, and the wallet/sign-in
-   log.
-4. Drag that file into the group chat (or attach it to an issue or email) —
-   done. Nothing is uploaded automatically, and you can read the file before
-   sending it.
-
-**Where the files live** (for grabbing them manually):
-
-- Once a profile exists, logs live inside **that profile's folder** — either
-  the folder you picked at profile creation ("Choose Save Location"), or by
-  default `Documents/xfchess/profiles/<your name>/logs` (`~/Documents/...` on
-  macOS and Linux/Chrome OS).
-- Fresh installs with no profile yet use the app-data folder instead:
-  Windows `%LOCALAPPDATA%\xfchess\logs`, macOS
-  `~/Library/Application Support/xfchess/logs`, Linux/Chrome OS
-  `~/.local/share/xfchess/logs`.
-
-Each day gets its own `game.log.<date>` file; `wallet-bridge.log.<date>` covers
-wallet sign-in; hard crashes write `crash_<timestamp>.log`. The export button
-bundles the latest of everything into one text file and also shows you the
-exact save path in Settings after exporting.
-## Sending logs for debugging
-
-Every game writes diagnostics to your computer automatically — the same detail
-a local terminal run prints (moves, connections, P2P relay, errors) — so when
-something goes wrong you can send a copy straight to the devs.
-
-**The 30-second version:**
-
-1. Open XFChess → **Settings** → **Help & Support**.
-2. Click **Export logs as text file**, pick where to save (it starts in your
-   profile folder), and hit Save.
-3. The game writes one `xfchess-logs-<timestamp>.txt` containing your version,
-   OS, arch, the latest game logs, any crash reports, and the wallet/sign-in
-   log.
-4. Drag that file into the group chat (or attach it to an issue or email) —
-   done. Nothing is uploaded automatically, and you can read the file before
-   sending it.
-
-**Where the files live** (for grabbing them manually):
-
-- Once a profile exists, logs live inside **that profile's folder** — either
-  the folder you picked at profile creation ("Choose Save Location"), or by
-  default `Documents/xfchess/profiles/<your name>/logs` (`~/Documents/...` on
-  macOS and Linux/Chrome OS).
-- Fresh installs with no profile yet use the app-data folder instead:
-  Windows `%LOCALAPPDATA%\xfchess\logs`, macOS
-  `~/Library/Application Support/xfchess/logs`, Linux/Chrome OS
-  `~/.local/share/xfchess/logs`.
-
-Each day gets its own `game.log.<date>` file; `wallet-bridge.log.<date>` covers
-wallet sign-in; hard crashes write `crash_<timestamp>.log`. The export button
-bundles the latest of everything into one text file and also shows you the
-exact save path in Settings after exporting.
-
-## Troubleshooting
-
-- **The app won't connect / multiplayer doesn't load anything:** confirm
-  `https://xfchess.com/health` is reachable from your machine — the app has
-  no offline fallback for online features.
-- **Windows/macOS security dialogs keep reappearing on every launch:** you
-  bypassed the wrong binary, or a later update reset the exception. Repeat
-  the bypass step above on the current install.
-- **Chess engine feels weak/strong:** difficulty is adjustable in-game
-  (Level 1–8); the default engine is the built-in `XFChessEngine`
-  (native Rust, no setup needed). Stockfish ships bundled with every
-  release on all four platforms and is selectable as the **Engine**
-  option when setting up a Play vs Computer game — if it doesn't work,
-  it's a bug (the release build fails outright if Stockfish can't be
-  bundled), not a missing optional download.
+Include platform, release version, reproduction steps and relevant redacted logs.

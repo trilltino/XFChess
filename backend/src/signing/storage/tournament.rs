@@ -8,7 +8,7 @@ pub enum TournamentFormat {
     Swiss { rounds: u8 },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SwissStorageData {
     pub current_round: u8,
     pub total_rounds: u8,
@@ -25,6 +25,31 @@ pub struct SwissStorageData {
     pub forbidden_pairs: Vec<(String, String)>,
     #[serde(default)]
     pub manual_pairings_next_round: Vec<swiss_pairing::ManualPairing>,
+    /// `(round, board)` results already written on-chain via `record_swiss_result`
+    /// (backend 1-based numbering). Lets the chain reconciler resume after a restart.
+    #[serde(default)]
+    pub chain_boards_recorded: Vec<(u8, u16)>,
+    /// Set once `complete_swiss_tournament` has landed on-chain.
+    #[serde(default)]
+    pub chain_completed: bool,
+}
+
+impl SwissStorageData {
+    pub fn has_result(&self, round: u8, board: u16) -> bool {
+        self.results
+            .iter()
+            .any(|(r, b, _)| *r == round && *b == board)
+    }
+
+    pub fn round(&self, round: u8) -> Option<&swiss_pairing::SwissRound> {
+        self.rounds.iter().find(|r| r.round == round)
+    }
+
+    /// Every board of `round` has a result (a round with no boards is complete).
+    pub fn round_complete(&self, round: u8) -> bool {
+        self.round(round)
+            .is_some_and(|r| r.pairings.iter().all(|p| self.has_result(round, p.board)))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -106,6 +131,10 @@ pub struct TournamentRecord {
     pub prize_release_approved: bool,
     #[serde(default)]
     pub broadcast_delay_secs: u32,
+    /// Game ids whose on-chain Game this backend has created (`create_tournament_game`).
+    /// A settled game is closed on-chain, so existence alone cannot say "done".
+    #[serde(default)]
+    pub provisioned_game_ids: Vec<u64>,
 }
 
 impl TournamentRecord {
@@ -147,6 +176,7 @@ impl TournamentRecord {
             prizes_distributed: false,
             prize_release_approved: false,
             broadcast_delay_secs: 0,
+            provisioned_game_ids: Vec::new(),
         }
     }
 
@@ -202,6 +232,7 @@ impl TournamentRecord {
             prizes_distributed: false,
             prize_release_approved: false,
             broadcast_delay_secs: 0,
+            provisioned_game_ids: Vec::new(),
         }
     }
 
@@ -209,7 +240,16 @@ impl TournamentRecord {
         self.players.len() >= self.max_players as usize
     }
 
+    /// 0-based round in play (bracket rounds are 0-based; Swiss rounds are stored
+    /// 1-based and shifted here). `None` before a Swiss event pairs round 1.
     pub fn current_round(&self) -> Option<u8> {
+        if matches!(self.format, TournamentFormat::Swiss { .. }) {
+            return self
+                .swiss_data
+                .as_ref()
+                .filter(|sd| sd.current_round > 0)
+                .map(|sd| sd.current_round - 1);
+        }
         self.matches
             .iter()
             .flatten()
@@ -218,7 +258,20 @@ impl TournamentRecord {
             .min()
     }
 
+    /// Unfinished matches in the 0-based `round`.
     pub fn matches_remaining_in_round(&self, round: u8) -> usize {
+        if matches!(self.format, TournamentFormat::Swiss { .. }) {
+            let Some(sd) = self.swiss_data.as_ref() else {
+                return 0;
+            };
+            let swiss_round = round + 1;
+            return sd.round(swiss_round).map_or(0, |r| {
+                r.pairings
+                    .iter()
+                    .filter(|p| !sd.has_result(swiss_round, p.board))
+                    .count()
+            });
+        }
         self.matches
             .iter()
             .flatten()
@@ -332,6 +385,10 @@ impl TournamentRecord {
             TournamentStatus::Active => {}
         }
 
+        if matches!(self.format, TournamentFormat::Swiss { .. }) {
+            return self.swiss_player_status(player, status);
+        }
+
         // Active: is the player seated in an unfinished match?
         if let Some(assignment) = self.match_for_player(player) {
             status.state = if assignment.game_id.is_some() {
@@ -417,6 +474,46 @@ impl TournamentRecord {
         None
     }
 
+    /// Swiss players never get "knocked out": between their own games they wait
+    /// for the round to finish, unless they withdrew.
+    fn swiss_player_status(
+        &self,
+        player: &str,
+        mut status: PlayerTournamentStatus,
+    ) -> PlayerTournamentStatus {
+        let withdrawn = self
+            .swiss_data
+            .as_ref()
+            .is_some_and(|sd| sd.withdrawn_players.iter().any(|p| p == player));
+        if withdrawn {
+            status.state = PlayerState::Eliminated;
+            return status;
+        }
+
+        let assignment = self.swiss_match_for_player(player);
+        if let Some(a) = assignment.as_ref().filter(|a| !a.is_bye) {
+            status.state = if a.game_id.is_some() {
+                PlayerState::MatchReady
+            } else {
+                PlayerState::AwaitingGameId
+            };
+            status.r#match = Some(a.clone());
+            return status;
+        }
+
+        status.state = PlayerState::AwaitingOpponent;
+        status.r#match = assignment;
+        if let Some(round) = status.round {
+            status.blocked_by = Some(BlockedBy {
+                round,
+                matches_remaining: self.matches_remaining_in_round(round),
+            });
+        }
+        status
+    }
+
+    /// The player's assignment in the latest Swiss round: their bye, or their board
+    /// while it has no result yet. `None` once their game is decided.
     fn swiss_match_for_player(&self, player: &str) -> Option<MatchAssignment> {
         let swiss = self.swiss_data.as_ref()?;
         let round = swiss.rounds.last()?;
@@ -442,6 +539,9 @@ impl TournamentRecord {
             .find(|(_, p)| p.white == player || p.black == player)?;
 
         let (idx, p) = pairing;
+        if swiss.has_result(round.round, p.board) {
+            return None;
+        }
         let is_white = p.white == player;
         let opponent = if is_white {
             p.black.clone()
@@ -453,7 +553,7 @@ impl TournamentRecord {
             match_index: idx as u16,
             round: Some(round.round),
             board: Some(p.board),
-            game_id: None,
+            game_id: TournamentStore::swiss_game_id(self.tournament_id, round.round, p.board),
             opponent_node_id: self.node_ids.get(&opponent).cloned(),
             opponent_pubkey: opponent,
             your_color: if is_white { "white" } else { "black" }.to_string(),
@@ -766,8 +866,9 @@ impl TournamentStore {
     pub async fn visible(&self) -> Result<Vec<TournamentRecord>, sqlx::Error> {
         let data: Vec<String> = sqlx::query_scalar("SELECT data FROM tournaments WHERE id NOT IN (SELECT tournament_id FROM archived_tournaments) ORDER BY id DESC")
             .fetch_all(&self.pool).await?;
-        data.into_iter().map(|data| serde_json::from_str(&data)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))).collect()
+        data.into_iter()
+            .map(|data| serde_json::from_str(&data).map_err(|e| sqlx::Error::Decode(Box::new(e))))
+            .collect()
     }
 
     pub async fn delete(&self, id: u64) -> bool {
@@ -787,17 +888,24 @@ impl TournamentStore {
         &self.pool
     }
 
-    pub async fn update_checked<F: FnOnce(&mut TournamentRecord)>(&self, id: u64, f: F) -> Result<(), sqlx::Error> {
+    pub async fn update_checked<F: FnOnce(&mut TournamentRecord)>(
+        &self,
+        id: u64,
+        f: F,
+    ) -> Result<(), sqlx::Error> {
         // Acquire the SQLite write lock before reading the JSON record. Otherwise
         // simultaneous registrations/results can silently replace each other.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let data: Option<String> = sqlx::query_scalar("SELECT data FROM tournaments WHERE id = ?")
-            .bind(id as i64).fetch_optional(&mut *tx).await?;
+            .bind(id as i64)
+            .fetch_optional(&mut *tx)
+            .await?;
         if let Some(data) = data {
-            let mut record: TournamentRecord = serde_json::from_str(&data)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+            let mut record: TournamentRecord =
+                serde_json::from_str(&data).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
             f(&mut record);
-            let data = serde_json::to_string(&record).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+            let data =
+                serde_json::to_string(&record).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
             let now = chrono::Utc::now().timestamp();
             sqlx::query("UPDATE tournaments SET data = ?, updated_at = ? WHERE id = ?")
                 .bind(data)
@@ -843,6 +951,27 @@ impl TournamentStore {
 
     pub fn deterministic_game_id(tournament_id: u64, match_index: u16) -> Option<u64> {
         (tournament_id < (1u64 << 48)).then_some((tournament_id << 16) | u64::from(match_index))
+    }
+
+    /// Swiss boards reuse the deterministic scheme with `match_index = round << 8 |
+    /// board` (1-based round and board; at most 255 boards per round). A tournament
+    /// is either Swiss or a bracket, so the two layouts never share an id space.
+    pub fn swiss_game_id(tournament_id: u64, round: u8, board: u16) -> Option<u64> {
+        if round == 0 || board == 0 || board > 0xff {
+            return None;
+        }
+        Self::deterministic_game_id(tournament_id, (u16::from(round) << 8) | board)
+    }
+
+    /// Inverse of [`Self::swiss_game_id`]: the `(round, board)` a game id belongs to,
+    /// if it is one of `tournament_id`'s Swiss games.
+    pub fn swiss_board_for_game_id(tournament_id: u64, game_id: u64) -> Option<(u8, u16)> {
+        if game_id >> 16 != tournament_id {
+            return None;
+        }
+        let match_index = (game_id & 0xffff) as u16;
+        let (round, board) = ((match_index >> 8) as u8, match_index & 0xff);
+        (round > 0 && board > 0).then_some((round, board))
     }
 
     pub async fn assign_ready_game_ids(&self, id: u64) -> Vec<(u16, u64)> {
@@ -1031,6 +1160,7 @@ impl Default for TournamentRecord {
             prizes_distributed: false,
             prize_release_approved: false,
             broadcast_delay_secs: 0,
+            provisioned_game_ids: Vec::new(),
         }
     }
 }
@@ -1294,5 +1424,99 @@ mod player_status_tests {
         assert_eq!(s.state, PlayerState::AwaitingOpponent);
         assert_eq!(s.round, Some(1));
         assert_eq!(s.total_rounds, 4);
+    }
+
+    fn swiss_record(tournament_id: u64) -> TournamentRecord {
+        let mut t = record_with_players(tournament_id, 5);
+        t.format = TournamentFormat::Swiss { rounds: 3 };
+        t.status = TournamentStatus::Active;
+        t.swiss_data = Some(SwissStorageData {
+            current_round: 1,
+            total_rounds: 3,
+            rounds: vec![swiss_pairing::SwissRound {
+                round: 1,
+                pairings: vec![
+                    swiss_pairing::Pairing {
+                        white: "P0".into(),
+                        black: "P2".into(),
+                        board: 1,
+                    },
+                    swiss_pairing::Pairing {
+                        white: "P3".into(),
+                        black: "P1".into(),
+                        board: 2,
+                    },
+                ],
+                byes: vec!["P4".into()],
+                float_downs: vec![],
+                float_ups: vec![],
+            }],
+            ..Default::default()
+        });
+        t
+    }
+
+    #[test]
+    fn swiss_game_ids_round_trip_and_stay_in_their_tournament() {
+        let id = TournamentStore::swiss_game_id(7, 3, 12).unwrap();
+        assert_eq!(
+            TournamentStore::swiss_board_for_game_id(7, id),
+            Some((3, 12))
+        );
+        assert_eq!(TournamentStore::swiss_board_for_game_id(8, id), None);
+        assert_ne!(
+            TournamentStore::swiss_game_id(7, 1, 2),
+            TournamentStore::swiss_game_id(7, 2, 1)
+        );
+        assert_eq!(TournamentStore::swiss_game_id(7, 0, 1), None);
+        assert_eq!(TournamentStore::swiss_game_id(7, 1, 0), None);
+        assert_eq!(TournamentStore::swiss_game_id(7, 1, 256), None);
+    }
+
+    #[test]
+    fn swiss_players_get_their_board_game_until_it_is_decided() {
+        let mut t = swiss_record(9);
+
+        let white = t.player_status("P0");
+        assert_eq!(white.state, PlayerState::MatchReady);
+        assert_eq!(
+            white.round,
+            Some(0),
+            "round is reported 0-based like brackets"
+        );
+        let m = white.r#match.unwrap();
+        assert_eq!(m.your_color, "white");
+        assert_eq!(m.game_id, TournamentStore::swiss_game_id(9, 1, 1));
+
+        let black = t.player_status("P1");
+        assert_eq!(black.state, PlayerState::MatchReady);
+        assert_eq!(black.r#match.unwrap().your_color, "black");
+
+        // The bye waits for the round instead of being sent into a game.
+        let bye = t.player_status("P4");
+        assert_eq!(bye.state, PlayerState::AwaitingOpponent);
+        assert_eq!(bye.blocked_by.unwrap().matches_remaining, 2);
+
+        // Once board 1 is decided its players wait for board 2.
+        t.swiss_data
+            .as_mut()
+            .unwrap()
+            .results
+            .push((1, 1, swiss_pairing::MatchResult::Draw));
+        let done = t.player_status("P0");
+        assert_eq!(done.state, PlayerState::AwaitingOpponent);
+        assert_eq!(done.blocked_by.unwrap().matches_remaining, 1);
+        assert_eq!(t.player_status("P3").state, PlayerState::MatchReady);
+    }
+
+    #[test]
+    fn withdrawn_swiss_player_is_out() {
+        let mut t = swiss_record(9);
+        t.swiss_data
+            .as_mut()
+            .unwrap()
+            .withdrawn_players
+            .push("P2".into());
+        assert_eq!(t.player_status("P2").state, PlayerState::Eliminated);
     }
 }

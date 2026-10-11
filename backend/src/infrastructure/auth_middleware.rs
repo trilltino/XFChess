@@ -248,10 +248,13 @@ mod tests {
         assert!(!constant_time_eq("123", "456"));
     }
 
+    /// Debug builds fall back to the `dev` key when none is configured, so a request
+    /// without that key is refused (release builds refuse every request with 503).
     #[tokio::test]
-    #[ignore = "Flaky: race condition with parallel tests modifying global env vars"]
     async fn test_require_api_key_missing_env_var() {
+        let _env = crate::test_env::lock();
         std::env::remove_var("ADMIN_API_KEY");
+        std::env::remove_var("ADMIN_API_KEYS");
 
         let app = Router::new()
             .route("/test", get(|| async { "protected" }))
@@ -262,11 +265,18 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let expected = if cfg!(debug_assertions) {
+            StatusCode::UNAUTHORIZED
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+        assert_eq!(response.status(), expected);
     }
 
     #[tokio::test]
     async fn test_require_api_key_valid() {
+        let _env = crate::test_env::lock();
+        std::env::remove_var("ADMIN_API_KEYS");
         std::env::set_var("ADMIN_API_KEY", "test-secret-key");
 
         let app = Router::new()
@@ -289,6 +299,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_require_api_key_invalid() {
+        let _env = crate::test_env::lock();
+        std::env::remove_var("ADMIN_API_KEYS");
         std::env::set_var("ADMIN_API_KEY", "test-secret-key");
 
         let app = Router::new()
@@ -311,6 +323,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_require_api_key_missing_header() {
+        let _env = crate::test_env::lock();
+        std::env::remove_var("ADMIN_API_KEYS");
         std::env::set_var("ADMIN_API_KEY", "test-secret-key");
 
         let app = Router::new()
@@ -327,6 +341,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_require_api_key_empty_header() {
+        let _env = crate::test_env::lock();
+        std::env::remove_var("ADMIN_API_KEYS");
         std::env::set_var("ADMIN_API_KEY", "test-secret-key");
 
         let app = Router::new()

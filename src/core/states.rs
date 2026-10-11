@@ -1,227 +1,110 @@
-use bevy::prelude::*;
-// use bevy::ecs::event::EventReader; // EventReader is in prelude
+//! The app's state machine and the game mode.
+//!
+//! ```text
+//! MainMenu ──► InGame ──► GameOver ──► MainMenu
+//!                ▲  │ ▲       │
+//!                └──┘ └───────┘   re-entering InGame (puzzle "Next", rematch)
+//! ```
+//!
+//! - [`GameState`] is the screen. [`MenuState`] is a sub-state of `MainMenu`;
+//!   [`InGameplay`] is computed (`InGame` or `GameOver`).
+//! - [`GameMode`] says what kind of game is on the board.
+//! - Entities live as long as their state: menu entities carry Bevy's
+//!   `DespawnOnExit(GameState::MainMenu)`, and the game scene carries
+//!   [`game_scene`].
 
-#[derive(Clone, Copy, Resource, PartialEq, Eq, Hash, Debug, Default, States, Reflect)]
+use bevy::prelude::*;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States, Reflect)]
 pub enum GameState {
     #[default]
     MainMenu,
-
     InGame,
-
-    Paused,
-
+    /// The result popup over the final position (the game scene stays).
     GameOver,
-
-    MultiplayerMenu,
-
-    Matching,
-
-    Settings,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource, Reflect)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource, Reflect, Default)]
 pub enum GameMode {
+    #[default]
     SinglePlayer,
     MultiplayerLocal,
     MultiplayerCompetitive,
     OnlineMultiplayer,
     Spectator,
     PgnReplay,
+    /// A server-verified puzzle: the player moves one colour, the server's replies
+    /// arrive as network moves, and the board stays on the player's side.
+    Puzzle,
 }
 
-impl Default for GameMode {
-    fn default() -> Self {
-        Self::SinglePlayer
-    }
-}
-
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct DespawnOnExit<T>(pub T)
-where
-    T: States + Copy;
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, SubStates, Reflect)]
+/// Which menu flow is open; exists only in `GameState::MainMenu`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, SubStates, Reflect)]
 #[source(GameState = GameState::MainMenu)]
 pub enum MenuState {
+    #[default]
     Main,
-
     ModeSelect,
-
     BraidLobby,
-
     LobbySelection,
-
     #[cfg(feature = "solana")]
     SolanaLobby,
-
-    ProfileCreation,
-
-    About,
-
     Tournaments,
-
     HostConfig,
-
     P2PWaiting,
 }
 
-impl Default for MenuState {
-    fn default() -> Self {
-        Self::Main
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct InMenus;
-
-impl ComputedStates for InMenus {
-    type SourceStates = GameState;
-
-    fn compute(sources: GameState) -> Option<Self> {
-        match sources {
-            GameState::MainMenu | GameState::MultiplayerMenu => Some(Self),
-            _ => None,
-        }
-    }
-}
-
+/// A game is on screen: `InGame`, or its `GameOver` popup.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct InGameplay;
 
 impl ComputedStates for InGameplay {
     type SourceStates = GameState;
 
+    // Computed states otherwise re-run OnExit/OnEnter on every source transition,
+    // even InGame → GameOver; here those schedules mean "left/entered gameplay".
+    const ALLOW_SAME_STATE_TRANSITIONS: bool = false;
+
     fn compute(sources: GameState) -> Option<Self> {
         match sources {
-            GameState::InGame | GameState::Paused | GameState::GameOver => Some(Self),
-            _ => None,
+            GameState::InGame | GameState::GameOver => Some(Self),
+            GameState::MainMenu => None,
         }
     }
 }
 
-pub fn in_gameplay(state: Res<State<GameState>>) -> bool {
-    InGameplay::compute(*state.get()).is_some()
-}
-
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
-#[reflect(Resource)]
-pub struct PreviousState {
-    pub state: GameState,
-}
-
-impl Default for PreviousState {
-    fn default() -> Self {
-        Self {
-            state: GameState::MainMenu,
-        }
-    }
+/// Marks an entity as part of the game scene (board, pieces, lights, effects).
+///
+/// The scene outlives `InGame → GameOver`, so the popup shows the final position,
+/// and is despawned when the game ends for good (leaving for the menu) or when
+/// `InGame` is entered again (puzzle "Next", rematch), which builds a new scene.
+/// Bevy evaluates this between the `OnExit` and `OnEnter` schedules, so the new
+/// scene is never caught by it.
+pub fn game_scene() -> DespawnWhen<GameState> {
+    DespawnWhen::new(|transition| {
+        matches!(
+            transition.exited,
+            Some(GameState::InGame | GameState::GameOver)
+        ) && transition.entered != Some(GameState::GameOver)
+    })
 }
 
 pub fn debug_current_gamestate(state: Res<State<GameState>>) {
     debug!("[DEBUG] Current State: {:?}", state.get());
 }
 
-#[derive(Resource, Deref, DerefMut)]
-pub struct StateLoggerTimer(pub Timer);
-
-impl Default for StateLoggerTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(15.0, TimerMode::Repeating))
-    }
-}
-
-pub fn log_game_state_system(
-    state: Res<State<GameState>>,
-    menu_state: Option<Res<State<MenuState>>>,
-    mut timer: ResMut<StateLoggerTimer>,
-    time: Res<Time>,
-    persistent_camera: Option<Res<crate::PersistentEguiCamera>>,
-    camera_query: Query<Entity, With<bevy_egui::PrimaryEguiContext>>,
-) {
-    if timer.tick(time.delta()).just_finished() {
-        let current_state = state.get();
-        let mut state_info = format!("State: {:?}", current_state);
-
-        if *current_state == GameState::MainMenu {
-            if let Some(menu_state_res) = menu_state {
-                state_info.push_str(&format!(" | Menu: {:?}", menu_state_res.get()));
+/// Logs every `GameState` transition; registered with `on_message`, so it only
+/// runs when one happens.
+pub fn log_state_transitions(mut transitions: MessageReader<StateTransitionEvent<GameState>>) {
+    for transition in transitions.read() {
+        match (transition.exited, transition.entered) {
+            (Some(GameState::MainMenu), Some(GameState::GameOver)) => {
+                error!("[TRANSITION] INVALID: MainMenu -> GameOver (no game to end)");
             }
-        }
-
-        // Log computed states (only if relevant)
-        if InMenus::compute(*current_state).is_some() {
-            state_info.push_str(" | InMenus");
-        }
-        if InGameplay::compute(*current_state).is_some() {
-            state_info.push_str(" | InGameplay");
-        }
-
-        debug!("[STATE] {}", state_info);
-
-        // Only log camera errors, not status
-        if let Some(persistent_camera_res) = persistent_camera {
-            if let Some(camera_entity) = persistent_camera_res.entity {
-                if camera_query.get(camera_entity).is_err() {
-                    error!("[STATE] Camera entity {:?} query failed", camera_entity);
-                }
-            }
-        }
-    }
-}
-
-fn is_valid_state_transition(from: GameState, to: GameState) -> bool {
-    match (from, to) {
-        (GameState::MainMenu, GameState::InGame) => true,
-        (GameState::MainMenu, GameState::MultiplayerMenu) => true,
-        (GameState::MultiplayerMenu, GameState::MainMenu) => true,
-        (GameState::MultiplayerMenu, GameState::InGame) => true, // Start game from lobby
-
-        // InGame can transition to Paused or GameOver
-        (GameState::InGame, GameState::Paused) => true,
-        (GameState::InGame, GameState::GameOver) => true,
-
-        // Paused can return to InGame or go to MainMenu
-        (GameState::Paused, GameState::InGame) => true,
-        (GameState::Paused, GameState::MainMenu) => true,
-
-        (GameState::GameOver, GameState::MainMenu) => true,
-        (GameState::GameOver, GameState::InGame) => true, // Allow restart
-
-        // Self-transitions are always valid (no-op)
-        (from, to) if from == to => true,
-
-        // All other transitions are invalid
-        _ => false,
-    }
-}
-
-pub fn validate_and_log_state_transitions(
-    mut transition_events: MessageReader<StateTransitionEvent<GameState>>,
-) {
-    for event in transition_events.read() {
-        // Validate and log transition
-        match (event.exited, event.entered) {
-            (Some(exited), Some(entered)) => {
-                let is_valid = is_valid_state_transition(exited, entered);
-
-                if is_valid {
-                    info!("[TRANSITION] {:?} -> {:?}", exited, entered);
-                } else {
-                    error!(
-                        "[TRANSITION] INVALID: {:?} -> {:?} (state may be inconsistent)",
-                        exited, entered
-                    );
-                }
-            }
-            (Some(exited), None) => {
-                debug!("[TRANSITION] Exit: {:?}", exited);
-            }
-            (None, Some(entered)) => {
-                debug!("[TRANSITION] Enter: {:?}", entered);
-            }
-            (None, None) => {
-                // Skip empty transitions
-            }
+            (Some(exited), Some(entered)) => info!("[TRANSITION] {exited:?} -> {entered:?}"),
+            (None, Some(entered)) => debug!("[TRANSITION] Enter: {entered:?}"),
+            (Some(exited), None) => debug!("[TRANSITION] Exit: {exited:?}"),
+            (None, None) => {}
         }
     }
 }
@@ -229,50 +112,90 @@ pub fn validate_and_log_state_transitions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::state::app::StatesPlugin;
 
     #[test]
-    fn test_game_state_default() {
-        let state = GameState::default();
-        assert_eq!(state, GameState::MainMenu, "Game should start at MainMenu");
+    fn game_starts_at_main_menu() {
+        assert_eq!(GameState::default(), GameState::MainMenu);
+        assert_eq!(MenuState::default(), MenuState::Main);
     }
 
     #[test]
-    fn test_game_state_variants() {
-        let menu = GameState::MainMenu;
-        let game = GameState::InGame;
-        let paused = GameState::Paused;
-        let over = GameState::GameOver;
-
-        // Ensure all states are distinct
-        assert_ne!(menu, game);
-        assert_ne!(game, paused);
-        assert_ne!(paused, over);
-        assert_ne!(over, menu);
-    }
-
-    #[test]
-    fn test_in_menus_computed_state() {
-        // Should be active in interactive menu states
-        assert!(InMenus::compute(GameState::MainMenu).is_some());
-
-        // Should be inactive in gameplay states
-        assert!(InMenus::compute(GameState::InGame).is_none());
-        assert!(InMenus::compute(GameState::Paused).is_none());
+    fn gameplay_covers_the_board_and_its_result() {
+        assert!(InGameplay::compute(GameState::InGame).is_some());
         assert!(InGameplay::compute(GameState::GameOver).is_some());
-
-        // Should be inactive in menu states
         assert!(InGameplay::compute(GameState::MainMenu).is_none());
     }
 
-    #[test]
-    fn test_previous_state_default() {
-        let prev = PreviousState::default();
-        assert_eq!(prev.state, GameState::MainMenu);
+    #[derive(Resource, Default)]
+    struct GameplayExits(u32);
+
+    fn app_at(state: GameState) -> App {
+        let mut app = App::new();
+        app.add_plugins(StatesPlugin)
+            .insert_state(state)
+            .add_computed_state::<InGameplay>()
+            .init_resource::<GameplayExits>()
+            .add_systems(OnExit(InGameplay), |mut exits: ResMut<GameplayExits>| {
+                exits.0 += 1
+            });
+        app.update();
+        app
+    }
+
+    fn go(app: &mut App, state: GameState) {
+        app.world_mut().commands().set_state(state);
+        app.update();
+    }
+
+    fn alive(app: &App, entity: Entity) -> bool {
+        app.world().get_entity(entity).is_ok()
     }
 
     #[test]
-    fn test_menu_state_default() {
-        let menu = MenuState::default();
-        assert_eq!(menu, MenuState::Main);
+    fn scene_survives_the_result_popup_and_ends_with_the_game() {
+        let mut app = app_at(GameState::InGame);
+        let scene = app.world_mut().spawn(game_scene()).id();
+
+        go(&mut app, GameState::GameOver);
+        assert!(alive(&app, scene), "the popup shows the final position");
+        assert_eq!(app.world().resource::<GameplayExits>().0, 0);
+
+        go(&mut app, GameState::MainMenu);
+        assert!(!alive(&app, scene));
+        assert_eq!(app.world().resource::<GameplayExits>().0, 1);
+    }
+
+    #[test]
+    fn reentering_the_game_rebuilds_the_scene() {
+        for from in [GameState::InGame, GameState::GameOver] {
+            let mut app = app_at(from);
+            let scene = app.world_mut().spawn(game_scene()).id();
+            go(&mut app, GameState::InGame);
+            assert!(!alive(&app, scene), "re-entering InGame from {from:?}");
+            assert_eq!(
+                app.world().resource::<GameplayExits>().0,
+                0,
+                "still in gameplay, so OnExit(InGameplay) must not run"
+            );
+        }
+    }
+
+    #[test]
+    fn scene_spawned_on_enter_survives_reentry() {
+        let mut app = App::new();
+        app.add_plugins(StatesPlugin)
+            .insert_state(GameState::InGame)
+            .add_systems(OnEnter(GameState::InGame), |mut commands: Commands| {
+                commands.spawn(game_scene());
+            });
+        app.update();
+        go(&mut app, GameState::InGame);
+        let scenes = app
+            .world_mut()
+            .query::<&DespawnWhen<GameState>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(scenes, 1, "old scene gone, new one kept");
     }
 }

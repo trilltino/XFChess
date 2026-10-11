@@ -2,108 +2,9 @@ use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
-use regex::Regex;
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone)]
-pub struct CountryValidationRules {
-    pub requires_full_name: bool,
-    pub requires_dob: bool,
-    pub requires_address: bool,
-    pub tax_id_pattern: Option<Regex>,
-    pub tax_id_field_name: &'static str,
-}
-
-impl CountryValidationRules {
-    pub fn for_country(country_code: &str) -> Self {
-        match country_code {
-            "GB" => CountryValidationRules {
-                requires_full_name: true,
-                requires_dob: true,
-                requires_address: true,
-                tax_id_pattern: Some(
-                    Regex::new(r"^[A-Z]{2}\d{6}[A-Z]$").expect("Invalid UK tax ID regex pattern"),
-                ),
-                tax_id_field_name: "National Insurance Number (NI)",
-            },
-            "BR" => CountryValidationRules {
-                requires_full_name: true,
-                requires_dob: true,
-                requires_address: true,
-                tax_id_pattern: Some(
-                    Regex::new(r"^\d{11}$").expect("Invalid Brazil tax ID regex pattern"),
-                ),
-                tax_id_field_name: "CPF (Cadastro de Pessoas Físicas)",
-            },
-            "CA" => CountryValidationRules {
-                requires_full_name: true,
-                requires_dob: true,
-                requires_address: true,
-                tax_id_pattern: Some(
-                    Regex::new(r"^\d{9}$").expect("Invalid Canada tax ID regex pattern"),
-                ),
-                tax_id_field_name: "Social Insurance Number (SIN)",
-            },
-            "DE" => CountryValidationRules {
-                requires_full_name: true,
-                requires_dob: true,
-                requires_address: true,
-                tax_id_pattern: Some(
-                    Regex::new(r"^\d{11}$").expect("Invalid Germany tax ID regex pattern"),
-                ),
-                tax_id_field_name: "Tax ID (Steueridentifikationsnummer)",
-            },
-            "US" => CountryValidationRules {
-                requires_full_name: false,
-                requires_dob: false,
-                requires_address: false,
-                tax_id_pattern: Some(
-                    Regex::new(r"^\d{9}$").expect("Invalid US tax ID regex pattern"),
-                ),
-                tax_id_field_name: "Social Security Number (SSN) - Optional",
-            },
-            _ => CountryValidationRules {
-                requires_full_name: false,
-                requires_dob: false,
-                requires_address: false,
-                tax_id_pattern: None,
-                tax_id_field_name: "Tax ID (Optional)",
-            },
-        }
-    }
-
-    pub fn validate_field(&self, field_name: &str, value: &str) -> Result<(), String> {
-        match field_name {
-            "full_name" if self.requires_full_name && value.is_empty() => {
-                Err("Full name is required for this country".to_string())
-            }
-            "dob" if self.requires_dob && value.is_empty() => {
-                Err("Date of birth is required for this country".to_string())
-            }
-            "address" if self.requires_address && value.is_empty() => {
-                Err("Address is required for this country".to_string())
-            }
-            "tax_id" => {
-                if let Some(ref pattern) = self.tax_id_pattern {
-                    if !value.is_empty() && !pattern.is_match(value) {
-                        Err(format!(
-                            "Invalid format for {}. Expected format: {}",
-                            self.tax_id_field_name,
-                            pattern.as_str()
-                        ))
-                    } else {
-                        Ok(())
-                    }
-                } else {
-                    Ok(())
-                }
-            }
-            _ => Ok(()),
-        }
-    }
-}
-
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct IdentityVault {
     encryption_key: [u8; 32],
     index_salt: [u8; 32],
@@ -132,7 +33,7 @@ impl IdentityVault {
 
     pub fn generate_blind_index(&self, raw_data: &str) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(&self.index_salt);
+        hasher.update(self.index_salt);
         hasher.update(raw_data.trim().to_uppercase().as_bytes());
         hex::encode(hasher.finalize())
     }
@@ -169,31 +70,12 @@ impl IdentityVault {
     }
 
     pub fn decrypt_bytes(&self, blob: &[u8]) -> Result<Vec<u8>, String> {
-        if blob.len() < 12 {
+        let Some((nonce, ciphertext)) = blob.split_first_chunk::<12>() else {
             return Err("Invalid ciphertext blob length".into());
-        }
-        let (nonce_bytes, ciphertext) = blob.split_at(12);
+        };
         let cipher = Aes256Gcm::new(&self.encryption_key.into());
-        let nonce_arr: [u8; 12] = nonce_bytes
-            .try_into()
-            .expect("Nonce must be exactly 12 bytes");
-        let nonce = Nonce::from(nonce_arr);
-
         cipher
-            .decrypt(&nonce, ciphertext)
+            .decrypt(&Nonce::from(*nonce), ciphertext)
             .map_err(|e| format!("Decryption failed: {}", e))
-    }
-
-    pub fn validate_fields(
-        country_code: &str,
-        fields: &std::collections::HashMap<&str, &str>,
-    ) -> Result<(), String> {
-        let rules = CountryValidationRules::for_country(country_code);
-
-        for (field_name, value) in fields {
-            rules.validate_field(field_name, value)?;
-        }
-
-        Ok(())
     }
 }

@@ -10,8 +10,7 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 
-// Must match tasks::archiver — archives live under data/ (the only writable
-// path in production, and the dir covered by nightly backups).
+// Must match tasks::archiver; production permits writes only under data/.
 const ARCHIVE_PATH: &str = "data/archive/games.xfg";
 const WALLET_INDEX_PATH: &str = "data/archive/wallets.idx";
 

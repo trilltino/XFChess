@@ -82,13 +82,14 @@ jobs:
           curl.exe -fsSL --retry 3 --retry-delay 5 -m 60 -o sf.zip "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-windows-x86-64-modern.zip"
           if ($LASTEXITCODE -ne 0) { throw "Stockfish download failed (curl exit $LASTEXITCODE)" }
           Expand-Archive -Path sf.zip -DestinationPath sf_extracted
-          Copy-Item -Force "sf_extracted\stockfish\stockfish-windows-x86-64-modern.exe" stockfish.exe
+          New-Item -ItemType Directory -Force -Path assets/bin | Out-Null
+          Copy-Item -Force "sf_extracted\stockfish\stockfish-windows-x86-64-modern.exe" assets/bin/stockfish.exe
 
       - name: Verify Stockfish binary
         shell: pwsh
         run: |
-          if (-not (Test-Path stockfish.exe)) { throw "stockfish.exe missing after download step" }
-          $output = @("uci", "quit") | & .\stockfish.exe
+          if (-not (Test-Path -LiteralPath assets/bin/stockfish.exe -PathType Leaf)) { throw "assets/bin/stockfish.exe missing after download step" }
+          $output = @("uci", "quit") | & .\assets\bin\stockfish.exe
           if (-not ($output -match "uciok")) { throw "stockfish.exe did not respond to a UCI handshake — binary may be corrupt" }
           Write-Host "Stockfish OK"
 
@@ -100,7 +101,6 @@ jobs:
           Copy-Item -Recurse -Force assets/* "$stage/assets/"
           Copy-Item -Force target/release/xfchess.exe "$stage/"
           Copy-Item -Force target/release/xfchess-tauri.exe "$stage/"
-          Copy-Item -Force stockfish.exe "$stage/"
           # Ship wallet-ui/dist beside the companion binary.
           New-Item -ItemType Directory -Force -Path "$stage/wallet-ui" | Out-Null
           Copy-Item -Recurse -Force tauri/wallet-ui/dist "$stage/wallet-ui/"
@@ -437,6 +437,8 @@ jobs:
           test -f mobile/app/src/main/jniLibs/arm64-v8a/libstockfish.so
 
       - name: Build libxfchess.so (release, arm64-v8a)
+        env:
+          XFCHESS_RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           # Read ANDROID_HOME from the shell environment set by the preceding action.
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
@@ -451,6 +453,8 @@ jobs:
 
       - name: Assemble release APK
         working-directory: mobile
+        env:
+          XFCHESS_RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Verify libxfchess.so is present and extractable in the built APK

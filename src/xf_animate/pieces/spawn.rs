@@ -3,7 +3,7 @@ use bevy::prelude::*;
 
 use super::assets::MiniAssets;
 use super::components::MiniPiece;
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::GameState;
 use crate::rendering::pieces::{PieceColor, PieceType};
 use crate::xf_animate::board::square_world;
 use crate::xf_animate::viewport::MINI_LAYER;

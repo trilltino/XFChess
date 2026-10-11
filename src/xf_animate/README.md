@@ -17,7 +17,7 @@ modified freely without risk to the game loop.
 
 | File | Responsibility |
 |------|----------------|
-| `../xf_animate.rs` | Plugin wiring and public root module exports |
+| `mod.rs` | Plugin wiring and public root module exports |
 | `animation/mod.rs` | Public facade for movement/fade components and animation systems |
 | `animation/components.rs` | Per-piece animation components |
 | `animation/systems.rs` | Movement, capture fade, and idle float systems |

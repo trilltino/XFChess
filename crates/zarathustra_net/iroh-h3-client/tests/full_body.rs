@@ -1,22 +1,19 @@
 use axum::{Router, body::Body, response::IntoResponse, routing::post};
 use bytes::Bytes;
-use example::mock_discovery::MockDiscoveryMap;
+#[path = "../../iroh-h3/tests/support/mod.rs"]
+mod support;
 use http_body_util::BodyExt as _;
 use iroh_h3_axum::IrohAxum;
 use iroh_h3_client::IrohH3Client;
-use wasm_bindgen_test::wasm_bindgen_test;
-wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+use support::MockDiscoveryMap;
 
 const ALPN: &[u8] = b"iroh+h3";
 
-#[cfg_attr(not(target_family = "wasm"), tokio::test)]
-#[wasm_bindgen_test]
+#[tokio::test]
 async fn full_body_helpers() {
     let discovery = MockDiscoveryMap::new();
     let endpoint_1 = discovery.spawn_endpoint().await;
     let endpoint_2 = discovery.spawn_endpoint().await;
-    endpoint_1.online().await;
-    endpoint_2.online().await;
 
     async fn echo_full(body: Body) -> impl IntoResponse {
         let b = body.collect().await.unwrap();

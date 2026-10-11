@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass};
 
-
 #[derive(Debug, Clone)]
 pub struct GamePopup {
     pub title: String,
@@ -51,7 +50,6 @@ impl GamePopup {
     }
 }
 
-
 #[derive(Resource, Default)]
 pub struct GamePopupQueue {
     pub entries: Vec<GamePopup>,
@@ -62,7 +60,6 @@ impl GamePopupQueue {
         self.entries.push(popup);
     }
 }
-
 
 fn tick_popups(mut queue: ResMut<GamePopupQueue>, time: Res<Time>) {
     let dt = time.delta_secs();
@@ -114,7 +111,7 @@ fn render_popups(
             continue;
         }
 
-        // Alpha-dialog frame (same as welcome panel in new_menu.rs)
+        // Alpha-dialog frame (same as welcome panel in menu.rs)
         let panel_frame = egui::Frame {
             corner_radius: egui::CornerRadius::same(8),
             fill: egui::Color32::from_rgba_unmultiplied(8, 8, 12, (240.0 * fade_alpha) as u8),
@@ -264,13 +261,13 @@ fn render_popups(
     }
 }
 
-
 pub struct PopupPlugin;
 
 impl Plugin for PopupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamePopupQueue>()
-            .add_systems(Update, tick_popups)
+            .add_systems(Update,
+            tick_popups.after(crate::core::schedule::NetworkSet::Send))
             .add_systems(EguiPrimaryContextPass, render_popups);
     }
 }

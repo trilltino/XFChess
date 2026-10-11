@@ -37,9 +37,9 @@ impl PatchedDoc {
     }
 
     pub fn subscribe(&self) -> (BraidUpdate, broadcast::Receiver<BraidUpdate>) {
+        let g = self.inner.read();
         let rx = self.tx.subscribe();
-        let (doc, ver) = self.snapshot();
-        let snap = BraidUpdate::snapshot(ver, doc);
+        let snap = BraidUpdate::snapshot(g.version, g.doc.clone());
         (snap, rx)
     }
 
@@ -99,9 +99,9 @@ impl AppendLog {
     }
 
     pub fn subscribe(&self) -> (BraidUpdate, broadcast::Receiver<BraidUpdate>) {
+        let g = self.inner.read();
         let rx = self.tx.subscribe();
-        let (entries, ver) = self.snapshot();
-        let snap = BraidUpdate::snapshot(ver, entries);
+        let snap = BraidUpdate::snapshot(g.version, Value::Array(g.entries.clone()));
         (snap, rx)
     }
 

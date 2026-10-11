@@ -54,7 +54,7 @@ pub fn update_move_hints_system(
                 } else {
                     "Move Hint"
                 }),
-                crate::core::DespawnOnExit(crate::core::GameState::InGame),
+                crate::core::game_scene(),
                 bevy::camera::visibility::RenderLayers::layer(
                     crate::game::systems::camera::BOARD_LAYER,
                 ),

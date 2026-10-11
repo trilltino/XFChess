@@ -1,38 +1,23 @@
-# Staging deploy (run on the VPS)
+# Staging
 
-Ready-to-use staging artifacts. These must run **on the server** (they touch systemd +
-nginx), so they can't be applied from a dev machine. See [../../docs/ENVIRONMENTS.md](../../docs/ENVIRONMENTS.md).
+Staging is isolated by user, environment, data directory and backend port 8091.
+The desktop panel's production forward also uses local 8091 on the operator's
+machine; it is unrelated to the VPS staging listener.
 
-```bash
-# 1. Isolated user + dirs
-sudo useradd -r xfchess-staging || true
-sudo mkdir -p /opt/xfchess-staging/data /opt/xfchess-staging/web
-sudo chown -R xfchess-staging:xfchess-staging /opt/xfchess-staging
+Create `xfchess-staging` and `/opt/xfchess-staging/data` on the VPS. Start from
+[the backend environment template](../backend/.env.example), with separate keys,
+`SIGNING_PORT=8091`, and both database URLs under `/opt/xfchess-staging/data`.
+Never share production data or signing authorities with staging.
 
-# 2. Config (fill in SEPARATE secrets from prod; openssl rand -hex 32)
-sudo cp ops/staging/.env.staging.example /opt/xfchess-staging/.env
-sudo chmod 600 /opt/xfchess-staging/.env && sudo nano /opt/xfchess-staging/.env
+Install the built Linux `signing-server-http` binary and complete website under
+`/opt/xfchess-staging`, then install [the service](xfchess-staging.service).
+The service binds loopback; its user needs write access only to `data/`.
 
-# 3. Build once, deploy the same artifact to staging
-cargo build -p backend --bin signing-server --release
-sudo cp target/release/signing-server /opt/xfchess-staging/signing-server-http
-# (build the web bundle and copy xfchessdotcom/dist → /opt/xfchess-staging/web)
+Install the shared nginx snippets and rate zones from `ops/nginx`, configure
+`staging.YOUR_DOMAIN` and its certificate in [the staging site](nginx-staging.conf),
+and run `nginx -t` before reloading. The shared route table keeps production and
+staging Braid/SSE/WebSocket behavior identical and blocks public admin/metrics.
 
-# 4. systemd unit
-sudo cp ops/staging/xfchess-staging.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now xfchess-staging
-
-# 5. nginx (edit YOUR_DOMAIN, get a cert first)
-sudo certbot --nginx -d staging.YOUR_DOMAIN
-sudo cp ops/staging/nginx-staging.conf /etc/nginx/sites-available/xfchess-staging
-sudo ln -s /etc/nginx/sites-available/xfchess-staging /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-
-# 6. Smoke test
-curl -fsS https://staging.YOUR_DOMAIN/health   # status:ok + git_sha
-curl -fsS -o /dev/null -w '%{http_code}\n' https://staging.YOUR_DOMAIN/readyz  # 200
-```
-
-Promotion: verify on staging, then run the prod deploy **from the same commit** (the
-`git_sha` on `/health` proves parity). See ENVIRONMENTS.md §"Same-artifact promotion".
+Verify private `/readyz`, JSON `/health`, the expected commit and public HTTPS
+readiness. The production PowerShell release scripts target `/opt/xfchess` only;
+they do not promise automated staging promotion or identical compiled artifacts.

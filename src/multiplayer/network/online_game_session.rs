@@ -4,7 +4,6 @@ use tracing::{info, warn};
 
 use crate::multiplayer::network::protocol::NetworkMessage;
 use crate::multiplayer::types::{is_online_game_mode, NetworkEvent, OnlineStartBarrier};
-use bevy::prelude::*;
 
 #[derive(Resource)]
 pub struct OnlineGameSession {
@@ -86,22 +85,36 @@ impl Plugin for OnlineGameSessionPlugin {
             .add_message::<OnlineChatMessage>()
             .add_systems(
                 Update,
+                drain_chat_messages
+                    .after(crate::multiplayer::systems::handle_pong)
+                    .in_set(crate::core::schedule::ReceiveSet::Game),
+            )
+            .add_systems(
+                Update,
                 (
                     announce_game_readiness,
+                    retry_pending_writes,
                     publish_local_move,
+                    publish_clock_on_move,
                     handle_publish_resign,
                     handle_publish_chat,
-                    drain_chat_messages,
                     drain_clock_to_spectator,
-                    publish_clock_on_move,
-                ),
+                )
+                    .chain()
+                    .in_set(crate::core::schedule::SendSet::Moves),
             );
         app.add_systems(
             OnExit(crate::core::states::GameState::InGame),
             reset_start_barrier,
         );
         #[cfg(feature = "solana")]
-        app.add_systems(Update, broadcast_snapshot_to_new_peer);
+        app.add_systems(
+            Update,
+            // After the whole publish chain, so a joining peer's snapshot includes it.
+            broadcast_snapshot_to_new_peer
+                .after(drain_clock_to_spectator)
+                .in_set(crate::core::schedule::SendSet::Moves),
+        );
     }
 }
 
@@ -165,18 +178,18 @@ pub fn announce_game_readiness(
     {
         barrier.ready_sent = true;
         info!("[START] Local player ready for game {game_id}; waiting for opponent");
-        if barrier.remote_ready && !barrier.start_sent {
-            if tx
+        if barrier.remote_ready
+            && !barrier.start_sent
+            && tx
                 .send(NetworkMessage::GameStartConfirmed {
                     game_id,
                     start_token: format!("game-{game_id}"),
                 })
                 .is_ok()
-            {
-                barrier.start_sent = true;
-                barrier.start_confirmed = true;
-                info!("[START] Sent synchronized start for game {game_id}");
-            }
+        {
+            barrier.start_sent = true;
+            barrier.start_confirmed = true;
+            info!("[START] Sent synchronized start for game {game_id}");
         }
     }
 }
@@ -215,12 +228,59 @@ fn braid_sender_identity(node_b58: &str) -> String {
     node_b58.to_string()
 }
 
+fn retry_pending_writes(
+    session: Res<OnlineGameSession>,
+    network: Res<crate::multiplayer::OnlineNetworkState>,
+    braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
+    time: Res<Time>,
+    mut delay: Local<f32>,
+    #[cfg(feature = "solana")] solana_state: Option<
+        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
+    #[cfg(feature = "solana")] game_sync: Option<
+        Res<crate::multiplayer::solana::addon::SolanaGameSync>,
+    >,
+) {
+    if !session.active || !session.is_configured() {
+        *delay = 0.;
+        return;
+    }
+    *delay -= time.delta_secs();
+    if *delay > 0. {
+        return;
+    }
+    *delay = 30.;
+    let node = network
+        .node_id
+        .as_ref()
+        .map(|id| bs58::encode(id.as_bytes()).into_string())
+        .unwrap_or_default();
+    #[cfg(feature = "solana")]
+    let sender = braid_sender_identity(solana_state.as_ref(), game_sync.as_ref(), &node);
+    #[cfg(not(feature = "solana"))]
+    let sender = braid_sender_identity(&node);
+    #[cfg(feature = "solana")]
+    let token = braid_session_token(game_sync.as_ref());
+    #[cfg(not(feature = "solana"))]
+    let token = String::new();
+    if !sender.is_empty() {
+        crate::multiplayer::network::braid_transport::retry_pending(
+            session.base_url.clone(),
+            session.game_id.clone(),
+            sender,
+            token,
+            braid.heads(),
+        );
+    }
+}
+
 fn publish_local_move(
     mut session: ResMut<OnlineGameSession>,
     mut move_events: MessageReader<crate::game::events::MoveMadeEvent>,
     network_state: Res<crate::multiplayer::OnlineNetworkState>,
     p2p_conn: Res<crate::multiplayer::network::p2p::P2PConnectionState>,
     braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
+    mut causal: ResMut<crate::multiplayer::types::CausalChainState>,
     #[cfg(feature = "solana")] solana_state: Option<
         Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
     >,
@@ -259,6 +319,11 @@ fn publish_local_move(
         // Causal chain fields.
         let parent_version = session.last_published_move_version.clone();
         let new_version = braid_chess::version_hash(&event.next_fen, move_number);
+        causal
+            .applied_versions
+            .entry(game_id_u64)
+            .or_default()
+            .insert(new_version.clone());
         session.last_published_move_version = new_version.clone();
 
         // Use the gossip signing key, not the Iroh node ID, for signer_pubkey. Gossip
@@ -363,7 +428,7 @@ pub fn start_session(
         return;
     }
     session.reset();
-    session.base_url = base_url.clone();
+    session.base_url = base_url;
     session.game_id = game_id.clone();
     session.wager_amount = wager_amount;
     session.active = true;
@@ -624,31 +689,29 @@ fn broadcast_snapshot_to_new_peer(
     let head_version = session.last_published_move_version.clone();
     let msg_tx = network_state.message_sender.clone();
 
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            use crate::multiplayer::vps_client;
-            let moves = vps_client::fetch_move_log(game_id).unwrap_or_default();
-            let move_payloads: Vec<String> = moves
-                .iter()
-                .filter_map(|m| serde_json::to_string(m).ok())
-                .collect();
+    crate::core::net_task::spawn_detached("online_game_session", move || {
+        use crate::multiplayer::vps_client;
+        let moves = vps_client::fetch_move_log(game_id).unwrap_or_default();
+        let move_payloads: Vec<String> = moves
+            .iter()
+            .filter_map(|m| serde_json::to_string(m).ok())
+            .collect();
 
-            info!(
-                "[online-session] New peer joined — sending GameSnapshot for game {} ({} moves)",
+        info!(
+            "[online-session] New peer joined — sending GameSnapshot for game {} ({} moves)",
+            game_id,
+            move_payloads.len()
+        );
+
+        if let Some(tx) = msg_tx {
+            let _ = tx.send(NetworkMessage::GameSnapshot {
                 game_id,
-                move_payloads.len()
-            );
-
-            if let Some(tx) = msg_tx {
-                let _ = tx.send(NetworkMessage::GameSnapshot {
-                    game_id,
-                    fen: committed_fen,
-                    move_payloads,
-                    head_version,
-                });
-            }
-        })
-        .detach();
+                fen: committed_fen,
+                move_payloads,
+                head_version,
+            });
+        }
+    });
 }
 
 pub fn make_move_payload(

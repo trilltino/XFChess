@@ -30,7 +30,7 @@ pub fn spawn_background_tasks(
         state.store.pool(),
         Some((
             config.program_id.clone(),
-            config.solana_rpc_url.clone(),
+            config.solana_rpc_url,
             state.vps_authority.clone(),
         )),
     );
@@ -59,5 +59,4 @@ pub fn spawn_background_tasks(
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}

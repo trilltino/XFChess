@@ -1,5 +1,11 @@
+//! Online play: backend auth, the Iroh/Braid P2P transport, game sessions,
+//! spectating, resume, and (with `--features solana`) wagers, rollups and
+//! tournaments. [`MultiplayerPlugin`] owns the shared Tokio runtime and registers
+//! the sub-plugins. See [README.md](README.md).
+
 use bevy::prelude::*;
 use tokio::runtime::Runtime;
+
 
 pub mod error;
 pub mod join_link;
@@ -15,9 +21,9 @@ pub mod network;
 #[cfg(feature = "solana")]
 pub mod resume;
 #[cfg(feature = "solana")]
-pub mod seat;
-#[cfg(feature = "solana")]
 pub mod rollup;
+#[cfg(feature = "solana")]
+pub mod seat;
 #[cfg(feature = "solana")]
 pub mod solana;
 pub mod spectator;
@@ -93,19 +99,27 @@ impl Plugin for MultiplayerPlugin {
         app.add_systems(
             Update,
             (
-                systems::initialize_braid_network,
-                systems::handle_network_events,
-                systems::sweep_stale_move_buffers,
-                systems::dispatch_remote_moves
-                    .after(network::braid_transport::drain_braid_messages),
-                systems::handle_resync_response,
-                systems::handle_resync_request,
-                systems::handle_game_control_messages,
-                systems::send_local_draw_events,
-                // Gate heartbeats to InGame; game_mode persists after returning to the menu.
-                systems::tick_heartbeat.run_if(in_state(crate::core::states::GameState::InGame)),
-                systems::handle_pong,
-                systems::record_casual_game_on_end,
+                systems::initialize_braid_network.in_set(crate::core::schedule::ReceiveSet::Transport),
+                (
+                    systems::handle_network_events,
+                    systems::sweep_stale_move_buffers,
+                    systems::dispatch_remote_moves,
+                    systems::handle_resync_response,
+                    systems::handle_resync_request,
+                    systems::handle_game_control_messages,
+                    systems::handle_pong,
+                )
+                    .chain()
+                    .in_set(crate::core::schedule::ReceiveSet::Game),
+                (
+                    systems::send_local_draw_events,
+                    // Gate heartbeats to InGame; game_mode persists after returning to the menu.
+                    systems::tick_heartbeat
+                        .run_if(in_state(crate::core::states::GameState::InGame)),
+                    systems::record_casual_game_on_end,
+                )
+                    .chain()
+                    .in_set(crate::core::schedule::SendSet::Session),
             ),
         )
         .add_systems(
@@ -115,21 +129,20 @@ impl Plugin for MultiplayerPlugin {
 
         #[cfg(feature = "solana")]
         {
-            use crate::game::system_sets::GameSystems;
             app.add_systems(
                 Update,
                 (
                     (
                         systems::feed_local_moves_to_rollup,
                         systems::feed_remote_moves_to_rollup,
+                        systems::emit_game_ended_event,
+                        systems::finalize_game_on_end,
                     )
-                        .after(GameSystems::Execution),
-                    systems::emit_game_ended_event.after(GameSystems::Execution),
-                    systems::finalize_game_on_end
-                        .after(systems::feed_local_moves_to_rollup)
-                        .after(systems::feed_remote_moves_to_rollup)
-                        .after(systems::emit_game_ended_event),
-                    systems::handle_session_info_from_network,
+                        .chain()
+                        .in_set(crate::core::schedule::SendSet::RollupFeed),
+                    systems::handle_session_info_from_network
+                        .after(systems::handle_pong)
+                        .in_set(crate::core::schedule::ReceiveSet::Game),
                 ),
             );
         }

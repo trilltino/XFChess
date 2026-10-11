@@ -15,6 +15,7 @@ use solana_sdk::{
     signature::{Signature, Signer},
     transaction::{Transaction, VersionedTransaction},
 };
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::{error, info, warn};
@@ -22,19 +23,22 @@ use tracing::{error, info, warn};
 use crate::db::repository::GameRepository;
 use crate::signing::auth::RequireWallet;
 use crate::signing::solana::{
-    cancel_tournament_ix, initialize_escrow_ix, initialize_shards_ix, initialize_tournament_ix,
-    record_result_ix, sign_and_submit,
+    initialize_escrow_ix, initialize_shards_ix, initialize_tournament_ix, record_result_ix,
+    sign_and_submit,
 };
 use crate::signing::storage::tournament::{
-    MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus, TournamentTransaction,
+    MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus, TournamentStore,
+    TournamentTransaction,
 };
 use crate::signing::storage::vault::VaultStore;
 use crate::signing::swiss::orchestrator::OrchestratorEvent;
 use crate::signing::{AppState, TournamentTrigger};
 
-
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CreateTournamentReq {
+    /// Leave 0 (or omit) to have the server assign one; pass an id only to resume a
+    /// setup that failed part-way on-chain.
+    #[serde(default)]
     pub tournament_id: u64,
     pub name: String,
     pub entry_fee_lamports: Option<u64>,
@@ -148,7 +152,6 @@ fn format_label(format: &TournamentFormat) -> String {
     }
 }
 
-
 async fn subscribe_node(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -222,9 +225,12 @@ async fn get_bootstrap_peers(
 
 async fn create_tournament(
     State(state): State<AppState>,
-    Json(req): Json<CreateTournamentReq>,
+    Json(mut req): Json<CreateTournamentReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = &state.tournament_store;
+    if req.tournament_id == 0 {
+        req.tournament_id = next_tournament_id(store).await;
+    }
     let format = match req.format.as_str() {
         "Swiss" => {
             let rounds = req.swiss_rounds.ok_or_else(|| {
@@ -401,9 +407,16 @@ async fn create_tournament(
     let already_complete = tokio::task::spawn_blocking(move || -> Result<bool, String> {
         let rpc = crate::signing::solana::make_rpc(&rpc_url);
         let account_exists = |pda: &Pubkey, kind: &str| -> Result<bool, String> {
-            let account = rpc.get_account_with_commitment(pda, solana_commitment_config::CommitmentConfig::confirmed())
-                .map_err(|e| format!("Could not inspect setup account: {e}"))?.value;
-            let Some(account) = account else { return Ok(false) };
+            let account = rpc
+                .get_account_with_commitment(
+                    pda,
+                    solana_commitment_config::CommitmentConfig::confirmed(),
+                )
+                .map_err(|e| format!("Could not inspect setup account: {e}"))?
+                .value;
+            let Some(account) = account else {
+                return Ok(false);
+            };
             let discriminator = Sha256::digest(format!("account:{kind}").as_bytes());
             if account.owner != program_id || account.data.get(..8) != Some(&discriminator[..8]) {
                 return Err("Existing setup account has wrong owner or discriminator".into());
@@ -411,8 +424,16 @@ async fn create_tournament(
             if kind == "Tournament" {
                 let config = OnChainTournamentConfiguration::deserialize(&mut &account.data[8..])
                     .map_err(|e| format!("Could not decode existing tournament: {e}"))?;
-                config.matches_request(&expected_setup, authority.pubkey(), entry_fee_lamports, platform_fee_lamports, prize_shares)?;
-            } else if kind == "TournamentPlayersShard" && account.data.get(8..16) != Some(tournament_id.to_le_bytes().as_slice()) {
+                config.matches_request(
+                    &expected_setup,
+                    authority.pubkey(),
+                    entry_fee_lamports,
+                    platform_fee_lamports,
+                    prize_shares,
+                )?;
+            } else if kind == "TournamentPlayersShard"
+                && account.data.get(8..16) != Some(tournament_id.to_le_bytes().as_slice())
+            {
                 return Err("Shard belongs to another tournament".into());
             }
             Ok(true)
@@ -435,9 +456,16 @@ async fn create_tournament(
         // Shard initialization is atomic; existence of shard 0 proves every required shard was created.
         if account_exists(&shard0_pda, "TournamentPlayersShard")? {
             for index in 1..crate::signing::solana::required_shards(expected_setup.max_players) {
-                let shard = Pubkey::find_program_address(&[b"tourney_players", &[index], &tid_bytes], &program_id).0;
+                let shard = Pubkey::find_program_address(
+                    &[b"tourney_players", &[index], &tid_bytes],
+                    &program_id,
+                )
+                .0;
                 if !account_exists(&shard, "TournamentPlayersShard")? {
-                    return Err("Existing tournament has incomplete shards; manual recovery required".into());
+                    return Err(
+                        "Existing tournament has incomplete shards; manual recovery required"
+                            .into(),
+                    );
                 }
             }
             return Ok(true);
@@ -530,9 +558,14 @@ async fn create_tournament(
     })))
 }
 
-async fn list_tournaments(State(state): State<AppState>) -> Result<Json<Vec<TournamentSummary>>, StatusCode> {
+async fn list_tournaments(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<TournamentSummary>>, StatusCode> {
     let store = &state.tournament_store;
-    let all = store.visible().await.map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    let all = store
+        .visible()
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let summaries = all
         .into_iter()
         .map(|t| TournamentSummary {
@@ -592,13 +625,29 @@ async fn list_my_tournaments(
 async fn get_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
-) -> Result<Json<TournamentRecord>, StatusCode> {
-    state
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let tournament = state
         .tournament_store
         .get(id)
         .await
-        .map(Json)
-        .ok_or(StatusCode::NOT_FOUND)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(public_tournament_view(&tournament)))
+}
+
+/// The tournament record as served on the public `/tournament/{id}` route: the
+/// private-event password hash and players' P2P node ids stay server-side (opponents
+/// get a node id through `my-match`/`my-status`). `is_private` says a password exists.
+fn public_tournament_view(tournament: &TournamentRecord) -> serde_json::Value {
+    let mut view = serde_json::to_value(tournament).unwrap_or_default();
+    if let Some(fields) = view.as_object_mut() {
+        fields.remove("password_hash");
+        fields.remove("node_ids");
+        fields.insert(
+            "is_private".into(),
+            serde_json::Value::Bool(tournament.password_hash.is_some()),
+        );
+    }
+    view
 }
 
 async fn get_registration_info(
@@ -731,24 +780,17 @@ async fn get_tournament_games(
 
     // One lookup per distinct wallet, not per match — a player appears in
     // several rounds.
-    let mut wallets: Vec<String> = Vec::with_capacity(matches.len() * 2);
-    for m in &matches {
-        if let Some(w) = &m.player_white {
-            wallets.push(w.clone());
-        }
-        if let Some(b) = &m.player_black {
-            wallets.push(b.clone());
-        }
-    }
     let mut names: HashMap<String, Option<String>> = HashMap::new();
-    for wallet in wallets {
-        if !names.contains_key(&wallet) {
-            let name = repo
-                .get_username(&wallet)
-                .await
-                .ok()
-                .filter(|n| !n.is_empty());
-            names.insert(wallet, name);
+    for m in &matches {
+        for wallet in [&m.player_white, &m.player_black].into_iter().flatten() {
+            if let Entry::Vacant(slot) = names.entry(wallet.clone()) {
+                let name = repo
+                    .get_username(wallet)
+                    .await
+                    .ok()
+                    .filter(|n| !n.is_empty());
+                slot.insert(name);
+            }
         }
     }
 
@@ -848,7 +890,7 @@ async fn get_bracket(
         .matches
         .last()
         .and_then(|m| m.as_ref())
-        .map_or(false, |m| m.status == MatchStatus::Completed);
+        .is_some_and(|m| m.status == MatchStatus::Completed);
     let current_round = if final_completed {
         255u8
     } else {
@@ -863,12 +905,24 @@ async fn get_bracket(
 
     let round_deadline_at = t.swiss_data.as_ref().and_then(|s| s.round_deadline_at);
 
+    // Swiss boards live in swiss_data, not the bracket's match list.
+    let (matches, current_round) = match t.swiss_data.as_ref() {
+        Some(sd) if matches!(t.format, TournamentFormat::Swiss { .. }) => (
+            swiss_bracket_matches(t.tournament_id, sd),
+            serde_json::json!(sd.current_round.saturating_sub(1)),
+        ),
+        _ => (
+            serde_json::to_value(&t.matches).unwrap_or_default(),
+            serde_json::json!(current_round),
+        ),
+    };
+
     Ok(Json(serde_json::json!({
         "tournament_id": t.tournament_id,
         "status": format!("{:?}", t.status),
         "max_players": t.max_players,
         "players": t.players,
-        "matches": t.matches,
+        "matches": matches,
         "winner": t.winner,
         "second_place": t.second_place,
         "third_place": t.third_place,
@@ -883,6 +937,46 @@ async fn get_bracket(
         "current_round": current_round,
         "round_deadline_at": round_deadline_at,
     })))
+}
+
+/// Every Swiss board in the bracket's match shape: 0-based `round` (like bracket
+/// rounds), `board`, the deterministic game id, and a winner once decided (a draw
+/// completes the board with no winner).
+fn swiss_bracket_matches(
+    tournament_id: u64,
+    sd: &crate::signing::storage::tournament::SwissStorageData,
+) -> serde_json::Value {
+    use swiss_pairing::MatchResult;
+    let matches: Vec<serde_json::Value> = sd
+        .rounds
+        .iter()
+        .flat_map(|round| round.pairings.iter().map(move |p| (round.round, p)))
+        .enumerate()
+        .map(|(index, (round, p))| {
+            let result = sd
+                .results
+                .iter()
+                .find(|(r, b, _)| *r == round && *b == p.board)
+                .map(|(_, _, result)| *result);
+            let winner = match result {
+                Some(MatchResult::WhiteWin | MatchResult::ForfeitWhiteWin) => Some(&p.white),
+                Some(MatchResult::BlackWin | MatchResult::ForfeitBlackWin) => Some(&p.black),
+                _ => None,
+            };
+            serde_json::json!({
+                "match_index": index,
+                "round": round.saturating_sub(1),
+                "board": p.board,
+                "player_white": p.white,
+                "player_black": p.black,
+                "winner": winner,
+                "game_id": TournamentStore::swiss_game_id(tournament_id, round, p.board),
+                "status": if result.is_some() { "Completed" } else { "Active" },
+                "next_match_for_winner": null,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(matches)
 }
 
 async fn record_result(
@@ -965,40 +1059,14 @@ async fn advance_round(
     Path(id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let store = &state.tournament_store;
-    let tournament = store.get(id).await.ok_or(StatusCode::NOT_FOUND)?;
+    use crate::signing::swiss::service::SwissServiceError;
 
-    // Verify all current-round matches are completed before forcing advance
-    let current_round = tournament
-        .swiss_data
-        .as_ref()
-        .map(|s| s.current_round)
-        .unwrap_or(0);
-    let all_done = tournament
-        .matches
-        .iter()
-        .flatten()
-        .filter(|m| m.round == current_round as u8)
-        .all(|m| m.status == crate::signing::storage::tournament::MatchStatus::Completed);
-
-    if !all_done {
-        warn!(
-            "[tournament] advance-round blocked — not all round-{} matches are complete for tournament {}",
-            current_round, id
-        );
-        return Err(StatusCode::CONFLICT);
-    }
-
-    // Ask the SwissService to pair the next round
+    // start_round refuses while the current round still has boards without a result.
     match state.swiss_service.start_round(id).await {
         Ok(round) => {
             if let Some(tx) = &state.orchestrator_tx {
                 let _ = tx
-                    .send(OrchestratorEvent::RoundPaired {
-                        tournament_id: id,
-                        round: round.round,
-                        pairings: round.pairings.clone(),
-                    })
+                    .send(OrchestratorEvent::Reconcile { tournament_id: id })
                     .await;
             }
             info!(
@@ -1009,6 +1077,16 @@ async fn advance_round(
                 serde_json::json!({ "ok": true, "new_round": round.round }),
             ))
         }
+        Err(SwissServiceError::RoundIncomplete(round)) => {
+            warn!(
+                "[tournament] advance-round blocked — round {} of tournament {} still has open boards",
+                round, id
+            );
+            Err(StatusCode::CONFLICT)
+        }
+        Err(SwissServiceError::TournamentNotFound) => Err(StatusCode::NOT_FOUND),
+        Err(SwissServiceError::NotSwissFormat) => Err(StatusCode::BAD_REQUEST),
+        Err(SwissServiceError::TournamentComplete) => Err(StatusCode::CONFLICT),
         Err(e) => {
             warn!("[tournament] advance-round failed for {}: {:?}", id, e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -1081,6 +1159,62 @@ async fn set_match_game_id(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+/// One "start now" for both formats. Swiss pairs round 1 at its minimum player
+/// count; a single-elimination bracket can only start full (the program rejects
+/// anything else), so a partial bracket gets a clear 409 instead of a failed tx.
+/// Re-sending for a full bracket that is still in Registration also retries an
+/// on-chain start that failed.
+async fn start_tournament_now(
+    Path(id): Path<u64>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let tournament = state
+        .tournament_store
+        .get(id)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, format!("tournament {id} not found")))?;
+    if tournament.status != TournamentStatus::Registration {
+        return Err((
+            StatusCode::CONFLICT,
+            format!(
+                "tournament is {:?}, not open for registration",
+                tournament.status
+            ),
+        ));
+    }
+    if matches!(tournament.format, TournamentFormat::Swiss { .. }) {
+        return initialize_swiss_tournament(Path(id), State(state))
+            .await
+            .map_err(|status| (status, "Swiss start failed — not enough players?".into()));
+    }
+
+    let (registered, capacity) = (tournament.players.len(), tournament.max_players as usize);
+    if registered != capacity {
+        return Err((
+            StatusCode::CONFLICT,
+            format!(
+                "{registered}/{capacity} registered — a single-elimination bracket starts only \
+                 when full. Wait for more players or cancel to refund entries."
+            ),
+        ));
+    }
+    let trigger = state.tournament_trigger.as_ref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "tournament scheduler is not running".to_string(),
+    ))?;
+    trigger
+        .send(TournamentTrigger::AdminStart { tournament_id: id })
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("could not queue start: {e}"),
+            )
+        })?;
+    info!("[tournament] Admin queued start for tournament {}", id);
+    Ok(Json(serde_json::json!({ "ok": true, "queued": true })))
+}
+
 async fn initialize_swiss_tournament(
     Path(id): Path<u64>,
     State(state): State<AppState>,
@@ -1108,41 +1242,24 @@ async fn initialize_swiss_tournament(
     seeded_tournament.started_at = Some(chrono::Utc::now().timestamp());
 
     seeded_tournament.swiss_data = Some(crate::signing::storage::tournament::SwissStorageData {
-        current_round: 0,
         total_rounds: rounds,
-        rounds: Vec::new(),
-        results: Vec::new(),
-        standings: Vec::new(),
-        round_deadline_at: None,
-        absent_players: Vec::new(),
-        withdrawn_players: Vec::new(),
-        forbidden_pairs: Vec::new(),
-        manual_pairings_next_round: Vec::new(),
+        ..Default::default()
     });
 
-    store.create(seeded_tournament).await;
+    // `create` is a plain INSERT and would silently keep the old row.
+    if !store.update(id, |t| *t = seeded_tournament).await {
+        error!("[tournament] Failed to persist Swiss setup for {}", id);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
 
     // Ensure gossip topic is registered for real-time updates
     state.tournament_gossip.ensure_topic_registered(id).await;
-
-    let first_round = match state.swiss_service.start_round(id).await {
-        Ok(round) => round,
-        Err(err) => {
-            error!(
-                "[tournament] Failed to start Swiss round 1 for {}: {:?}",
-                id, err
-            );
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-    if let Some(tx) = &state.orchestrator_tx {
-        let _ = tx
-            .send(OrchestratorEvent::RoundPaired {
-                tournament_id: id,
-                round: first_round.round,
-                pairings: first_round.pairings.clone(),
-            })
-            .await;
+    if let Err(err) = state.swiss_service.start_round(id).await {
+        error!(
+            "[tournament] Failed to start Swiss round 1 for {}: {:?}",
+            id, err
+        );
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     // Start Swiss tournaments on-chain through the scheduler so store state and
@@ -1424,6 +1541,16 @@ async fn confirm_join(
         if req.elo < min || req.elo > max {
             return Err(StatusCode::FORBIDDEN);
         }
+    }
+    // A register tx built outside `build-register-tx` (e.g. a Blink) skips the ban
+    // check in `join_tournament`; the roster is only written here.
+    let bans = crate::db::repository::BanRepository::new(state.store.pool());
+    if bans.is_banned(&req.player).await.unwrap_or(false) {
+        warn!(
+            "[tournament] banned wallet {} rejected at confirm-join for tournament {}",
+            req.player, id
+        );
+        return Err(StatusCode::FORBIDDEN);
     }
 
     let updated = state
@@ -1726,18 +1853,11 @@ async fn tournament_operations(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let operations = crate::signing::tournament_operations::list(state.tournament_store.pool(), id)
-        .await.map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    Ok(Json(serde_json::json!({ "tournament_id": id.to_string(), "operations": operations })))
-}
-
-fn is_missing_tournament_account_error(e: &impl std::fmt::Display) -> bool {
-    let msg = e.to_string();
-    msg.contains("account: tournament") && msg.contains("AccountNotInitialized")
-}
-
-fn is_tournament_not_active_error(e: &impl std::fmt::Display) -> bool {
-    let msg = e.to_string();
-    msg.contains("TournamentNotActive") || msg.contains("Error Number: 6050")
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    Ok(Json(
+        serde_json::json!({ "tournament_id": id.to_string(), "operations": operations }),
+    ))
 }
 
 #[derive(BorshDeserialize)]
@@ -1749,6 +1869,7 @@ struct OnChainTournamentPrefix {
     platform_fee: u64,
     prize_pool: u64,
     max_players: u16,
+    #[expect(dead_code, reason = "decoded only to keep the on-chain field layout")]
     player_count: u16,
     num_registered_players: u16,
     status: OnChainTournamentStatus,
@@ -1780,15 +1901,36 @@ struct OnChainTournamentConfiguration {
 }
 
 impl OnChainTournamentConfiguration {
-    fn matches_request(&self, req: &CreateTournamentReq, authority: Pubkey, entry: u64, platform: u64, shares: [u16; 10]) -> Result<(), String> {
-        let format = if req.format == "Swiss" { OnChainTournamentType::Swiss { rounds: req.swiss_rounds.unwrap_or(0) } } else { OnChainTournamentType::SingleElimination };
+    fn matches_request(
+        &self,
+        req: &CreateTournamentReq,
+        authority: Pubkey,
+        entry: u64,
+        platform: u64,
+        shares: [u16; 10],
+    ) -> Result<(), String> {
+        let format = if req.format == "Swiss" {
+            OnChainTournamentType::Swiss {
+                rounds: req.swiss_rounds.unwrap_or(0),
+            }
+        } else {
+            OnChainTournamentType::SingleElimination
+        };
         let p = &self.prefix;
-        if p.tournament_id != req.tournament_id || p.authority != authority.to_bytes()
-            || p.name != req.name || p.entry_fee != entry || p.platform_fee != platform
-            || p.max_players != req.max_players || p.status != OnChainTournamentStatus::Registration
-            || p.num_registered_players != 0 || self.tournament_type != format
-            || self.elo_min != req.elo_min.unwrap_or(0) || self.elo_max != req.elo_max.unwrap_or(u32::MAX)
-            || self.min_players != req.min_players.unwrap_or(req.max_players) || self.prize_shares != shares {
+        if p.tournament_id != req.tournament_id
+            || p.authority != authority.to_bytes()
+            || p.name != req.name
+            || p.entry_fee != entry
+            || p.platform_fee != platform
+            || p.max_players != req.max_players
+            || p.status != OnChainTournamentStatus::Registration
+            || p.num_registered_players != 0
+            || self.tournament_type != format
+            || self.elo_min != req.elo_min.unwrap_or(0)
+            || self.elo_max != req.elo_max.unwrap_or(u32::MAX)
+            || self.min_players != req.min_players.unwrap_or(req.max_players)
+            || self.prize_shares != shares
+        {
             return Err("Existing tournament differs from requested configuration or has already started registration; reconcile instead of recreating".into());
         }
         Ok(())
@@ -1956,11 +2098,20 @@ async fn delete_tournament(
         ));
     }
 
-    if tournament.status == TournamentStatus::Completed && tournament.prize_pool > 0 && !tournament.prizes_distributed {
-        return Err(err_body(StatusCode::CONFLICT, "Cannot archive while prizes remain outstanding".into()));
+    if tournament.status == TournamentStatus::Completed
+        && tournament.prize_pool > 0
+        && !tournament.prizes_distributed
+    {
+        return Err(err_body(
+            StatusCode::CONFLICT,
+            "Cannot archive while prizes remain outstanding".into(),
+        ));
     }
     if !state.tournament_store.delete(id).await {
-        return Err(err_body(StatusCode::SERVICE_UNAVAILABLE, "Could not persist tournament archive".into()));
+        return Err(err_body(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Could not persist tournament archive".into(),
+        ));
     }
     info!("[tournament] Deleted store row for tournament {}", id);
     Ok(Json(serde_json::json!({ "ok": true, "tournament_id": id })))
@@ -2066,6 +2217,7 @@ pub fn admin_tournament_routes() -> Router<AppState> {
         .route("/{id}/record-result", post(record_result))
         .route("/{id}/set-match-game-id", post(set_match_game_id))
         .route("/{id}/initialize-swiss", post(initialize_swiss_tournament))
+        .route("/{id}/start", post(start_tournament_now))
         .route("/{id}/cancel", post(build_cancel_transaction))
         .route("/{id}/operations", get(tournament_operations))
         .route("/{id}/sync-status", post(sync_tournament_status))
@@ -2080,7 +2232,6 @@ pub fn admin_tournament_routes() -> Router<AppState> {
         .route("/{id}/set-round-deadline", post(set_round_deadline))
         .route("/{id}/approve-prize-release", post(approve_prize_release))
 }
-
 
 #[derive(Deserialize)]
 struct TournamentSessionReq {
@@ -2111,12 +2262,24 @@ async fn tournament_session_create_game(
         .get(tournament_id)
         .await
         .ok_or(StatusCode::NOT_FOUND)?;
-    if t.match_for_player(&req.wallet_pubkey).is_none() {
+    let assigned_game = t
+        .match_for_player(&req.wallet_pubkey)
+        .and_then(|m| m.game_id);
+    if assigned_game != Some(req.game_id) {
         warn!(
-            "[TOURNAMENT] session-create-game: player {} has no match in tournament {}",
-            req.wallet_pubkey, tournament_id
+            "[TOURNAMENT] session-create-game: game {} is not player {}'s match in tournament {} (assigned {:?})",
+            req.game_id, req.wallet_pubkey, tournament_id, assigned_game
         );
         return Err(StatusCode::PRECONDITION_FAILED);
+    }
+    // Make sure the Game exists on-chain before the client tries to delegate it.
+    if let Err(e) =
+        crate::tasks::tournament_games::provision_now(&state, tournament_id, req.game_id).await
+    {
+        warn!(
+            "[TOURNAMENT] game {} not provisioned yet (background retry): {}",
+            req.game_id, e
+        );
     }
 
     crate::signing::routes::main::session_funding_guard(&state, &req.wallet_pubkey)
@@ -2156,12 +2319,24 @@ async fn tournament_session_join_game(
         .get(tournament_id)
         .await
         .ok_or(StatusCode::NOT_FOUND)?;
-    if t.match_for_player(&req.wallet_pubkey).is_none() {
+    let assigned_game = t
+        .match_for_player(&req.wallet_pubkey)
+        .and_then(|m| m.game_id);
+    if assigned_game != Some(req.game_id) {
         warn!(
-            "[TOURNAMENT] session-join-game: player {} has no match in tournament {}",
-            req.wallet_pubkey, tournament_id
+            "[TOURNAMENT] session-join-game: game {} is not player {}'s match in tournament {} (assigned {:?})",
+            req.game_id, req.wallet_pubkey, tournament_id, assigned_game
         );
         return Err(StatusCode::PRECONDITION_FAILED);
+    }
+    // Make sure the Game exists on-chain before the client tries to delegate it.
+    if let Err(e) =
+        crate::tasks::tournament_games::provision_now(&state, tournament_id, req.game_id).await
+    {
+        warn!(
+            "[TOURNAMENT] game {} not provisioned yet (background retry): {}",
+            req.game_id, e
+        );
     }
 
     crate::signing::routes::main::session_funding_guard(&state, &req.wallet_pubkey)
@@ -2584,7 +2759,6 @@ mod tests {
     }
 }
 
-
 #[derive(serde::Serialize)]
 struct ScheduleStatusResponse {
     phase: String,
@@ -2637,4 +2811,14 @@ async fn get_schedule_status(
         max_players: tournament.max_players,
         my_session_authorized: None, // populated by client from wallet state
     }))
+}
+
+/// A fresh tournament id: the current Unix time in milliseconds, bumped past any id
+/// already in the store. It stays far below 2^48, which deterministic game ids need.
+async fn next_tournament_id(store: &crate::signing::storage::tournament::TournamentStore) -> u64 {
+    let mut id = chrono::Utc::now().timestamp_millis().max(1) as u64;
+    while store.get(id).await.is_some() {
+        id += 1;
+    }
+    id
 }

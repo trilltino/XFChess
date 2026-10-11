@@ -5,6 +5,7 @@
 import bs58 from 'bs58';
 import type { WalletSource } from './types';
 import { detectSolanaTxCapabilities } from './types';
+import { withTimeout } from './bridge';
 
 /**
  * Preserve the caller's concrete wallet type for SDK hooks while allowing
@@ -31,14 +32,14 @@ export function privyWalletSource<W extends { address: string }>(
     // Embedded wallets have no provider-selected cluster; callers must skip ensureDevnet.
     provider: null,
     signRaw: async (msg: string) => {
-      const { signature } = await signMessage({
+      const { signature } = await withTimeout(signMessage({
         message: new TextEncoder().encode(msg),
         wallet,
-      });
+      }), 60000, 'Message signature');
       return bs58.encode(signature);
     },
     signTransaction: async (tx: Uint8Array) => {
-      const { signedTransaction } = await signTransaction({ transaction: tx, wallet });
+      const { signedTransaction } = await withTimeout(signTransaction({ transaction: tx, wallet }), 60000, 'Wallet signature');
       return signedTransaction;
     },
   };

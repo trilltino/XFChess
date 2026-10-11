@@ -1,3 +1,5 @@
+//! Profile and Solana account panels.
+
 #[cfg(feature = "solana")]
 pub mod profile_view;
 #[cfg(feature = "solana")]

@@ -1,127 +1,214 @@
-use crate::core::GameSettings;
+//! Applies the graphics-quality setting to cameras (bloom, SSAO) and lights
+//! (shadows). Runs when the setting changes and whenever a camera or light is
+//! spawned, so the game scene built after the menu gets the same treatment.
+
+use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
 use bevy::pbr::ScreenSpaceAmbientOcclusion;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
+use bevy::render::view::Msaa;
 
-pub fn apply_graphics_quality_camera_system(
-    settings: Res<GameSettings>,
-    mut camera_query: Query<
-        Entity,
+use crate::core::GameSettings;
+
+/// Runs the quality systems in `ApplySettings`, only on frames where the setting
+/// changed or a camera or light was spawned.
+pub(crate) fn register(app: &mut App) {
+    app.add_systems(
+        Update,
         (
-            With<Camera3d>,
-            Without<Bloom>,
-            Without<ScreenSpaceAmbientOcclusion>,
-        ),
-    >,
-    mut commands: Commands,
-    mut last_quality: Local<Option<crate::core::GraphicsQuality>>,
-) {
-    // Check if quality changed
-    let current_quality = settings.graphics_quality;
-    if let Some(prev_quality) = *last_quality {
-        if prev_quality == current_quality {
-            return; // No change
-        }
-    }
-    *last_quality = Some(current_quality);
-
-    let bloom_enabled = settings.graphics_quality.bloom_enabled();
-    let ssao_enabled = settings.graphics_quality.ambient_occlusion_enabled();
-
-    for entity in camera_query.iter_mut() {
-        if bloom_enabled {
-            commands.entity(entity).insert(Bloom::NATURAL);
-        }
-        if ssao_enabled {
-            commands
-                .entity(entity)
-                .insert(ScreenSpaceAmbientOcclusion::default());
-        }
-    }
-
-    info!(
-        "[GRAPHICS] Applied quality preset: {:?} (Bloom: {}, SSAO: {})",
-        settings.graphics_quality.description(),
-        bloom_enabled,
-        ssao_enabled
+            apply_camera_quality.run_if(settings_changed_or_added::<Camera3d>),
+            apply_light_quality.run_if(
+                settings_changed_or_added::<PointLight>
+                    .or_else(settings_changed_or_added::<DirectionalLight>)
+                    .or_else(settings_changed_or_added::<SpotLight>),
+            ),
+        )
+            .in_set(crate::core::schedule::ApplySettings),
     );
 }
 
-pub fn update_graphics_quality_camera_system(
-    settings: Res<GameSettings>,
-    mut bloom_query: Query<Entity, (With<Camera3d>, With<Bloom>)>,
-    mut ssao_query: Query<Entity, (With<Camera3d>, With<ScreenSpaceAmbientOcclusion>)>,
-    mut commands: Commands,
-    mut last_quality: Local<Option<crate::core::GraphicsQuality>>,
-) {
-    // Check if quality changed
-    let current_quality = settings.graphics_quality;
-    if let Some(prev_quality) = *last_quality {
-        if prev_quality == current_quality {
-            return; // No change
-        }
-    }
-    *last_quality = Some(current_quality);
-
-    let bloom_enabled = settings.graphics_quality.bloom_enabled();
-    let ssao_enabled = settings.graphics_quality.ambient_occlusion_enabled();
-
-    if !bloom_enabled {
-        for entity in bloom_query.iter_mut() {
-            commands.entity(entity).remove::<Bloom>();
-        }
-    } else {
-        // Add to cameras that don't have it (handled by apply system)
-    }
-
-    if !ssao_enabled {
-        for entity in ssao_query.iter_mut() {
-            commands
-                .entity(entity)
-                .remove::<ScreenSpaceAmbientOcclusion>();
-        }
-    }
-
-    info!(
-        "[GRAPHICS] Updated quality preset: {:?} (Bloom: {}, SSAO: {})",
-        settings.graphics_quality.description(),
-        bloom_enabled,
-        ssao_enabled
-    );
+/// Whether `GameSettings` changed this frame or `T` was just spawned.
+pub fn settings_changed_or_added<T: Component>(
+    settings: Option<Res<GameSettings>>,
+    added: Query<(), Added<T>>,
+) -> bool {
+    settings.is_some_and(|s| s.is_changed()) || !added.is_empty()
 }
 
-pub fn apply_graphics_quality_lights_system(
+/// Adds or removes bloom and SSAO on 3D cameras. A camera's own bloom tuning is
+/// kept when bloom stays on. SSAO only renders with MSAA off (Bevy logs an error
+/// every frame otherwise), so MSAA is switched off with it and restored after.
+pub fn apply_camera_quality(
     settings: Res<GameSettings>,
-    mut directional_lights: Query<&mut DirectionalLight>,
-    mut point_lights: Query<&mut PointLight>,
-    mut spot_lights: Query<&mut SpotLight>,
-    mut last_quality: Local<Option<crate::core::GraphicsQuality>>,
+    cameras: Query<(Entity, Ref<Camera3d>, Has<Bloom>, Has<ScreenSpaceAmbientOcclusion>)>,
+    mut commands: Commands,
 ) {
-    let current_quality = settings.graphics_quality;
-    if let Some(prev_quality) = *last_quality {
-        if prev_quality == current_quality {
-            return;
+    let quality = settings.graphics_quality;
+    for (entity, camera, has_bloom, has_ssao) in &cameras {
+        if !(settings.is_changed() || camera.is_added()) {
+            continue;
+        }
+        let mut camera = commands.entity(entity);
+        match (quality.bloom_enabled(), has_bloom) {
+            (true, false) => {
+                camera.insert(Bloom::NATURAL);
+            }
+            (false, true) => {
+                camera.remove::<Bloom>();
+            }
+            _ => {}
+        }
+        match (quality.ambient_occlusion_enabled(), has_ssao) {
+            (true, false) => {
+                camera.insert((ScreenSpaceAmbientOcclusion::default(), Msaa::Off));
+            }
+            (false, true) => {
+                // The prepasses were added for SSAO; nothing else here uses them.
+                camera
+                    .remove::<(ScreenSpaceAmbientOcclusion, DepthPrepass, NormalPrepass)>()
+                    .insert(Msaa::default());
+            }
+            _ => {}
         }
     }
-    *last_quality = Some(current_quality);
+}
 
-    let shadows_enabled = settings.graphics_quality.shadow_enabled();
-    let shadow_size = settings.graphics_quality.shadow_map_size();
+/// The shadow setting a light was spawned with; quality can switch shadows off
+/// but never turns them on for a light designed without them.
+#[derive(Component, Clone, Copy)]
+pub struct DesignedShadows(pub bool);
 
-    for mut light in directional_lights.iter_mut() {
-        light.shadow_maps_enabled = shadows_enabled;
+/// Caps light shadows to the quality preset.
+#[allow(clippy::type_complexity)]
+pub fn apply_light_quality(
+    settings: Res<GameSettings>,
+    mut point: Query<(Entity, Mut<PointLight>, Option<&DesignedShadows>)>,
+    mut directional: Query<(Entity, Mut<DirectionalLight>, Option<&DesignedShadows>)>,
+    mut spot: Query<(Entity, Mut<SpotLight>, Option<&DesignedShadows>)>,
+    mut commands: Commands,
+) {
+    let quality = settings.graphics_quality;
+    let allowed = quality.shadow_enabled();
+    // Smaller shadow maps need more bias to hide acne.
+    let bias = 4096.0 / quality.shadow_map_size() as f32 * 0.05;
+    let changed = settings.is_changed();
+
+    // Records the designed value the first time a light is seen; returns it.
+    let mut designed = |entity: Entity, current: bool, known: Option<&DesignedShadows>| {
+        known.map_or_else(
+            || {
+                commands.entity(entity).insert(DesignedShadows(current));
+                current
+            },
+            |d| d.0,
+        )
+    };
+
+    for (entity, mut light, known) in &mut point {
+        if changed || light.is_added() {
+            let shadows = designed(entity, light.shadow_maps_enabled, known) && allowed;
+            light.shadow_maps_enabled = shadows;
+            light.shadow_depth_bias = bias;
+        }
     }
-    for mut light in point_lights.iter_mut() {
-        light.shadow_maps_enabled = shadows_enabled;
-        // Bias scales with map resolution: smaller map → more bias to hide aliasing
-        light.shadow_depth_bias = 4096.0 / shadow_size as f32 * 0.05;
+    for (entity, mut light, known) in &mut directional {
+        if changed || light.is_added() {
+            light.shadow_maps_enabled = designed(entity, light.shadow_maps_enabled, known) && allowed;
+        }
     }
-    for mut light in spot_lights.iter_mut() {
-        light.shadow_maps_enabled = shadows_enabled;
+    for (entity, mut light, known) in &mut spot {
+        if changed || light.is_added() {
+            light.shadow_maps_enabled = designed(entity, light.shadow_maps_enabled, known) && allowed;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::GraphicsQuality;
+
+    fn app(quality: GraphicsQuality) -> App {
+        let mut app = App::new();
+        app.insert_resource(GameSettings {
+            graphics_quality: quality,
+            ..Default::default()
+        });
+        register(&mut app);
+        app.update();
+        app
     }
 
-    info!(
-        "[GRAPHICS] Shadow quality: {:?} (map {}px, enabled: {})",
-        current_quality, shadow_size, shadows_enabled
-    );
+    fn set_quality(app: &mut App, quality: GraphicsQuality) {
+        app.world_mut()
+            .resource_mut::<GameSettings>()
+            .graphics_quality = quality;
+        app.update();
+    }
+
+    #[test]
+    fn a_camera_spawned_later_gets_the_current_quality() {
+        let mut app = app(GraphicsQuality::Ultra);
+        // Frames pass with no camera, as on the menu before a game starts.
+        app.update();
+        let camera = app.world_mut().spawn(Camera3d::default()).id();
+        app.update();
+
+        let world = app.world();
+        assert!(world.get::<Bloom>(camera).is_some(), "bloom on Ultra");
+        assert!(world.get::<ScreenSpaceAmbientOcclusion>(camera).is_some());
+        assert_eq!(world.get::<Msaa>(camera), Some(&Msaa::Off), "SSAO needs MSAA off");
+    }
+
+    #[test]
+    fn lowering_quality_removes_effects_and_restores_msaa() {
+        let mut app = app(GraphicsQuality::Ultra);
+        let camera = app.world_mut().spawn(Camera3d::default()).id();
+        app.update();
+
+        set_quality(&mut app, GraphicsQuality::Medium);
+        let world = app.world();
+        assert!(world.get::<Bloom>(camera).is_none());
+        assert!(world.get::<ScreenSpaceAmbientOcclusion>(camera).is_none());
+        assert!(world.get::<DepthPrepass>(camera).is_none());
+        assert_eq!(world.get::<Msaa>(camera), Some(&Msaa::default()));
+    }
+
+    #[test]
+    fn quality_caps_light_shadows_but_never_adds_them() {
+        let mut app = app(GraphicsQuality::Low);
+        let key = app
+            .world_mut()
+            .spawn(PointLight {
+                shadow_maps_enabled: true,
+                ..Default::default()
+            })
+            .id();
+        let fill = app
+            .world_mut()
+            .spawn(PointLight {
+                shadow_maps_enabled: false,
+                ..Default::default()
+            })
+            .id();
+        app.update();
+        let shadows = |app: &App, light| app.world().get::<PointLight>(light).unwrap().shadow_maps_enabled;
+        assert!(!shadows(&app, key), "Low turns shadows off");
+
+        set_quality(&mut app, GraphicsQuality::High);
+        assert!(shadows(&app, key), "the key light gets its shadows back");
+        assert!(!shadows(&app, fill), "a light designed without shadows stays without");
+    }
+
+    #[test]
+    fn nothing_runs_without_a_change() {
+        let mut app = app(GraphicsQuality::Ultra);
+        let camera = app.world_mut().spawn(Camera3d::default()).id();
+        app.update();
+        // A camera that dropped its bloom on purpose keeps it off until the
+        // setting changes again.
+        app.world_mut().entity_mut(camera).remove::<Bloom>();
+        app.update();
+        assert!(app.world().get::<Bloom>(camera).is_none());
+    }
 }

@@ -5,18 +5,17 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{pubkey::Pubkey, signature::Signer};
 use std::{
     collections::HashMap,
     str::FromStr,
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
 
 use crate::signing::{solana, AppState};
-
 
 #[derive(Deserialize)]
 pub struct InitRequest {
@@ -52,7 +51,6 @@ pub struct LichessErrorResponse {
     pub error: String,
 }
 
-
 #[derive(Clone)]
 struct PkceState {
     code_verifier: String,
@@ -62,8 +60,8 @@ struct PkceState {
 
 use once_cell::sync::Lazy;
 
-static PKCE_STATES: Lazy<Arc<Mutex<HashMap<String, PkceState>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+static PKCE_STATES: Lazy<Mutex<HashMap<String, PkceState>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 const REDIRECT_URI: &str = "https://xfchess.com/api/auth/lichess/callback";
 
@@ -73,7 +71,6 @@ pub fn lichess_oauth_routes() -> Router<AppState> {
         .route("/auth/lichess/exchange", post(exchange_code))
         .route("/auth/lichess/callback", get(oauth_callback))
 }
-
 
 async fn init_oauth(
     State(state): State<AppState>,
@@ -112,13 +109,11 @@ async fn init_oauth(
 
     // Store PKCE state with wallet binding and 10-minute TTL
     {
-        let mut store = PKCE_STATES
-            .lock()
-            .expect("PKCE mutex should not be poisoned");
+        let mut store = PKCE_STATES.lock();
         store.insert(
             state_param.clone(),
             PkceState {
-                code_verifier: code_verifier.clone(),
+                code_verifier: code_verifier,
                 wallet_pubkey: req.wallet_pubkey.clone(),
                 created_at: Instant::now(),
             },
@@ -128,11 +123,12 @@ async fn init_oauth(
     }
 
     let auth_url = format!(
-        "https://lichess.org/oauth?response_type=code&client_id={}&redirect_uri={}&state={}&code_challenge={}&code_challenge_method=S256&scope=preference:read",
+        "https://lichess.org/oauth?response_type=code&client_id={}&redirect_uri={}&state={}&code_challenge={}&code_challenge_method=S256&scope={}",
         urlencoding::encode(client_id),
         urlencoding::encode(REDIRECT_URI),
         urlencoding::encode(&state_param),
-        urlencoding::encode(&code_challenge)
+        urlencoding::encode(&code_challenge),
+        urlencoding::encode(crate::signing::lichess_puzzles::LICHESS_SCOPES)
     );
 
     info!(
@@ -153,9 +149,7 @@ async fn exchange_code(
 ) -> Result<Json<ExchangeResponse>, (StatusCode, String)> {
     // Retrieve and validate PKCE state
     let pkce_state = {
-        let mut store = PKCE_STATES
-            .lock()
-            .expect("PKCE mutex should not be poisoned");
+        let mut store = PKCE_STATES.lock();
         let entry = store.remove(&req.state).ok_or_else(|| {
             (
                 StatusCode::BAD_REQUEST,
@@ -209,9 +203,7 @@ async fn handle_callback(
     }
 
     let pkce_state = {
-        let mut store = PKCE_STATES
-            .lock()
-            .expect("PKCE mutex should not be poisoned");
+        let mut store = PKCE_STATES.lock();
         let entry = store
             .remove(state_param)
             .ok_or("Invalid or expired state parameter")?;
@@ -293,6 +285,7 @@ async fn complete_link(
     let client = reqwest::Client::new();
     let token_resp = client
         .post(token_url)
+        .timeout(Duration::from_secs(10))
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -338,6 +331,24 @@ async fn complete_link(
         "[LichessOAuth] Got access token for wallet {}",
         wallet_pubkey
     );
+
+    // Keep the token (encrypted) so puzzle training can fetch unseen Lichess puzzles
+    // and record results. Lichess grants exactly the scopes requested at init.
+    let granted_scope = token_data
+        .get("scope")
+        .and_then(|s| s.as_str())
+        .unwrap_or(crate::signing::lichess_puzzles::LICHESS_SCOPES);
+    if let Err(e) = crate::signing::lichess_puzzles::save_token(
+        &state.store.pool(),
+        &state.identity_vault,
+        wallet_pubkey,
+        access_token,
+        granted_scope,
+    )
+    .await
+    {
+        warn!("[LichessOAuth] could not store puzzle token for {wallet_pubkey}: {e}");
+    }
 
     let profile_resp = client
         .get("https://lichess.org/api/account")
@@ -419,13 +430,14 @@ async fn complete_link(
 
     // Retry transient RPC failures before falling back to off-chain-only persistence.
     let rpc = solana::make_rpc(&state.solana_rpc_url);
-    let mut submit_result = solana::sign_and_submit(&rpc, link_authority, &[ix.clone()]);
+    let mut submit_result =
+        solana::sign_and_submit(&rpc, link_authority, std::slice::from_ref(&ix));
     for attempt in 1..=2 {
         if submit_result.is_ok() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(500 * attempt)).await;
-        submit_result = solana::sign_and_submit(&rpc, link_authority, &[ix.clone()]);
+        submit_result = solana::sign_and_submit(&rpc, link_authority, std::slice::from_ref(&ix));
     }
     let tx_sig = match submit_result {
         Ok(sig) => sig.to_string(),
@@ -470,7 +482,6 @@ async fn complete_link(
         bullet_rating,
     })
 }
-
 
 fn generate_code_verifier() -> String {
     use base64::{engine::general_purpose, Engine as _};

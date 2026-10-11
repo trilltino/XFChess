@@ -148,7 +148,7 @@ fn monitor_simulation(
 ) {
     use std::io::Write;
 
-    let event_types = vec![
+    let event_types = [
         ("BatchProposed", "\x1b[33m[? PROPOSED]\x1b[0m"),
         ("BatchAccepted", "\x1b[32m[ ACCEPTED]\x1b[0m"),
         ("SolanaSubmitted", "\x1b[36m[? SUBMITTED]\x1b[0m"),
@@ -176,7 +176,7 @@ fn monitor_simulation(
         if pretty_print {
             println!(
                 "{} Game {} | Batch: {}... | Moves: {} | Time: {}",
-                color_code, game_id, &batch_hash, 10, timestamp
+                color_code, game_id, batch_hash, 10, timestamp
             );
         } else {
             println!(

@@ -1,3 +1,5 @@
+//! The move sequence being replayed and its playback state.
+
 mod model;
 mod playback;
 

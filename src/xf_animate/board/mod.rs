@@ -1,3 +1,5 @@
+//! The mini board's squares, coordinates and lighting.
+
 mod coordinates;
 mod lighting;
 mod squares;

@@ -1,6 +1,9 @@
 use chrono::Utc;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 use std::time::Duration;
 use tokio::time;
 
@@ -69,14 +72,12 @@ impl RelayStore {
         let mut expired = Vec::new();
         let mut restored = 0;
         {
-            let mut games = state
-                .write()
-                .expect("P2P relay mutex should not be poisoned");
+            let mut games = state.write();
             for (game_id, json) in rows {
                 match serde_json::from_str::<ActiveGame>(&json) {
                     Ok(game) if !is_expired(&game, now) => {
-                        if !games.contains_key(&game_id) {
-                            games.insert(game_id, game);
+                        if let Entry::Vacant(slot) = games.entry(game_id) {
+                            slot.insert(game);
                             restored += 1;
                         }
                     }
@@ -120,9 +121,7 @@ pub fn create_relay_state(store: Option<RelayStore>) -> P2PRelayState {
 }
 
 fn cleanup_stale_games(state: &P2PRelayState) -> Vec<String> {
-    let mut games = state
-        .write()
-        .expect("P2P relay mutex should not be poisoned");
+    let mut games = state.write();
     let now = Utc::now();
     let mut removed = Vec::new();
 

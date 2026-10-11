@@ -7,12 +7,13 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 use super::friends::{Contact, FriendRequest};
 use super::presence::{Presence, PresenceStatus};
 use crate::signing::AppState;
-
 
 #[derive(Deserialize)]
 pub struct SendFriendRequestBody {
@@ -81,7 +82,7 @@ pub fn spawn_invite_store_sweep(store: InviteStore) {
         loop {
             interval.tick().await;
             let cutoff = Utc::now() - INVITE_TTL;
-            let mut map = store.write().unwrap();
+            let mut map = store.write();
             map.retain(|_, invites| {
                 invites.retain(|inv| inv.received_at > cutoff);
                 !invites.is_empty()
@@ -96,7 +97,6 @@ fn err(msg: impl Into<String>) -> (StatusCode, Json<ErrorBody>) {
         Json(ErrorBody { error: msg.into() }),
     )
 }
-
 
 pub fn social_routes(invite_store: InviteStore) -> Router<AppState> {
     Router::new()
@@ -119,12 +119,11 @@ pub fn social_routes(invite_store: InviteStore) -> Router<AppState> {
         .route(
             "/social/poll",
             get({
-                let store = invite_store.clone();
+                let store = invite_store;
                 move |state, query| poll_social(state, query, store)
             }),
         )
 }
-
 
 async fn send_friend_request(
     State(state): State<AppState>,
@@ -238,7 +237,7 @@ async fn push_lobby_invite(
         received_at: Utc::now(),
     };
     {
-        let mut map = store.write().unwrap();
+        let mut map = store.write();
         let invites = map.entry(body.to_node_id).or_default();
         invites.push(invite);
         // Oldest-first: if we're over the cap, drop from the front.
@@ -255,7 +254,7 @@ async fn poll_social(
     Query(q): Query<SocialPollQuery>,
     store: InviteStore,
 ) -> Json<SocialPollResponse> {
-    let map = store.read().unwrap();
+    let map = store.read();
     let all = map.get(&q.node_id).map(|v| v.as_slice()).unwrap_or(&[]);
     let since = q.since_index.unwrap_or(0);
     let invites = all.get(since..).unwrap_or(&[]).to_vec();

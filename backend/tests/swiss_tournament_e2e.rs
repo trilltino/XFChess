@@ -154,17 +154,7 @@ async fn swiss_tournament_full_lifecycle_via_http() {
     );
     app.state.tournament_store.create(record).await;
 
-    // Join all 8 players over real HTTP (chain-free route).
-    for (wallet, elo) in players {
-        let (status, body) = app
-            .post_json(
-                &format!("/tournament/{tournament_id}/join"),
-                &json!({ "player": wallet, "elo": elo }),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "join {wallet}: {body}");
-        assert_eq!(body["ok"], json!(true), "join {wallet}: {body}");
-    }
+    seed_players(&app, tournament_id, players).await;
 
     // Initialize Swiss: seeds by ELO, marks Active, starts round 1.
     let (status, body) = app
@@ -338,4 +328,409 @@ async fn approve_prize_release_route_sets_the_flag() {
         .post_json_admin("/admin/tournament/999999/approve-prize-release", &json!({}))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// Mirrors what the settlement worker does when a tournament game settles on-chain:
+/// it hands the orchestrator the Game's id, players and result.
+async fn settle(
+    tx: &tokio::sync::mpsc::Sender<backend::signing::swiss::OrchestratorEvent>,
+    tournament_id: u64,
+    game_id: u64,
+    white: &str,
+    black: &str,
+    result: swiss_pairing::MatchResult,
+) {
+    tx.send(backend::signing::swiss::OrchestratorEvent::GameEnded {
+        tournament_id,
+        game_id,
+        white: white.to_string(),
+        black: black.to_string(),
+        result,
+    })
+    .await
+    .unwrap();
+}
+
+/// Waits for the orchestrator (a separate task) to apply queued events.
+async fn wait_until<F: Fn(&TournamentRecord) -> bool>(
+    app: &TestApp,
+    id: u64,
+    done: F,
+) -> TournamentRecord {
+    for _ in 0..200 {
+        let t = app.state.tournament_store.get(id).await.unwrap();
+        if done(&t) {
+            return t;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("orchestrator did not reach the expected state");
+}
+
+#[tokio::test]
+async fn swiss_tournament_runs_end_to_end_from_settled_games() {
+    use backend::signing::storage::tournament::TournamentStatus;
+    use swiss_pairing::MatchResult;
+
+    let app = spawn_app().await;
+    let tournament_id = 9200_u64;
+    let rounds = 3u8;
+
+    let mut record = TournamentRecord::with_config(
+        tournament_id,
+        "Settled Swiss".to_string(),
+        0,
+        0,
+        7,
+        [5000, 3000, 2000, 0, 0, 0, 0, 0, 0, 0],
+        TournamentFormat::Swiss { rounds },
+        None,
+        None,
+        Some(2),
+        None,
+        false,
+    );
+    record.max_players = 7;
+    app.state.tournament_store.create(record).await;
+    // Odd field: every round has exactly one bye.
+    let players = ["a", "b", "c", "d", "e", "f", "g"];
+    seed_players(
+        &app,
+        tournament_id,
+        players
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (*p, 2000 - i as u32 * 50)),
+    )
+    .await;
+
+    let (status, body) = app
+        .post_json_admin(
+            &format!("/admin/tournament/{tournament_id}/initialize-swiss"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "initialize-swiss: {body}");
+
+    // No chain config: this exercises the off-chain half of the orchestrator.
+    let tx = backend::signing::swiss::spawn_orchestrator(
+        (*app.state.tournament_store).clone(),
+        app.state.swiss_service.clone(),
+        None,
+    );
+
+    for round in 1..=rounds {
+        let (_, pairings) = app
+            .get(&format!("/tournament/{tournament_id}/pairings/{round}"))
+            .await;
+        let boards = pairings["pairings"].as_array().unwrap().clone();
+        assert_eq!(boards.len(), 3, "round {round}: {pairings}");
+        assert_eq!(
+            pairings["byes"].as_array().unwrap().len(),
+            1,
+            "round {round}"
+        );
+
+        // Every paired player is told to play their board's deterministic game.
+        for b in &boards {
+            let board = b["board"].as_u64().unwrap() as u16;
+            let game_id = TournamentStore::swiss_game_id(tournament_id, round, board).unwrap();
+            for (side, color) in [("white", "white"), ("black", "black")] {
+                let player = b[side].as_str().unwrap();
+                let (_, s) = app
+                    .get(&format!(
+                        "/tournament/{tournament_id}/my-status?player={player}"
+                    ))
+                    .await;
+                assert_eq!(
+                    s["state"],
+                    json!("MatchReady"),
+                    "{player} round {round}: {s}"
+                );
+                assert_eq!(s["match"]["game_id"], json!(game_id), "{player}: {s}");
+                assert_eq!(s["match"]["your_color"], json!(color));
+            }
+        }
+
+        // The round cannot be skipped while boards are open.
+        let (status, _) = app
+            .post_json_admin(
+                &format!("/admin/tournament/{tournament_id}/advance-round"),
+                &json!({}),
+            )
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "round {round} skipped while open"
+        );
+
+        // A game whose on-chain players don't match the pairing is ignored.
+        let first = &boards[0];
+        let first_board = first["board"].as_u64().unwrap() as u16;
+        let first_game = TournamentStore::swiss_game_id(tournament_id, round, first_board).unwrap();
+        settle(
+            &tx,
+            tournament_id,
+            first_game,
+            first["black"].as_str().unwrap(),
+            first["white"].as_str().unwrap(),
+            MatchResult::WhiteWin,
+        )
+        .await;
+
+        for (i, b) in boards.iter().enumerate() {
+            let board = b["board"].as_u64().unwrap() as u16;
+            let result = if i == 0 {
+                MatchResult::WhiteWin
+            } else {
+                MatchResult::Draw
+            };
+            let game_id = TournamentStore::swiss_game_id(tournament_id, round, board).unwrap();
+            let (white, black) = (b["white"].as_str().unwrap(), b["black"].as_str().unwrap());
+            settle(&tx, tournament_id, game_id, white, black, result).await;
+            // A settlement retry for the same game is harmless.
+            settle(&tx, tournament_id, game_id, white, black, result).await;
+
+            if round == rounds && i + 1 < boards.len() {
+                let t = wait_until(&app, tournament_id, |t| {
+                    t.swiss_data.as_ref().unwrap().results.len() == (round as usize - 1) * 3 + i + 1
+                })
+                .await;
+                assert_eq!(
+                    t.status,
+                    TournamentStatus::Active,
+                    "final round must not complete before its last board"
+                );
+            }
+        }
+
+        let t = wait_until(&app, tournament_id, |t| {
+            let sd = t.swiss_data.as_ref().unwrap();
+            sd.round_complete(round) && (sd.current_round > round || round == rounds)
+        })
+        .await;
+        let sd = t.swiss_data.as_ref().unwrap();
+        assert_eq!(
+            sd.results.len(),
+            round as usize * 3,
+            "one result per board, no duplicates"
+        );
+        let first_result = sd
+            .results
+            .iter()
+            .find(|(r, b, _)| *r == round && *b == first_board)
+            .unwrap();
+        assert_eq!(
+            first_result.2,
+            MatchResult::WhiteWin,
+            "mismatched-player result was ignored"
+        );
+    }
+
+    let t = app.state.tournament_store.get(tournament_id).await.unwrap();
+    assert_eq!(t.status, TournamentStatus::Completed);
+    let standings = &t.swiss_data.as_ref().unwrap().standings;
+    assert_eq!(t.winner.as_deref(), Some(standings[0].player_id.as_str()));
+    assert_eq!(
+        t.seventh_place.as_deref(),
+        Some(standings[6].player_id.as_str())
+    );
+    let mut byes: Vec<String> = t
+        .swiss_data
+        .as_ref()
+        .unwrap()
+        .rounds
+        .iter()
+        .flat_map(|r| r.byes.clone())
+        .collect();
+    byes.sort();
+    byes.dedup();
+    assert_eq!(byes.len(), rounds as usize, "nobody gets a second bye");
+
+    // A completed event takes no further results.
+    let (status, _) = app
+        .post_json_admin(
+            &format!("/admin/tournament/{tournament_id}/result"),
+            &json!({ "round": rounds, "board": 1, "result": "0-1" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn admin_views_show_swiss_boards_and_hide_private_fields() {
+    let app = spawn_app().await;
+    let tournament_id = 9300_u64;
+    let mut record = TournamentRecord::with_config(
+        tournament_id,
+        "Private Swiss".to_string(),
+        0,
+        0,
+        4,
+        [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
+        TournamentFormat::Swiss { rounds: 2 },
+        None,
+        None,
+        Some(2),
+        None,
+        false,
+    );
+    record.password_hash = Some("argon2-hash-must-not-leak".into());
+    record.node_ids.insert("p0".into(), "node-p0".into());
+    app.state.tournament_store.create(record).await;
+    seed_players(
+        &app,
+        tournament_id,
+        [("p0", 2000), ("p1", 1900), ("p2", 1800), ("p3", 1700)],
+    )
+    .await;
+
+    let (status, _) = app
+        .post_json_admin(
+            &format!("/admin/tournament/{tournament_id}/initialize-swiss"),
+            &json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail) = app.get(&format!("/api/tournament/{tournament_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(detail.get("password_hash").is_none(), "{detail}");
+    assert!(detail.get("node_ids").is_none(), "{detail}");
+    assert_eq!(detail["is_private"], json!(true));
+
+    let (status, bracket) = app
+        .get(&format!("/api/tournament/{tournament_id}/bracket"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        bracket["current_round"],
+        json!(0),
+        "0-based like bracket rounds"
+    );
+    let matches = bracket["matches"].as_array().unwrap();
+    assert_eq!(matches.len(), 2, "{bracket}");
+    for m in matches {
+        assert_eq!(m["round"], json!(0));
+        assert_eq!(m["status"], json!("Active"));
+        let board = m["board"].as_u64().unwrap() as u16;
+        assert_eq!(
+            m["game_id"],
+            json!(TournamentStore::swiss_game_id(tournament_id, 1, board))
+        );
+    }
+
+    // A decided board shows as completed with its winner.
+    let board = matches[0]["board"].as_u64().unwrap();
+    let white = matches[0]["player_white"].clone();
+    let (status, _) = app
+        .post_json_admin(
+            &format!("/admin/tournament/{tournament_id}/result"),
+            &json!({ "round": 1, "board": board, "result": "1-0" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, bracket) = app
+        .get(&format!("/api/tournament/{tournament_id}/bracket"))
+        .await;
+    let decided = bracket["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["board"].as_u64() == Some(board))
+        .unwrap();
+    assert_eq!(decided["status"], json!("Completed"));
+    assert_eq!(decided["winner"], white);
+}
+
+#[tokio::test]
+async fn start_route_explains_partial_brackets_and_starts_swiss() {
+    let app = spawn_app().await;
+
+    // A 4-player bracket with 3 registered cannot start on-chain: clear 409.
+    let bracket_id = 9400_u64;
+    app.state
+        .tournament_store
+        .create(TournamentRecord::with_config(
+            bracket_id,
+            "Bracket".to_string(),
+            0,
+            0,
+            4,
+            [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
+            TournamentFormat::SingleElimination,
+            None,
+            None,
+            None,
+            None,
+            false,
+        ))
+        .await;
+    seed_players(&app, bracket_id, [("a", 2000), ("b", 1900), ("c", 1800)]).await;
+    let (status, _) = app
+        .post_json_admin(&format!("/admin/tournament/{bracket_id}/start"), &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Swiss starts at its minimum through the same route.
+    let swiss_id = 9401_u64;
+    app.state
+        .tournament_store
+        .create(TournamentRecord::with_config(
+            swiss_id,
+            "Swiss".to_string(),
+            0,
+            0,
+            8,
+            [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
+            TournamentFormat::Swiss { rounds: 3 },
+            None,
+            None,
+            Some(2),
+            None,
+            false,
+        ))
+        .await;
+    seed_players(
+        &app,
+        swiss_id,
+        [("p0", 2000), ("p1", 1900), ("p2", 1800), ("p3", 1700)],
+    )
+    .await;
+    let (status, body) = app
+        .post_json_admin(&format!("/admin/tournament/{swiss_id}/start"), &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, round) = app
+        .get(&format!("/tournament/{swiss_id}/current-round"))
+        .await;
+    assert_eq!(round["round"], json!(1));
+
+    // A started tournament cannot be started again.
+    let (status, _) = app
+        .post_json_admin(&format!("/admin/tournament/{swiss_id}/start"), &json!({}))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+/// Registers players directly in the store. `POST /tournament/{id}/join` requires a
+/// wallet JWT matching the player (`RequireWallet`), which these chain-free tests
+/// don't mint; everything after registration still goes over HTTP.
+async fn seed_players(app: &TestApp, id: u64, players: impl IntoIterator<Item = (&str, u32)>) {
+    let players: Vec<(String, u32)> = players
+        .into_iter()
+        .map(|(p, elo)| (p.to_string(), elo))
+        .collect();
+    assert!(
+        app.state
+            .tournament_store
+            .update(id, |t| {
+                for (p, elo) in players {
+                    t.players.push(p);
+                    t.player_elos.push(elo);
+                }
+            })
+            .await
+    );
 }

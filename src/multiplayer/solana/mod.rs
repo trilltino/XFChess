@@ -1,3 +1,6 @@
+//! Solana game flows (`--features solana`): wagered lobbies, session keys, signing
+//! through the wallet bridge, tournaments, money movement and recovery.
+
 pub mod addon;
 pub mod global_session_manager;
 pub mod integration;

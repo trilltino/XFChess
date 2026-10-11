@@ -4,7 +4,6 @@ use std::io::{self, Write};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
-
 static SERVICE_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 fn server_url() -> String {
@@ -86,7 +85,6 @@ fn client() -> reqwest::blocking::Client {
         .build()
         .expect("Failed to build HTTP client")
 }
-
 
 fn prompt(label: &str) -> String {
     print!("  {}: ", label);
@@ -230,7 +228,6 @@ fn read_prize_shares(max_players: u16, is_free: bool) -> [u16; 4] {
     [first, second, third, fourth]
 }
 
-
 #[derive(Debug, Deserialize)]
 struct TournamentSummary {
     tournament_id: u64,
@@ -304,7 +301,6 @@ struct KycStatus {
     requires_kyc: bool,
 }
 
-
 fn shorten(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -322,7 +318,6 @@ fn fmt_timestamp(ts: i64) -> String {
         .map(|dt: DateTime<Utc>| dt.format("%Y-%m-%d %H:%M UTC").to_string())
         .unwrap_or_else(|| ts.to_string())
 }
-
 
 fn list_tournaments() {
     println!("\n[LIST] Fetching all tournaments…\n");
@@ -424,11 +419,10 @@ fn create_tournament() {
     println!("  │ Name:      {:<44}│", shorten(&name, 44));
     println!(
         "  │ Format:    {:<44}│",
-        if swiss_rounds.is_some() {
-            format!("Swiss ({} rounds)", swiss_rounds.unwrap())
-        } else {
-            "Single Elimination".to_string()
-        }
+        swiss_rounds.map_or_else(
+            || "Single Elimination".to_string(),
+            |rounds| format!("Swiss ({rounds} rounds)")
+        )
     );
     println!(
         "  │ Players:   max={}, min={:<36}│",
@@ -915,8 +909,12 @@ fn advance_tournament_round_directly() {
         Ok(p) => p,
         Err(e) => return println!("  [ERROR] Invalid program ID: {e}"),
     };
-    let keypair_path = prompt("Path to a funded keypair JSON file (pays the tx fee only)");
-    let cranker = match read_keypair_file(&keypair_path) {
+    let boards_in_round: u16 = match prompt("Boards paired in the current round").trim().parse() {
+        Ok(n) => n,
+        Err(e) => return println!("  [ERROR] Invalid board count: {e}"),
+    };
+    let keypair_path = prompt("Path to the tournament authority keypair JSON file");
+    let authority = match read_keypair_file(&keypair_path) {
         Ok(kp) => kp,
         Err(e) => return println!("  [ERROR] Could not read keypair: {e}"),
     };
@@ -925,17 +923,18 @@ fn advance_tournament_round_directly() {
         Pubkey::find_program_address(&[b"tournament", &tournament_id.to_le_bytes()], &program_id);
 
     // Anchor discriminator = sha256("global:advance_round")[..8], followed by
-    // the single `tournament_id: u64` arg (borsh little-endian).
+    // `tournament_id: u64` and `boards_in_round: u16` (borsh little-endian).
     let mut hasher = Sha256::new();
     hasher.update(b"global:advance_round");
     let disc: [u8; 8] = hasher.finalize()[..8].try_into().unwrap();
     let mut data = disc.to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&boards_in_round.to_le_bytes());
 
-    // Account order must match `AdvanceRound`: tournament, cranker.
+    // Account order must match `AdvanceRound`: tournament, authority.
     let accounts = vec![
         AccountMeta::new(tournament_pda, false),
-        AccountMeta::new_readonly(cranker.pubkey(), true),
+        AccountMeta::new_readonly(authority.pubkey(), true),
     ];
     let ix = Instruction {
         program_id,
@@ -948,18 +947,22 @@ fn advance_tournament_round_directly() {
         Ok(h) => h,
         Err(e) => return println!("  [ERROR] Could not fetch blockhash: {e}"),
     };
-    let tx =
-        Transaction::new_signed_with_payer(&[ix], Some(&cranker.pubkey()), &[&cranker], blockhash);
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&authority.pubkey()),
+        &[&authority],
+        blockhash,
+    );
 
     match rpc.send_and_confirm_transaction(&tx) {
         Ok(sig) => println!("  [OK] Round advanced. Signature: {sig}"),
         Err(e) => println!(
-            "  [ERROR] {e}\n  (a TournamentRoundIncomplete error means not every board in the \
-             current round has reported a result yet — nothing to do until they have)"
+            "  [ERROR] {e}\n  (TournamentRoundIncomplete means not all {boards_in_round} boards of \
+             the current round have been recorded on-chain yet; NotTournamentAuthority means \
+             the keypair is not the tournament authority)"
         ),
     }
 }
-
 
 fn print_header() {
     println!("\n╔═══════════════════════════════════════════════════════════════════╗");

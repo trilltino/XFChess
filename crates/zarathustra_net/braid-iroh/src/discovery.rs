@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn test_discovery_config_mock() {
         let config = DiscoveryConfig::mock();
-        matches!(config, DiscoveryConfig::Mock(_));
+        assert!(matches!(config, DiscoveryConfig::Mock(_)));
     }
 
     #[test]
@@ -106,8 +106,8 @@ mod tests {
         let cloned = config.clone();
 
         // Both should be Mock variant
-        matches!(config, DiscoveryConfig::Mock(_));
-        matches!(cloned, DiscoveryConfig::Mock(_));
+        assert!(matches!(config, DiscoveryConfig::Mock(_)));
+        assert!(matches!(cloned, DiscoveryConfig::Mock(_)));
     }
 
     #[test]

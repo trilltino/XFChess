@@ -5,6 +5,24 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+#[derive(Clone)]
+pub struct Acknowledger(async_channel::Sender<(Vec<crate::Version>, bool)>);
+
+impl Acknowledger {
+    pub fn acknowledge(&self, versions: &[crate::Version]) -> Result<()> {
+        self.0
+            .try_send((versions.to_vec(), true))
+            .map_err(|_| BraidError::Aborted)
+    }
+
+    /// Stop this subscription without advancing its cursor. Resubscribe after recovery.
+    pub fn reject(&self, versions: &[crate::Version]) -> Result<()> {
+        self.0
+            .try_send((versions.to_vec(), false))
+            .map_err(|_| BraidError::Aborted)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HeartbeatConfig {
     pub interval: Duration,
@@ -16,7 +34,9 @@ impl HeartbeatConfig {
     pub fn new(interval: Duration) -> Self {
         Self {
             interval,
-            timeout: interval.mul_f64(1.2) + Duration::from_secs(3),
+            timeout: interval
+                .saturating_add(interval / 5)
+                .saturating_add(Duration::from_secs(3)),
         }
     }
 
@@ -27,20 +47,26 @@ impl HeartbeatConfig {
 
     #[must_use]
     pub fn from_header(value: &str) -> Option<Self> {
-        let v = value.trim();
-        let num = v.strip_suffix('s').unwrap_or(v);
-        num.parse::<f64>()
+        super::utils::parse_heartbeat(value)
             .ok()
-            .filter(|n| *n > 0.0 && n.is_finite())
-            .map(Self::from_secs)
+            .filter(|interval| !interval.is_zero())
+            .map(Self::new)
     }
 }
 
 pub struct Subscription {
     updates: Pin<Box<async_channel::Receiver<Result<Update>>>>,
     heartbeat: Option<HeartbeatConfig>,
+    terminated: bool,
+    acknowledger: Option<Acknowledger>,
     #[cfg(not(target_arch = "wasm32"))]
     deadline: Option<Pin<Box<tokio::time::Sleep>>>,
+}
+
+pub(crate) struct SubscriptionStreamHandle {
+    pub updates: async_channel::Receiver<Result<Update>>,
+    pub heartbeat: Option<HeartbeatConfig>,
+    pub acknowledgments: Option<async_channel::Sender<(Vec<crate::Version>, bool)>>,
 }
 
 impl Subscription {
@@ -49,6 +75,8 @@ impl Subscription {
         Self {
             updates: Box::pin(updates),
             heartbeat: None,
+            terminated: false,
+            acknowledger: None,
             #[cfg(not(target_arch = "wasm32"))]
             deadline: None,
         }
@@ -77,6 +105,17 @@ impl Subscription {
         self.heartbeat
     }
 
+    pub(crate) fn from_transport(handle: SubscriptionStreamHandle) -> Self {
+        let mut subscription = Self::new(handle.updates);
+        subscription.heartbeat = handle.heartbeat;
+        subscription.acknowledger = handle.acknowledgments.map(Acknowledger);
+        subscription
+    }
+
+    pub fn acknowledger(&self) -> Option<Acknowledger> {
+        self.acknowledger.clone()
+    }
+
     pub async fn next(&mut self) -> Option<Result<Update>> {
         futures::StreamExt::next(self).await
     }
@@ -96,6 +135,9 @@ impl Stream for Subscription {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+        if this.terminated {
+            return Poll::Ready(None);
+        }
 
         // `async_channel::Receiver` is itself a Stream, so it is polled directly —
         // there is no self-referential future here to construct and pin per call.
@@ -111,12 +153,19 @@ impl Stream for Subscription {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(deadline) = this.deadline.as_mut() {
             if std::future::Future::poll(deadline.as_mut(), cx).is_ready() {
-                // Keep returning timeout after expiry; polling must not silently re-arm the subscription.
+                this.terminated = true;
+                this.updates.close();
                 return Poll::Ready(Some(Err(BraidError::Timeout)));
             }
         }
 
         Poll::Pending
+    }
+}
+
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        self.updates.close();
     }
 }
 
@@ -172,6 +221,7 @@ mod tests {
         let mut sub = Subscription::with_heartbeat(rx, HeartbeatConfig::from_secs(20.0));
 
         assert!(matches!(sub.next().await, Some(Err(BraidError::Timeout))));
+        assert!(sub.next().await.is_none());
     }
 
     #[tokio::test(start_paused = true)]

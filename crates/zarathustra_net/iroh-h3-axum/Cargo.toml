@@ -2,7 +2,6 @@
 name = "iroh-h3-axum"
 version = "0.2.0"
 edition = "2024"
-autotests = false
 description = "Axum integration for serving and consuming HTTP/3 over the Iroh QUIC P2P transport."
 license = "MIT"
 repository = "https://github.com/Le-Maz/iroh-h3"
@@ -16,7 +15,7 @@ bytes = "1.11.1"
 futures-lite = "2.6.1"
 h3 = "0.0.8"
 iroh.workspace = true
-tokio = { version = "1.53.1", features = ["rt"], default-features = false }
+tokio = { version = "1.53.1", features = ["rt", "macros"], default-features = false }
 axum = { version = "0.8.9", default-features = false }
 http = "1.4.0"
 tower-service = "0.3.3"
@@ -26,5 +25,5 @@ http-body = "1.0.1"
 n0-future = "0.3.2"
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 iroh-h3-client = { path = "../iroh-h3-client", features = ["json"] }
-wasm-bindgen-test = "0.3.61"

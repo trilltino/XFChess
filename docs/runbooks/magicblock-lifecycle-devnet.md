@@ -2,19 +2,16 @@
 
 Use this runbook for live MagicBlock validation. The full happy path depends on MagicBlock delegation, asynchronous commit, and undelegation behavior that local program-test does not reproduce.
 
-## Pinned Toolchain
-
-- Anchor `1.1.2`
-- Solana `3.1.12` (Agave)
-- `ephemeral-rollups-sdk` `0.16.2`
-
-The Anchor 1.0 / Solana 3.x migration landed 2026-07-22, which also unblocked the `ephemeral-rollups-sdk` bump to `0.16.2` — the version fixing the 2026-07-22 undelegation-buffer disclosure (`undelegate_account()` now checks that `buffer` is the canonical PDA for `delegated_account`, closing the arbitrary-account-overwrite path). Confirmed present in the resolved dependency and covered by `er_delegation_tests.rs`/`er_move_tests.rs`.
+Use the toolchain/dependency pins in [Cargo.toml](../../Cargo.toml) and
+[the Anchor builder](../../docker/anchor-builder.Dockerfile). Record cluster,
+program bytes, commit and submitted signatures with each drill. Program-test
+does not prove a live asynchronous commit/undelegation flow.
 
 ## Flow
 
 1. Create a PvP game on base.
 2. Join the game on base.
-3. Authorize session keys for both players.
+3. Authorize the session-key model used by both players (per-game or global).
 4. Call `delegate_game` on base.
 5. Submit two or more `record_move` transactions through Magic Router or the ER endpoint used by the backend.
 6. Force a terminal result on ER through a legal checkmate/draw path, `resign`, or `claim_timeout`.
@@ -33,17 +30,18 @@ The Anchor 1.0 / Solana 3.x migration landed 2026-07-22, which also unblocked th
 
 ## Recovery/liveness drills — rehearsal schedule
 
-Two live-devnet drills exist in `crates/er-cu-benchmark/src/recovery_drill.rs`,
-covering the ER-unavailability escape hatch (§1.6, `docs/PRE_MAINNET_E2E_PLAN.md`):
+Live-devnet drills live in
+[chain/recovery.rs](../../crates/cu_benchmark/src/chain/recovery.rs), with CLI
+wiring in [live/recovery.rs](../../crates/cu_benchmark/src/cli/live/recovery.rs).
+Check the runner's `--help` before selecting live recovery/crank flags.
 
 - `run_stuck_delegation_drill` — the full `request_force_undelegate` →
   `force_undelegate_after_timeout` → `recover_stuck_delegation` chain.
   ~60-70 minutes (dominated by the undelegation-request timeout window).
 - `run_crank_liveness_drill` — MagicBlock scheduled-crank liveness. ~1-2 minutes.
 
-Both are opt-in and intentionally **not** run in CI (live-devnet, real-time-bound,
-cost real devnet SOL/compute). Run them as a scheduled rehearsal instead of ad
-hoc, and log every result below rather than discarding the output:
+Both are opt-in, use funded wallets and are not ordinary CI checks. Retain the
+result, source commit and signatures with the release evidence:
 
 - **Cadence:** monthly, or before any change touching `delegation_ix/`,
   `governance_ix/recover_stuck_delegation.rs`, or `backend/src/tasks/settlement_worker.rs`.
@@ -51,8 +49,5 @@ hoc, and log every result below rather than discarding the output:
   of the monthly cadence.
 - **On failure:** treat as a mainnet blocker, same severity as a failed money-seam test.
 
-### Drill log
-
-| Date | Drill | Result | Notes |
-|---|---|---|---|
-| _(none yet — first rehearsal not yet run)_ | | | |
+See [release verification](../development/verification.md) for the failure
+matrix. A runbook's existence does not establish that a drill has passed.

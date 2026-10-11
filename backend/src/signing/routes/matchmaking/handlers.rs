@@ -73,10 +73,7 @@ pub async fn join(
     };
 
     {
-        let mut queue = state
-            .queue
-            .lock()
-            .expect("Mutex lock should not be poisoned");
+        let mut queue = state.queue.lock();
         // Remove if already in queue to prevent duplicates
         queue.retain(|t| t.pubkey != req.pubkey);
         queue.push(ticket.clone());
@@ -109,10 +106,7 @@ pub async fn status(
 ) -> Result<Json<Option<MatchResult>>, (StatusCode, String)> {
     let state = &app_state.matchmaking;
     let removed = {
-        let mut matches = state
-            .matches
-            .lock()
-            .expect("Mutex lock should not be poisoned");
+        let mut matches = state.matches.lock();
         matches.remove(&pubkey)
     };
 
@@ -151,10 +145,7 @@ pub async fn leave(
     }
 
     {
-        let mut queue = state
-            .queue
-            .lock()
-            .expect("Mutex lock should not be poisoned");
+        let mut queue = state.queue.lock();
         queue.retain(|t| t.pubkey != req.pubkey);
     }
 

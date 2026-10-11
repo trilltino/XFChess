@@ -17,9 +17,6 @@ pub enum Error {
     #[error("HTTP error: {0}")]
     Http(#[from] http::Error),
 
-    #[error("Middleware error: {0}")]
-    Middleware(#[from] MiddlewareError),
-
     #[error("{0}")]
     Shared(#[from] std::sync::Arc<Self>),
 
@@ -60,21 +57,6 @@ pub enum TransportError {
 
     #[error("Stream error: {0}")]
     Stream(#[from] StreamError),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum MiddlewareError {
-    #[error("Request timed out")]
-    Timeout,
-
-    #[error("Redirect limit exceeded")]
-    RedirectLimitExceeded,
-
-    #[error("Retry attempts exceeded, final error: {0}")]
-    RetryLimitExceeded(Box<Error>),
-
-    #[error("{0}")]
-    Other(String),
 }
 
 impl From<Infallible> for Error {

@@ -1,19 +1,20 @@
-use crate::core::{DespawnOnExit, DynamicLightingSettings, GameSettings, GameState};
+use crate::core::{game_scene, DynamicLightingSettings, GameSettings, GameState};
 use bevy::prelude::*;
 
 pub struct DynamicLightingPlugin;
 
 impl Plugin for DynamicLightingPlugin {
     fn build(&self, app: &mut App) {
+        // The lights carry game_scene(), so they go with the rest of the scene.
         app.add_systems(OnEnter(GameState::InGame), spawn_orbital_lights)
-            .add_systems(OnExit(GameState::InGame), despawn_orbital_lights)
             .add_systems(
                 Update,
-                (
-                    update_orbital_lights,
-                    sync_light_count.after(update_orbital_lights),
-                )
-                    .run_if(in_state(GameState::InGame)),
+                (update_orbital_lights, sync_light_count)
+                    .chain()
+                    .after(crate::game::systems::animate_capture_fade)
+                    .after(crate::rendering::effects::update_check_highlight_system)
+                    .before(crate::game::systems::visual::update_board_fill_light)
+                    .in_set(crate::core::schedule::GameSystems::Visual),
             );
     }
 }
@@ -64,7 +65,7 @@ fn spawn_orbital_lights(mut commands: Commands, settings: Res<GameSettings>) {
             },
             Transform::from_xyz(x, height, z),
             OrbitalLight { index: i },
-            DespawnOnExit(GameState::InGame),
+            game_scene(),
             Name::new(format!("Orbital Light {}", i)),
         ));
     }
@@ -153,7 +154,7 @@ fn sync_light_count(
                 },
                 Transform::from_xyz(x, height, z),
                 OrbitalLight { index: i },
-                DespawnOnExit(GameState::InGame),
+                game_scene(),
                 bevy::camera::visibility::RenderLayers::layer(
                     crate::game::systems::camera::BOARD_LAYER,
                 ),
@@ -172,9 +173,3 @@ fn sync_light_count(
     }
 }
 
-fn despawn_orbital_lights(mut commands: Commands, query: Query<Entity, With<OrbitalLight>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
-    info!("[DYNAMIC_LIGHTING] Despawned all orbital lights");
-}

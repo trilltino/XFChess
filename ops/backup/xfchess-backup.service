@@ -1,5 +1,5 @@
 [Unit]
-Description=XFChess encrypted DB backup (snapshot → age → offsite)
+Description=XFChess encrypted database backup
 After=network-online.target
 Wants=network-online.target
 
@@ -8,7 +8,7 @@ Type=oneshot
 User=xfchess
 WorkingDirectory=/opt/xfchess
 EnvironmentFile=/opt/xfchess/.env
-ExecStart=/opt/xfchess/src/ops/backup/backup-db.sh
+ExecStart=/usr/bin/bash /opt/xfchess/ops/backup/backup-db.sh
 
 # Hardening (this unit only reads the DBs and writes to the backups workdir).
 NoNewPrivileges=true
@@ -16,3 +16,5 @@ ProtectSystem=strict
 ReadWritePaths=/opt/xfchess/data
 ProtectHome=true
 PrivateTmp=true
+
+UMask=0077

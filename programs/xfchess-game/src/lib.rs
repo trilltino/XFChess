@@ -71,6 +71,7 @@ pub use moves_ix::{GlobalRecordMove, RecordMove};
 pub use tournament_ix::{
     AdvanceRound, AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
     CancelTournament, ClaimTournamentPrize, CloseTournament, CompleteSwissTournament,
+    CreateTournamentGame,
     DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize, InitializeMatch,
     InitializeShardsMedium, InitializeShardsSmall, InitializeTournament,
     InitializeTournamentEscrow, InitializeTournamentShards, LeaveTournament, RecordMatchResult,
@@ -221,6 +222,9 @@ pub mod __client_accounts_record_swiss_result {
 }
 pub mod __client_accounts_advance_round {
     pub use crate::tournament_ix::matches::advance_round::__client_accounts_advance_round::*;
+}
+pub mod __client_accounts_create_tournament_game {
+    pub use crate::tournament_ix::matches::create_tournament_game::__client_accounts_create_tournament_game::*;
 }
 pub mod __client_accounts_complete_swiss_tournament {
     pub use crate::tournament_ix::matches::complete_swiss::__client_accounts_complete_swiss_tournament::*;
@@ -751,15 +755,34 @@ pub mod xfchess_game {
         )
     }
 
-    pub fn advance_round(ctx: Context<AdvanceRound>, tournament_id: u64) -> Result<()> {
-        crate::tournament_ix::matches::advance_round::handler(ctx, tournament_id)
+    pub fn advance_round(
+        ctx: Context<AdvanceRound>,
+        tournament_id: u64,
+        boards_in_round: u16,
+    ) -> Result<()> {
+        crate::tournament_ix::matches::advance_round::handler(ctx, tournament_id, boards_in_round)
     }
 
     pub fn complete_swiss_tournament(
         ctx: Context<CompleteSwissTournament>,
         tournament_id: u64,
+        places: Vec<Pubkey>,
     ) -> Result<()> {
-        crate::tournament_ix::matches::complete_swiss::handler(ctx, tournament_id)
+        crate::tournament_ix::matches::complete_swiss::handler(ctx, tournament_id, places)
+    }
+
+    pub fn create_tournament_game(
+        ctx: Context<CreateTournamentGame>,
+        tournament_id: u64,
+        game_id: u64,
+        session_key: Pubkey,
+    ) -> Result<()> {
+        crate::tournament_ix::matches::create_tournament_game::handler(
+            ctx,
+            tournament_id,
+            game_id,
+            session_key,
+        )
     }
 
 

@@ -16,8 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `chess-logic-on-chain` | **must stay `no_std`** | `programs/xfchess-game/src/chess_logic_on_chain.rs` (behind `move-validation` feature) |
 | `xfchess-anticheat` | Engine-move-correlation anti-cheat | Backend |
 | `solana-chess-client` | Anchor + Solana SDK | Game client (`--features solana`) |
-| `er-cu-benchmark` | Compute-unit/RPC load-test binaries against MagicBlock ER | Standalone benchmarking tool, not linked into the app |
-| `braid-core` | Thin HTTP-209 Braid facade over `braid-http` | All braid-* crates |
+| `cu_benchmark` | Game-cost estimates, MagicBlock measurements and RPC probes | Standalone benchmarking tool, not linked into the app |
 | `braid-http` | reqwest-based Braid-HTTP 209 client (Rust port of braid.org JS) | Game client |
 | `braid-iroh` | Iroh QUIC transport for Braid | Game client, backend |
 | `braid_chess` | Typed chess messages + resources + publish/subscribe (was `braid_uri`); also the **tournament vocabulary** (`SwissMessage`, `TournamentResource`) — application types, moved here out of the `braid-iroh` transport crate | Game client, backend |
@@ -31,7 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **`nimzovich_engine` has two personalities**: With `features = ["std", "search"]` it runs full alpha-beta search. Without `std` it provides only move generation (used on-chain). Keep the feature boundary clean.
 
-**Braid protocol**: HTTP-209 is a streaming subscribe protocol (a Rust port of the braid.org JS reference). `braid-http` holds the protocol codec + reqwest/WASM client; `braid-core` is a thin re-export facade over it; `braid-iroh` tunnels the same protocol over QUIC; `xfchess-braid-server` is the Axum-native server/fan-out hub. Note the upstream CRDT/OT merge engine was removed — XFChess is server-authoritative (JSON Patch for tournament docs, append-log for moves). Do not conflate HTTP-209 subscriptions with WebSocket connections — they serve different roles (Braid for board/tournament state sync, WebSocket for auth/signaling).
+**Braid protocol**: HTTP-209 is a streaming subscribe protocol (a Rust port of the braid.org JS reference). `braid-http` holds the protocol codec + native reqwest client; `braid-iroh` tunnels the same protocol over QUIC; `xfchess-braid-server` is the Axum-native server/fan-out hub. Note the upstream CRDT/OT merge engine was removed — XFChess is server-authoritative (JSON Patch for tournament docs, append-log for moves). Do not conflate HTTP-209 subscriptions with WebSocket connections — they serve different roles (Braid for board/tournament state sync, WebSocket for auth/signaling).
 
 **One write, two transports**: every tournament fact is written once, into a `ResourceHub` resource. The hub fans that update out to HTTP-209 subscribers (`/braid/*`, mounted in `infrastructure/router.rs`) *and*, through `ResourceHub::set_gossip_sink` (wired in `server.rs`), to P2P peers as the same versioned update. Do not add a second publication path beside a hub write — that is exactly what was removed here: `SwissService` emitted tagged-JSON `SwissMessage`s over gossip alongside its hub writes, with a SQLite `tournament_gossip_log` table for late-joiner replay. Both were dead: the broadcasts were guarded on a `gossip` field that was never set, and nothing ever called `persist_message`. Subscribe-replay covers the case they were aiming at.
 

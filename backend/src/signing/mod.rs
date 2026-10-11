@@ -7,6 +7,7 @@ pub mod elo_cache;
 pub mod feepayer;
 pub mod game_pgn;
 pub mod identity;
+pub mod lichess_puzzles;
 pub mod linkage;
 pub mod p2p_relay;
 pub mod privy;
@@ -87,7 +88,7 @@ pub struct AppState {
 
     pub friends: Arc<FriendManager>,
     pub presence: Arc<PresenceStore>,
-    pub invite_store: Arc<std::sync::RwLock<HashMap<String, Vec<social::routes::LobbyInvite>>>>,
+    pub invite_store: Arc<parking_lot::RwLock<HashMap<String, Vec<social::routes::LobbyInvite>>>>,
 
     pub siws_nonces: Arc<Mutex<HashMap<String, (String, u64)>>>,
 }
@@ -240,7 +241,7 @@ impl AppState {
         let friends = Arc::new(FriendManager::new(pool.clone()));
         let presence = Arc::new(PresenceStore::new());
 
-        let invite_store = Arc::new(std::sync::RwLock::new(HashMap::new()));
+        let invite_store = Arc::new(parking_lot::RwLock::new(HashMap::new()));
         social::routes::spawn_invite_store_sweep(invite_store.clone());
 
         Self {
@@ -253,7 +254,7 @@ impl AppState {
             identity_vault: Arc::new(identity_vault),
             p2p_relay,
             p2p_relay_store,
-            seat_leases: storage::seat_lease::SeatLeaseStore::new(pool.clone()),
+            seat_leases: storage::seat_lease::SeatLeaseStore::new(pool),
             vault_pool: Arc::new(vault_pool),
             elo_cache,
             vps_authority,
@@ -365,8 +366,7 @@ impl AppState {
 
 pub fn build_router(state: AppState) -> Router<AppState> {
     let base = Router::new().with_state(state.clone());
-    base
-        .merge(crate::signing::routes::debug::debug_routes())
+    base.merge(crate::signing::routes::debug::debug_routes())
         // Core game session and move routes (These were missing from build_app_router)
         .merge(crate::signing::routes::main::routes())
         // Session-key signing endpoints — dual-accept guard: a valid per-user JWT
@@ -417,7 +417,7 @@ pub fn build_router(state: AppState) -> Router<AppState> {
             "/api/global-session",
             crate::signing::routes::global_session::global_session_protected_routes().layer(
                 axum::middleware::from_fn_with_state(
-                    state.clone(),
+                    state,
                     crate::infrastructure::require_relay_or_jwt,
                 ),
             ),

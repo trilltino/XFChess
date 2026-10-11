@@ -1,198 +1,145 @@
+use crate::{store::ResourceStore, subscription::SubscriptionManager};
 use axum::{
-    extract::{Query, State},
-    response::IntoResponse,
-    routing::{get, put},
-    Router,
+    body::Body,
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
 };
-use braid_core::{Update, Version};
+use braid_http::{client::BraidHeaders, Update, Version};
 use bytes::Bytes;
-use http::StatusCode;
 use iroh_h3_axum::IrohAxum;
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use crate::subscription::SubscriptionManager;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Clone)]
-pub struct BraidAppState {
+pub(crate) struct BraidAppState {
     pub subscriptions: Arc<SubscriptionManager>,
-    pub resources: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<Update>>>>,
+    pub resources: Arc<ResourceStore>,
 }
 
-pub fn build_protocol_handler(state: BraidAppState) -> IrohAxum {
-    let router = Router::new()
-        .route("/{resource}", get(handle_get))
-        .route("/{resource}", put(handle_put))
-        .with_state(state);
-
-    IrohAxum::new(router)
+pub(crate) fn build_protocol_handler(state: BraidAppState) -> IrohAxum {
+    IrohAxum::new(router(state))
 }
 
-use http::HeaderMap;
+pub(crate) fn router(state: BraidAppState) -> Router {
+    Router::new()
+        .route("/{*resource}", get(handle_get).put(handle_put))
+        .with_state(state)
+}
 
 async fn handle_get(
     State(state): State<BraidAppState>,
-    axum::extract::Path(resource): axum::extract::Path<String>,
+    Path(resource): Path<String>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
-) -> impl IntoResponse {
-    let url = format!("/{}", resource);
-
-    // Check for Subscribe header (Subscription 209 Demo)
-    if let Some(val) = headers.get("subscribe") {
-        if val == "true" {
-            tracing::debug!(url = url.as_str(), "received Subscribe request");
-
-            // Try to get current content to send as initial state (latest version)
-            let resources = state.resources.read().await;
-            tracing::trace!(keys = ?resources.keys().collect::<Vec<_>>(), "resource store keys");
-            let initial_content = if let Some(history) = resources.get(&url) {
-                tracing::debug!(url = url.as_str(), entries = history.len(), "found history");
-                if let Some(latest) = history.last() {
-                    let content = serde_json::to_string(latest).unwrap_or_default();
-                    tracing::debug!(len = content.len(), "sending initial content");
-                    content
-                } else {
-                    tracing::debug!(url = url.as_str(), "history empty");
-                    String::new()
+) -> Response {
+    let url = SubscriptionManager::normalize_url(&resource);
+    if braid_http::server::wants_subscribe(|name| headers.get(name).and_then(|v| v.to_str().ok())) {
+        let parsed = match BraidHeaders::from_header_map(&headers) {
+            Ok(parsed) if parsed.version.is_none() => parsed,
+            _ => return StatusCode::BAD_REQUEST.into_response(),
+        };
+        let (history, mut receiver) = match state
+            .resources
+            .subscribe(&url, &parsed.parents.unwrap_or_default())
+            .await
+        {
+            Ok(subscription) => subscription,
+            Err(braid_http::BraidError::HistoryDropped) => return StatusCode::GONE.into_response(),
+            Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        };
+        let stream = async_stream::try_stream! {
+            for update in history { yield braid_http::protocol::format_update(&update)?; }
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(20));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                let event = tokio::select! {
+                    event = receiver.recv() => Some(event),
+                    _ = interval.tick() => None,
+                };
+                match event {
+                    Some(Ok(update)) => yield braid_http::protocol::format_update(&update)?,
+                    Some(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
+                    Some(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => Err(braid_http::BraidError::HistoryDropped)?,
+                    None => yield braid_http::protocol::format_heartbeat(),
                 }
-            } else {
-                // Empty initial state
-                tracing::debug!(url = url.as_str(), "resource not found");
-                String::new()
-            };
-
-            return (
-                StatusCode::from_u16(209).unwrap(),
-                [("subscribe", "true")],
-                initial_content,
-            )
-                .into_response();
-        }
-    }
-
-    let resources = state.resources.read().await;
-
-    if let Some(history) = resources.get(&url) {
-        // 1. Check for ?version=...
-        if let Some(ver) = params.get("version") {
-            // Basic implementation: check if version string contains the requested ID
-            // Optimally we'd use strict equality but Version enum makes it tricky strictly
-            if let Some(update) = history
-                .iter()
-                .find(|u| u.version.iter().any(|v| v.to_string() == *ver))
-            {
-                return (
-                    StatusCode::OK,
-                    serde_json::to_string(update).unwrap_or_default(),
-                )
-                    .into_response();
             }
-            return StatusCode::NOT_FOUND.into_response();
-        }
-
-        // 2. Check for ?history=true
-        if params.get("history").map(|v| v == "true").unwrap_or(false) {
-            let versions: Vec<String> = history
+        };
+        let body = Body::from_stream(futures::StreamExt::map(
+            stream,
+            |item: braid_http::Result<Bytes>| item,
+        ));
+        return Response::builder()
+            .status(209)
+            .header("Subscribe", "true")
+            .header("Heartbeats", "20")
+            .header("Cache-Control", "no-cache")
+            .header("Vary", "Subscribe, Version, Parents")
+            .body(body)
+            .unwrap();
+    }
+    let history = state.resources.history(&url).await;
+    if let Some(version) = params.get("version") {
+        return match history
+            .into_iter()
+            .find(|u| u.version.iter().any(|v| v.to_string() == *version))
+        {
+            Some(update) => Json(update).into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+    if params.get("history").is_some_and(|v| v == "true") {
+        return Json(
+            history
                 .iter()
                 .map(|u| {
                     u.version
                         .iter()
-                        .map(|v| v.to_string())
+                        .map(ToString::to_string)
                         .collect::<Vec<_>>()
                         .join(",")
                 })
-                .collect();
-            return (
-                StatusCode::OK,
-                serde_json::to_string(&versions).unwrap_or_default(),
-            )
-                .into_response();
-        }
-
-        if let Some(latest) = history.last() {
-            return (
-                StatusCode::OK,
-                serde_json::to_string(latest).unwrap_or_default(),
-            )
-                .into_response();
-        }
+                .collect::<Vec<_>>(),
+        )
+        .into_response();
     }
-
-    StatusCode::NOT_FOUND.into_response()
+    match history.into_iter().last() {
+        Some(update) => Json(update).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn handle_put(
     State(state): State<BraidAppState>,
-    axum::extract::Path(resource): axum::extract::Path<String>,
+    Path(resource): Path<String>,
     headers: HeaderMap,
-    body: String,
-) -> impl IntoResponse {
-    let url = format!("/{}", resource);
-
-    if tracing::enabled!(tracing::Level::DEBUG) {
-        let braid_headers: Vec<(String, String)> = headers
-            .iter()
-            .filter(|(name, _)| {
-                let n = name.as_str();
-                n.starts_with("version")
-                    || n.starts_with("parents")
-                    || n.starts_with("merge-type")
-                    || n.starts_with("content-type")
-                    || n.starts_with("content-range")
-                    || n.starts_with("braid-")
-            })
-            .map(|(name, value)| {
-                (
-                    name.to_string(),
-                    value.to_str().unwrap_or("???").to_string(),
-                )
-            })
-            .collect();
-        tracing::debug!(url = url.as_str(), headers = ?braid_headers, "incoming braid PUT");
-        tracing::trace!(body = %body, "PUT body");
+    body: Bytes,
+) -> Response {
+    let parsed = match BraidHeaders::from_header_map(&headers) {
+        Ok(parsed) => parsed,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    if parsed.patches_count.is_some() || parsed.content_range.is_some() {
+        return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     }
-
-    let version = headers
-        .get("version")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| Version::String(v.to_string()))
-        .unwrap_or_else(|| Version::String(uuid::Uuid::new_v4().to_string()));
-    let update = Update::snapshot(version, Bytes::from(body.clone().into_bytes()));
-
-    let mut resources = state.resources.write().await;
-    resources
-        .entry(url.clone())
-        .or_insert_with(Vec::new)
-        .push(update.clone());
-
-    // Broadcast to gossip subscribers
-    if let Err(e) = state.subscriptions.broadcast(&url, &update).await {
-        tracing::warn!("gossip broadcast failed for {}: {}", url, e);
-    }
-
-    StatusCode::OK
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_braid_app_state_clone() {
-        fn assert_clone<T: Clone>() {}
-        assert_clone::<BraidAppState>();
-    }
-
-    #[test]
-    fn test_build_protocol_handler() {
-        // Just verify the function signature compiles
-        // Real testing requires a gossip instance
-        fn assert_handler_fn<F>()
-        where
-            F: Fn(BraidAppState) -> IrohAxum,
-        {
+    let mut update = Update::snapshot(Version::new(uuid::Uuid::new_v4().to_string()), body);
+    if let Some(version) = parsed.version {
+        if version.is_empty() {
+            return StatusCode::BAD_REQUEST.into_response();
         }
-        assert_handler_fn::<fn(BraidAppState) -> IrohAxum>();
+        update.version = version;
     }
+    update.parents = parsed.parents.unwrap_or_default();
+    update.merge_type = parsed.merge_type;
+    update.content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let url = SubscriptionManager::normalize_url(&resource);
+    state.resources.append(&url, update.clone()).await;
+    if let Err(e) = state.subscriptions.broadcast(&url, &update).await {
+        tracing::warn!("Gossip broadcast failed for {url}: {e}");
+    }
+    StatusCode::OK.into_response()
 }

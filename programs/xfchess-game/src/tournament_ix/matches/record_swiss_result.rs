@@ -3,13 +3,19 @@ use crate::errors::GameErrorCode;
 use crate::state::*;
 use anchor_lang::prelude::*;
 
+/// Records one board of the current Swiss round. Pairings are computed off-chain,
+/// so — like `record_match_result` for single elimination — only the tournament
+/// authority may report, naming the board's white and black players. A bye is
+/// reported as its own board after the round's real ones, with `Bye` and the bye
+/// player passed as both `white` and `black`.
 #[derive(Accounts)]
 #[instruction(tournament_id: u64, round: u8, board: u16)]
 pub struct RecordSwissResult<'info> {
     #[account(
         mut,
         seeds = [TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        bump = tournament.bump
+        bump = tournament.bump,
+        constraint = tournament.authority == authority.key() @ GameErrorCode::NotTournamentAuthority
     )]
     pub tournament: Account<'info, Tournament>,
     #[account(
@@ -37,19 +43,26 @@ pub struct RecordSwissResult<'info> {
     )]
     pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
 
-    #[account(mut)]
-    pub player: Signer<'info>,
+    pub authority: Signer<'info>,
 
-    pub opponent: UncheckedAccount<'info>,
-
-    pub system_program: Program<'info, System>,
+    /// CHECK: only its key is used; it must be a registered player.
+    pub white: UncheckedAccount<'info>,
+    /// CHECK: only its key is used; it must be a registered player.
+    pub black: UncheckedAccount<'info>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SwissMatchResult {
-    Win,
-    Loss,
+    WhiteWin,
+    BlackWin,
     Draw,
+    /// The player passed as both `white` and `black` sat out the round: a full point.
+    Bye,
+}
+
+/// Board slots per round: every pairing plus at most one bye, so ⌈players / 2⌉.
+pub fn board_slots(num_registered_players: u16) -> u16 {
+    num_registered_players.max(2).div_ceil(2)
 }
 
 pub fn handler(
@@ -64,8 +77,13 @@ pub fn handler(
         t.tournament_id == tournament_id,
         GameErrorCode::UnauthorizedAccess
     );
-    let player = ctx.accounts.player.key();
-    let opponent = ctx.accounts.opponent.key();
+    let white = ctx.accounts.white.key();
+    let black = ctx.accounts.black.key();
+    if result == SwissMatchResult::Bye {
+        require_keys_eq!(white, black, GameErrorCode::InvalidArgument);
+    } else {
+        require_keys_neq!(white, black, GameErrorCode::InvalidArgument);
+    }
 
     require!(
         t.status == TournamentStatus::Active,
@@ -76,9 +94,11 @@ pub fn handler(
         GameErrorCode::InvalidGameStatus
     );
     require!(round == t.current_round, GameErrorCode::InvalidGameStatus);
-    require!(round <= t.total_rounds, GameErrorCode::InvalidGameStatus);
-    let boards_per_round = t.num_registered_players.max(2) / 2;
-    require!(board < boards_per_round, GameErrorCode::InvalidArgument);
+    require!(round < t.total_rounds, GameErrorCode::InvalidGameStatus);
+    require!(
+        board < board_slots(t.num_registered_players),
+        GameErrorCode::InvalidArgument
+    );
     require!(
         !crate::tournament_ix::matches::round_bitmap::is_set(&t.round_boards_reported, board),
         GameErrorCode::BoardAlreadyRecorded
@@ -96,129 +116,42 @@ pub fn handler(
         shards.push(s);
     }
 
-    let mut player_shard_idx: Option<(usize, usize)> = None;
-    let mut opponent_shard_idx: Option<(usize, usize)> = None;
-
-    for (shard_idx, shard) in shards.iter().enumerate() {
-        for (player_idx, standing) in shard.swiss_standings.iter().enumerate() {
-            if standing.player == player {
-                player_shard_idx = Some((shard_idx, player_idx));
-            }
-            if standing.player == opponent {
-                opponent_shard_idx = Some((shard_idx, player_idx));
-            }
-        }
-    }
-
-    let (player_shard_id, player_idx) = player_shard_idx.ok_or(GameErrorCode::PlayerNotFound)?;
-    let (opponent_shard_id, opponent_idx) =
-        opponent_shard_idx.ok_or(GameErrorCode::PlayerNotFound)?;
-
-    let player_score_before = shards[player_shard_id].swiss_standings[player_idx].score;
-    let opponent_score_before = shards[opponent_shard_id].swiss_standings[opponent_idx].score;
-
-    if player_shard_id == opponent_shard_id {
-        let shard = &mut shards[player_shard_id];
-
-        match result {
-            SwissMatchResult::Win => {
-                shard.swiss_standings[player_idx].score += 2;
-                shard.swiss_standings[opponent_idx].score += 0;
-                shard.swiss_standings[player_idx].color_balance += 1;
-                shard.swiss_standings[opponent_idx].color_balance -= 1;
-            }
-            SwissMatchResult::Loss => {
-                shard.swiss_standings[player_idx].score += 0;
-                shard.swiss_standings[opponent_idx].score += 2;
-                shard.swiss_standings[player_idx].color_balance -= 1;
-                shard.swiss_standings[opponent_idx].color_balance += 1;
-            }
-            SwissMatchResult::Draw => {
-                shard.swiss_standings[player_idx].score += 1;
-                shard.swiss_standings[opponent_idx].score += 1;
-            }
-        }
-
-        shard.swiss_standings[player_idx].buchholz += opponent_score_before as u16;
-        shard.swiss_standings[opponent_idx].buchholz += player_score_before as u16;
-
-        if result == SwissMatchResult::Win {
-            shard.swiss_standings[player_idx].sonneborn += opponent_score_before as u16;
-        } else if result == SwissMatchResult::Loss {
-            shard.swiss_standings[opponent_idx].sonneborn += player_score_before as u16;
-        } else {
-            shard.swiss_standings[player_idx].sonneborn += (opponent_score_before / 2) as u16;
-            shard.swiss_standings[opponent_idx].sonneborn += (player_score_before / 2) as u16;
-        }
-    } else {
-        let lo = player_shard_id.min(opponent_shard_id);
-        let hi = player_shard_id.max(opponent_shard_id);
-        let (left, right) = shards.split_at_mut(hi);
-        let (player_shard, opponent_shard) = if player_shard_id == lo {
-            (&mut *left[lo], &mut *right[0])
-        } else {
-            (&mut *right[0], &mut *left[lo])
-        };
-        update_shards(
-            player_shard,
-            opponent_shard,
-            player_idx,
-            opponent_idx,
-            result,
-            player_score_before,
-            opponent_score_before,
-        );
+    let (white_points, black_points) = match result {
+        SwissMatchResult::WhiteWin => (2u8, 0u8),
+        SwissMatchResult::BlackWin => (0, 2),
+        SwissMatchResult::Draw => (1, 1),
+        SwissMatchResult::Bye => (2, 0),
+    };
+    let white_standing = find_standing(&mut shards, &white)?;
+    white_standing.score = white_standing.score.saturating_add(white_points);
+    if result != SwissMatchResult::Bye {
+        white_standing.color_balance = white_standing.color_balance.saturating_add(1);
+        let black_standing = find_standing(&mut shards, &black)?;
+        black_standing.score = black_standing.score.saturating_add(black_points);
+        black_standing.color_balance = black_standing.color_balance.saturating_sub(1);
     }
 
     crate::tournament_ix::matches::round_bitmap::set(&mut t.round_boards_reported, board);
 
     msg!(
-        "Swiss result recorded: player {} vs opponent {} result {:?}",
-        player,
-        opponent,
+        "Swiss result recorded: round {} board {} {} (W) vs {} (B) {:?}",
+        round,
+        board,
+        white,
+        black,
         result
     );
 
     Ok(())
 }
 
-fn update_shards(
-    player_shard: &mut TournamentPlayersShard,
-    opponent_shard: &mut TournamentPlayersShard,
-    player_idx: usize,
-    opponent_idx: usize,
-    result: SwissMatchResult,
-    player_score_before: u8,
-    opponent_score_before: u8,
-) {
-    match result {
-        SwissMatchResult::Win => {
-            player_shard.swiss_standings[player_idx].score += 2;
-            opponent_shard.swiss_standings[opponent_idx].score += 0;
-            player_shard.swiss_standings[player_idx].color_balance += 1;
-            opponent_shard.swiss_standings[opponent_idx].color_balance -= 1;
-        }
-        SwissMatchResult::Loss => {
-            player_shard.swiss_standings[player_idx].score += 0;
-            opponent_shard.swiss_standings[opponent_idx].score += 2;
-            player_shard.swiss_standings[player_idx].color_balance -= 1;
-            opponent_shard.swiss_standings[opponent_idx].color_balance += 1;
-        }
-        SwissMatchResult::Draw => {
-            player_shard.swiss_standings[player_idx].score += 1;
-            opponent_shard.swiss_standings[opponent_idx].score += 1;
-        }
-    }
-
-    player_shard.swiss_standings[player_idx].buchholz += opponent_score_before as u16;
-    opponent_shard.swiss_standings[opponent_idx].buchholz += player_score_before as u16;
-
-    if result == SwissMatchResult::Win {
-        player_shard.swiss_standings[player_idx].sonneborn += opponent_score_before as u16;
-    } else if result == SwissMatchResult::Loss {
-        opponent_shard.swiss_standings[opponent_idx].sonneborn += player_score_before as u16;
-    } else {
-        player_shard.swiss_standings[player_idx].sonneborn += (opponent_score_before / 2) as u16;
-        opponent_shard.swiss_standings[opponent_idx].sonneborn += (player_score_before / 2) as u16;
-    }
+fn find_standing<'a>(
+    shards: &'a mut [&mut TournamentPlayersShard],
+    player: &Pubkey,
+) -> Result<&'a mut SwissStanding> {
+    shards
+        .iter_mut()
+        .flat_map(|shard| shard.swiss_standings.iter_mut())
+        .find(|standing| standing.player == *player)
+        .ok_or_else(|| GameErrorCode::PlayerNotFound.into())
 }

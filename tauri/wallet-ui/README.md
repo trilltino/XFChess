@@ -1,36 +1,23 @@
-# tauri/wallet-ui
+# Wallet UI
 
-React app for the desktop wrapper's wallet window: connect a wallet (extension or
-Privy), report the pubkey/JWT to the Rust shell, and sign transactions the game
-queues.
+React UI for Phantom, Solflare, and Privy authentication and signing. It runs in
+a Chromium app window so installed wallet extensions remain available.
 
-## Role in XFChess
+`src/App.tsx` handles onboarding and profile setup. `src/wallet/` contains the
+bridge client, authentication, provider adapters, transaction validation,
+signing component, popup tracking, and shared UI elements.
 
-The signing half of the wallet bridge described in [../README.md](../README.md):
+Game transactions retain their original message, blockhash, and local
+signatures. The browser and game both validate returned transactions before
+broadcast. Profile creation simulates before approval and rebuilds unsigned
+transactions for expired-blockhash retries. Message signing uses a separate
+request type and verifies the connected wallet's signature.
 
-```
-Bevy game ──POST /pending──> tauri bridge (:7454) ──window event──> wallet-ui
-wallet-ui signs ──POST /resolved──> bridge ──oneshot──> game continues
-```
+XFChess JWTs stay in memory and are handed to the native bridge before the
+wallet is marked connected. Closing a popup cancels pending signing; successful
+signing hides the window for reuse. OAuth windows opened by the page close when
+their parent unloads. Extension-owned approvals and `noopener` windows remain
+under provider control.
 
-## Layout
-
-| File | Contents |
-|------|----------|
-| [src/App.tsx](src/App.tsx) | The whole flow: wallet connect, pending-tx polling, signing UI, auth hand-off |
-| [src/main.tsx](src/main.tsx) | Mount point |
-
-## Run
-
-```bash
-npm install
-npm run dev                          # standalone (dev server on :5174)
-cargo tauri dev --features wallet    # inside the desktop shell (from tauri/)
-```
-
-## Invariants
-
-- This window loads remote wallet scripts, so it must never hold shell capabilities
-  (see [../capabilities/](../capabilities/)) — signing only.
-- Tokens are handed to the shell via the bridge endpoints; don't persist them in
-  browser storage here.
+Run `npm ci`, `npm test`, and `npm run build`. For development, `npm run dev`
+uses port 5174; `VITE_BRIDGE_PORT` selects the owning bridge (default 7454).

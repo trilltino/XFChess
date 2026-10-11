@@ -78,6 +78,7 @@ fn render_match_info_card(
         GameMode::MultiplayerCompetitive => "Rated",
         GameMode::Spectator => "Spectating",
         GameMode::PgnReplay => "Replay",
+        GameMode::Puzzle => "Puzzle",
         _ => "Casual",
     };
 

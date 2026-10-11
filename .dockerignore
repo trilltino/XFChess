@@ -1,4 +1,5 @@
 target/
+/assets/bin/
 **/*.rs.bk
 *.pdb
 

@@ -24,6 +24,7 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:8090"]
     metrics_path: "/metrics"
+    fallback_scrape_protocol: PrometheusText0.0.4
     scrape_interval: 15s
 
   # node_exporter listens on host loopback port 9100.

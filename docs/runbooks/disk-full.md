@@ -1,27 +1,18 @@
-# VPS disk pressure / full
+# Disk pressure
 
-**Symptom:** `disk_space` health check warns/critical; writes failing; SQLite errors;
-backup job failing.
-**Severity:** S2 → S1 (SQLite can't write = outage).
-**Dashboards:** `ops/monitoring/rules/disk_alerts.yml`; `/health/detailed` disk check.
+Database writes, backup failures or resource alerts can indicate a full filesystem.
 
-## Diagnose
-1. `ssh $SERVER df -h` — which mount is full?
-2. `ssh $SERVER du -sh /opt/xfchess/* /var/log/* 2>/dev/null | sort -h | tail`.
-3. Common culprits: local backup copies (`/opt/xfchess/data/backups`), journald logs,
-   SQLite WAL growth, old release artifacts.
+Check `df -h`, database/WAL sizes, journald and release/build directories.
+Inspect `/opt/xfchess/data/backups`, private pre-release snapshots under
+`backups/` and releases outside the `current`, `previous` and `ops` links.
 
-## Mitigate
-1. Prune local backups (offsite copies remain in R2): they auto-prune at
-   `BACKUP_RETENTION_DAYS`, but you can delete `*.age` older than N days now.
-2. `journalctl --vacuum-size=200M` to trim logs.
-3. Checkpoint SQLite WAL if huge: `sqlite3 <db> 'PRAGMA wal_checkpoint(TRUNCATE);'`
-   (stop backend first for a clean checkpoint).
-4. Remove old deploy artifacts.
+Verify successful offsite copies before retiring encrypted backups. Apply the
+configured retention and prune only explicitly retired releases/recovery points.
+Journald can be bounded with `journalctl --vacuum-size=200M`.
 
-## Verify
-1. `df -h` shows headroom; `disk_space` check returns ok; backups resume.
+A large WAL needs investigation; never delete it independently of its database.
+For a controlled checkpoint, stop the service and run
+`sqlite3 <database> 'PRAGMA wal_checkpoint(TRUNCATE);'`, then restart.
 
-## Root cause / follow-up
-- Set/verify log rotation + backup retention; add a disk-growth alert threshold if missing;
-  consider a larger volume before launch (capacity planning, WS-C).
+Verify free space, database readiness and a successful backup. See
+[recovery](../../ops/docs/ROLLBACK_GUIDE.md) and [capacity](../../ops/docs/CAPACITY.md).

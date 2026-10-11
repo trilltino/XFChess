@@ -1,3 +1,5 @@
+//! The mini board's camera and the screen rectangle it draws into.
+
 mod camera;
 mod rect;
 mod resource;

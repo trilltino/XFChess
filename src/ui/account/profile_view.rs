@@ -4,7 +4,6 @@ use bevy_egui::{egui, EguiContexts};
 use crate::multiplayer::solana::addon::SolanaProfile;
 use crate::multiplayer::solana::integration::state::SolanaIntegrationState;
 
-
 #[derive(Debug, Clone)]
 pub struct GameHistoryEntry {
     pub game_id: String,
@@ -42,7 +41,6 @@ impl ProfileViewState {
         self.elo_curve = curve;
     }
 }
-
 
 fn fetch_history_blocking(wallet: String) -> Result<Vec<GameHistoryEntry>, String> {
     use crate::multiplayer::network::vps::{client, vps_base};
@@ -83,7 +81,6 @@ fn fetch_pgn_blocking(game_id: String) -> Result<String, String> {
     Ok(resp.text().map_err(|e| format!("parse pgn: {e}"))?)
 }
 
-
 pub fn fetch_profile_history(
     mut view: ResMut<ProfileViewState>,
     solana_state: Res<SolanaIntegrationState>,
@@ -107,7 +104,7 @@ pub fn fetch_profile_history(
     let (tx, rx) = crossbeam_channel::bounded(1);
     view.fetch_rx = Some(rx);
 
-    std::thread::spawn(move || {
+    crate::core::net_task::spawn_detached("profile_view", move || {
         let _ = tx.send(fetch_history_blocking(wallet));
     });
 }
@@ -195,7 +192,7 @@ pub fn profile_view_ui(
         .default_height(520.0)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .frame(
-            egui::Frame::window(&ctx.style())
+            egui::Frame::window(&ctx.global_style())
                 .fill(egui::Color32::from_rgba_premultiplied(18, 18, 22, 250))
                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(230, 57, 70))),
         )
@@ -350,9 +347,12 @@ pub fn profile_view_ui(
                                                 let (tx, rx) = crossbeam_channel::bounded(1);
                                                 view.pgn_fetch_rx = Some(rx);
                                                 let gid = entry.game_id.clone();
-                                                std::thread::spawn(move || {
-                                                    let _ = tx.send(fetch_pgn_blocking(gid));
-                                                });
+                                                crate::core::net_task::spawn_detached(
+                                                    "profile_view",
+                                                    move || {
+                                                        let _ = tx.send(fetch_pgn_blocking(gid));
+                                                    },
+                                                );
                                             }
                                         }
                                     },
@@ -365,7 +365,6 @@ pub fn profile_view_ui(
 
     view.open = open;
 }
-
 
 fn stat_card(ui: &mut egui::Ui, label: &str, value: u32, color: egui::Color32) {
     ui.group(|ui| {

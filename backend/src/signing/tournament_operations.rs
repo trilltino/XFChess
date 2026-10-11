@@ -1,12 +1,19 @@
 //! Durable cancellation evidence shared by owner actions and scheduled expiry.
+use super::{
+    solana::{cancel_tournament_ix, make_rpc, transaction_fetch_config},
+    storage::tournament::{TournamentStatus, TournamentStore, TournamentTransaction},
+};
 use anyhow::{anyhow, ensure, Context, Result};
 use borsh::BorshDeserialize;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use solana_sdk::{pubkey::Pubkey, signature::{Keypair, Signature, Signer}, transaction::Transaction};
+use solana_sdk::{
+    pubkey::Pubkey,
+    signature::{Keypair, Signature, Signer},
+    transaction::Transaction,
+};
 use sqlx::SqlitePool;
 use std::{str::FromStr, sync::Arc};
-use super::{solana::{cancel_tournament_ix, make_rpc, transaction_fetch_config}, storage::tournament::{TournamentStatus, TournamentStore, TournamentTransaction}};
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct TournamentOperation {
@@ -23,26 +30,43 @@ pub struct TournamentOperation {
 }
 
 pub async fn init(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query("CREATE TABLE IF NOT EXISTS tournament_operations (
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS tournament_operations (
         id TEXT PRIMARY KEY, tournament_id TEXT NOT NULL, action TEXT NOT NULL,
         actor TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL,
         signature TEXT, last_error TEXT, lease_until INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)")
-        .execute(pool).await?;
-    sqlx::query("CREATE TABLE IF NOT EXISTS archived_tournaments (
-        tournament_id INTEGER PRIMARY KEY, archived_at INTEGER NOT NULL)")
-        .execute(pool).await?;
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS archived_tournaments (
+        tournament_id INTEGER PRIMARY KEY, archived_at INTEGER NOT NULL)",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
-pub async fn list(pool: &SqlitePool, tournament_id: u64) -> Result<Vec<TournamentOperation>, sqlx::Error> {
-    sqlx::query_as("SELECT * FROM tournament_operations WHERE tournament_id = ? ORDER BY created_at DESC")
-        .bind(tournament_id.to_string()).fetch_all(pool).await
+pub async fn list(
+    pool: &SqlitePool,
+    tournament_id: u64,
+) -> Result<Vec<TournamentOperation>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT * FROM tournament_operations WHERE tournament_id = ? ORDER BY created_at DESC",
+    )
+    .bind(tournament_id.to_string())
+    .fetch_all(pool)
+    .await
 }
 
 async fn get(pool: &SqlitePool, id: &str) -> Result<TournamentOperation> {
-    Ok(sqlx::query_as("SELECT * FROM tournament_operations WHERE id = ?")
-        .bind(id).fetch_one(pool).await?)
+    Ok(
+        sqlx::query_as("SELECT * FROM tournament_operations WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await?,
+    )
 }
 
 #[derive(BorshDeserialize)]
@@ -69,23 +93,44 @@ pub struct CancellationService {
 }
 
 impl CancellationService {
-    pub async fn cancel(&self, tournament_id: u64, actor: &str, reason: &str) -> Result<TournamentOperation> {
+    pub async fn cancel(
+        &self,
+        tournament_id: u64,
+        actor: &str,
+        reason: &str,
+    ) -> Result<TournamentOperation> {
         ensure!(!reason.trim().is_empty(), "Cancellation requires a reason");
         let id = format!("cancel_tournament:{tournament_id}");
         let pool = self.store.pool();
-        sqlx::query("INSERT OR IGNORE INTO tournament_operations
+        sqlx::query(
+            "INSERT OR IGNORE INTO tournament_operations
             (id,tournament_id,action,actor,reason,status,created_at,updated_at)
-            VALUES (?,?,'cancel_tournament',?,?,'requested',unixepoch(),unixepoch())")
-            .bind(&id).bind(tournament_id.to_string()).bind(actor).bind(reason)
-            .execute(pool).await?;
+            VALUES (?,?,'cancel_tournament',?,?,'requested',unixepoch(),unixepoch())",
+        )
+        .bind(&id)
+        .bind(tournament_id.to_string())
+        .bind(actor)
+        .bind(reason)
+        .execute(pool)
+        .await?;
         let operation = get(pool, &id).await?;
-        if matches!(operation.status.as_str(), "resolved" | "failed" | "needs_admin_review") {
+        if matches!(
+            operation.status.as_str(),
+            "resolved" | "failed" | "needs_admin_review"
+        ) {
             return Ok(operation);
         }
-        let claimed = sqlx::query("UPDATE tournament_operations SET lease_until=unixepoch()+180
-            WHERE id=? AND lease_until < unixepoch()")
-            .bind(&id).execute(pool).await?.rows_affected();
-        if claimed == 0 { return get(pool, &id).await; }
+        let claimed = sqlx::query(
+            "UPDATE tournament_operations SET lease_until=unixepoch()+180
+            WHERE id=? AND lease_until < unixepoch()",
+        )
+        .bind(&id)
+        .execute(pool)
+        .await?
+        .rows_affected();
+        if claimed == 0 {
+            return get(pool, &id).await;
+        }
         let result = self.execute(tournament_id, &operation).await;
         match result {
             Ok(status) => {
@@ -103,30 +148,68 @@ impl CancellationService {
         get(pool, &id).await
     }
 
-    async fn execute(&self, tournament_id: u64, operation: &TournamentOperation) -> Result<&'static str> {
-        let record = self.store.get(tournament_id).await.context("Tournament record unavailable")?;
+    async fn execute(
+        &self,
+        tournament_id: u64,
+        operation: &TournamentOperation,
+    ) -> Result<&'static str> {
+        let record = self
+            .store
+            .get(tournament_id)
+            .await
+            .context("Tournament record unavailable")?;
         if let Some(signature) = &operation.signature {
             let sig = Signature::from_str(signature)?;
             let service = self.clone();
             let chain_result = tokio::task::spawn_blocking(move || -> Result<Option<bool>> {
                 let rpc = make_rpc(&service.rpc_url);
                 let statuses = rpc.get_signature_statuses_with_history(&[sig])?;
-                let Some(status) = statuses.value.first().and_then(Option::as_ref) else { return Ok(None) };
-                if status.err.is_some() { return Ok(Some(false)) }
+                let Some(status) = statuses.value.first().and_then(Option::as_ref) else {
+                    return Ok(None);
+                };
+                if status.err.is_some() {
+                    return Ok(Some(false));
+                }
                 // Fetch at confirmed commitment; processed status alone is insufficient.
                 let tx = rpc.get_transaction_with_config(&sig, transaction_fetch_config())?;
-                ensure!(tx.transaction.meta.as_ref().is_some_and(|m| m.err.is_none()), "Missing successful transaction metadata");
+                ensure!(
+                    tx.transaction
+                        .meta
+                        .as_ref()
+                        .is_some_and(|m| m.err.is_none()),
+                    "Missing successful transaction metadata"
+                );
                 let chain = service.read_chain(tournament_id)?;
-                ensure!(chain.status == 4, "Cancellation landed but tournament is not Cancelled");
+                ensure!(
+                    chain.status == 4,
+                    "Cancellation landed but tournament is not Cancelled"
+                );
                 Ok(Some(true))
-            }).await??;
+            })
+            .await??;
             return match chain_result {
                 Some(true) => {
-                    self.store.update_checked(tournament_id, |t| { t.status = TournamentStatus::Cancelled; t.prize_pool = 0; }).await?;
-                    ensure!(self.store.record_transaction(TournamentTransaction {
-                        tournament_id, signature: signature.clone(), operation: "cancel_tournament".into(), status: "confirmed".into(),
-                        retry_count: 0, last_error: None, next_retry_at: None, created_at: chrono::Utc::now().timestamp(),
-                    }).await, "Could not persist refund evidence");
+                    self.store
+                        .update_checked(tournament_id, |t| {
+                            t.status = TournamentStatus::Cancelled;
+                            t.prize_pool = 0;
+                        })
+                        .await?;
+                    ensure!(
+                        self.store
+                            .record_transaction(TournamentTransaction {
+                                tournament_id,
+                                signature: signature.clone(),
+                                operation: "cancel_tournament".into(),
+                                status: "confirmed".into(),
+                                retry_count: 0,
+                                last_error: None,
+                                next_retry_at: None,
+                                created_at: chrono::Utc::now().timestamp(),
+                            })
+                            .await,
+                        "Could not persist refund evidence"
+                    );
                     Ok("resolved")
                 }
                 Some(false) => Ok("failed"),
@@ -160,13 +243,26 @@ impl CancellationService {
     }
 
     fn read_chain(&self, tournament_id: u64) -> Result<TournamentPrefix> {
-        let pda = Pubkey::find_program_address(&[b"tournament", &tournament_id.to_le_bytes()], &self.program_id).0;
+        let pda = Pubkey::find_program_address(
+            &[b"tournament", &tournament_id.to_le_bytes()],
+            &self.program_id,
+        )
+        .0;
         let account = make_rpc(&self.rpc_url).get_account(&pda)?;
-        ensure!(account.owner == self.program_id, "Tournament account has wrong owner");
+        ensure!(
+            account.owner == self.program_id,
+            "Tournament account has wrong owner"
+        );
         let discriminator = Sha256::digest(b"account:Tournament");
-        ensure!(account.data.get(..8) == Some(&discriminator[..8]), "Invalid tournament discriminator");
+        ensure!(
+            account.data.get(..8) == Some(&discriminator[..8]),
+            "Invalid tournament discriminator"
+        );
         let prefix = TournamentPrefix::deserialize(&mut &account.data[8..])?;
-        ensure!(prefix.id == tournament_id && prefix.authority == self.authority.pubkey().to_bytes(), "Wrong tournament identity or authority");
+        ensure!(
+            prefix.id == tournament_id && prefix.authority == self.authority.pubkey().to_bytes(),
+            "Wrong tournament identity or authority"
+        );
         Ok(prefix)
     }
 
@@ -176,8 +272,11 @@ impl CancellationService {
             AND lease_until < unixepoch() ORDER BY updated_at LIMIT 20")
             .fetch_all(self.store.pool()).await?;
         for id in ids {
-            let id = id.parse().map_err(|_| anyhow!("Invalid operation tournament ID"))?;
-            self.cancel(id, "reconciler", "Resume persisted cancellation").await?;
+            let id = id
+                .parse()
+                .map_err(|_| anyhow!("Invalid operation tournament ID"))?;
+            self.cancel(id, "reconciler", "Resume persisted cancellation")
+                .await?;
         }
         Ok(())
     }

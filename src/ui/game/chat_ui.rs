@@ -4,7 +4,6 @@ use bevy_egui::egui;
 use crate::multiplayer::network::{OnlineChatMessage, OnlineGameSession, PublishOnlineChat};
 use crate::multiplayer::traits::MessageReader;
 
-
 #[derive(Debug, Clone)]
 pub struct ChatEntry {
     pub player: String,
@@ -32,7 +31,6 @@ impl ChatState {
         self.input.clear();
     }
 }
-
 
 pub fn drain_chat_messages(
     session: Option<Res<OnlineGameSession>>,
@@ -79,7 +77,7 @@ pub fn render_chat_section(
                         .color(egui::Color32::GRAY),
                 );
             }
-            let entries: Vec<_> = chat_state.history.iter().cloned().collect();
+            let entries: Vec<_> = chat_state.history.to_vec();
             for entry in &entries {
                 let name_color = if entry.player.contains("white") || entry.player.contains("host")
                 {

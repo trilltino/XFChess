@@ -13,7 +13,13 @@ use xfchess_braid_server::{bridge, ResourceHub};
 
 pub const TOURNAMENT_TRIGGER_CHANNEL_SIZE: usize = 256;
 
+/// Players needed before the scheduler may start the event. The program only starts
+/// a single-elimination bracket when it is completely full, so a partial bracket is
+/// never a startable state, whatever `min_players` says.
 fn default_min_players(tournament: &TournamentRecord) -> usize {
+    if matches!(tournament.format, TournamentFormat::SingleElimination) {
+        return tournament.max_players as usize;
+    }
     tournament
         .min_players
         .unwrap_or_else(|| tournament.max_players.min(8)) as usize
@@ -88,11 +94,15 @@ struct OnChainConfig {
 }
 
 impl TournamentScheduler {
-    fn cancellation_service(&self) -> Option<crate::signing::tournament_operations::CancellationService> {
+    fn cancellation_service(
+        &self,
+    ) -> Option<crate::signing::tournament_operations::CancellationService> {
         let config = self.on_chain.as_ref()?;
         Some(crate::signing::tournament_operations::CancellationService {
-            store: self.store.clone(), rpc_url: config.rpc_url.clone(),
-            program_id: config.program_id.parse().ok()?, authority: config.vps_authority.clone(),
+            store: self.store.clone(),
+            rpc_url: config.rpc_url.clone(),
+            program_id: config.program_id.parse().ok()?,
+            authority: config.vps_authority.clone(),
             host_treasury: config.host_treasury,
         })
     }
@@ -268,7 +278,6 @@ impl TournamentScheduler {
 
     const GRACE_SECS: i64 = 10 * 60;
 
-
     fn abort_fill_timer(&mut self, tournament_id: u64) {
         if let Some(handle) = self.fill_timers.remove(&tournament_id) {
             handle.abort();
@@ -278,7 +287,6 @@ impl TournamentScheduler {
             );
         }
     }
-
 
     async fn handle_player_joined(&mut self, tournament_id: u64, player_count: usize) {
         let tournament = match self.store.get(tournament_id).await {
@@ -378,8 +386,18 @@ impl TournamentScheduler {
                         tournament_id, count, min
                     );
                     if let Some(service) = self.cancellation_service() {
-                        if let Err(e) = service.cancel(tournament_id, "scheduler", "Minimum player deadline expired").await {
-                            error!("[tournament-scheduler] cancellation pending for {}: {}", tournament_id, e);
+                        if let Err(e) = service
+                            .cancel(
+                                tournament_id,
+                                "scheduler",
+                                "Minimum player deadline expired",
+                            )
+                            .await
+                        {
+                            error!(
+                                "[tournament-scheduler] cancellation pending for {}: {}",
+                                tournament_id, e
+                            );
                         }
                     } else {
                         warn!("[tournament-scheduler] cancellation requires chain configuration; keeping {} open", tournament_id);
@@ -395,10 +413,14 @@ impl TournamentScheduler {
         }
     }
 
-
     async fn start_tournament(&self, tournament_id: u64) {
-        if let Ok(operations) = crate::signing::tournament_operations::list(self.store.pool(), tournament_id).await {
-            if operations.iter().any(|op| op.action == "cancel_tournament" && op.status != "failed") {
+        if let Ok(operations) =
+            crate::signing::tournament_operations::list(self.store.pool(), tournament_id).await
+        {
+            if operations
+                .iter()
+                .any(|op| op.action == "cancel_tournament" && op.status != "failed")
+            {
                 return;
             }
         } else {
@@ -407,16 +429,22 @@ impl TournamentScheduler {
         if let Some(cfg) = &self.on_chain {
             let record = self.store.get(tournament_id).await;
             let max_players = record.as_ref().map(|t| t.max_players).unwrap_or(0);
-            let round1_pairs = record
-                .as_ref()
-                .map(|t| round1_pairings(t))
-                .unwrap_or_default();
+            let round1_pairs = record.as_ref().map(round1_pairings).unwrap_or_default();
 
             let program_id_str = cfg.program_id.clone();
             let rpc_url = cfg.rpc_url.clone();
             let authority = cfg.vps_authority.clone();
             let host_treasury = cfg.host_treasury;
-            let total_matches = max_players.saturating_sub(1) as usize;
+            // Swiss rounds are paired off-chain and reported per board, so they have
+            // no bracket matches to initialise.
+            let is_swiss = record
+                .as_ref()
+                .is_some_and(|t| matches!(t.format, TournamentFormat::Swiss { .. }));
+            let total_matches = if is_swiss {
+                0
+            } else {
+                max_players.saturating_sub(1) as usize
+            };
 
             let result = tokio::task::spawn_blocking(move || {
                 use crate::signing::solana::{
@@ -906,7 +934,6 @@ mod tests {
         t.player_elos.pop();
         assert!(round1_pairings(&t).is_empty());
     }
-
 
     async fn anticheat_migrated_pool() -> sqlx::SqlitePool {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();

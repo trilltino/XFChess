@@ -1,7 +1,3 @@
-#[cfg(feature = "json")]
-pub mod ndjson;
-pub mod sse;
-
 use std::ops::Deref;
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
@@ -17,7 +13,6 @@ use tracing::{debug, instrument, trace};
 
 use crate::body::Body;
 use crate::error::Error;
-use crate::response::sse::{SseEvent, SseStream};
 
 #[must_use]
 pub struct Response {
@@ -78,35 +73,32 @@ impl Response {
     pub fn bytes_stream(self) -> impl Stream<Item = Result<Bytes, Error>> {
         self.body.into_stream().into_data_stream()
     }
-
-    #[instrument(skip(self))]
-    pub fn sse_stream(self) -> impl Stream<Item = Result<SseEvent, Error>> {
-        SseStream::new(self)
-    }
-
-    #[cfg(feature = "json")]
-    #[instrument(skip(self))]
-    pub fn ndjson_stream<T: DeserializeOwned>(self) -> impl Stream<Item = Result<T, Error>> {
-        use crate::response::ndjson::NdjsonStream;
-
-        NdjsonStream::new(self)
-    }
 }
 
 pub(crate) struct IrohH3ResponseBody {
     pub(crate) stream: h3::client::RequestStream<iroh_h3::BidiStream<Bytes>, Bytes>,
     pub(crate) _sender: h3::client::SendRequest<OpenStreams, Bytes>,
+    _lifetime: std::sync::Arc<tokio::sync::watch::Sender<()>>,
 }
 
 impl IrohH3ResponseBody {
     pub(crate) fn new(
         stream: h3::client::RequestStream<iroh_h3::BidiStream<Bytes>, Bytes>,
         sender: h3::client::SendRequest<OpenStreams, Bytes>,
+        lifetime: std::sync::Arc<tokio::sync::watch::Sender<()>>,
     ) -> Self {
         Self {
             stream,
             _sender: sender,
+            _lifetime: lifetime,
         }
+    }
+}
+
+impl Drop for IrohH3ResponseBody {
+    fn drop(&mut self) {
+        self.stream
+            .stop_sending(h3::error::Code::H3_REQUEST_CANCELLED);
     }
 }
 

@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -11,12 +13,24 @@ use tracing::warn;
 use crate::signing::storage::vault::{KycInput, VaultStore};
 use crate::signing::AppState;
 
-fn get_tax_id_pattern(country: &str) -> Option<Regex> {
+/// Tax-ID formats for the countries that require one, compiled once.
+fn get_tax_id_pattern(country: &str) -> Option<&'static Regex> {
+    // UK NI: AB123456C
+    static GB: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[A-Za-z]{2}\d{6}[A-Za-z]$").expect("valid pattern"));
+    // Brazil CPF
+    static BR: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$").expect("valid pattern"));
+    // Germany Tax ID: 11 digits
+    static DE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{11}$").expect("valid pattern"));
+    // Canada SIN
+    static CA: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\d{3}-?\d{3}-?\d{3}$").expect("valid pattern"));
     match country {
-        "GB" => Some(Regex::new(r"^[A-Za-z]{2}\d{6}[A-Za-z]$").unwrap()), // UK NI: AB123456C
-        "BR" => Some(Regex::new(r"^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$").unwrap()), // Brazil CPF
-        "DE" => Some(Regex::new(r"^\d{11}$").unwrap()), // Germany Tax ID: 11 digits
-        "CA" => Some(Regex::new(r"^\d{3}-?\d{3}-?\d{3}$").unwrap()), // Canada SIN
+        "GB" => Some(&GB),
+        "BR" => Some(&BR),
+        "DE" => Some(&DE),
+        "CA" => Some(&CA),
         _ => None,
     }
 }

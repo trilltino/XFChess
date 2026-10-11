@@ -19,7 +19,6 @@ use crate::signing::AppState;
 const DISPUTE_NOTIFY_EMAIL: &str = "isicheivalentine@gmail.com";
 const FROM_EMAIL: &str = "noreply@xfchess.com";
 
-
 // Use paths relative to the /dispute and /admin/dispute router prefixes.
 pub fn dispute_routes() -> Router<AppState> {
     Router::new()
@@ -32,7 +31,6 @@ pub fn admin_dispute_routes() -> Router<AppState> {
         .route("/resolve", post(resolve_dispute))
         .route("/recover_stuck_delegation", post(recover_stuck_delegation))
 }
-
 
 #[derive(Deserialize)]
 pub struct NotifyDisputeReq {
@@ -63,7 +61,6 @@ pub struct ResolveDisputeResp {
     pub ok: bool,
     pub tx_sig: String,
 }
-
 
 pub async fn notify_dispute(
     State(state): State<AppState>,
@@ -239,10 +236,7 @@ pub async fn recover_stuck_delegation(
         &authority.pubkey(),
     );
 
-    let rpc = solana_client::nonblocking::rpc_client::RpcClient::new_with_commitment(
-        state.config.solana_rpc_url.clone(),
-        solana_commitment_config::CommitmentConfig::confirmed(),
-    );
+    let rpc = crate::signing::solana::rpc::make_async_rpc(&state.config.solana_rpc_url);
     let blockhash = rpc.get_latest_blockhash().await.map_err(|e| {
         error!("[dispute] recover_stuck_delegation blockhash fetch failed: {e}");
         StatusCode::BAD_GATEWAY
@@ -269,7 +263,6 @@ pub async fn recover_stuck_delegation(
     }))
 }
 
-
 async fn submit_resolve_dispute_tx(
     state: &AppState,
     authority: &solana_sdk::signature::Keypair,
@@ -279,17 +272,12 @@ async fn submit_resolve_dispute_tx(
     white_wallet: &str,
     black_wallet: &str,
 ) -> anyhow::Result<String> {
-    use solana_client::nonblocking::rpc_client::RpcClient;
-    use solana_commitment_config::CommitmentConfig;
     use solana_sdk::{
         instruction::{AccountMeta, Instruction},
         transaction::Transaction,
     };
 
-    let rpc = RpcClient::new_with_commitment(
-        state.config.solana_rpc_url.clone(),
-        CommitmentConfig::confirmed(),
-    );
+    let rpc = crate::signing::solana::rpc::make_async_rpc(&state.config.solana_rpc_url);
     let program_id = Pubkey::from_str(&state.config.program_id)?;
 
     let game_id_bytes = game_id.to_le_bytes();
@@ -310,8 +298,8 @@ async fn submit_resolve_dispute_tx(
 
     // Encode args: resolution (String) + winner (Option<Pubkey>)
     let mut data = disc.to_vec();
-    data.extend_from_slice(&(game_id as u64).to_le_bytes()); // game_id arg
-                                                             // resolution string: 4-byte LE len + bytes
+    data.extend_from_slice(&game_id.to_le_bytes()); // game_id arg
+                                                    // resolution string: 4-byte LE len + bytes
     let res_bytes = resolution.as_bytes();
     data.extend_from_slice(&(res_bytes.len() as u32).to_le_bytes());
     data.extend_from_slice(res_bytes);
@@ -354,7 +342,6 @@ async fn submit_resolve_dispute_tx(
     let sig = rpc.send_and_confirm_transaction(&tx).await?;
     Ok(sig.to_string())
 }
-
 
 async fn send_dispute_notification_email(game_id: i64, challenger: &str, reason: &str) {
     let key = match env::var("SENDGRID_API_KEY") {
@@ -419,6 +406,7 @@ async fn send_sendgrid(api_key: &str, body: serde_json::Value) {
     if let Err(e) = client
         .post(&url)
         .header("Authorization", format!("Bearer {api_key}"))
+        .timeout(std::time::Duration::from_secs(10))
         .json(&body)
         .send()
         .await

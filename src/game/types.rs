@@ -6,7 +6,7 @@ pub struct File(pub u8);
 impl File {
     pub fn from_char(c: char) -> Option<Self> {
         match c {
-            'a'..='h' => Some(File((c as u8 - b'a') as u8)),
+            'a'..='h' => Some(File(c as u8 - b'a')),
             _ => None,
         }
     }

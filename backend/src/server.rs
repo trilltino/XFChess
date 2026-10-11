@@ -54,7 +54,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let port = config.port;
 
     // ── Write PID so the launcher can kill exactly this process on restart ──
-    write_pid_file();
+    let manage_pid_file = !config.is_production();
+    if manage_pid_file {
+        write_pid_file();
+    }
 
     // Use configured DB paths; hardened production writes only to its data directory.
     let session_db =
@@ -99,11 +102,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let orchestrator_tx = crate::signing::swiss::spawn_orchestrator(
         tournament_store.clone(),
         state.swiss_service.clone(),
-        Some(state.braid_hub.clone()),
         Some(crate::signing::swiss::orchestrator::SwissOnChainConfig {
             program_id: config.program_id.clone(),
             rpc_url: config.solana_rpc_url.clone(),
-            cranker: state.vps_authority.clone(),
+            authority: state.vps_authority.clone(),
         }),
     );
     state.orchestrator_tx = Some(orchestrator_tx);
@@ -158,6 +160,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     crate::tasks::settlement_worker::spawn_settlement_worker(settlement_state.clone());
     crate::tasks::er_watch::spawn_er_watch(settlement_state.clone());
     crate::tasks::tournament_forfeit::spawn_tournament_forfeit_watcher(settlement_state.clone());
+    crate::tasks::tournament_games::spawn_tournament_game_provisioner(settlement_state.clone());
     crate::signing::anticheat_enqueue::spawn_reingest_sweep(settlement_state);
     // Sweep expired nonces and idle ER locks to bound memory from unauthenticated requests.
     AppState::spawn_state_sweeps(state.clone());
@@ -166,7 +169,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     crate::signing::routes::main::init_uptime_clock();
     info!("[signing-server] Settlement worker + anti-cheat re-ingest sweep + ER watch + tournament auto-forfeit watcher + state sweeps spawned");
 
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+    let bind_address = std::env::var("SIGNING_BIND_ADDRESS")
+        .unwrap_or_else(|_| "0.0.0.0".into())
+        .parse::<std::net::IpAddr>()?;
+    let listener = tokio::net::TcpListener::bind(std::net::SocketAddr::new(bind_address, port))
         .await
         .map_err(|e| anyhow::anyhow!("Failed to bind TCP listener on port {}: {}", port, e))?;
     info!(
@@ -186,7 +192,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|e| anyhow::anyhow!("HTTP server error: {}", e))?;
 
     info!("[signing-server] Graceful shutdown complete");
-    remove_pid_file();
+    if manage_pid_file {
+        remove_pid_file();
+    }
 
     Ok(())
 }

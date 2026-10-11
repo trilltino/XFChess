@@ -18,12 +18,11 @@ fn resynced_move(n: u32) -> RollupEvent {
 fn app_with_session(delayed: bool) -> App {
     let mut app = App::new();
     app.insert_resource(GameMode::Spectator);
-    app.insert_resource(SpectatorSession {
-        game_id: Some("1".to_string()),
-        delayed,
-        delay_checked: true,
-        ..Default::default()
-    });
+    let mut session = SpectatorSession::default();
+    session.begin_session("1".to_string(), None);
+    session.delayed = delayed;
+    session.delay_checked = true;
+    app.insert_resource(session);
     app.add_message::<RollupEvent>();
     app.add_message::<NetworkMoveEvent>();
     app.add_systems(Update, apply_braid_resync_to_spectator);

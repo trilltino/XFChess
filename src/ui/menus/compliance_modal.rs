@@ -49,10 +49,12 @@ pub struct CompliancePlugin;
 
 impl Plugin for CompliancePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ComplianceState>().add_systems(
-            Update,
-            (poll_compliance_submission, draw_compliance_modal).chain(),
-        );
+        app.init_resource::<ComplianceState>()
+            .add_systems(Update, poll_compliance_submission)
+            .add_systems(
+                bevy_egui::EguiPrimaryContextPass,
+                draw_compliance_modal.run_if(|state: Res<ComplianceState>| state.show),
+            );
     }
 }
 
@@ -210,6 +212,21 @@ fn draw_compliance_modal(mut contexts: EguiContexts, mut state: ResMut<Complianc
         });
 }
 
+/// Without a wallet signer the player can't prove they own the wallet, so the
+/// submission is refused before anything is collected or sent (never sent
+/// unsigned).
+#[cfg(any(target_os = "android", not(feature = "solana")))]
+fn submit_identity(state: &mut ComplianceState) {
+    let reason = if cfg!(target_os = "android") {
+        "Identity verification isn't available on Android yet — wallet message signing \
+         requires the Mobile Wallet Adapter bridge, not yet implemented."
+    } else {
+        "Identity verification needs a wallet-enabled build."
+    };
+    state.status = SubmissionStatus::Error(reason.to_string());
+}
+
+#[cfg(all(feature = "solana", not(target_os = "android")))]
 fn submit_identity(state: &mut ComplianceState) {
     let pubkey = state
         .pubkey
@@ -231,43 +248,31 @@ fn submit_identity(state: &mut ComplianceState) {
     state.tx_rx = Some(rx);
     state.status = SubmissionStatus::Submitting;
 
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            let result = (|| -> Result<(), String> {
-                let message = format!("register_identity:{pubkey}:{timestamp}");
+    crate::core::net_task::spawn_detached("compliance_modal", move || {
+        let result = (|| -> Result<(), String> {
+            let message = format!("register_identity:{pubkey}:{timestamp}");
 
-                #[cfg(all(feature = "solana", not(target_os = "android")))]
-                let signature_bytes = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(
-                    &message,
-                    "Identity verification",
-                )?;
-                // Android MWA signing is not implemented; return an error rather than
-                // a fabricated ownership signature.
-                #[cfg(any(target_os = "android", not(feature = "solana")))]
-                let signature_bytes: Vec<u8> = {
-                    return Err(
-                        "Identity verification isn't available on Android yet — wallet message signing requires the Mobile Wallet Adapter bridge, not yet implemented.".to_string(),
-                    );
-                };
+            let signature_bytes = crate::multiplayer::solana::tauri_signer::sign_message_via_tauri(
+                &message,
+                "Identity verification",
+            )?;
+            let signature = bs58::encode(&signature_bytes).into_string();
 
-                let signature = bs58::encode(&signature_bytes).into_string();
+            let payload = crate::multiplayer::network::vps::IdentityPayload {
+                pubkey,
+                full_name,
+                dob,
+                address,
+                country,
+                tax_id,
+                signature,
+                timestamp,
+                consent_kyc,
+                consent_retention_years: 7,
+            };
+            crate::multiplayer::network::vps::register_identity(&payload)
+        })();
 
-                let payload = crate::multiplayer::network::vps::IdentityPayload {
-                    pubkey,
-                    full_name,
-                    dob,
-                    address,
-                    country,
-                    tax_id,
-                    signature,
-                    timestamp,
-                    consent_kyc,
-                    consent_retention_years: 7,
-                };
-                crate::multiplayer::network::vps::register_identity(&payload)
-            })();
-
-            let _ = tx.send(result);
-        })
-        .detach();
+        let _ = tx.send(result);
+    });
 }

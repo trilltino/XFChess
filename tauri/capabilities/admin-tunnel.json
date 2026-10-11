@@ -4,7 +4,7 @@
   "windows": ["tournament-admin"],
   "local": true,
   "remote": {
-    "urls": ["http://localhost:*/*"]
+    "urls": ["http://localhost:*/tournament-admin/*"]
   },
   "permissions": ["allow-admin-tunnel"]
 }

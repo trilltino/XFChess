@@ -1,41 +1,25 @@
 groups:
-  - name: xfchess_disk
-    rules:
-      - alert: DiskUsageHigh
-        expr: |
-          (
-            node_filesystem_size_bytes{mountpoint="/opt/xfchess"} -
-            node_filesystem_avail_bytes{mountpoint="/opt/xfchess"}
-          ) / node_filesystem_size_bytes{mountpoint="/opt/xfchess"} > 0.80
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "/opt/xfchess disk usage above 80%"
-          description: "{{ $value | humanizePercentage }} of /opt/xfchess is used. Clean up backups or expand the volume."
-
-      - alert: DiskUsageCritical
-        expr: |
-          (
-            node_filesystem_size_bytes{mountpoint="/opt/xfchess"} -
-            node_filesystem_avail_bytes{mountpoint="/opt/xfchess"}
-          ) / node_filesystem_size_bytes{mountpoint="/opt/xfchess"} > 0.95
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "/opt/xfchess disk usage above 95%"
-          description: "{{ $value | humanizePercentage }} used — database writes may fail imminently."
-
-      - alert: RootDiskUsageHigh
-        expr: |
-          (
-            node_filesystem_size_bytes{mountpoint="/"} -
-            node_filesystem_avail_bytes{mountpoint="/"}
-          ) / node_filesystem_size_bytes{mountpoint="/"} > 0.80
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Root filesystem above 80%"
-          description: "{{ $value | humanizePercentage }} of / is used on {{ $labels.instance }}."
+- name: xfchess_disk
+  rules:
+  - alert: DiskUsageHigh
+    expr: 1 - node_filesystem_avail_bytes{job="node",mountpoint=~"/|/opt/xfchess",fstype!~"tmpfs|overlay|squashfs"}
+      / node_filesystem_size_bytes{job="node",mountpoint=~"/|/opt/xfchess",fstype!~"tmpfs|overlay|squashfs"}
+      > 0.80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: 'Filesystem usage is high: {{ $labels.mountpoint }}'
+      description: '{{ $value | humanizePercentage }} used on {{ $labels.instance
+        }}. Database writes need free disk space.'
+  - alert: DiskUsageCritical
+    expr: 1 - node_filesystem_avail_bytes{job="node",mountpoint=~"/|/opt/xfchess",fstype!~"tmpfs|overlay|squashfs"}
+      / node_filesystem_size_bytes{job="node",mountpoint=~"/|/opt/xfchess",fstype!~"tmpfs|overlay|squashfs"}
+      > 0.95
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'Filesystem usage is high: {{ $labels.mountpoint }}'
+      description: '{{ $value | humanizePercentage }} used on {{ $labels.instance
+        }}. Database writes need free disk space.'

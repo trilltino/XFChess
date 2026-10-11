@@ -1,3 +1,7 @@
+//! Asset preloading and tracking: the chess-piece glTF, per-piece mesh handles and
+//! loading progress, held in resources so other modules never load raw paths.
+//! See [README.md](README.md).
+
 use bevy::asset::AssetLoadFailedEvent;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
@@ -153,18 +157,16 @@ pub fn check_asset_loading(
     match load_state {
         bevy::asset::LoadState::Loaded => {
             // Asset is loaded - verify it exists in Assets collection
-            if gltf_assets.get(&game_assets.pieces_gltf).is_some() {
-                if !game_assets.loaded {
-                    game_assets.loaded = true;
-                    progress.increment();
+            if gltf_assets.get(&game_assets.pieces_gltf).is_some() && !game_assets.loaded {
+                game_assets.loaded = true;
+                progress.increment();
 
-                    // Note: Individual mesh extraction from GLTF will happen
-                    // in the piece spawning system (rendering/pieces.rs)
-                }
+                // Note: Individual mesh extraction from GLTF will happen
+                // in the piece spawning system (rendering/pieces.rs)
             }
         }
         bevy::asset::LoadState::Failed(_) => {
-            let error_msg = format!("Failed to load asset: models/chess_kit/pieces.glb");
+            let error_msg = "Failed to load asset: models/chess_kit/pieces.glb".to_string();
             error!("[ASSETS] {}", error_msg);
 
             game_assets.failed = true;

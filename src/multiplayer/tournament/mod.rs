@@ -1,3 +1,5 @@
+//! Tournament events from the backend's live feed.
+
 pub mod client;
 pub mod events;
 

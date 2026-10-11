@@ -114,7 +114,7 @@ pub fn emit_client_event(event: ClientEvent) {
     if was_seen(&event) {
         return;
     }
-    std::thread::spawn(move || {
+    crate::core::net_task::spawn_detached("client_events", move || {
         let client = match super::client_fast() {
             Ok(client) => client,
             Err(e) => {

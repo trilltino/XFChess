@@ -25,35 +25,25 @@ pub fn calculate_standings(
     // Sort by: score desc, buchholz desc, sonneborn desc, rating desc
     entries.sort_by(|a, b| {
         b.score
-            .partial_cmp(&a.score)
-            .unwrap()
-            .then_with(|| b.buchholz.partial_cmp(&a.buchholz).unwrap())
-            .then_with(|| b.sonneborn.partial_cmp(&a.sonneborn).unwrap())
+            .total_cmp(&a.score)
+            .then_with(|| b.buchholz.total_cmp(&a.buchholz))
+            .then_with(|| b.sonneborn.total_cmp(&a.sonneborn))
             .then_with(|| b.rating.cmp(&a.rating))
     });
 
-    // Assign ranks (handle ties)
-    let mut current_rank = 1;
-    let mut prev_score = None;
-    let mut prev_buchholz = None;
-    let mut prev_sonneborn = None;
-
-    for entry in entries.iter_mut() {
-        let is_tie =
-            if let (Some(ps), Some(pb), Some(pso)) = (prev_score, prev_buchholz, prev_sonneborn) {
-                entry.score == ps && entry.buchholz == pb && entry.sonneborn == pso
-            } else {
-                false
-            };
-
-        if !is_tie {
-            entry.rank = current_rank;
-        }
-
-        prev_score = Some(entry.score);
-        prev_buchholz = Some(entry.buchholz);
-        prev_sonneborn = Some(entry.sonneborn);
-        current_rank += 1;
+    // Standard competition ranking: players level on score and both tie-breaks
+    // share a rank, and the next rank skips past them (1, 2, 2, 4).
+    for i in 0..entries.len() {
+        let tied = i > 0 && {
+            let (prev, entry) = (&entries[i - 1], &entries[i]);
+            (prev.score, prev.buchholz, prev.sonneborn)
+                == (entry.score, entry.buchholz, entry.sonneborn)
+        };
+        entries[i].rank = if tied {
+            entries[i - 1].rank
+        } else {
+            u16::try_from(i + 1).unwrap_or(u16::MAX)
+        };
     }
 
     entries
@@ -205,6 +195,22 @@ mod tests {
         assert_eq!(standings[2].score, 2.5);
         // Higher rated gets better rank on tie
         assert!(standings[1].rating >= standings[2].rating);
+    }
+
+    #[test]
+    fn tied_players_share_a_rank_and_the_next_rank_skips() {
+        // p2 and p3 are level on score and both tie-breaks (no rounds played).
+        let players = vec![
+            test_player("p1", 2000, 3.0),
+            test_player("p2", 1900, 2.5),
+            test_player("p3", 1800, 2.5),
+            test_player("p4", 1700, 1.0),
+        ];
+
+        let standings = calculate_standings(&players, &[], &[]);
+
+        let ranks: Vec<u16> = standings.iter().map(|s| s.rank).collect();
+        assert_eq!(ranks, vec![1, 2, 2, 4]);
     }
 
     #[test]

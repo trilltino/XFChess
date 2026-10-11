@@ -1,10 +1,20 @@
 import { describe, it, expect, vi } from "vitest";
-import { withTimeout } from "./App";
+import { withTimeout, ensureDevnet } from "./wallet/bridge";
 import { createMockWalletProvider } from "./walletProvider.mock";
 
 // Injected extension calls may neither resolve nor reject when their
 // background relay breaks; withTimeout must bound that wait.
 describe("withTimeout", () => {
+  it("does not hang on an unsupported wallet network request", async () => {
+    vi.useFakeTimers();
+    try {
+      const operation = ensureDevnet({ request: () => new Promise(() => {}) }, "phantom");
+      await vi.advanceTimersByTimeAsync(5000);
+      await expect(operation).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("resolves with the underlying value when the promise settles in time", async () => {
     await expect(withTimeout(Promise.resolve("ok"), 50, "op")).resolves.toBe("ok");
   });

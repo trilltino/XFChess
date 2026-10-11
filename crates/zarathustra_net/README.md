@@ -1,44 +1,40 @@
-# zarathustra_net — networking stack
+# Multiplayer networking
 
-The Braid-HTTP (209) protocol stack and Iroh QUIC transports that power XFChess's
-live game subscriptions, tournament document sync, and P2P relay. XFChess is
-server-authoritative throughout: the relay server (and, for staked games, the Solana
-program) is the single source of truth; clients subscribe to update streams rather
-than merging concurrent edits.
+| Crate | Responsibility |
+| --- | --- |
+| `braid_chess` | Chess messages, resource paths, HTTP publisher/subscriber, tournament events |
+| `braid-http` | Braid headers, update framing, native HTTP client and subscription lifecycle |
+| `braid-iroh` | Iroh discovery/gossip, bounded event history, persistence and optional TCP bridge |
+| `iroh-h3` | Zero-copy Iroh QUIC adapter for the `h3` HTTP/3 implementation |
+| `iroh-h3-axum` | Serves an Axum router over Iroh HTTP/3 |
+| `iroh-h3-client` | Reuses Iroh HTTP/3 connections and streams request/response bodies |
+| `xfchess-braid-server` | Backend document/log hub and HTTP 209 subscriptions |
 
-## Layering
+`braid_chess`, `braid-iroh` and the backend hub share the types and wire codec in
+`braid-http`. `braid-core` was a redundant facade and has been removed.
+Iroh gossip comes from the upstream Cargo dependency, not a vendored directory.
 
+The desktop bridge serves its own resources directly through the shared Axum
+router. Requests to another node use the three HTTP/3 crates. Backend tournament
+subscriptions send a snapshot followed by JSON Patch updates; a lagging subscriber
+receives a fresh snapshot. Game history subscriptions replay retained events and
+close on lag so consumers can reconnect.
+Optional HTTP retries resume from delivered versions. The bridge honors `Parents`
+and returns HTTP 410 when the requested history is unavailable. Upstream research
+and implementation decisions are recorded in [UPSTREAM.md](UPSTREAM.md).
+
+The Iroh event store retains 500 updates per resource. It is a replay cache, not
+an archive or a chess rules validator. Consumers remain responsible for validating
+moves, authorization, causal ordering and reconnect policy. Production nodes use
+`DiscoveryConfig::Real`; local tests use isolated discovery without public relays.
+Pass a persisted secret key when a stable node identity is required. The native
+Braid HTTP client has no browser transport.
+
+Validation:
+
+```sh
+cargo test -p braid-http -p braid-iroh -p braid_chess -p iroh-h3 -p iroh-h3-axum -p iroh-h3-client -p xfchess-braid-server --all-targets --features braid-iroh/proxy,iroh-h3-client/json
 ```
-braid_chess (typed chess messages, pub/sub API)
-    │
-braid-core (stable facade: protocol types + runtime traits)
-    │
-braid-http (HTTP-209 codec + reqwest/WASM client)          xfchess-braid-server (Axum-native 209 server / fan-out hub)
-    │
-braid-iroh (Braid over Iroh QUIC)  ── iroh-h3 / iroh-h3-axum / iroh-h3-client (HTTP/3 over Iroh) ── iroh-gossip (broadcast)
-```
 
-## Crates
-
-| Crate | Role |
-|-------|------|
-| [`braid_chess/`](braid_chess/) | Chess application layer: maps games onto Braid resources (`/game/{id}/moves`, `/clock`, `/engine`, `/chat`) with a typed publish/subscribe API |
-| [`braid-core/`](braid-core/) | Thin facade over `braid-http`: one stable import path for protocol types, plus runtime-abstraction traits (`BraidRuntime`/`BraidNetwork`/`BraidStorage`) |
-| [`braid-http/`](braid-http/) | The HTTP-209 protocol implementation: wire codec and the reqwest (native) / WASM (browser) client backends |
-| [`braid-iroh/`](braid-iroh/) | Braid protocol tunneled over Iroh QUIC connections for P2P relay |
-| [`xfchess-braid-server/`](xfchess-braid-server/) | Axum-native HTTP-209 server: subscription registry and update fan-out, embedded by the backend |
-| [`iroh-h3/`](iroh-h3/), [`iroh-h3-axum/`](iroh-h3-axum/), [`iroh-h3-client/`](iroh-h3-client/) | HTTP/3 over Iroh: core layer, Axum server integration, and client |
-| [`iroh-gossip/`](iroh-gossip/) | Gossip broadcast over Iroh, used by the backend relay |
-
-`iroh-gossip` (upstream [n0-computer/iroh-gossip](https://github.com/n0-computer/iroh-gossip))
-and the three `iroh-h3*` crates (upstream [Le-Maz/iroh-h3](https://github.com/Le-Maz/iroh-h3))
-are vendored third-party code — keep their docs and comments as upstream wrote them.
-
-## Channel roles
-
-Braid HTTP-209 subscriptions carry **state sync** (move logs, clocks, tournament
-documents via JSON Patch). WebSockets carry **auth and signaling** (see
-`src/multiplayer/`). Keep the two distinct when adding features.
-
-Protocol provenance: Rust port of the [braid.org](https://braid.org) JavaScript
-reference (MIT OR Apache-2.0) — see `xfchess-braid-server/ATTRIBUTION.md`.
+HTTP/3 adapters are maintained forks of [Le-Maz/iroh-h3](https://github.com/Le-Maz/iroh-h3).
+Braid provenance is recorded in [ATTRIBUTION.md](xfchess-braid-server/ATTRIBUTION.md).

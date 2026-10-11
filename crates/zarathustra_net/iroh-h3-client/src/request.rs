@@ -1,6 +1,4 @@
 use bytes::Bytes;
-#[cfg(feature = "json")]
-use futures::Stream;
 use http::request::Builder;
 use http::{HeaderValue, header::CONTENT_TYPE};
 #[cfg(feature = "json")]
@@ -9,7 +7,7 @@ use tracing::instrument;
 
 use crate::IrohH3Client;
 use crate::body::Body;
-use crate::middleware::Service;
+use crate::service::Service;
 use crate::{error::Error, response::Response};
 
 pub type ClientRequest = Request<IrohH3Client>;
@@ -96,32 +94,6 @@ impl<C: Service> RequestBuilder<C> {
             .body(Body::bytes(Bytes::from(body)))
     }
 
-    #[cfg(feature = "json")]
-    #[inline]
-    pub fn ndjson<T: Serialize>(
-        self,
-        data: impl Stream<Item = T> + Unpin + Send + Sync + 'static,
-    ) -> Result<Request<C>, Error> {
-        use futures::stream::StreamExt;
-        use http_body_util::{StreamBody, combinators::BoxBody};
-
-        const MIME_NDJSON: HeaderValue = HeaderValue::from_static("application/x-ndjson");
-
-        let stream = data.map(|item| {
-            use http_body::Frame;
-
-            let mut buffer =
-                serde_json::to_vec(&item).map_err(|err| Error::RequestValidation(err.into()))?;
-            buffer.push(b'\n');
-
-            Ok::<_, Error>(Frame::data(Bytes::from(buffer)))
-        });
-
-        let body = BoxBody::new(StreamBody::new(stream));
-
-        self.ensure_content_type(MIME_NDJSON).body(Body::from(body))
-    }
-
     #[inline]
     #[instrument(skip(self))]
     pub async fn send(self) -> Result<Response, Error> {
@@ -156,8 +128,8 @@ mod tests {
     use crate::{
         body::Body,
         error::Error,
-        middleware::{MockService, Service},
         request::{Request, RequestBuilder},
+        service::{MockService, Service},
     };
     use http::{HeaderValue, Request as HttpRequest, Response as HttpResponse};
     use std::sync::Arc;
@@ -271,37 +243,5 @@ mod tests {
             Some(&HeaderValue::from_static("custom/type"))
         );
         verify_body(req, |b| b == b"hello").await;
-    }
-
-    #[cfg(feature = "json")]
-    #[tokio::test]
-    async fn send_request_with_ndjson() {
-        use futures::stream;
-        use serde_json::Value;
-
-        let (builder, _mock) = builder_with_mock();
-
-        let items = vec![serde_json::json!({"a": 1}), serde_json::json!({"b": 2})];
-        let item_stream = stream::iter(items.clone());
-
-        let req = builder.ndjson(item_stream).unwrap();
-
-        assert_eq!(
-            req.inner.headers().get("content-type"),
-            Some(&http::HeaderValue::from_static("application/x-ndjson"))
-        );
-
-        verify_body(req, |body_bytes| {
-            let body_str = std::str::from_utf8(&body_bytes).expect("body is valid UTF-8");
-            let lines: Vec<&str> = body_str.lines().collect();
-
-            let parsed: Vec<Value> = lines
-                .into_iter()
-                .map(|line| serde_json::from_str(line).expect("valid JSON line"))
-                .collect();
-
-            parsed == items
-        })
-        .await;
     }
 }

@@ -1,0 +1,242 @@
+//! PGN replay mode (`GameMode::PgnReplay`): step through a parsed game with its own
+//! board ([`board`]) and controls ([`ui`]).
+
+use crate::core::{game_scene, GameMode, GameState};
+use crate::engine::board_state::ChessEngine;
+use crate::game::components::{HasMoved, PieceMoveAnimation};
+use crate::game::replay_shorts::ReplayAnnotations;
+use crate::game::view_mode::ViewMode;
+use crate::rendering::pieces::{
+    Piece, Piece2DVisual, Piece3DVisual, PieceColor, PieceMeshes, PieceSpriteHandles, PieceType,
+    PiecesSpawned, PIECE_ON_BOARD_Y,
+};
+use bevy::prelude::*;
+use bevy_egui::{egui, EguiContexts};
+use nimzovich_engine::{
+    do_move_with_promo, game_from_fen_no_tt, game_to_fen, new_game_no_tt, san_to_move,
+};
+
+mod board;
+mod ui;
+pub use board::*;
+pub use ui::*;
+
+#[derive(Resource, Debug, Clone)]
+pub struct ParsedPgnGameResource {
+    pub inner: nimzovich_engine::ParsedPgnGame,
+    pub show_eval_graph: bool,
+    pub puzzle_mode: bool,
+    pub puzzle_revealed: bool,
+}
+
+#[derive(Resource)]
+pub struct PgnReplayState {
+    /// Boxed: a `Game` carries tens of KB of inline tables, and this state is
+    /// moved through commands and UI closures, where debug builds copy it onto
+    /// the stack several times.
+    pub engine: Box<nimzovich_engine::Game>,
+    pub fen_snapshots: Vec<String>,
+    pub current_ply: usize,
+    pub paused: bool,
+    pub speed: f32,
+    pub timer: Timer,
+    pub board_ready: bool,
+    pub position_dirty: bool,
+    pub show_controls: bool,
+
+    // ── Cinematic / shorts ──
+    pub prev_board: [i8; 64],
+    pub engine_ply: usize,
+    pub animate_next_advance: bool,
+    pub slow_factor: f32,
+    pub cinematic_timer: f32,
+    pub last_annotation_ply: usize,
+
+    // ── In-replayer PGN file picker ──
+    pub pgn_load_rx: Option<crossbeam_channel::Receiver<Result<String, String>>>,
+    pub is_loading_file: bool,
+    pub pgn_input_error: Option<String>,
+}
+
+impl Default for PgnReplayState {
+    fn default() -> Self {
+        Self {
+            engine: Box::new(new_game_no_tt()),
+            fen_snapshots: vec![
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()
+            ],
+            current_ply: 0,
+            paused: true,
+            speed: 1.0,
+            timer: Timer::from_seconds(1.0, TimerMode::Once),
+            board_ready: false,
+            position_dirty: false,
+            show_controls: true,
+            prev_board: [0i8; 64],
+            engine_ply: 0,
+            animate_next_advance: false,
+            slow_factor: 1.0,
+            cinematic_timer: 0.0,
+            last_annotation_ply: usize::MAX,
+            pgn_load_rx: None,
+            is_loading_file: false,
+            pgn_input_error: None,
+        }
+    }
+}
+
+impl PgnReplayState {
+    pub fn total_plies(&self) -> usize {
+        self.fen_snapshots.len().saturating_sub(1)
+    }
+}
+
+pub fn setup_replay(
+    parsed_pgn: Option<Res<ParsedPgnGameResource>>,
+    mut replay: ResMut<PgnReplayState>,
+    mut engine: ResMut<ChessEngine>,
+    mut pieces_spawned: ResMut<PiecesSpawned>,
+) {
+    let Some(pgn) = parsed_pgn else {
+        warn!("[REPLAY] setup_replay called but no ParsedPgnGameResource present");
+        return;
+    };
+
+    info!(
+        "[REPLAY] Setting up replay: {} moves",
+        pgn.inner.moves.len()
+    );
+
+    // Reset replay state
+    *replay = PgnReplayState::default();
+
+    // Pre-generate all FEN snapshots by applying moves sequentially
+    let mut temp_engine = new_game_no_tt();
+    replay.fen_snapshots.clear();
+    replay
+        .fen_snapshots
+        .push("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
+
+    for (i, san) in pgn.inner.moves.iter().enumerate() {
+        match san_to_move(&mut temp_engine, san) {
+            Ok((src, dst, promo)) => {
+                do_move_with_promo(&mut temp_engine, src, dst, true, promo);
+                let fen = engine_to_fen(&temp_engine);
+                replay.fen_snapshots.push(fen);
+            }
+            Err(e) => {
+                warn!(
+                    "[REPLAY] Failed to resolve move {} '{}': {:?}",
+                    i + 1,
+                    san,
+                    e
+                );
+                break;
+            }
+        }
+    }
+
+    info!(
+        "[REPLAY] Generated {} FEN snapshots for {} plies",
+        replay.fen_snapshots.len(),
+        pgn.inner.moves.len()
+    );
+
+    // Sync the main ChessEngine to starting position
+    engine.set_from_fen(&replay.fen_snapshots[0]).ok();
+
+    // Mark board as needing spawn
+    replay.board_ready = false;
+    replay.position_dirty = true;
+    pieces_spawned.spawned = false;
+
+    info!("[REPLAY] Setup complete — ready to spawn board");
+}
+
+pub fn cleanup_replay(
+    mut commands: Commands,
+    pieces: Query<Entity, With<Piece>>,
+    mut replay: ResMut<PgnReplayState>,
+) {
+    for entity in pieces.iter() {
+        commands.entity(entity).despawn();
+    }
+    *replay = PgnReplayState::default();
+    commands.remove_resource::<ParsedPgnGameResource>();
+    info!("[REPLAY] Cleaned up replay resources");
+}
+
+pub fn replay_auto_advance_system(
+    mut replay: ResMut<PgnReplayState>,
+    parsed_pgn: Option<Res<ParsedPgnGameResource>>,
+    time: Res<Time>,
+) {
+    let Some(pgn) = parsed_pgn else { return };
+    if replay.paused {
+        return;
+    }
+    if replay.current_ply >= pgn.inner.moves.len() {
+        replay.paused = true;
+        return;
+    }
+
+    replay.timer.tick(time.delta());
+    if replay.timer.just_finished() {
+        replay.current_ply += 1;
+        replay.position_dirty = true;
+        replay.timer = Timer::from_seconds(replay.speed, TimerMode::Once);
+    }
+}
+
+pub fn replay_apply_move_system(
+    mut replay: ResMut<PgnReplayState>,
+    parsed_pgn: Option<Res<ParsedPgnGameResource>>,
+) {
+    if !replay.position_dirty {
+        return;
+    }
+    replay.position_dirty = false;
+
+    let Some(pgn) = parsed_pgn else { return };
+
+    // Clamp to valid range
+    let target_ply = replay.current_ply.min(pgn.inner.moves.len());
+
+    replay.prev_board = replay.engine.board;
+    // Single forward step → inject tween; jump or backward → full respawn only
+    replay.animate_next_advance = target_ply == replay.engine_ply + 1;
+    replay.engine_ply = target_ply;
+
+    // If we have a FEN snapshot, rebuild from it (handles both forward and backward)
+    if target_ply < replay.fen_snapshots.len() {
+        let fen = replay.fen_snapshots[target_ply].clone();
+        *replay.engine = game_from_fen_no_tt(&fen);
+        // Trigger piece re-spawn so the board visuals update.
+        replay.board_ready = false;
+    } else {
+        // Shouldn't happen if snapshots were generated correctly
+        warn!("[REPLAY] Missing FEN snapshot for ply {}", target_ply);
+    }
+}
+
+pub fn replay_sync_engine_system(replay: Res<PgnReplayState>, mut engine: ResMut<ChessEngine>) {
+    let fen = engine_to_fen(&replay.engine);
+    if engine.fen != fen {
+        engine.set_from_fen(&fen).ok();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replay_state_does_not_carry_the_engine_inline() {
+        // Debug builds copy a resource several times on its way through
+        // commands; with the engine inline, leaving a replay overflowed the stack.
+        let engine = std::mem::size_of::<nimzovich_engine::Game>();
+        let state = std::mem::size_of::<PgnReplayState>();
+        assert!(engine > 16 * 1024, "engine is {engine} bytes");
+        assert!(state < 1024, "replay state is {state} bytes");
+    }
+}

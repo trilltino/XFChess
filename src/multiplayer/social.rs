@@ -9,7 +9,6 @@ use crate::multiplayer::network::vps::{
 };
 use crate::multiplayer::types::NetworkEvent;
 
-
 #[derive(Resource)]
 pub struct FriendsState {
     pub contacts: Vec<SocialContact>,
@@ -82,7 +81,6 @@ pub struct BackendRegion {
     pub latency_ms: Option<u32>,
 }
 
-
 #[derive(Resource, Default)]
 pub struct LobbyFilterConfig {
     pub time_min: Option<u32>,
@@ -119,7 +117,6 @@ impl LobbySort {
     }
 }
 
-
 #[derive(Resource, Default)]
 pub struct LobbyFetchState {
     pub status: LobbyLoadStatus,
@@ -136,7 +133,6 @@ pub enum LobbyLoadStatus {
     Done,
     Error(String),
 }
-
 
 pub struct SocialPlugin;
 
@@ -157,11 +153,12 @@ impl Plugin for SocialPlugin {
                     tick_presence_sync,
                     fetch_backend_region_once,
                     check_opponent_presence,
-                ),
+                )
+                    .chain()
+                    .in_set(crate::core::schedule::SessionSet::Social),
             );
     }
 }
-
 
 fn sync_node_id_from_network(
     mut friends: ResMut<FriendsState>,
@@ -233,25 +230,23 @@ fn tick_friends_sync(mut state: ResMut<FriendsState>) {
     let pubkey = state.our_pubkey.clone();
     let poll_index = state.social_poll_index;
 
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            let contacts = get_contacts(&node_id, pubkey.as_deref()).unwrap_or_default();
-            let pending_requests =
-                get_pending_requests(&node_id, pubkey.as_deref()).unwrap_or_default();
-            let poll_resp = poll_social(&node_id, poll_index).unwrap_or_else(|_| {
-                crate::multiplayer::vps_client::SocialPollResponse {
-                    invites: vec![],
-                    next_index: poll_index,
-                }
-            });
-            let _ = tx.send(FriendsFetchResult {
-                contacts,
-                pending_requests,
-                invites: poll_resp.invites,
-                next_poll_index: poll_resp.next_index,
-            });
-        })
-        .detach();
+    crate::core::net_task::spawn_detached("social", move || {
+        let contacts = get_contacts(&node_id, pubkey.as_deref()).unwrap_or_default();
+        let pending_requests =
+            get_pending_requests(&node_id, pubkey.as_deref()).unwrap_or_default();
+        let poll_resp = poll_social(&node_id, poll_index).unwrap_or_else(|_| {
+            crate::multiplayer::vps_client::SocialPollResponse {
+                invites: vec![],
+                next_index: poll_index,
+            }
+        });
+        let _ = tx.send(FriendsFetchResult {
+            contacts,
+            pending_requests,
+            invites: poll_resp.invites,
+            next_poll_index: poll_resp.next_index,
+        });
+    });
 }
 
 fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlayersState>) {
@@ -285,21 +280,19 @@ fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlaye
     let (tx, rx) = bounded(1);
     online.fetch_rx = Some(rx);
 
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            // Heartbeat — best-effort; ignore failures.
-            let _ = update_presence(&SocialPresence {
-                node_id,
-                pubkey,
-                display_name: display,
-                status: "online".to_string(),
-                game_id: None,
-                updated_at: chrono::Utc::now().to_rfc3339(),
-            });
-            let count = get_online().map(|v| v.len()).unwrap_or(0);
-            let _ = tx.send(count);
-        })
-        .detach();
+    crate::core::net_task::spawn_detached("social", move || {
+        // Heartbeat — best-effort; ignore failures.
+        let _ = update_presence(&SocialPresence {
+            node_id,
+            pubkey,
+            display_name: display,
+            status: "online".to_string(),
+            game_id: None,
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        });
+        let count = get_online().map(|v| v.len()).unwrap_or(0);
+        let _ = tx.send(count);
+    });
 }
 
 fn check_opponent_presence(
@@ -335,17 +328,15 @@ fn check_opponent_presence(
         liveness.since_last_poll = 0.0;
         let (tx, rx) = bounded(1);
         liveness.fetch_rx = Some(rx);
-        bevy::tasks::IoTaskPool::get()
-            .spawn(async move {
-                let seen = get_online().ok().and_then(|list| {
-                    list.into_iter()
-                        .find(|p| p.node_id == opponent_node_id)
-                        .and_then(|p| chrono::DateTime::parse_from_rfc3339(&p.updated_at).ok())
-                        .map(|dt| dt.with_timezone(&chrono::Utc))
-                });
-                let _ = tx.send(seen);
-            })
-            .detach();
+        crate::core::net_task::spawn_detached("social", move || {
+            let seen = get_online().ok().and_then(|list| {
+                list.into_iter()
+                    .find(|p| p.node_id == opponent_node_id)
+                    .and_then(|p| chrono::DateTime::parse_from_rfc3339(&p.updated_at).ok())
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+            });
+            let _ = tx.send(seen);
+        });
     }
 }
 
@@ -357,15 +348,13 @@ fn fetch_backend_region_once(
         RegionFetchState::NotStarted => {
             let (tx, rx) = bounded::<(String, String, u32)>(1);
             *state = RegionFetchState::Pending(rx);
-            bevy::tasks::IoTaskPool::get()
-                .spawn(async move {
-                    let start = std::time::Instant::now();
-                    let (tag, label) = crate::multiplayer::vps_client::fetch_region()
-                        .unwrap_or_else(|_| ("unknown".to_string(), "Unknown Region".to_string()));
-                    let latency_ms = start.elapsed().as_millis() as u32;
-                    let _ = tx.send((tag, label, latency_ms));
-                })
-                .detach();
+            crate::core::net_task::spawn_detached("social", move || {
+                let start = std::time::Instant::now();
+                let (tag, label) = crate::multiplayer::vps_client::fetch_region()
+                    .unwrap_or_else(|_| ("unknown".to_string(), "Unknown Region".to_string()));
+                let latency_ms = start.elapsed().as_millis() as u32;
+                let _ = tx.send((tag, label, latency_ms));
+            });
         }
         RegionFetchState::Pending(rx) => {
             if let Ok((tag, label, latency_ms)) = rx.try_recv() {

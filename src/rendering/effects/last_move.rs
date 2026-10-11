@@ -73,7 +73,7 @@ pub fn update_last_move_highlight_system(
             LastMoveHighlight,
             bevy::picking::Pickable::IGNORE,
             Name::new("Last Move Highlight"),
-            crate::core::DespawnOnExit(crate::core::GameState::InGame),
+            crate::core::game_scene(),
             bevy::camera::visibility::RenderLayers::layer(
                 crate::game::systems::camera::BOARD_LAYER,
             ),
@@ -98,7 +98,7 @@ pub fn update_last_move_highlight_system(
             LastMoveArrow3D,
             bevy::picking::Pickable::IGNORE,
             Name::new("Last Move Arrow"),
-            crate::core::DespawnOnExit(crate::core::GameState::InGame),
+            crate::core::game_scene(),
             bevy::camera::visibility::RenderLayers::layer(
                 crate::game::systems::camera::BOARD_LAYER,
             ),

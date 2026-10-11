@@ -5,8 +5,8 @@ import {
   isNetworkMismatchError,
   isStaleBlockhashError,
   refreshBlockhash,
-  resolveExistingUsername,
-} from './App';
+} from './wallet/bridge';
+import { resolveExistingUsername } from './wallet/auth';
 
 // Signing must use the connected extension when multiple wallets are installed.
 describe('getConnectedProvider', () => {
@@ -257,8 +257,8 @@ describe('isStaleBlockhashError', () => {
     expect(isStaleBlockhashError(new Error('BLOCKHASH NOT FOUND'))).toBe(true);
   });
 
-  it('recognizes the bare RPC error code', () => {
-    expect(isStaleBlockhashError(new Error('some wrapper text -32002 more text'))).toBe(true);
+  it('does not retry the generic RPC simulation error code', () => {
+    expect(isStaleBlockhashError(new Error('some wrapper text -32002 more text'))).toBe(false);
   });
 
   it('does not misclassify an unrelated broadcast failure', () => {

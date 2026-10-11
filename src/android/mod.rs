@@ -1,3 +1,7 @@
+//! Android entry point (`#[bevy_main]`) and platform glue: logging, the rustls
+//! platform verifier, and JNI helpers in [`platform`]. The Gradle shell lives in
+//! `mobile/`.
+
 pub mod platform;
 
 use crate::{build_app, GameConfig};

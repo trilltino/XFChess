@@ -1,3 +1,5 @@
+//! Session-key lifecycle for passwordless on-chain moves.
+
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;

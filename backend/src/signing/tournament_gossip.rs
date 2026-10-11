@@ -2,6 +2,7 @@ use anyhow::Result;
 // Note: iroh crate not directly available, using String for node IDs
 pub type EndpointId = String;
 use rand::seq::IteratorRandom;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -64,13 +65,12 @@ impl TournamentGossipService {
 
     pub async fn ensure_topic_registered(&self, tournament_id: u64) {
         let mut topics = self.tournament_topics.write().await;
-        if !topics.contains_key(&tournament_id) {
-            let handle = TopicHandle {
+        if let Entry::Vacant(slot) = topics.entry(tournament_id) {
+            slot.insert(TopicHandle {
                 sender: None,
                 tournament_id,
                 subscriber_count: AtomicUsize::new(0),
-            };
-            topics.insert(tournament_id, handle);
+            });
             info!(
                 "[gossip] Ensured placeholder topic for tournament {}",
                 tournament_id

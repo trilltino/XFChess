@@ -1,7 +1,7 @@
 use bevy::audio::{AudioSinkPlayback, PlaybackMode, Volume};
 use bevy::prelude::*;
 
-use crate::core::{DespawnOnExit, GameState};
+use crate::core::GameState;
 
 const BASE_VOLUME: f32 = 0.30;
 const FADE_PER_SEC: f32 = 0.12;

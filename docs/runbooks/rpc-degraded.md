@@ -1,32 +1,21 @@
-# Solana / Triton RPC degraded
+# RPC degraded
 
-**Symptom:** slow RPC reads, `solana_rpc` health check failing, settlement/auth latency up,
-"primary circuit breaker OPEN" in logs.
-**Severity:** S2 (degraded; failover should absorb) → S1 if fallback also down.
-**Dashboards:** Grafana → RPC latency/error panel; `journalctl | grep '\[rpc\]'`.
+Use RPC latency/error metrics, detailed health and redacted backend logs to
+identify timeouts, HTTP 429 or an open primary circuit breaker.
 
-## Background
-Primary RPC = **Triton One** (`SOLANA_RPC_URL`, rpcpool, x-token in URL — redacted in logs).
-Fallback = `SOLANA_RPC_FALLBACK_URL` (public devnet). `read_with_failover` + a circuit
-breaker (3 fails → 30s cooldown) route reads to the fallback automatically. Every client
-has a 30s timeout.
+Base reads use `SOLANA_RPC_URL` and `SOLANA_RPC_FALLBACK_URL`; the shared read
+adapter has timeouts and circuit-breaker failover. Delegated game submission
+uses its MagicBlock routing configuration, not an arbitrary base fallback.
 
-## Diagnose
-1. Which endpoint is failing? Logs show redacted host + "failing over to ...".
-2. Triton status: check the Triton/rpcpool dashboard (rate-limit tier = developer — are we
-   throttled? 429s?).
-3. Fallback (public devnet) healthy? `curl -s https://api.devnet.solana.com -X POST -d
-   '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' -H 'content-type: application/json'`.
+Check the configured provider's status/usage and a same-cluster fallback.
+Do not assume a subscription tier or mainnet/devnet from this guide.
+Check [RPC probes](../../crates/cu_benchmark/docs/rpc.md) and
+[pricing](../../crates/cu_benchmark/docs/pricing.md) for measurement.
 
-## Mitigate
-1. Triton throttled → the breaker already sheds to fallback; consider upgrading the Triton
-   tier or adding a second keyed provider (Helius) as an additional fallback.
-2. Both degraded → reads will be slow; non-critical features degrade. Communicate status.
-3. Rotate a leaked/abused x-token in the Triton dashboard and update `.env`; restart.
+For throttling, reduce load and inspect billed method/traffic usage before
+changing a plan. If rotating a provider credential, update the protected
+environment and restart the service; never post the endpoint token in logs.
 
-## Verify
-1. `/health/detailed` → `solana_rpc` ok; breaker closes (no more OPEN logs); latency normal.
-
-## Root cause / follow-up
-- Persistent Triton issues → formalize multi-provider failover ordering in WS-D config and
-  record provider SLAs in a VENDORS.md (not yet written).
+A submission timeout is not proof of failure. Reconcile its signature/account
+before retrying. Verify healthy detailed checks and normal RPC latency/error
+rates. Stuck delegated games follow [ER recovery](magicblock-lifecycle-devnet.md).

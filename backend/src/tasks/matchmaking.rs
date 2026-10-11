@@ -35,14 +35,12 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
             .unwrap_or(0);
 
         // Sweep stale results even with an empty queue so crashed players cannot leave permanent entries.
-        match state.matches.lock() {
-            Ok(mut matches) => {
-                matches.retain(|_, m| now.saturating_sub(m.matched_at) < STALE_MATCH_SECS);
-            }
-            Err(e) => error!("[MATCHMAKING] Matches mutex poisoned during sweep: {}", e),
-        }
-        // Guard is dropped above, so this can safely await (std Mutex guards
-        // aren't Send and can't cross an .await point in a spawned task).
+        // The guard is a temporary dropped at the end of this statement; lock
+        // guards aren't Send and must not cross the .await below.
+        state
+            .matches
+            .lock()
+            .retain(|_, m| now.saturating_sub(m.matched_at) < STALE_MATCH_SECS);
         if let Err(e) = sqlx::query("DELETE FROM matchmaking_matches WHERE (? - matched_at) >= ?")
             .bind(now as i64)
             .bind(STALE_MATCH_SECS as i64)
@@ -57,13 +55,7 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
 
         // Mutate synchronously under the mutex; persist after releasing it.
         let (removed_stale, new_matches): (Vec<String>, Vec<(_, _, u64)>) = {
-            let mut queue = match state.queue.lock() {
-                Ok(q) => q,
-                Err(e) => {
-                    error!("[MATCHMAKING] Queue mutex poisoned: {}", e);
-                    continue;
-                }
-            };
+            let mut queue = state.queue.lock();
 
             // Drop tickets nobody ever paired with and the client never left
             // (dropped connection, closed tab) instead of waiting forever.
@@ -148,30 +140,28 @@ pub async fn run_matchmaking_service(state: SharedMatchmakingState) {
         // Save results to match map, then persist (queue rows for the
         // matched players cleared, match rows written).
         if !new_matches.is_empty() {
-            match state.matches.lock() {
-                Ok(mut matches) => {
-                    for (p1, p2, game_id) in &new_matches {
-                        matches.insert(
-                            p1.pubkey.clone(),
-                            MatchResult {
-                                game_id: *game_id,
-                                opponent: p2.pubkey.clone(),
-                                is_white: true,
-                                matched_at: now,
-                            },
-                        );
-                        matches.insert(
-                            p2.pubkey.clone(),
-                            MatchResult {
-                                game_id: *game_id,
-                                opponent: p1.pubkey.clone(),
-                                is_white: false,
-                                matched_at: now,
-                            },
-                        );
-                    }
+            {
+                let mut matches = state.matches.lock();
+                for (p1, p2, game_id) in &new_matches {
+                    matches.insert(
+                        p1.pubkey.clone(),
+                        MatchResult {
+                            game_id: *game_id,
+                            opponent: p2.pubkey.clone(),
+                            is_white: true,
+                            matched_at: now,
+                        },
+                    );
+                    matches.insert(
+                        p2.pubkey.clone(),
+                        MatchResult {
+                            game_id: *game_id,
+                            opponent: p1.pubkey.clone(),
+                            is_white: false,
+                            matched_at: now,
+                        },
+                    );
                 }
-                Err(e) => error!("[MATCHMAKING] Matches mutex poisoned: {}", e),
             }
 
             for (p1, p2, game_id) in &new_matches {

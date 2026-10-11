@@ -1,8 +1,6 @@
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -47,10 +45,7 @@ impl SharedMatchmakingState {
         {
             Ok(rows) => {
                 let count = rows.len();
-                let mut queue = self
-                    .queue
-                    .lock()
-                    .expect("Mutex lock should not be poisoned");
+                let mut queue = self.queue.lock();
                 queue.extend(
                     rows.into_iter()
                         .map(|(pubkey, elo, joined_at)| MatchmakingTicket {
@@ -72,10 +67,7 @@ impl SharedMatchmakingState {
         {
             Ok(rows) => {
                 let count = rows.len();
-                let mut matches = self
-                    .matches
-                    .lock()
-                    .expect("Mutex lock should not be poisoned");
+                let mut matches = self.matches.lock();
                 for (pubkey, game_id, opponent, is_white, matched_at) in rows {
                     matches.insert(
                         pubkey,
@@ -175,12 +167,12 @@ mod tests {
         let restarted = state_with_pool(pool);
         restarted.hydrate().await;
 
-        let queue = restarted.queue.lock().unwrap();
+        let queue = restarted.queue.lock();
         assert_eq!(queue.len(), 1);
         assert_eq!(queue[0].pubkey, "player_a");
         assert_eq!(queue[0].elo, 1500);
 
-        let matches = restarted.matches.lock().unwrap();
+        let matches = restarted.matches.lock();
         let m = matches
             .get("player_b")
             .expect("match should survive restart");

@@ -1,6 +1,5 @@
+use crate::core::net_task::{Pending, Poll};
 use bevy::prelude::*;
-use bevy::tasks::IoTaskPool;
-use crossbeam_channel::{unbounded, Receiver, TryRecvError};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -13,7 +12,6 @@ pub const INSTALL_GUIDE_URL: &str =
     "https://github.com/trilltino/XFChess/blob/main/docs/INSTALL.md";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Platform {
@@ -97,7 +95,6 @@ fn running_on_chrome_os() -> bool {
     false
 }
 
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReleaseAsset {
     pub name: String,
@@ -163,7 +160,6 @@ struct WireAsset {
     size: u64,
 }
 
-
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Version {
     parts: [u64; 3],
@@ -193,7 +189,6 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
     }
 }
 
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum UpdateStatus {
     #[default]
@@ -207,18 +202,19 @@ pub enum UpdateStatus {
 #[derive(Resource)]
 pub struct UpdateCheck {
     pub status: UpdateStatus,
-    pub panel_open: bool,
+    /// A newly found version should open the Updates panel once.
+    raise_pending: bool,
     skipped: Option<String>,
-    rx: Option<Receiver<Result<ReleaseInfo, String>>>,
+    pending: Option<Pending<Result<ReleaseInfo, String>>>,
 }
 
 impl Default for UpdateCheck {
     fn default() -> Self {
         Self {
             status: UpdateStatus::Idle,
-            panel_open: false,
+            raise_pending: false,
             skipped: load_skipped_version(),
-            rx: None,
+            pending: None,
         }
     }
 }
@@ -239,16 +235,8 @@ impl UpdateCheck {
         if self.is_checking() {
             return;
         }
-        let (tx, rx) = unbounded();
-        self.rx = Some(rx);
+        self.pending = Some(Pending::spawn("updates", fetch_latest_release));
         self.status = UpdateStatus::Checking;
-
-        // Blocking reqwest is safe on Bevy’s IoTaskPool; creating it inside Tokio would panic.
-        IoTaskPool::get()
-            .spawn(async move {
-                let _ = tx.send(fetch_latest_release());
-            })
-            .detach();
     }
 
     pub fn skip_available_version(&mut self) {
@@ -257,10 +245,14 @@ impl UpdateCheck {
             save_skipped_version(&version);
             self.skipped = Some(version);
         }
-        self.panel_open = false;
+        self.raise_pending = false;
+    }
+
+    /// True once after a check finds a version the player hasn't skipped.
+    pub fn take_raise_request(&mut self) -> bool {
+        std::mem::take(&mut self.raise_pending)
     }
 }
-
 
 fn fetch_latest_release() -> Result<ReleaseInfo, String> {
     let client = reqwest::blocking::Client::builder()
@@ -320,7 +312,6 @@ pub fn open_in_browser(url: &str) {
     }
 }
 
-
 const SKIP_FILENAME: &str = "update_check.json";
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -368,22 +359,21 @@ fn save_skipped_version(version: &str) {
     }
 }
 
-
 fn start_update_check(mut check: ResMut<UpdateCheck>) {
     info!("[UPDATE] Running {CURRENT_VERSION}; checking for a newer release");
     check.start();
 }
 
 fn poll_update_check(mut check: ResMut<UpdateCheck>) {
-    let Some(rx) = check.rx.as_ref() else {
+    let Some(pending) = check.pending.as_ref() else {
         return;
     };
-    let result = match rx.try_recv() {
-        Ok(result) => result,
-        Err(TryRecvError::Empty) => return,
-        Err(TryRecvError::Disconnected) => Err("Update check stopped unexpectedly".to_string()),
+    let result = match pending.poll() {
+        Poll::Running => return,
+        Poll::Ready(result) => result,
+        Poll::Lost => Err("Update check stopped unexpectedly".to_string()),
     };
-    check.rx = None;
+    check.pending = None;
 
     match result {
         Ok(release) if is_newer(&release.version, CURRENT_VERSION) => {
@@ -391,9 +381,9 @@ fn poll_update_check(mut check: ResMut<UpdateCheck>) {
                 "[UPDATE] {} is available (running {CURRENT_VERSION})",
                 release.version
             );
-            // Auto-raise once per version; a version the user skipped stays
-            // quiet until they open the panel from the menu themselves.
-            check.panel_open = check.skipped.as_deref() != Some(release.version.as_str());
+            // Raise the panel once per version; a skipped version stays quiet
+            // until the player opens the panel from the menu themselves.
+            check.raise_pending = check.skipped.as_deref() != Some(release.version.as_str());
             check.status = UpdateStatus::Available(release);
         }
         Ok(release) => {
@@ -415,8 +405,10 @@ pub struct UpdateCheckPlugin;
 impl Plugin for UpdateCheckPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UpdateCheck>()
-            .add_systems(Startup, start_update_check)
             .add_systems(Update, poll_update_check);
+        // Android updates through the dApp Store, not these desktop installers.
+        #[cfg(not(target_os = "android"))]
+        app.add_systems(Startup, start_update_check);
     }
 }
 

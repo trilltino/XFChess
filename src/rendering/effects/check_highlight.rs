@@ -56,7 +56,7 @@ pub fn update_check_highlight_system(
             Transform::from_translation(pos),
             CheckHighlightLight,
             Name::new("Check Highlight Light"),
-            crate::core::DespawnOnExit(crate::core::GameState::InGame),
+            crate::core::game_scene(),
             bevy::camera::visibility::RenderLayers::layer(
                 crate::game::systems::camera::BOARD_LAYER,
             ),

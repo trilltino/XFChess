@@ -8,6 +8,7 @@ export type TunnelState = "down" | "connecting" | "up" | "error";
 
 let state: TunnelState = "down";
 let lastError: string | null = null;
+let generation = 0;
 const listeners = new Set<(s: TunnelState) => void>();
 
 function setState(s: TunnelState) {
@@ -34,6 +35,7 @@ export function onTunnelState(cb: (s: TunnelState) => void): () => void {
  * tunnels, no-op for LOCAL, and propagate specific Rust failures.
  */
 export async function ensureTunnel(env: EnvConfig): Promise<void> {
+  const operation = ++generation;
   lastError = null;
   if (!env.tunnel) {
     // LOCAL — nothing to forward.
@@ -52,8 +54,10 @@ export async function ensureTunnel(env: EnvConfig): Promise<void> {
       remoteHost: t.remoteHost,
       remotePort: t.remotePort,
     });
+    if (operation !== generation) throw new Error("Tunnel connection cancelled");
     setState("up");
   } catch (e) {
+    if (operation !== generation) throw e;
     lastError = typeof e === "string" ? e : String(e);
     setState("error");
     throw new Error(lastError);
@@ -61,10 +65,11 @@ export async function ensureTunnel(env: EnvConfig): Promise<void> {
 }
 
 export async function killTunnel(): Promise<void> {
+  ++generation;
   try {
     await invoke("kill_admin_tunnel");
   } catch {
     // Nothing running, or the command isn't available in this build.
   }
-  if (state !== "error") setState("down");
+  setState("down");
 }

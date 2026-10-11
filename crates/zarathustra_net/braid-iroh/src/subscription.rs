@@ -1,4 +1,4 @@
-use braid_core::Update;
+use braid_http::Update;
 use bytes::Bytes;
 use iroh::EndpointId;
 use iroh_gossip::api::{GossipReceiver, GossipSender, GossipTopic};
@@ -20,6 +20,7 @@ const TOPIC_SWEEP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 pub struct SubscriptionManager {
     gossip: Gossip,
     topics: Arc<Mutex<HashMap<String, TopicEntry>>>,
+    sweep_task: tokio::task::JoinHandle<()>,
 }
 
 impl SubscriptionManager {
@@ -27,7 +28,7 @@ impl SubscriptionManager {
         let topics: Arc<Mutex<HashMap<String, TopicEntry>>> = Arc::new(Mutex::new(HashMap::new()));
 
         let sweep_topics = topics.clone();
-        tokio::spawn(async move {
+        let sweep_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(TOPIC_SWEEP_INTERVAL);
             loop {
                 interval.tick().await;
@@ -45,17 +46,16 @@ impl SubscriptionManager {
             }
         });
 
-        Self { gossip, topics }
-    }
-
-    pub fn normalize_url(url: &str) -> String {
-        if url.starts_with('/') {
-            url.trim_end_matches('/').to_string()
-        } else {
-            format!("/{}", url.trim_end_matches('/'))
+        Self {
+            gossip,
+            topics,
+            sweep_task,
         }
     }
 
+    pub fn normalize_url(url: &str) -> String {
+        format!("/{}", url.trim_matches('/'))
+    }
     pub fn topic_for_url(url: &str) -> TopicId {
         let normalized = Self::normalize_url(url);
         let hash = blake3::hash(normalized.as_bytes());
@@ -94,55 +94,31 @@ impl SubscriptionManager {
         let normalized = Self::normalize_url(url);
         let sender = {
             let mut topics = self.topics.lock().await;
-            tracing::debug!(
-                url,
-                normalized = normalized.as_str(),
-                topics_count = topics.len(),
-                "broadcast_raw"
-            );
-
-            // If we don't have a sender for this topic, join it (with no bootstrap peers)
-            // This allows us to publish to a topic we haven't explicitly subscribed to
-            if !topics.contains_key(&normalized) {
-                tracing::debug!(normalized = normalized.as_str(), "creating new topic");
-                let topic_id = Self::topic_for_url(&normalized);
-                // Join with empty bootstrap peers since we are likely the publisher/origin
-                let topic: GossipTopic = self.gossip.subscribe(topic_id, vec![]).await?;
-                let (sender, _receiver) = topic.split();
-
-                // We discard the receiver because we don't necessarily want to listen to our own updates
-                // (or maybe we do? but for now just enable publishing)
-                topics.insert(
-                    normalized.clone(),
-                    TopicEntry {
-                        sender,
-                        last_active: Instant::now(),
-                    },
-                );
-            } else if let Some(entry) = topics.get_mut(&normalized) {
+            topics.get_mut(&normalized).map(|entry| {
                 entry.last_active = Instant::now();
-            }
-
-            topics.get(&normalized).map(|entry| entry.sender.clone())
+                entry.sender.clone()
+            })
         };
-
-        if let Some(sender) = sender {
-            tracing::debug!(
-                normalized = normalized.as_str(),
-                bytes = data.len(),
-                "sending broadcast"
-            );
-            sender.broadcast(data).await?;
-            tracing::debug!(normalized = normalized.as_str(), "broadcast complete");
-        }
+        let sender = match sender {
+            Some(sender) => sender,
+            None => {
+                let topic = self
+                    .gossip
+                    .subscribe(Self::topic_for_url(&normalized), vec![])
+                    .await?;
+                let (candidate, _receiver) = topic.split();
+                let mut topics = self.topics.lock().await;
+                let entry = topics.entry(normalized).or_insert_with(|| TopicEntry {
+                    sender: candidate,
+                    last_active: Instant::now(),
+                });
+                entry.last_active = Instant::now();
+                entry.sender.clone()
+            }
+        };
+        sender.broadcast(data).await?;
         Ok(())
     }
-
-    #[allow(dead_code)]
-    pub fn gossip(&self) -> &Gossip {
-        &self.gossip
-    }
-
     pub async fn join_peers(&self, url: &str, peers: Vec<EndpointId>) -> anyhow::Result<()> {
         let normalized = Self::normalize_url(url);
         let sender = {
@@ -162,6 +138,12 @@ impl SubscriptionManager {
             }
             None => anyhow::bail!("Topic not found: {}", normalized),
         }
+    }
+}
+
+impl Drop for SubscriptionManager {
+    fn drop(&mut self) {
+        self.sweep_task.abort();
     }
 }
 
@@ -191,7 +173,6 @@ mod tests {
         let topic = SubscriptionManager::topic_for_url("");
         let topic_bytes: &[u8; 32] = topic.as_ref();
 
-        // Should produce a valid 32-byte hash (not panic)
         assert_eq!(topic_bytes.len(), 32);
     }
 
@@ -201,7 +182,6 @@ mod tests {
         let topic = SubscriptionManager::topic_for_url(&long_url);
         let topic_bytes: &[u8; 32] = topic.as_ref();
 
-        // Should still produce a valid 32-byte hash
         assert_eq!(topic_bytes.len(), 32);
     }
 
@@ -211,7 +191,6 @@ mod tests {
         let topic1 = SubscriptionManager::topic_for_url(url);
         let topic2 = SubscriptionManager::topic_for_url(url);
 
-        // Should be deterministic even with special characters
         assert_eq!(topic1, topic2);
     }
 }

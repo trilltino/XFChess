@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-pub const RETRYABLE_STATUS: &[u16] = &[309, 408, 425, 429, 432, 502, 503, 504];
+pub const RETRYABLE_STATUS: &[u16] = &[309, 408, 425, 429, 432, 500, 502, 503, 504];
 
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
@@ -125,7 +125,7 @@ impl RetryState {
     }
 
     fn decide_retry(&mut self, retry_after: Option<Duration>) -> RetryDecision {
-        self.attempts += 1;
+        self.attempts = self.attempts.saturating_add(1);
         if let Some(max) = self.config.max_retries {
             if self.attempts > max {
                 return RetryDecision::DontRetry;
@@ -139,7 +139,7 @@ impl RetryState {
         };
 
         self.current_backoff = std::cmp::min(
-            self.current_backoff + Duration::from_secs(1),
+            self.current_backoff.saturating_add(Duration::from_secs(1)),
             self.config.max_backoff,
         );
 
@@ -153,15 +153,34 @@ impl RetryState {
 }
 
 pub fn parse_retry_after(value: &str) -> Option<Duration> {
-    if let Ok(seconds) = value.parse::<u64>() {
+    if let Ok(seconds) = value.trim().parse::<u64>() {
         return Some(Duration::from_secs(seconds));
     }
-    None
+    httpdate::parse_http_date(value.trim())
+        .ok()
+        .map(|deadline| {
+            deadline
+                .duration_since(std::time::SystemTime::now())
+                .unwrap_or_default()
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_after_accepts_seconds_and_http_dates() {
+        assert_eq!(parse_retry_after(" 2 "), Some(Duration::from_secs(2)));
+        assert_eq!(
+            parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT"),
+            Some(Duration::ZERO)
+        );
+        let future = std::time::SystemTime::now() + Duration::from_secs(60);
+        let delay = parse_retry_after(&httpdate::fmt_http_date(future)).unwrap();
+        assert!(delay > Duration::from_secs(58) && delay <= Duration::from_secs(60));
+        assert_eq!(parse_retry_after("not a date"), None);
+    }
 
     #[test]
     fn test_default_config() {

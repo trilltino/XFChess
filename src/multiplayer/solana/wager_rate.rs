@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::time::{Duration, Instant};
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 use crate::multiplayer::vps_client;
 
@@ -64,7 +64,10 @@ impl Plugin for SolUsdRatePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SolUsdRate>()
             .add_systems(Startup, kick_off_sol_usd_refresh)
-            .add_systems(Update, poll_sol_usd_refresh);
+            .add_systems(
+                Update,
+                poll_sol_usd_refresh.in_set(crate::core::schedule::SessionSet::Wallet),
+            );
     }
 }
 
@@ -103,21 +106,20 @@ fn dispatch_refresh(rate: &mut SolUsdRate) {
     rate.last_refresh = Some(Instant::now());
 
     let response_tx = rate.response_tx.clone();
-    bevy::tasks::IoTaskPool::get()
-        .spawn(async move {
-            match vps_client::fetch_sol_usd_rate() {
-                Ok(payload) => {
-                    let _ = response_tx.send(SolUsdRateMessage::Success(SolUsdRateSnapshot {
-                        sol_per_usd: payload.sol_per_usd,
-                        usd_per_sol: payload.usd_per_sol,
-                        fetched_at: payload.fetched_at,
-                    }));
-                }
-                Err(err) => {
-                    error!("[SOL_USD_RATE] Backend fetch error: {}", err);
-                    let _ = response_tx.send(SolUsdRateMessage::Error(err));
-                }
+    crate::core::net_task::spawn_detached(
+        "wager_rate",
+        move || match vps_client::fetch_sol_usd_rate() {
+            Ok(payload) => {
+                let _ = response_tx.send(SolUsdRateMessage::Success(SolUsdRateSnapshot {
+                    sol_per_usd: payload.sol_per_usd,
+                    usd_per_sol: payload.usd_per_sol,
+                    fetched_at: payload.fetched_at,
+                }));
             }
-        })
-        .detach();
+            Err(err) => {
+                error!("[SOL_USD_RATE] Backend fetch error: {}", err);
+                let _ = response_tx.send(SolUsdRateMessage::Error(err));
+            }
+        },
+    );
 }

@@ -1,5 +1,4 @@
 use axum::{
-    body::Body,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -7,15 +6,14 @@ use axum::{
     Json, Router,
 };
 use braid_chess::ChessMessage;
-use bytes::Bytes;
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
 use tokio::sync::{broadcast, RwLock};
-use tokio::time::interval;
-use tokio_stream::wrappers::BroadcastStream;
-use tracing::{debug, info, warn};
-use xfchess_braid_server::resource::protocol::{format_chunk, format_heartbeat, BraidUpdate};
+use tracing::{info, warn};
+use xfchess_braid_server::resource::protocol::BraidUpdate;
+
+mod stream;
+use stream::get_stream;
 
 use crate::signing::AppState;
 
@@ -128,17 +126,6 @@ impl GameLogState {
             .collect()
     }
 
-    pub async fn subscribe(
-        &self,
-        game_id: &str,
-        stream: &str,
-    ) -> (Vec<serde_json::Value>, broadcast::Receiver<BraidUpdate>) {
-        let tx = self.channel(game_id, stream).await;
-        let rx = tx.subscribe();
-        let history = self.load_history(game_id, stream).await;
-        (history, rx)
-    }
-
     pub async fn snapshot(&self, game_id: &str, stream: &str) -> serde_json::Value {
         serde_json::Value::Array(self.load_history(game_id, stream).await)
     }
@@ -185,9 +172,13 @@ impl GameLogState {
             .map_err(|e| PutEventError::Db(sqlx::Error::Decode(Box::new(e))))?;
         let created_at = chrono::Utc::now().timestamp();
 
-        // Read the head, validate, and insert in one transaction to serialize
-        // concurrent writes to the same game.
-        let mut tx = self.pool.begin().await.map_err(PutEventError::Db)?;
+        // Acquire the writer before reading: deferred transactions can fail
+        // with SQLITE_BUSY_SNAPSHOT when another game advances the WAL.
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(PutEventError::Db)?;
 
         // Check duplicate versions before parents: a retry remains valid after the head advances.
         let previous: Option<(i64, String, String)> = sqlx::query_as(
@@ -492,7 +483,6 @@ fn kind_of(msg: &ChessMessage) -> &'static str {
     }
 }
 
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GameEventReq {
     #[serde(rename = "player_pubkey")]
@@ -506,7 +496,6 @@ pub struct GameEventReq {
     #[serde(default)]
     pub device_id: Option<String>,
 }
-
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -591,66 +580,6 @@ async fn put_chat(
     put_event_handler(&state, &game_id, "chat", req, None).await
 }
 
-
-async fn get_stream(state: &AppState, game_id: &str, stream: &str, headers: HeaderMap) -> Response {
-    if !wants_subscribe(&headers) {
-        let snapshot = state.game_log.snapshot(game_id, stream).await;
-        return (StatusCode::OK, Json(snapshot)).into_response();
-    }
-
-    let (history, rx) = state.game_log.subscribe(game_id, stream).await;
-
-    // Replay each historical entry as a bare ChessMessage, matching live update bodies.
-    let history_chunks: Vec<Bytes> = history
-        .into_iter()
-        .enumerate()
-        .map(|(i, entry)| format_chunk(&BraidUpdate::snapshot(i as u64, entry)))
-        .collect();
-    let hb_chunk = format_heartbeat();
-    let rx_stream = BroadcastStream::new(rx);
-    let game_id_owned = game_id.to_string();
-    let stream_owned = stream.to_string();
-
-    let body_stream = async_stream::stream! {
-        debug!(
-            "[game-log] subscriber connected to {}/{} ({} historical entries)",
-            game_id_owned, stream_owned, history_chunks.len()
-        );
-        for chunk in history_chunks {
-            yield Ok::<Bytes, String>(chunk);
-        }
-
-        let mut ticker = interval(Duration::from_secs(HEARTBEAT_SECS));
-        ticker.tick().await;
-
-        tokio::pin!(rx_stream);
-        loop {
-            tokio::select! {
-                maybe_update = rx_stream.next() => {
-                    match maybe_update {
-                        Some(Ok(update)) => yield Ok(format_chunk(&update)),
-                        Some(Err(e)) => warn!("[game-log] broadcast lag on {}/{}: {}", game_id_owned, stream_owned, e),
-                        None => break,
-                    }
-                }
-                _ = ticker.tick() => {
-                    yield Ok(hb_chunk.clone());
-                }
-            }
-        }
-        debug!("[game-log] subscriber disconnected from {}/{}", game_id_owned, stream_owned);
-    };
-
-    Response::builder()
-        .status(209)
-        .header("Content-Type", "application/http-history")
-        .header("Cache-Control", "no-store")
-        .header("Heartbeats", HEARTBEAT_SECS.to_string())
-        .body(Body::from_stream(body_stream))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-}
-
-// Accept Subscribe: true and legacy keep-alive values for Braid streaming.
 fn wants_subscribe(headers: &HeaderMap) -> bool {
     headers
         .get("Prefer")
@@ -663,7 +592,6 @@ fn wants_subscribe(headers: &HeaderMap) -> bool {
             .map(|v| v.eq_ignore_ascii_case("keep-alive") || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
 }
-
 
 fn is_db_locked(e: &sqlx::Error) -> bool {
     e.as_database_error()
@@ -832,13 +760,12 @@ async fn auth_ok(state: &AppState, req: &GameEventReq) -> bool {
     matches!(active.get(&wallet), Some(kp) if kp.pubkey().to_string() == req.session_token)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use braid_chess::message::MovePayload;
 
-    async fn migrated_pool() -> sqlx::SqlitePool {
+    pub(super) async fn migrated_pool() -> sqlx::SqlitePool {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
         sqlx::raw_sql(include_str!("../../../migrations/027_game_event_log.sql"))
             .execute(&pool)
@@ -853,7 +780,7 @@ mod tests {
         pool
     }
 
-    fn move_message(fen_after: &str, move_number: u32) -> ChessMessage {
+    pub(super) fn move_message(fen_after: &str, move_number: u32) -> ChessMessage {
         ChessMessage::Move(MovePayload::from_uci(
             "e2e4",
             fen_after,
@@ -1046,7 +973,7 @@ mod tests {
         let pool = migrated_pool().await;
         let state = GameLogState::new(pool, None);
 
-        let (_, mut rx) = state.subscribe("g1", "moves").await;
+        let mut rx = state.channel("g1", "moves").await.subscribe();
 
         let m1 = move_message("fen1", 1);
         let v1 = braid_chess::version_hash("fen1", 1);

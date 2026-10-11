@@ -1,0 +1,94 @@
+rule_files:
+- ../rules/xfchess.yml
+- ../rules/disk_alerts.yml
+evaluation_interval: 1m
+tests:
+- name: failed scrape fires backend alert
+  interval: 1m
+  input_series:
+  - series: up{job="xfchess-backend",instance="localhost:8090"}
+    values: '0x10'
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: BackendDown
+    exp_alerts:
+    - exp_labels:
+        job: xfchess-backend
+        instance: localhost:8090
+        severity: critical
+      exp_annotations: &id001
+        summary: XFChess backend is down
+        description: Prometheus cannot scrape the backend. Check the service and private
+          /readyz endpoint.
+- name: missing target fires backend alert
+  interval: 1m
+  input_series: []
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: BackendDown
+    exp_alerts:
+    - exp_labels:
+        job: xfchess-backend
+        severity: critical
+      exp_annotations: *id001
+- name: error type labels aggregate by chain and real error ratio
+  interval: 1m
+  input_series:
+  - series: transactions_submitted_total{chain="solana"}
+    values: 0+100x10
+  - series: transactions_failed_total{chain="solana",error_type="rpc"}
+    values: 0+4x10
+  - series: transactions_failed_total{chain="solana",error_type="simulation"}
+    values: 0+2x10
+  - series: http_requests_total{endpoint="/move",status="500"}
+    values: 0+20x10
+  - series: http_requests_total{endpoint="/move",status="200"}
+    values: 0+80x10
+  promql_expr_test:
+  - expr: sum by (job, instance, chain) (rate(transactions_failed_total[5m])) / sum
+      by (job, instance, chain) (rate(transactions_submitted_total[5m])) > 0.05
+    eval_time: 10m
+    exp_samples:
+    - labels: '{chain="solana"}'
+      value: 0.06
+  - expr: sum by (job, instance) (rate(http_requests_total{status=~"5.."}[5m])) /
+      sum by (job, instance) (rate(http_requests_total[5m])) > 0.1
+    eval_time: 10m
+    exp_samples:
+    - labels: '{}'
+      value: 0.2
+- name: zero traffic does not page
+  interval: 1m
+  input_series:
+  - series: transactions_submitted_total{chain="solana"}
+    values: '0x10'
+  - series: transactions_failed_total{chain="solana",error_type="rpc"}
+    values: '0x10'
+  - series: http_requests_total{status="500"}
+    values: '0x10'
+  - series: http_requests_total{status="200"}
+    values: '0x10'
+  promql_expr_test:
+  - expr: sum by (job, instance) (rate(http_requests_total{status=~"5.."}[5m])) /
+      sum by (job, instance) (rate(http_requests_total[5m])) > 0.1
+    eval_time: 10m
+    exp_samples: []
+  - expr: sum by (job, instance, chain) (rate(transactions_failed_total[5m])) / sum
+      by (job, instance, chain) (rate(transactions_submitted_total[5m])) > 0.05
+    eval_time: 10m
+    exp_samples: []
+- name: root disk is monitored when opt is not a separate mount
+  interval: 1m
+  input_series:
+  - series: node_filesystem_avail_bytes{job="node",mountpoint="/",fstype="ext4"}
+    values: 4x10
+  - series: node_filesystem_size_bytes{job="node",mountpoint="/",fstype="ext4"}
+    values: 100x10
+  promql_expr_test:
+  - expr: 1 - node_filesystem_avail_bytes{job="node",mountpoint=~"/|/opt/xfchess",fstype!~"tmpfs|overlay|squashfs"}
+      / node_filesystem_size_bytes{job="node",mountpoint=~"/|/opt/xfchess",fstype!~"tmpfs|overlay|squashfs"}
+      > 0.95
+    eval_time: 10m
+    exp_samples:
+    - labels: '{job="node",mountpoint="/",fstype="ext4"}'
+      value: 0.96

@@ -10,15 +10,14 @@ pub enum SessionStatus {
     Expired,
 }
 
-impl ToString for SessionStatus {
-    fn to_string(&self) -> String {
-        match self {
+impl std::fmt::Display for SessionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
             SessionStatus::Active => "active",
             SessionStatus::Paused => "paused",
             SessionStatus::Resumable => "resumable",
             SessionStatus::Expired => "expired",
-        }
-        .to_string()
+        })
     }
 }
 

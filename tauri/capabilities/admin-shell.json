@@ -1,23 +1,59 @@
 {
   "identifier": "admin-shell",
-  "description": "Restricted shell access for the tournament-admin window ONLY (VPS operations). The wallet windows deliberately have no shell access.",
-  "windows": ["tournament-admin"],
+  "description": "SSH operations for the tournament-admin window. Local arguments are pinned; remote shell input is quoted behind a fixed timeout command so it cannot become a local SSH option.",
+  "windows": [
+    "tournament-admin"
+  ],
   "local": true,
   "remote": {
-    "urls": ["http://localhost:*/*"]
+    "urls": [
+      "http://localhost:*/tournament-admin/*"
+    ]
   },
   "permissions": [
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "name": "ssh", "cmd": "ssh", "args": true },
         {
-          "name": "powershell",
-          "cmd": "powershell",
+          "name": "ssh-probe",
+          "cmd": "ssh",
           "args": [
-            "-NoExit",
-            "-Command",
-            { "validator": "^ssh (-i \\S+ )?(deploy|root|tunnel)@\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$" }
+            "-i",
+            {
+              "validator": "^[A-Za-z0-9:_./\\\\~][A-Za-z0-9:_./\\\\~-]*$"
+            },
+            "-o",
+            "ConnectTimeout=3",
+            "-o",
+            "BatchMode=yes",
+            {
+              "validator": "^deploy@\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"
+            },
+            "echo ok"
+          ]
+        },
+        {
+          "name": "ssh-exec",
+          "cmd": "ssh",
+          "args": [
+            "-i",
+            {
+              "validator": "^[A-Za-z0-9:_./\\\\~][A-Za-z0-9:_./\\\\~-]*$"
+            },
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=8",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=2",
+            {
+              "validator": "^deploy@\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"
+            },
+            {
+              "validator": "^timeout 30s bash -lc '[\\s\\S]*'$"
+            }
           ]
         }
       ]
@@ -25,14 +61,15 @@
     {
       "identifier": "shell:allow-spawn",
       "allow": [
-        { "name": "ssh", "cmd": "ssh", "args": true },
         {
           "name": "powershell",
           "cmd": "powershell",
           "args": [
             "-NoExit",
             "-Command",
-            { "validator": "^ssh (-i \\S+ )?(deploy|root|tunnel)@\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$" }
+            {
+              "validator": "^ssh -i [A-Za-z0-9:_./\\\\~][A-Za-z0-9:_./\\\\~-]* deploy@\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"
+            }
           ]
         }
       ]

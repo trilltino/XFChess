@@ -17,8 +17,12 @@ pub struct SpectateSyncPlugin;
 
 impl Plugin for SpectateSyncPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SpectatorSyncStatus>()
-            .add_systems(Update, sync_spectator_board.run_if(is_spectator));
+        app.init_resource::<SpectatorSyncStatus>().add_systems(
+            Update,
+            sync_spectator_board
+                .run_if(is_spectator)
+                .in_set(crate::core::schedule::MoveSource::Spectator),
+        );
     }
 }
 
@@ -44,7 +48,7 @@ pub fn sync_spectator_board(
         {
             if !sync_status.initialized {
                 info!("[SPECTATE] Initial sync from FEN: {}", fen);
-                if let Err(e) = engine.set_from_fen(&fen) {
+                if let Err(e) = engine.set_from_fen(fen) {
                     error!("[SPECTATE] Failed to sync board from FEN: {}", e);
                 }
                 sync_status.initialized = true;
@@ -53,29 +57,22 @@ pub fn sync_spectator_board(
             }
 
             if let Some(uci) = last_move {
-                if Some(uci.clone()) != sync_status.last_move_uci {
+                if sync_status.last_move_uci.as_ref() != Some(uci) {
                     info!("[SPECTATE] Detected new move: {}", uci);
 
-                    if uci.len() >= 4 {
-                        let from_file =
-                            (uci.as_bytes()[0] as char).to_digit(36).unwrap_or(0) as u8 - 10;
-                        let from_rank =
-                            (uci.as_bytes()[1] as char).to_digit(10).unwrap_or(0) as u8 - 1;
-                        let to_file =
-                            (uci.as_bytes()[2] as char).to_digit(36).unwrap_or(0) as u8 - 10;
-                        let to_rank =
-                            (uci.as_bytes()[3] as char).to_digit(10).unwrap_or(0) as u8 - 1;
-                        let promotion = uci.get(4..5).map(|s| s.chars().next().unwrap());
-
+                    // The move comes off the network: parse it, never trust it.
+                    if let Some((from, to, promotion)) = ChessEngine::parse_uci_move(uci) {
                         move_events.write(NetworkMoveEvent {
-                            from: (from_file, from_rank),
-                            to: (to_file, to_rank),
+                            from,
+                            to,
                             promotion,
                             expected_fen: None,
                             dedup_version: None,
                         });
 
                         sync_status.last_move_uci = Some(uci.clone());
+                    } else {
+                        warn!("[SPECTATE] Ignoring malformed move {:?}", uci);
                     }
                 }
             }

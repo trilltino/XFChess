@@ -1,3 +1,5 @@
+//! Piece move animation for the mini board.
+
 mod components;
 mod systems;
 

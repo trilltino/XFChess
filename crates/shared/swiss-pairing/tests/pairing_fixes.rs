@@ -19,7 +19,6 @@ fn cfg() -> PairingConfig {
     PairingConfig::default()
 }
 
-
 #[test]
 fn rematch_transposition_in_bottom_half() {
     let mut p1 = player("p1", 2000, 2.0);
@@ -39,7 +38,6 @@ fn rematch_transposition_in_bottom_half() {
     }
 }
 
-
 #[test]
 fn forced_bye_on_odd_leftover_after_float() {
     let mut p1 = player("p1", 2000, 0.0);
@@ -58,7 +56,6 @@ fn forced_bye_on_odd_leftover_after_float() {
     );
     assert!(!round.byes.is_empty(), "at least one forced bye expected");
 }
-
 
 #[test]
 fn five_round_bye_rotation_no_double_bye() {
@@ -113,7 +110,6 @@ fn five_round_bye_rotation_no_double_bye() {
     }
 }
 
-
 #[test]
 fn float_down_recorded_in_round() {
     // Top 2 pair cleanly within their scoregroup; bottom 4 pair among themselves.
@@ -135,4 +131,50 @@ fn float_down_recorded_in_round() {
     );
     assert_eq!(round.pairings.len(), 3);
     assert!(round.byes.is_empty());
+}
+
+#[test]
+fn odd_scoregroups_float_down_instead_of_each_taking_a_bye() {
+    // Two odd scoregroups (3 on 2.0, 3 on 1.0) in an even field: the top group
+    // floats one player down, nobody gets a bye, and all six play.
+    let players = vec![
+        player("a", 2000, 2.0),
+        player("b", 1900, 2.0),
+        player("c", 1800, 2.0),
+        player("d", 1700, 1.0),
+        player("e", 1600, 1.0),
+        player("f", 1500, 1.0),
+    ];
+
+    let round = generate_pairings(3, &players, 5, &cfg()).unwrap();
+
+    assert!(
+        round.byes.is_empty(),
+        "even field must not get a bye: {:?}",
+        round.byes
+    );
+    assert_eq!(round.pairings.len(), 3);
+    assert_eq!(round.float_downs, vec!["c".to_string()]);
+}
+
+#[test]
+fn at_most_one_bye_and_everyone_accounted_for() {
+    // Sweep field sizes and score spreads that produce many odd scoregroups.
+    for n in 2usize..=17 {
+        let players: Vec<SwissPlayer> = (0..n)
+            .map(|i| player(&format!("p{i}"), 2000 - i as u32 * 10, (i % 4) as f64 * 0.5))
+            .collect();
+        let round = generate_pairings(2, &players, 5, &cfg()).unwrap();
+
+        assert_eq!(round.byes.len(), n % 2, "n={n}: byes {:?}", round.byes);
+        let mut seen: Vec<&String> = round
+            .pairings
+            .iter()
+            .flat_map(|p| [&p.white, &p.black])
+            .chain(round.byes.iter())
+            .collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), n, "n={n}: every player exactly once");
+    }
 }

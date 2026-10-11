@@ -7,12 +7,11 @@ tools have `required-features = ["solana"]` in the root [Cargo.toml](../../Cargo
 
 | Binary | File | Purpose |
 |--------|------|---------|
-| `debugger` | [debugger.rs](debugger.rs) | Transaction/game-state inspector (no Solana feature needed) |
+| `debugger` | [debugger.rs](debugger.rs) | Local log/debug stream inspector |
 | `pda` | [pda.rs](pda.rs) | Derive and print program PDAs (game, profile, vaults) |
 | `profile_pda` | [profile_pda.rs](profile_pda.rs) | Inspect a `PlayerProfile` PDA |
 | `read_game` | [read_game.rs](read_game.rs) | Fetch and decode a `Game` account |
-| `tournament_test` / `tournament_real_test` | [tournament_test.rs](tournament_test.rs), [tournament_real_test.rs](tournament_real_test.rs) | Drive tournament flows against devnet |
-| `tournament_data_gen` | [tournament_data_gen.rs](tournament_data_gen.rs) | **Stale** — fails against current instruction signatures; removal candidate ([docs/legacy-cleanup-audit.md](../../docs/legacy-cleanup-audit.md)) |
+| `tournament_test` | [tournament_test.rs](tournament_test.rs) | Drive tournament flows against devnet |
 
 ## Example
 
@@ -24,7 +23,6 @@ cargo run --bin read_game --features solana -- <GAME_ID>
 
 ## Gotchas
 
-- These tools hit **devnet** by default and each hardcodes its own local `PROGRAM_ID`/seed
-  constants rather than importing a shared source (`src/solana/constants.rs` is unused
-  scaffold, not what these tools reference — see `docs/AUDIT_TRACKING.md` Phase 8); they
-  do not read the backend's `.env`.
+- Check each tool's endpoint, program ID and key-loading behavior before use;
+  do not assume it uses the backend environment.
+- Maintained cost/capacity workflows live in [cu_benchmark](../../crates/cu_benchmark/README.md).

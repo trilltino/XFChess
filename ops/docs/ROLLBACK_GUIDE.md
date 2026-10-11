@@ -1,58 +1,40 @@
-# XFChess Rollback Guide
+# Rollback and recovery
 
-This document provides detailed instructions for rolling back a deployment on Hetzner in case of issues after a deployment.
+From the repository terminal:
 
-## Prerequisites
-- SSH access to the Hetzner server (default: `root@178.104.55.19`)
-- PowerShell or a terminal with `ssh` command available
-
-## Rollback Steps
-
-### 1. Verify the Need for Rollback
-Before proceeding with a rollback, confirm that there is an issue with the current deployment that cannot be resolved through other means. Check logs with:
-```bash
-ssh root@178.104.55.19 journalctl -u xfchess-backend -n 50
-```
-
-### 2. Execute Rollback Script
-The rollback script restores the previous backend binary and, optionally, the databases to their state before the last deployment.
-
-#### Rollback Binary Only
-Run the following command to rollback only the backend binary:
 ```powershell
-powershell -ExecutionPolicy Bypass -File ops\rollback.ps1 -Server 178.104.55.19 -User root
+powershell -File ops\scripts\rollback.ps1 -Server 178.104.55.19
+# Or select an existing release explicitly:
+powershell -File ops\scripts\rollback.ps1 -Server 178.104.55.19 -Release <release-id>
 ```
 
-#### Rollback Binary and Databases
-If the issue involves data corruption or incompatible database changes, rollback both the binary and databases:
-```powershell
-powershell -ExecutionPolicy Bypass -File ops\rollback.ps1 -Server 178.104.55.19 -User root -RestoreDb
-```
-**Warning**: Restoring databases will result in loss of any user registrations or KYC data added since the last backup snapshot.
+Rollback switches the backend, website and saved nginx/systemd configuration
+together. It uses the same identity and SSH checks as deployment and exits with
+an error if readiness or the expected commit cannot be verified. A failed rollback
+attempt restores the formerly current release.
 
-### 3. Verify Rollback Success
-After the rollback script completes, it will attempt to verify if the backend is responding. Ensure the API and health endpoints are operational:
-- API: `http://178.104.55.19/api/user/status/11111111111111111111111111111111`
-- Health: `http://178.104.55.19/health`
+Database migrations and secrets are preserved. Check backward schema compatibility
+before rolling back a migrated release. Deployment snapshots are in
+`/opt/xfchess/backups/pre-<release-id>/`; these are private, local recovery copies,
+not an offsite backup. The first upgrade from the old layout saves a `legacy-*`
+release and the original binary/website under `*.before-releases`.
 
-You can manually check logs if issues persist:
+For offsite database recovery, choose an explicit encrypted object and first test it:
+
 ```bash
-ssh root@178.104.55.19 journalctl -u xfchess-backend -f
+export BACKUP_AGE_IDENTITY=/secure/offline-age-identity
+export BACKUP_REMOTE=remote:bucket/db
+bash /opt/xfchess/ops/backup/restore-db.sh sessions sessions-<timestamp>.db.age --check
+sudo systemctl stop xfchess-backend
+bash /opt/xfchess/ops/backup/restore-db.sh sessions sessions-<timestamp>.db.age
+sudo systemctl start xfchess-backend
+curl -fsS http://127.0.0.1:8090/readyz
+curl -fsS http://127.0.0.1:8090/health
 ```
 
-### 4. Troubleshooting Rollback Failures
-If the rollback fails:
-- **No Backup Binary**: The script checks for `/opt/xfchess/signing-server-http.prev`. If not found, it means this might be the first deployment or the backup was not created. Manual intervention is required to install a known good binary.
-- **Service Restart Issues**: If the `xfchess-backend` service fails to restart, check logs with `journalctl -u xfchess-backend -n 50`.
-- **Database Backup Missing**: If `-RestoreDb` is used and no backups are found in `/opt/xfchess/backups/`, the script will skip database restoration. Manual database recovery may be needed.
-
-### 5. Post-Rollback Actions
-After a successful rollback, consider:
-- Analyzing the cause of the failed deployment to prevent recurrence.
-- Testing the deployment process in a staging environment before retrying.
-- Updating any documentation or scripts if issues were found in the rollback process.
-
-## Additional Notes
-- Backups are created automatically during deployment and kept for 7 days for databases.
-- Nightly cron jobs at 3am UTC create additional database snapshots, retained for 14 days.
-- Always backup critical data manually if you suspect a deployment might be risky.
+Restore refuses a running service, checks integrity, preserves the current database
+under `data/recovery/`, clears old WAL/SHM files and atomically replaces the database
+on the same filesystem. It asks before discarding later writes. Restoring several
+databases requires selecting a compatible recovery point; separate snapshots do
+not establish a transaction spanning both databases. Keep the matching vault
+encryption secrets offline.

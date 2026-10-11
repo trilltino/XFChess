@@ -1,18 +1,13 @@
 import { useState, useEffect } from "react";
 import { apiClient } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
-import { VPS_HOST } from "../config/environments";
+import { getOpsConfig } from "../config/environments";
+import { deploymentCommands, resourcePercentages } from "../services/operations";
+import { startPolling } from "../services/poll";
 
 interface WalletData { pubkey: string; balance_lamports: number; balance_sol: string; }
 interface Report { game_id: number; white: string; black: string; suspect: string; verdict: string; wager: string; score: number; reason: string; status: string; created_at?: number; assigned_to?: string; }
 interface NodeCheck { label: string; url: string; status: "checking" | "online" | "offline"; }
-interface DeployEntry { ts: string; note: string; code: number; }
-
-const DEPLOY_HISTORY_KEY = "deploy_history";
-function loadDeployHistory(): DeployEntry[] {
-  try { return JSON.parse(localStorage.getItem(DEPLOY_HISTORY_KEY) || "[]"); } catch { return []; }
-}
-
 const FEEPAYER_THRESHOLD_KEY = "feepayer_threshold_sol";
 function getFeepayerThreshold() { return parseFloat(localStorage.getItem(FEEPAYER_THRESHOLD_KEY) || "0.5"); }
 
@@ -21,10 +16,6 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<MainTab>("CONSOLE");
   const { authState } = useAuth();
   const backendUrl = authState.backend_url;
-  // Prometheus is not forwarded by the admin tunnel. Use loopback for LOCAL
-  // and the configured VPS address for best-effort PRODUCTION access.
-  const promHost = authState.env === "production" ? VPS_HOST : "127.0.0.1";
-
   const [onlineCount, setOnlineCount] = useState(0);
   const [gamesInProgress, setGamesInProgress] = useState(0);
   const [txConfirmed, setTxConfirmed] = useState(0);
@@ -34,8 +25,8 @@ export default function Dashboard() {
   // always being collected — they just had no route into this panel.
   type MetricGroup = Record<string, number | null>;
   const [workers, setWorkers] = useState<Record<string, MetricGroup>>({});
-  const [cpuUsage, setCpuUsage] = useState(0);
-  const [ramUsage, setRamUsage] = useState(0);
+  const [cpuUsage, setCpuUsage] = useState<number | null>(null);
+  const [ramUsage, setRamUsage] = useState<number | null>(null);
   const [rates, setRates] = useState<Record<string, number>>({});
   type WalletKey = "feepayer" | "vps_signer" | "kyc_signer" | "treasury";
   const WALLET_LABELS: Record<WalletKey, string> = {
@@ -48,8 +39,6 @@ export default function Dashboard() {
   const [reports, setReports] = useState<Report[]>([]);
 
   const [logs, setLogs] = useState<string[]>([]);
-  const [deploying] = useState(false);
-  const [deployHistory] = useState<DeployEntry[]>(loadDeployHistory);
 
   const [taskStatus, setTaskStatus] = useState<Record<string, { last_tick: number | null; status: string; age_seconds?: number }>>({});
   const [dbStats, setDbStats] = useState<{ sessions_rows: number; games_rows: number; users_rows: number; db_mb: number } | null>(null);
@@ -71,104 +60,61 @@ export default function Dashboard() {
   const feepayerThreshold = getFeepayerThreshold();
   const addLog = (msg: string) => setLogs(prev => [...prev.slice(-199), `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
-  useEffect(() => {
-    const poll = async () => {
-      try {
-        const ms = await apiClient.getMetricsSummary();
-        if (ms.ok && ms.data) {
-          setOnlineCount(ms.data.online_count);
-          setGamesInProgress(ms.data.games_in_progress);
-          setTxConfirmed(ms.data.transactions_confirmed_solana);
-          setErStaleCount(ms.data.er_stale_delegated_count);
-          setErConnected(ms.data.er_subscription_connected);
-          setWorkers({
-            settlement: ms.data.settlement ?? {},
-            schedulers: ms.data.schedulers ?? {},
-            anticheat: ms.data.anticheat ?? {},
-            prizes: ms.data.prizes ?? {},
-            guards: ms.data.guards ?? {},
-          });
-        }
+  useEffect(() => startPolling(async active => {
+    const [ms, wb, rr, ar] = await Promise.all([
+      apiClient.getMetricsSummary(), apiClient.getWalletBalances(),
+      apiClient.getExchangeRates(), apiClient.getAntiCheatReports(),
+    ]);
+    if (!active()) return;
+    if (ms.ok && ms.data) {
+      setOnlineCount(ms.data.online_count);
+      setGamesInProgress(ms.data.games_in_progress);
+      setTxConfirmed(ms.data.transactions_confirmed_solana);
+      setErStaleCount(ms.data.er_stale_delegated_count);
+      setErConnected(ms.data.er_subscription_connected);
+      setWorkers({ settlement: ms.data.settlement ?? {}, schedulers: ms.data.schedulers ?? {},
+        anticheat: ms.data.anticheat ?? {}, prizes: ms.data.prizes ?? {}, guards: ms.data.guards ?? {} });
+      const resources = resourcePercentages(ms.data.resources);
+      setCpuUsage(resources.cpu); setRamUsage(resources.ram);
+    } else { setCpuUsage(null); setRamUsage(null); }
+    if (wb.ok) setWallets(wb.data);
+    if (rr.ok && rr.data) setRates(rr.data.rates);
+    if (ar.ok && ar.data) setReports(ar.data.reports);
+  }, 5000), [backendUrl]);
 
-        const promQuery = async (q: string) => {
-          try {
-            // Bound connection waits so an unreachable host cannot stall the five-second poll loop.
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 3000);
-            const r = await fetch(
-              `http://${promHost}:9090/api/v1/query?query=${encodeURIComponent(q)}`,
-              { signal: controller.signal },
-            ).then(r => r.json());
-            clearTimeout(timeout);
-            return r.data.result[0]?.value[1] || "0";
-          } catch { return "0"; }
-        };
-        const cpu = parseFloat(await promQuery('100-(avg(rate(node_cpu_seconds_total{mode="idle"}[1m]))*100)'));
-        const ramUsed = parseFloat(await promQuery('node_memory_MemTotal_bytes-node_memory_MemAvailable_bytes'));
-        const ramTotal = parseFloat(await promQuery('node_memory_MemTotal_bytes'));
-        setCpuUsage(Math.round(cpu || 0));
-        setRamUsage(Math.round((ramUsed / (ramTotal || 1)) * 100 || 0));
-
-        const wb = await apiClient.getWalletBalances(); if (wb.ok) setWallets(wb.data);
-        const rr = await apiClient.getExchangeRates();  if (rr.ok) setRates(rr.data.rates);
-        const ar = await apiClient.getAntiCheatReports(); if (ar.ok && ar.data) setReports(ar.data.reports);
-      } catch {}
-    };
-    poll();
-    const id = setInterval(poll, 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    const pollInfra = async () => {
-      const ts = await apiClient.getTasksStatus(); if (ts.ok) setTaskStatus(ts.data);
-      const ds = await apiClient.getDbStats();     if (ds.ok) setDbStats(ds.data);
-      const tl = await apiClient.getTlsExpiry();   if (tl.ok) setTlsExpiry(Array.isArray(tl.data) ? tl.data : [tl.data]);
-    };
-    pollInfra();
-    const id = setInterval(pollInfra, 30000);
-    return () => clearInterval(id);
-  }, []);
+  useEffect(() => startPolling(async active => {
+    const [ts, ds, tl, health] = await Promise.all([
+      apiClient.getTasksStatus(), apiClient.getDbStats(), apiClient.getTlsExpiry(), apiClient.getHealth(),
+    ]);
+    if (!active()) return;
+    if (ts.ok) setTaskStatus(ts.data);
+    if (ds.ok) setDbStats(ds.data);
+    if (tl.ok) setTlsExpiry(Array.isArray(tl.data) ? tl.data : [tl.data]);
+    setNodeChecks([{ label: "Backend API", url: `${backendUrl}/health`,
+      status: health.ok && health.data?.status === "ok" ? "online" : "offline" }]);
+  }, 30000), [backendUrl]);
 
   useEffect(() => {
     if (activeTab !== "AUDIT") return;
-    const fetch_ = async () => {
-      const r = await apiClient.getAuditLog(100); if (r.ok) setAuditEntries(r.data.entries ?? []);
-    };
-    fetch_(); const id = setInterval(fetch_, 10000); return () => clearInterval(id);
-  }, [activeTab]);
+    return startPolling(async active => {
+      const r = await apiClient.getAuditLog(100);
+      if (active() && r.ok) setAuditEntries(r.data.entries ?? []);
+    }, 10000);
+  }, [activeTab, backendUrl]);
 
   useEffect(() => {
     if (activeTab !== "CONSOLE") return;
-    const fetch_ = async () => {
+    return startPolling(async active => {
       const r = await apiClient.getLogsStream();
-      if (r.ok && r.data?.lines) {
-        setLogs(prev => { const nl = (r.data.lines as string[]).filter(l => !prev.includes(l)); return [...prev, ...nl].slice(-200); });
+      if (active() && r.ok && r.data?.lines) {
+        setLogs(prev => [...prev, ...(r.data.lines as string[]).filter(l => !prev.includes(l))].slice(-200));
       }
-    };
-    fetch_(); const id = setInterval(fetch_, 5000); return () => clearInterval(id);
-  }, [activeTab]);
+    }, 5000);
+  }, [activeTab, backendUrl]);
 
-  useEffect(() => {
-    const check = async () => {
-      const updated = await Promise.all(
-        nodeChecks.map(async n => {
-          try {
-            const r = await fetch(n.url, { signal: AbortSignal.timeout(3000) });
-            return { ...n, status: r.ok ? "online" as const : "offline" as const };
-          } catch { return { ...n, status: "offline" as const }; }
-        })
-      );
-      setNodeChecks(updated);
-    };
-    check(); const id = setInterval(check, 30000); return () => clearInterval(id);
-  }, []);
-
-  // In-app deployment is not implemented (T9, tauri/docs/TAURI_REMEDIATION.md).
-  // Deploys run from a terminal via ops\scripts\deploy.ps1.
-  const runDeployment = async () => {
-    addLog("NOT IMPLEMENTED: deploys run from a terminal, not this panel.");
-    addLog("Run: powershell -File ops\\scripts\\deploy.ps1 -Server 178.104.55.19 [-Domain your.domain]");
+  const showDeploymentCommand = () => {
+    const commands = deploymentCommands(getOpsConfig());
+    addLog(commands.problem ?? `Run from the repository terminal: ${commands.deploy}`);
   };
 
   const handleIpBan = async () => {
@@ -264,20 +210,7 @@ export default function Dashboard() {
                   return <div key={i} style={{ marginBottom: "2px", color: col }}><span style={{ color: "var(--accent)", marginRight: "8px", opacity: 0.7 }}>&gt;</span>{l}</div>;
                 })}
               </div>
-              {deployHistory.length > 0 && (
-                <div style={{ padding: "0.75rem 1.25rem", borderTop: "1px solid var(--border)", background: "rgba(0,0,0,0.2)" }}>
-                  <div style={{ fontSize: "10px", color: "var(--text-dim)", letterSpacing: "1px", marginBottom: "6px" }}>DEPLOY HISTORY</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "3px", maxHeight: "80px", overflowY: "auto" }}>
-                    {[...deployHistory].reverse().map((d, i) => (
-                      <div key={i} style={{ display: "flex", gap: "12px", fontSize: "11px", fontFamily: "monospace" }}>
-                        <span style={{ color: d.code === 0 ? "#4ade80" : "#f87171" }}>{d.code === 0 ? "✓" : "✗"}</span>
-                        <span style={{ color: "var(--text-dim)" }}>{d.ts}</span>
-                        <span style={{ color: "#fff" }}>{d.note}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+
             </div>
           )}
 
@@ -450,17 +383,17 @@ export default function Dashboard() {
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div style={{ padding: "1.5rem", backgroundColor: "var(--surface)", borderRadius: "24px", border: "1px solid var(--border)", backdropFilter: "blur(10px)", display: "flex", flexDirection: "column", gap: "1rem" }}>
             <h3 style={{ color: "var(--primary)", margin: 0, fontSize: "12px", letterSpacing: "2px", fontWeight: "800" }}>OPERATIONS</h3>
-            <button onClick={runDeployment} disabled={deploying} className="primary"
+            <button onClick={showDeploymentCommand} className="primary"
               style={{ width: "100%", padding: "1rem", borderRadius: "100px", fontSize: "13px", boxShadow: "0 4px 15px rgba(173,92,47,0.3)" }}>
-              {deploying ? "ROLLING OUT…" : "ROLLOUT UPDATE"}
+              DEPLOYMENT COMMAND
             </button>
             <div>
               <div style={{ fontSize: "10px", color: "var(--text-dim)", letterSpacing: "1px" }}>SERVER HEALTH</div>
               <div style={{ width: "100%", height: "6px", backgroundColor: "rgba(0,0,0,0.3)", borderRadius: "100px", marginTop: "8px", overflow: "hidden" }}>
-                <div style={{ width: `${cpuUsage}%`, height: "100%", backgroundColor: cpuUsage > 80 ? "#ef4444" : "var(--primary)", borderRadius: "100px", transition: "width 0.5s" }} />
+                <div style={{ width: `${cpuUsage ?? 0}%`, height: "100%", backgroundColor: (cpuUsage ?? 0) > 80 ? "#ef4444" : "var(--primary)", borderRadius: "100px", transition: "width 0.5s" }} />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--text-dim)", marginTop: "6px", fontWeight: "600" }}>
-                <span>CPU: {cpuUsage}%</span><span>RAM: {ramUsage}%</span>
+                <span>CPU: {cpuUsage === null ? "unavailable" : `${cpuUsage}%`}</span><span>RAM: {ramUsage === null ? "unavailable" : `${ramUsage}%`}</span>
               </div>
             </div>
           </div>

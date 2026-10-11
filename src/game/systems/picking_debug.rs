@@ -1,14 +1,15 @@
+//! Debug builds only: F9 toggles a selection/picking inspector window and logs
+//! every click, hover interaction and picking setup on the board.
+
 use crate::core::GameState;
 use crate::game::resources::Selection;
 use crate::rendering::pieces::Piece;
 use crate::rendering::utils::Square;
-// use bevy::ecs::message::MessageReader; (Removed for Bevy 0.18)
 use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonInput;
-use bevy::picking::events::{Click, Pointer};
+use bevy::picking::events::PointerClick;
 use bevy::picking::pointer::{PointerId, PointerInteraction};
 use bevy::prelude::*;
-// use bevy::ecs::event::EventReader; // EventReader is in prelude
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 
 #[derive(Resource, Default)]
@@ -117,7 +118,7 @@ fn selection_debug_ui(
 }
 
 pub fn debug_all_clicks(
-    mut click_reader: MessageReader<Pointer<Click>>,
+    mut click_reader: MessageReader<PointerClick>,
     pieces: Query<(Entity, &Piece)>,
     squares: Query<(Entity, &Square)>,
     selection: Res<Selection>,
@@ -235,8 +236,7 @@ pub fn debug_picking_setup(
         error!("[SETUP] NO POINTERS FOUND! Picking will not work.");
     }
 
-    if pieces_without > 0 || squares_without > 0 {
-    }
+    if pieces_without > 0 || squares_without > 0 {}
 }
 
 pub struct PickingDebugPlugin;
@@ -247,16 +247,22 @@ impl Plugin for PickingDebugPlugin {
         app.add_systems(
             Update,
             (
-                debug_all_clicks,
-                debug_pointer_interactions,
-                debug_picking_setup,
+                (
+                    debug_all_clicks,
+                    debug_pointer_interactions,
+                    debug_picking_setup,
+                )
+                    .run_if(|state: Res<SelectionDebugState>| state.enabled),
                 toggle_selection_debug,
             )
-                .run_if(in_state(GameState::InGame)),
+                .chain()
+                .in_set(crate::core::schedule::GameSystems::Visual),
         );
         app.add_systems(
             EguiPrimaryContextPass,
-            selection_debug_ui.run_if(in_state(GameState::InGame)),
+            selection_debug_ui
+                .run_if(in_state(GameState::InGame))
+                .run_if(|state: Res<SelectionDebugState>| state.enabled),
         );
     }
 }

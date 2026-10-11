@@ -8,7 +8,7 @@ settings, tournament menu). The state *machine* lives in
 
 | File | Contents |
 |------|----------|
-| [main_menu/](main_menu/) | The main menu: screen layout ([screens.rs](main_menu/screens.rs), [new_menu.rs](main_menu/new_menu.rs)), modals, cinematic + board animation backdrop, music |
+| [main_menu/](main_menu/) | The main menu: menu panels and 3D backdrop ([menu/](main_menu/menu/)), lobby flows ([screens/](main_menu/screens/)), modals, cinematic + board animation backdrop, music |
 | [pause.rs](pause.rs) | Pause overlay (`GameState::Paused`) |
 | [game_over.rs](game_over.rs) | Result screen (`GameState::GameOver`) |
 | [settings.rs](settings.rs) | Settings screen (`GameState::Settings`) |

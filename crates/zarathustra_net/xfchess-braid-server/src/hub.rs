@@ -57,11 +57,14 @@ impl ResourceHub {
     }
 
     pub fn ensure_log(&self, path: &str) -> bool {
-        if self.inner.read().contains_key(path) {
-            return false;
+        if let std::collections::hash_map::Entry::Vacant(entry) =
+            self.inner.write().entry(path.to_owned())
+        {
+            entry.insert(ResourceEntry::Log(AppendLog::new()));
+            true
+        } else {
+            false
         }
-        self.register_log(path.to_string());
-        true
     }
 
     pub fn has(&self, path: &str) -> bool {
@@ -88,7 +91,8 @@ impl ResourceHub {
     }
 
     pub fn patch(&self, path: &str, patch: Patch) {
-        if let Some(ResourceEntry::Doc(doc)) = self.inner.read().get(path).cloned() {
+        let entry = self.inner.read().get(path).cloned();
+        if let Some(ResourceEntry::Doc(doc)) = entry {
             match doc.apply(patch) {
                 Ok(update) => self.fan_out(path, &update),
                 Err(e) => tracing::warn!("[braid-hub] patch failed on {}: {}", path, e),
@@ -97,14 +101,16 @@ impl ResourceHub {
     }
 
     pub fn replace(&self, path: &str, new_doc: Value) {
-        if let Some(ResourceEntry::Doc(doc)) = self.inner.read().get(path).cloned() {
+        let entry = self.inner.read().get(path).cloned();
+        if let Some(ResourceEntry::Doc(doc)) = entry {
             let update = doc.replace(new_doc);
             self.fan_out(path, &update);
         }
     }
 
     pub fn append(&self, path: &str, entry: Value) {
-        if let Some(ResourceEntry::Log(log)) = self.inner.read().get(path).cloned() {
+        let resource = self.inner.read().get(path).cloned();
+        if let Some(ResourceEntry::Log(log)) = resource {
             let update = log.append(entry);
             self.fan_out(path, &update);
         }
@@ -117,27 +123,29 @@ impl ResourceHub {
             format!("tournament/{}/schedule-status", tid),
             format!("tournament/{}/roster", tid),
         ];
-        for path in &docs {
-            if !self.inner.read().contains_key(path.as_str()) {
-                self.register_doc(path.clone(), Value::Object(Default::default()));
-            }
+        let mut resources = self.inner.write();
+        for path in docs {
+            resources.entry(path).or_insert_with(|| {
+                ResourceEntry::Doc(PatchedDoc::new(Value::Object(Default::default())))
+            });
         }
 
         let standings = format!("tournament/{}/standings", tid);
-        if !self.inner.read().contains_key(standings.as_str()) {
-            self.register_doc(standings, Value::Array(Vec::new()));
-        }
+        resources
+            .entry(standings)
+            .or_insert_with(|| ResourceEntry::Doc(PatchedDoc::new(Value::Array(Vec::new()))));
 
         let results = format!("tournament/{}/results", tid);
-        if !self.inner.read().contains_key(results.as_str()) {
-            self.register_log(results);
-        }
+        resources
+            .entry(results)
+            .or_insert_with(|| ResourceEntry::Log(AppendLog::new()));
     }
 
     pub fn ensure_pairings(&self, tournament_id: u64, round: u8) {
         let path = format!("tournament/{}/pairings/{}", tournament_id, round);
-        if !self.inner.read().contains_key(&path) {
-            self.register_doc(path, Value::Array(Vec::new()));
-        }
+        self.inner
+            .write()
+            .entry(path)
+            .or_insert_with(|| ResourceEntry::Doc(PatchedDoc::new(Value::Array(Vec::new()))));
     }
 }

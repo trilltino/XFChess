@@ -24,15 +24,15 @@ describe("config duplication", () => {
     status: "Completed", players: ["player"], winner: "player", entry_fee_lamports: 100,
     platform_fee_lamports: 20, prize_shares: [6000, 3000, 1000, 0, 0, 0, 0, 0, 0, 0],
     total_rounds: 5, scheduled_at: 100, kyc_required: true, password: "do-not-copy" } as TournamentDetail;
-  it("copies only selected config and finances with a fresh identity and independent shares", () => {
-    const copy = duplicateConfig(source, 456);
-    expect(copy).toMatchObject({ tournament_id: 456, entry_fee_lamports: 100, platform_fee_lamports: 20, swiss_rounds: 5, kyc_required: true });
+  it("copies config and finances but no identity, so the backend assigns a fresh id", () => {
+    const copy = duplicateConfig(source);
+    expect(copy).not.toHaveProperty("tournament_id");
+    expect(copy).toMatchObject({ entry_fee_lamports: 100, platform_fee_lamports: 20, swiss_rounds: 5, kyc_required: true });
     for (const key of ["players", "winner", "status", "scheduled_at", "password"]) expect(copy).not.toHaveProperty(key);
     expect(copy.name).not.toBe(source.name);
     copy.prize_shares![0] = 0;
     expect(source.prize_shares[0]).toBe(6000);
   });
-  it("rejects reuse of the source ID", () => expect(() => duplicateConfig(source, 123)).toThrow());
 });
 
 describe("refund execution evidence", () => {

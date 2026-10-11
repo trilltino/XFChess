@@ -85,7 +85,7 @@ impl Default for IpPatternDetector {
 static IP_DETECTOR: OnceCell<IpPatternDetector> = OnceCell::new();
 
 pub fn get_ip_detector() -> &'static IpPatternDetector {
-    IP_DETECTOR.get_or_init(|| IpPatternDetector::new())
+    IP_DETECTOR.get_or_init(IpPatternDetector::new)
 }
 
 pub async fn check_ip_patterns(ip_address: &str, _tournament_id: u64) -> Option<String> {

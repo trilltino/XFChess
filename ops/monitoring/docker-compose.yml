@@ -1,66 +1,96 @@
-version: '3.8'
-
-# Host networking lets monitoring reach the native backend and node exporter.
-# Bind each service to 127.0.0.1; access monitoring through SSH tunnels.
-
 services:
   prometheus:
-    image: prom/prometheus:v2.47.0
+    image: prom/prometheus:v3.15.0
     container_name: xfchess-prometheus
     network_mode: host
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./rules:/etc/prometheus/rules:ro
-      - prometheus-data:/prometheus
+    - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - ./rules:/etc/prometheus/rules:ro
+    - prometheus-data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
-      - '--web.listen-address=127.0.0.1:9090'
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --storage.tsdb.retention.time=30d
+    - --web.listen-address=127.0.0.1:9090
     restart: unless-stopped
-
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - -q
+      - -O
+      - /dev/null
+      - http://127.0.0.1:9090/-/ready
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+    security_opt:
+    - no-new-privileges:true
   grafana:
-    image: grafana/grafana:10.1.0
+    image: grafana/grafana:13.2.3
     container_name: xfchess-grafana
     network_mode: host
     volumes:
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - grafana-data:/var/lib/grafana
+    - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    - grafana-data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
-      - GF_USERS_ALLOW_SIGN_UP=false
-      # Under host networking Grafana would otherwise listen on 0.0.0.0.
-      - GF_SERVER_HTTP_ADDR=127.0.0.1
-      - GF_SERVER_HTTP_PORT=3000
-      # Reach Grafana via SSH tunnel (ssh -L 3000:127.0.0.1:3000 SERVER), not a public URL.
-      - GF_SERVER_ROOT_URL=http://localhost:3000
+    - GF_SECURITY_ADMIN_USER=admin
+    - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD
+      in .env}
+    - GF_USERS_ALLOW_SIGN_UP=false
+    - GF_PLUGINS_PREINSTALL_DISABLED=true
+    - GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false
+    - GF_SERVER_HTTP_ADDR=127.0.0.1
+    - GF_SERVER_HTTP_PORT=3000
+    - GF_SERVER_ROOT_URL=http://localhost:3000
     restart: unless-stopped
     depends_on:
-      - prometheus
-
-  # Scrape the native systemd node_exporter on 127.0.0.1:9100; a second
-  # container exporter would conflict or duplicate host metrics.
-
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - -q
+      - -O
+      - /dev/null
+      - http://127.0.0.1:3000/api/health
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+    security_opt:
+    - no-new-privileges:true
   alertmanager:
-    image: prom/alertmanager:v0.26.0
+    image: prom/alertmanager:v0.34.1
     container_name: xfchess-alertmanager
     network_mode: host
     volumes:
-      - ./alertmanager.yml:/etc/alertmanager/config.yml:ro
-      - ./secrets/telegram_bot_token:/etc/alertmanager/secrets/telegram_bot_token:ro
-      - alertmanager-data:/alertmanager
+    - ./alertmanager.yml:/etc/alertmanager/config.yml:ro
+    - ./secrets/telegram_bot_token:/etc/alertmanager/secrets/telegram_bot_token:ro
+    - alertmanager-data:/alertmanager
     command:
-      - '--config.file=/etc/alertmanager/config.yml'
-      - '--storage.path=/alertmanager'
-      - '--web.listen-address=127.0.0.1:9093'
-      - '--cluster.listen-address='
+    - --config.file=/etc/alertmanager/config.yml
+    - --storage.path=/alertmanager
+    - --web.listen-address=127.0.0.1:9093
+    - --cluster.listen-address=
     restart: unless-stopped
-
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - -q
+      - -O
+      - /dev/null
+      - http://127.0.0.1:9093/-/ready
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+    security_opt:
+    - no-new-privileges:true
 volumes:
   prometheus-data:
     driver: local

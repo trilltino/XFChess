@@ -79,6 +79,21 @@ async fn get_spectator_moves(
     let Some((snapshot, rx)) = state.braid_hub.subscribe(&path).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let parsed = match braid_chess::braid_http::client::BraidHeaders::from_header_map(&headers) {
+        Ok(parsed) if parsed.version.is_none() => parsed,
+        _ => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let mut cursor = 0;
+    for parent in parsed.parents.unwrap_or_default() {
+        let seq = parent
+            .as_integer()
+            .and_then(|n| u64::try_from(n).ok())
+            .or_else(|| parent.as_str().and_then(|s| s.parse::<u64>().ok()));
+        let Some(seq) = seq.filter(|seq| *seq <= snapshot.version) else {
+            return StatusCode::GONE.into_response();
+        };
+        cursor = cursor.max(seq);
+    }
 
     // Stream each historical move as a live-shaped ChessMessage chunk so the
     // same subscriber decodes history and tail.
@@ -89,7 +104,12 @@ async fn get_spectator_moves(
             entries
                 .iter()
                 .enumerate()
-                .map(|(i, entry)| format_chunk(&BraidUpdate::snapshot(i as u64, entry.clone())))
+                .filter(|(i, _)| (*i as u64 + 1) > cursor)
+                .map(|(i, entry)| {
+                    let mut update = BraidUpdate::snapshot(i as u64 + 1, entry.clone());
+                    update.parents = vec![i as u64];
+                    format_chunk(&update)
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -106,6 +126,7 @@ async fn get_spectator_moves(
         for chunk in history_chunks {
             yield Ok::<Bytes, String>(chunk);
         }
+        let mut cursor = snapshot.version;
 
         let mut ticker = interval(Duration::from_secs(HEARTBEAT_SECS));
         ticker.tick().await;
@@ -117,11 +138,18 @@ async fn get_spectator_moves(
                     match maybe_update {
                         // Convert add /- patches to bare snapshots so live and historical moves decode identically.
                         Some(Ok(update)) => {
+                            if update.version <= cursor { continue; }
                             if let Some(entry) = appended_entry(&update) {
-                                yield Ok(format_chunk(&BraidUpdate::snapshot(update.version, entry)));
+                                let mut outgoing = BraidUpdate::snapshot(update.version, entry);
+                                outgoing.parents = vec![cursor];
+                                cursor = update.version;
+                                yield Ok(format_chunk(&outgoing));
                             }
                         }
-                        Some(Err(e)) => warn!("[spectate] broadcast lag on {}: {}", path_owned, e),
+                        Some(Err(e)) => {
+                            warn!("[spectate] broadcast lag on {}: {}; reconnect to replay", path_owned, e);
+                            break;
+                        }
                         None => break,
                     }
                 }
@@ -135,6 +163,7 @@ async fn get_spectator_moves(
         .status(209)
         .header("Content-Type", "application/http-history")
         .header("Cache-Control", "no-store")
+        .header("Vary", "Subscribe, Parents, Version")
         .header("Heartbeats", HEARTBEAT_SECS.to_string())
         .body(Body::from_stream(body_stream))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())

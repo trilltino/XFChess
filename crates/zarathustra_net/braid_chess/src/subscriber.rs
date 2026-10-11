@@ -2,12 +2,12 @@ use crate::error::BraidChessError;
 use crate::message::ChessMessage;
 use crate::resource::ChessResource;
 use async_channel::Receiver;
-use braid_http::client::Subscription;
-use braid_http::types::{BraidRequest, Update};
+use braid_http::client::{Acknowledger, Subscription};
+use braid_http::types::{BraidRequest, Update, Version};
 use braid_http::BraidClient;
-use std::sync::atomic::{AtomicU64, Ordering};
+
 use tokio::task::JoinHandle;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 pub struct ChessSubscriber {
     base_url: String,
@@ -15,7 +15,87 @@ pub struct ChessSubscriber {
     client: BraidClient,
 }
 
+pub struct DeliveryReceipt {
+    versions: Vec<Version>,
+    acknowledger: Option<Acknowledger>,
+}
+
+impl DeliveryReceipt {
+    pub fn versions(&self) -> &[Version] {
+        &self.versions
+    }
+
+    pub fn acknowledge(mut self) -> braid_http::Result<()> {
+        self.acknowledger
+            .take()
+            .expect("receipt is consumed once")
+            .acknowledge(&self.versions)
+    }
+}
+
+impl Drop for DeliveryReceipt {
+    fn drop(&mut self) {
+        if let Some(acknowledger) = self.acknowledger.take() {
+            let _ = acknowledger.reject(&self.versions);
+        }
+    }
+}
+
+pub struct ChessDelivery {
+    pub message: ChessMessage,
+    pub receipt: DeliveryReceipt,
+}
+
 impl ChessSubscriber {
+    pub async fn subscribe_acknowledged(
+        &self,
+        resource: ChessResource,
+        parents: Vec<Version>,
+    ) -> Result<(Receiver<ChessDelivery>, JoinHandle<()>), BraidChessError> {
+        let request = BraidRequest::new()
+            .subscribe()
+            .with_parents(parents)
+            .with_manual_ack()
+            .with_heartbeat(20)
+            .with_retry(braid_http::client::RetryConfig::default().with_max_retries(5));
+        let mut subscription = self
+            .client
+            .subscribe(&resource.to_url(&self.base_url), request)
+            .await
+            .map_err(|e| match e {
+                braid_http::BraidError::InvalidSubscriptionStatus(status) => {
+                    BraidChessError::HttpStatus(status)
+                }
+                error => BraidChessError::Http(error.to_string()),
+            })?;
+        let acknowledger = subscription
+            .acknowledger()
+            .expect("manual acknowledgment configured");
+        let (tx, rx) = async_channel::bounded(1);
+        let handle = tokio::spawn(async move {
+            loop {
+                let update = tokio::select! { _ = tx.closed() => break, update = subscription.next() => update };
+                let Some(Ok(update)) = update else {
+                    break;
+                };
+                let Some(message) = decode_update(&update) else {
+                    let _ = acknowledger.reject(&update.version);
+                    break;
+                };
+                let delivery = ChessDelivery {
+                    message,
+                    receipt: DeliveryReceipt {
+                        versions: update.version,
+                        acknowledger: Some(acknowledger.clone()),
+                    },
+                };
+                if tx.send(delivery).await.is_err() {
+                    break;
+                }
+            }
+        });
+        Ok((rx, handle))
+    }
     pub fn new(
         base_url: impl Into<String>,
         game_id: impl Into<String>,
@@ -27,7 +107,6 @@ impl ChessSubscriber {
             client,
         })
     }
-
 
     pub async fn subscribe_moves(
         &self,
@@ -57,7 +136,6 @@ impl ChessSubscriber {
             .await
     }
 
-
     async fn subscribe_inner(
         &self,
         resource: ChessResource,
@@ -65,7 +143,10 @@ impl ChessSubscriber {
         let url = resource.to_url(&self.base_url);
         debug!("[BRAID SUB] Subscribing to {}", url);
 
-        let request = BraidRequest::new().subscribe();
+        let request = BraidRequest::new()
+            .subscribe()
+            .with_heartbeat(20)
+            .with_retry(braid_http::client::RetryConfig::default().with_max_retries(5));
 
         let mut subscription: Subscription = self
             .client
@@ -74,11 +155,12 @@ impl ChessSubscriber {
             .map_err(|e| BraidChessError::Http(e.to_string()))?;
 
         // Bridge: Subscription.next() → ChessMessage channel
-        let (chess_tx, chess_rx) = async_channel::unbounded::<ChessMessage>();
+        let (chess_tx, chess_rx) = async_channel::bounded::<ChessMessage>(256);
 
         let handle = tokio::spawn(async move {
             loop {
-                match subscription.next().await {
+                let update = tokio::select! { _ = chess_tx.closed() => break, update = subscription.next() => update };
+                match update {
                     Some(Ok(update)) => {
                         if let Some(msg) = decode_update(&update) {
                             if chess_tx.send(msg).await.is_err() {
@@ -88,24 +170,8 @@ impl ChessSubscriber {
                         }
                     }
                     Some(Err(e)) => {
-                        // Warn at most once per 30 seconds for routine heartbeat timeouts.
-                        static LAST_WARN_NS: AtomicU64 = AtomicU64::new(0);
-                        const WARN_COOLDOWN_SECS: u64 = 30;
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs();
-                        let last = LAST_WARN_NS.load(Ordering::Relaxed);
-                        if now.saturating_sub(last) >= WARN_COOLDOWN_SECS {
-                            LAST_WARN_NS.store(now, Ordering::Relaxed);
-                            warn!("[BRAID SUB] Update error: {}", e);
-                        } else {
-                            debug!("[BRAID SUB] Update error (throttled): {}", e);
-                        }
-                        if matches!(e, braid_http::BraidError::SubscriptionClosed) {
-                            error!("[BRAID SUB] Server closed the connection");
-                            break;
-                        }
+                        warn!("[BRAID SUB] Update error: {e}");
+                        break;
                     }
                     None => {
                         // Routine long-poll closure is not a warning; the caller decides whether
@@ -120,7 +186,6 @@ impl ChessSubscriber {
         Ok((chess_rx, handle))
     }
 }
-
 
 fn decode_update(update: &Update) -> Option<ChessMessage> {
     if let Some(body_str) = update.body_str() {
@@ -142,7 +207,7 @@ fn parse_chess_message(s: &str) -> Option<ChessMessage> {
     match serde_json::from_str::<ChessMessage>(s) {
         Ok(msg) => Some(msg),
         Err(e) => {
-            warn!("[BRAID SUB] JSON parse error: {} | body: {:?}", e, s);
+            warn!("[BRAID SUB] JSON parse error: {e}");
             None
         }
     }

@@ -130,12 +130,17 @@ path = "tests/global_create_game_tests.rs"
 name = "tournament_swiss_completion_tests"
 path = "tests/tournament_swiss_completion_tests.rs"
 
+# create_tournament_game: authority seats a pairing with per-game move sessions.
+[[test]]
+name = "tournament_game_creation_tests"
+path = "tests/tournament_game_creation_tests.rs"
+
 # Assert finalization pays a nonzero country_fee to treasury_vault.
 [[test]]
 name = "global_session_settlement_tests"
 path = "tests/global_session_settlement_tests.rs"
 
-# docs/PRE_MAINNET_E2E_PLAN.md §1.3: ClaimTimeout instruction-level coverage
+# ClaimTimeout instruction-level coverage; see docs/development/verification.md.
 # (TimeoutNotExpired rejection + the black-timed-out/white-wins parity).
 [[test]]
 name = "claim_timeout_tests"

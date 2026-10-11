@@ -195,7 +195,6 @@ impl VaultStore {
         }
     }
 
-
     pub async fn save_cacf(
         &self,
         wallet: &str,
@@ -242,10 +241,10 @@ impl VaultStore {
     pub async fn cacf_can_wager(&self, wallet: &str, country: &str) -> bool {
         match country {
             "GB" | "BR" | "DE" | "CA" => {
-                match self.load_cacf_status(wallet, country).await.as_deref() {
-                    Some("fully_compliant") | Some("partially_compliant") => true,
-                    _ => false,
-                }
+                matches!(
+                    self.load_cacf_status(wallet, country).await.as_deref(),
+                    Some("fully_compliant" | "partially_compliant")
+                )
             }
             _ => true,
         }

@@ -71,7 +71,7 @@ fn fetch_stats_system(
     let vps_url = crate::multiplayer::network::vps::vps_base();
     let tx = channel.sender.clone();
 
-    std::thread::spawn(move || {
+    crate::core::net_task::spawn_detached("stats", move || {
         let url = format!("{}/stats", vps_url);
         match reqwest::blocking::get(&url) {
             Ok(resp) if resp.status().is_success() => {

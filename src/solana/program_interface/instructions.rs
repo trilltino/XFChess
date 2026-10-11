@@ -854,56 +854,6 @@ pub fn record_match_result_ix(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn record_swiss_result_ix(
-    program_id: Pubkey,
-    player: Pubkey,
-    opponent: Pubkey,
-    tournament_id: u64,
-    max_players: u16,
-    round: u8,
-    board: u16,
-    result: u8,
-) -> Result<Instruction> {
-    let tournament_pda = Pubkey::find_program_address(
-        &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        &program_id,
-    )
-    .0;
-    let shard_0 = Pubkey::find_program_address(
-        &[
-            TOURNAMENT_PLAYERS_SEED,
-            &[0u8],
-            &tournament_id.to_le_bytes(),
-        ],
-        &program_id,
-    )
-    .0;
-
-    let mut data = anchor_discriminator("record_swiss_result").to_vec();
-    data.extend_from_slice(&tournament_id.to_le_bytes());
-    data.push(round);
-    data.extend_from_slice(&board.to_le_bytes());
-    data.push(result); // SwissMatchResult Borsh variant tag
-
-    Ok(Instruction {
-        program_id,
-        // Account order must match `RecordSwissResult`: tournament, shards 0-3,
-        // player (signer), opponent, system_program.
-        accounts: vec![
-            AccountMeta::new(tournament_pda, false),
-            AccountMeta::new(shard_0, false),
-            shard_meta(&program_id, tournament_id, 1, max_players),
-            shard_meta(&program_id, tournament_id, 2, max_players),
-            shard_meta(&program_id, tournament_id, 3, max_players),
-            AccountMeta::new(player, true),
-            AccountMeta::new_readonly(opponent, false),
-            AccountMeta::new_readonly(system_program::id(), false),
-        ],
-        data,
-    })
-}
-
 pub fn advance_winner_ix(
     program_id: Pubkey,
     authority: Pubkey,

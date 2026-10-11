@@ -11,7 +11,6 @@ use swiss_pairing::{MatchResult, StandingsEntry, SwissRound};
 use super::service::SwissServiceError;
 use crate::signing::AppState;
 
-
 #[derive(Deserialize)]
 pub struct RecordResultReq {
     pub round: u8,
@@ -61,7 +60,6 @@ pub struct CurrentRoundRes {
     pub is_active: bool,
 }
 
-
 pub fn swiss_read_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}/current-round", get(get_current_round))
@@ -82,7 +80,6 @@ pub fn swiss_admin_routes() -> Router<AppState> {
         .route("/{id}/manual-pair", post(add_manual_pairing))
         .route("/{id}/manual-pair", delete(remove_manual_pairing))
 }
-
 
 fn parse_result(s: &str) -> Option<MatchResult> {
     match s {
@@ -105,13 +102,14 @@ fn swiss_err(e: SwissServiceError) -> StatusCode {
         SwissServiceError::InvalidBoard(_) => StatusCode::BAD_REQUEST,
         SwissServiceError::PlayerNotFound(_) => StatusCode::NOT_FOUND,
         SwissServiceError::PlayerWithdrawn => StatusCode::CONFLICT,
+        SwissServiceError::RoundIncomplete(_) => StatusCode::CONFLICT,
+        SwissServiceError::ResultAlreadyRecorded => StatusCode::CONFLICT,
         e => {
             tracing::error!("Swiss service error: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
 }
-
 
 async fn start_round(
     Path(id): Path<u64>,
@@ -123,6 +121,7 @@ async fn start_round(
         .await
         .map(Json)
         .map_err(swiss_err)
+        .inspect(|_| request_reconcile(&state, id))
 }
 
 async fn get_current_round(
@@ -165,6 +164,7 @@ async fn record_result(
         .await
         .map(Json)
         .map_err(swiss_err)
+        .inspect(|_| request_reconcile(&state, id))
 }
 
 async fn get_standings(
@@ -190,6 +190,7 @@ async fn mark_absent(
         .await
         .map(|_| StatusCode::OK)
         .map_err(swiss_err)
+        .inspect(|_| request_reconcile(&state, id))
 }
 
 async fn withdraw_player(
@@ -203,6 +204,7 @@ async fn withdraw_player(
         .await
         .map(|_| StatusCode::OK)
         .map_err(swiss_err)
+        .inspect(|_| request_reconcile(&state, id))
 }
 
 async fn rejoin_player(
@@ -285,4 +287,13 @@ async fn override_result(
         .await
         .map(Json)
         .map_err(swiss_err)
+        .inspect(|_| request_reconcile(&state, id))
+}
+
+/// Asks the orchestrator to mirror an admin change on-chain. Never blocks the
+/// request: a full queue is fine, the orchestrator's timer catches up.
+fn request_reconcile(state: &AppState, tournament_id: u64) {
+    if let Some(tx) = &state.orchestrator_tx {
+        let _ = tx.try_send(super::OrchestratorEvent::Reconcile { tournament_id });
+    }
 }

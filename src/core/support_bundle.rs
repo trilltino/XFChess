@@ -1,9 +1,9 @@
 // Export local game, crash, error, and wallet logs to a user-selected text file.
 // No upload occurs. Desktop only because Android has no rfd backend.
 
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use bevy::prelude::*;
@@ -14,9 +14,11 @@ const LOG_TAIL_LINES: usize = 4000;
 // How many newest daily files (game.log.YYYY-MM-DD) to include.
 const NEWEST_DAILY_FILES: usize = 2;
 
-/// Last export success or error, displayed beneath the Settings export button.
+/// The Settings panel's log export: the button sets `export_requested`;
+/// [`run_requested_export`] shows the save dialog and records the outcome.
 #[derive(Resource, Default)]
 pub struct SupportBundleUi {
+    pub export_requested: bool,
     pub status: Option<String>,
     pub error: Option<String>,
 }
@@ -37,11 +39,7 @@ fn read_if_exists(path: &PathBuf) -> Option<String> {
 
 fn tail_lines(text: &str, max_lines: usize) -> String {
     let total = text.lines().count();
-    let skip = if total > max_lines {
-        total - max_lines
-    } else {
-        0
-    };
+    let skip = total.saturating_sub(max_lines);
     let mut seen = 0;
     let mut out = String::new();
     for line in text.lines() {
@@ -54,7 +52,7 @@ fn tail_lines(text: &str, max_lines: usize) -> String {
     out
 }
 
-fn list_files(dir: &PathBuf, pred: impl Fn(&str) -> bool) -> Vec<PathBuf> {
+fn list_files(dir: &Path, pred: impl Fn(&str) -> bool) -> Vec<PathBuf> {
     if !dir.exists() {
         return Vec::new();
     }
@@ -73,33 +71,25 @@ fn list_files(dir: &PathBuf, pred: impl Fn(&str) -> bool) -> Vec<PathBuf> {
     out
 }
 
-/// Select the newest n daily logs from ascending, lexicographically ordered filenames.
-fn newest_n(files: &mut Vec<PathBuf>, n: usize) -> Vec<PathBuf> {
-    if files.len() <= n {
-        return files.clone();
-    }
-    let start = files.len() - n;
-    files[start..].to_vec()
+/// The newest n daily logs, given filenames sorted oldest first.
+fn newest_n(mut files: Vec<PathBuf>, n: usize) -> Vec<PathBuf> {
+    files.split_off(files.len().saturating_sub(n))
 }
 
 /// Appends every crash report + recovered-errors file, plus (optionally) the
 /// newest daily game/bridge logs, from `dir`, each snip-cut to a bounded tail.
-fn append_dir_sections(mut out: &mut String, dir: &PathBuf, include_game: bool) {
+fn append_dir_sections(out: &mut String, dir: &Path, include_game: bool) {
     let mut ordered: Vec<PathBuf> = Vec::new();
 
     if include_game {
         let mut game_logs = list_files(dir, |n| n.starts_with("game.log."));
         game_logs.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-        for path in newest_n(&mut game_logs, NEWEST_DAILY_FILES) {
-            ordered.push(path);
-        }
+        ordered.extend(newest_n(game_logs, NEWEST_DAILY_FILES));
     }
 
     let mut bridge_logs = list_files(dir, |n| n.starts_with("wallet-bridge.log."));
     bridge_logs.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-    for path in newest_n(&mut bridge_logs, NEWEST_DAILY_FILES) {
-        ordered.push(path);
-    }
+    ordered.extend(newest_n(bridge_logs, NEWEST_DAILY_FILES));
 
     let mut crashes = list_files(dir, |n| n.starts_with("crash_"));
     crashes.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
@@ -115,7 +105,7 @@ fn append_dir_sections(mut out: &mut String, dir: &PathBuf, include_game: bool) 
         let title = path.display().to_string();
         out.push('\n');
         out.push_str(&title);
-        out.push_str("\n");
+        out.push('\n');
         out.push_str(&"=".repeat(title.len()));
         out.push('\n');
         out.push_str(&body);
@@ -127,14 +117,14 @@ fn append_dir_sections(mut out: &mut String, dir: &PathBuf, include_game: bool) 
         let title = recovered.display().to_string();
         out.push('\n');
         out.push_str(&title);
-        out.push_str("\n");
+        out.push('\n');
         out.push_str(&"=".repeat(title.len()));
         out.push('\n');
         out.push_str(&text);
         out.push('\n');
     }
 }
-fn build_header(log_dir: &PathBuf) -> String {
+fn build_header(log_dir: &Path) -> String {
     #[cfg(debug_assertions)]
     let build = "debug";
     #[cfg(not(debug_assertions))]
@@ -204,9 +194,13 @@ pub fn write_support_bundle(dest: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-/// Save an exported bundle through the desktop file dialog and record its result for Settings.
+/// Saves a bundle through the desktop file dialog once the Settings panel asks for
+/// one. Runs outside the egui pass, so the native dialog never blocks UI drawing.
 #[cfg(not(target_os = "android"))]
-pub fn run_export_dialog(mut ui: ResMut<SupportBundleUi>) {
+pub fn run_requested_export(mut ui: ResMut<SupportBundleUi>) {
+    ui.export_requested = false;
+    ui.status = None;
+    ui.error = None;
     let default_dir = crate::multiplayer::network::identity::active_profile_dir();
     let picked = rfd::FileDialog::new()
         .set_title("Export XFChess Logs")

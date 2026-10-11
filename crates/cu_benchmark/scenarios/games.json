@@ -1,0 +1,225 @@
+{
+  "fee_profile": "current",
+  "variants": [
+    {
+      "name": "1v1-settle-only",
+      "games": 1,
+      "transactions": [
+        {
+          "label": "create-game",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 300000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "join-game",
+          "count": 1,
+          "signatures": 2,
+          "cu_limit": 200000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "authorize-session",
+          "count": 2,
+          "signatures": 1,
+          "cu_limit": 150000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "delegate-game",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 300000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "finalize-game",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 200000,
+          "cu_price_micro_lamports": 10000
+        }
+      ],
+      "er_transactions": 101,
+      "accounts": [
+        {
+          "label": "game",
+          "data_bytes": 365,
+          "count": 1,
+          "rent_lamports": 3431280,
+          "closed": true
+        },
+        {
+          "label": "session-delegation",
+          "data_bytes": 92,
+          "count": 2,
+          "rent_lamports": 1531200,
+          "closed": false
+        }
+      ],
+      "delegations": [
+        {
+          "label": "game",
+          "count": 1,
+          "deposit_lamports": 6000000,
+          "normal_commits": 0,
+          "final_commit": true,
+          "delegated_fee_payer": false
+        }
+      ]
+    },
+    {
+      "name": "1v1-checkpoint-every-10-plies",
+      "games": 1,
+      "transactions": [
+        {
+          "label": "create-game",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 300000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "join-game",
+          "count": 1,
+          "signatures": 2,
+          "cu_limit": 200000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "authorize-session",
+          "count": 2,
+          "signatures": 1,
+          "cu_limit": 150000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "delegate-game",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 300000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "finalize-game",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 200000,
+          "cu_price_micro_lamports": 10000
+        }
+      ],
+      "er_transactions": 111,
+      "accounts": [
+        {
+          "label": "game",
+          "data_bytes": 365,
+          "count": 1,
+          "rent_lamports": 3431280,
+          "closed": true
+        },
+        {
+          "label": "session-delegation",
+          "data_bytes": 92,
+          "count": 2,
+          "rent_lamports": 1531200,
+          "closed": false
+        }
+      ],
+      "delegations": [
+        {
+          "label": "game",
+          "count": 1,
+          "deposit_lamports": 6000000,
+          "normal_commits": 10,
+          "final_commit": true,
+          "delegated_fee_payer": false
+        }
+      ]
+    },
+    {
+      "name": "ten-games-shared-64-player-shard",
+      "games": 10,
+      "transactions": [
+        {
+          "label": "create-game",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 300000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "join-game",
+          "count": 1,
+          "signatures": 2,
+          "cu_limit": 200000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "authorize-session",
+          "count": 2,
+          "signatures": 1,
+          "cu_limit": 150000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "delegate-game",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 300000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "finalize-game",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 200000,
+          "cu_price_micro_lamports": 10000
+        },
+        {
+          "label": "shared-shard-setup",
+          "count": 1,
+          "signatures": 1,
+          "cu_limit": 200000,
+          "cu_price_micro_lamports": 10000,
+          "shared": true
+        }
+      ],
+      "er_transactions": 101,
+      "accounts": [
+        {
+          "label": "game",
+          "data_bytes": 365,
+          "count": 1,
+          "rent_lamports": 3431280,
+          "closed": true
+        },
+        {
+          "label": "64-player-shard",
+          "data_bytes": 4765,
+          "count": 1,
+          "rent_lamports": 34055280,
+          "closed": false,
+          "shared": true
+        },
+        {
+          "label": "session-delegation",
+          "data_bytes": 92,
+          "count": 2,
+          "rent_lamports": 1531200,
+          "closed": false
+        }
+      ],
+      "delegations": [
+        {
+          "label": "game",
+          "count": 1,
+          "deposit_lamports": 6000000,
+          "normal_commits": 0,
+          "final_commit": true,
+          "delegated_fee_payer": false
+        }
+      ]
+    }
+  ]
+}

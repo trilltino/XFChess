@@ -275,7 +275,7 @@ impl Plugin for EphemeralRollupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EphemeralRollupManager>()
             .add_message::<RollupEvent>()
-            .add_systems(Update, handle_rollup_events);
+            .add_systems(Update, handle_rollup_events.in_set(crate::core::schedule::SessionSet::Rollup));
         // process_batch_commit_requests owns periodic flushing; a second flush path
         // could consume the batch before direct VPS submission.
     }

@@ -53,7 +53,7 @@ pub fn generate_pairings(
         .cloned()
         .collect();
 
-    let mut ranked = auto_players.clone();
+    let mut ranked = auto_players;
     ranked.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -67,45 +67,60 @@ pub fn generate_pairings(
 
     let mut all_pairings: Vec<Pairing> = manual_pairings;
     let mut byes: Vec<String> = Vec::new();
-    let mut used_players: Vec<String> = overridden_ids.into_iter().collect();
+    let used_players: HashSet<String> = overridden_ids;
+    let mut float_downs: Vec<String> = Vec::new();
+
+    // Players that could not be paired in their own scoregroup carry down into the
+    // next one. Only the lowest scoregroup may hand out the round's single bye.
+    let mut carried: Vec<SwissPlayer> = Vec::new();
+    let last_group = scoregroups.len().saturating_sub(1);
 
     for (i, group) in scoregroups.iter().enumerate() {
         trace!(
-            "Pairing scoregroup {} with score {} ({} players)",
+            "Pairing scoregroup {} with score {} ({} players, {} carried)",
             i,
             group.score,
-            group.players.len()
+            group.players.len(),
+            carried.len()
         );
 
-        // Filter out already paired players
-        let available: Vec<SwissPlayer> = group
-            .players
-            .iter()
-            .filter(|p| !used_players.contains(&p.id))
-            .cloned()
-            .collect();
+        let mut pool: Vec<SwissPlayer> = std::mem::take(&mut carried);
+        pool.extend(
+            group
+                .players
+                .iter()
+                .filter(|p| !used_players.contains(&p.id))
+                .cloned(),
+        );
 
-        if available.is_empty() {
+        if pool.is_empty() {
             continue;
         }
 
-        let (pairings, bye, remaining) = pair_scoregroup(&available, config)?;
-
-        all_pairings.extend(pairings);
-        if let Some(bye_player) = bye {
-            byes.push(bye_player);
+        if pool.len() % 2 == 1 {
+            if i == last_group {
+                let bye = select_bye_candidate(&pool)?;
+                pool.retain(|p| p.id != bye.id);
+                byes.push(bye.id);
+            } else {
+                let floater = select_down_floater(&pool);
+                pool.retain(|p| p.id != floater.id);
+                float_downs.push(floater.id.clone());
+                carried.push(floater);
+            }
         }
-        used_players.extend(remaining);
+
+        let (pairings, unpaired) = pair_scoregroup(&pool, config);
+        all_pairings.extend(pairings);
+        for p in unpaired {
+            if !float_downs.contains(&p.id) {
+                float_downs.push(p.id.clone());
+            }
+            carried.push(p);
+        }
     }
 
-    let unpaired: Vec<SwissPlayer> = ranked
-        .iter()
-        .filter(|p| !used_players.contains(&p.id) && !byes.contains(&p.id))
-        .cloned()
-        .collect();
-
-    // Track which players float down this round
-    let float_downs: Vec<String> = unpaired.iter().map(|p| p.id.clone()).collect();
+    let unpaired: Vec<SwissPlayer> = carried;
 
     // Track float-ups
     let mut float_ups: Vec<String> = Vec::new();
@@ -123,10 +138,11 @@ pub fn generate_pairings(
                 if !float_ups.contains(&pairing.white) {
                     float_ups.push(pairing.white.clone());
                 }
-            } else if (ws - bs).abs() > f64::EPSILON && bs < ws {
-                if !float_ups.contains(&pairing.black) {
-                    float_ups.push(pairing.black.clone());
-                }
+            } else if (ws - bs).abs() > f64::EPSILON
+                && bs < ws
+                && !float_ups.contains(&pairing.black)
+            {
+                float_ups.push(pairing.black.clone());
             }
         }
     }
@@ -205,40 +221,18 @@ fn is_valid_pairing(p1: &str, p2: &str, p1_opponents: &[String], config: &Pairin
     !already_played && !forbidden
 }
 
+/// Pairs an even-sized pool top half against bottom half. Returns the pairings and
+/// the players left without a valid (non-rematch, non-forbidden) opponent.
 fn pair_scoregroup(
     players: &[SwissPlayer],
     config: &PairingConfig,
-) -> PairingResult<(Vec<Pairing>, Option<String>, Vec<String>)> {
-    if players.is_empty() {
-        return Ok((Vec::new(), None, Vec::new()));
-    }
-
+) -> (Vec<Pairing>, Vec<SwissPlayer>) {
     let mut pairings: Vec<Pairing> = Vec::new();
-    let mut used: Vec<String> = Vec::new();
-    let mut bye: Option<String> = None;
+    let mut used: HashSet<String> = HashSet::new();
 
-    // Handle odd number - one player gets bye.
-    // A 1-player group should float to the next scoregroup, not receive a bye here.
-    let player_count = if players.len() % 2 == 1 && players.len() > 1 {
-        let bye_candidate = select_bye_candidate(players)?;
-        bye = Some(bye_candidate.id.clone());
-        used.push(bye_candidate.id.clone());
-        players.len() - 1
-    } else {
-        players.len()
-    };
-
-    // Now pair remaining players
-    let to_pair: Vec<&SwissPlayer> = players.iter().filter(|p| !used.contains(&p.id)).collect();
-
-    // Dutch system: split in half, pair top half vs bottom half
-    let half = player_count / 2;
-    let top_half = &to_pair[..half.min(to_pair.len())];
-    let bottom_half = &to_pair[half.min(to_pair.len())..];
-
-    // Prefer floaters that have NOT been floated down recently as the down-float
-    // candidate. If all have been floated down, we accept a repeat.
-    let mut bottom: Vec<&SwissPlayer> = bottom_half.to_vec();
+    let half = players.len() / 2;
+    let top_half = &players[..half];
+    let mut bottom: Vec<&SwissPlayer> = players[half..].iter().collect();
 
     for white in top_half.iter() {
         if bottom.is_empty() {
@@ -261,8 +255,8 @@ fn pair_scoregroup(
                     black: black.id.clone(),
                     board: 0, // assigned later
                 });
-                used.push(white.id.clone());
-                used.push(black.id.clone());
+                used.insert(white.id.clone());
+                used.insert(black.id.clone());
             }
             None => {
                 // All remaining bottom-half players are rematches or forbidden; float this player.
@@ -274,7 +268,32 @@ fn pair_scoregroup(
         }
     }
 
-    Ok((pairings, bye, used))
+    let unpaired = players
+        .iter()
+        .filter(|p| !used.contains(&p.id))
+        .cloned()
+        .collect();
+    (pairings, unpaired)
+}
+
+/// Picks the player an odd scoregroup sends down: the lowest-ranked one that did not
+/// already float down last round, falling back to the lowest-ranked overall.
+fn select_down_floater(pool: &[SwissPlayer]) -> SwissPlayer {
+    let mut ranked: Vec<&SwissPlayer> = pool.iter().collect();
+    ranked.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.rating.cmp(&a.rating))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    ranked
+        .iter()
+        .rev()
+        .find(|p| !p.floated_down_last_round())
+        .or_else(|| ranked.last())
+        .map(|p| (*p).clone())
+        .expect("select_down_floater called with an empty pool")
 }
 
 fn select_bye_candidate(players: &[SwissPlayer]) -> PairingResult<SwissPlayer> {

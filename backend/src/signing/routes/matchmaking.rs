@@ -61,7 +61,7 @@ mod tests {
         // Default() builds a lazy (unconnected) SQLite pool, which needs a
         // Tokio context to construct even though it doesn't connect eagerly.
         let state = SharedMatchmakingState::default();
-        assert_eq!(state.queue.lock().expect("Mutex lock").len(), 0);
-        assert_eq!(state.matches.lock().expect("Mutex lock").len(), 0);
+        assert_eq!(state.queue.lock().len(), 0);
+        assert_eq!(state.matches.lock().len(), 0);
     }
 }

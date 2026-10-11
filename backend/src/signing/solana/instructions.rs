@@ -1007,65 +1007,155 @@ pub fn register_player_ix(
     }
 }
 
-pub fn advance_round_ix(program_id: &Pubkey, tournament_id: u64, cranker: &Pubkey) -> Instruction {
+/// Shard accounts 0-3 for the Swiss instructions. Shards beyond what the tournament
+/// was initialised with are passed as the program ID, Anchor's `None` marker.
+fn swiss_shard_metas(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    max_players: u16,
+) -> Vec<AccountMeta> {
+    let present = required_shards(max_players);
+    (0..4u8)
+        .map(|shard| {
+            if shard < present {
+                let pda = Pubkey::find_program_address(
+                    &[
+                        TOURNAMENT_PLAYERS_SEED,
+                        &[shard],
+                        &tournament_id.to_le_bytes(),
+                    ],
+                    program_id,
+                )
+                .0;
+                AccountMeta::new(pda, false)
+            } else {
+                AccountMeta::new_readonly(*program_id, false)
+            }
+        })
+        .collect()
+}
+
+/// Closes the current on-chain Swiss round; every one of its `boards_in_round`
+/// boards must already be reported.
+pub fn advance_round_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    boards_in_round: u16,
+    authority: &Pubkey,
+) -> Instruction {
     let tournament_pda =
         Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
             .0;
     let mut data = anchor_discriminator("advance_round").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&boards_in_round.to_le_bytes());
     Instruction {
         program_id: *program_id,
         accounts: vec![
             AccountMeta::new(tournament_pda, false),
-            AccountMeta::new_readonly(*cranker, true),
+            AccountMeta::new_readonly(*authority, true),
         ],
         data,
     }
 }
 
+/// Finalises a Swiss tournament with the off-chain final order (top 10 at most).
 pub fn complete_swiss_tournament_ix(
     program_id: &Pubkey,
     tournament_id: u64,
     max_players: u16,
-    cranker: &Pubkey,
+    places: &[Pubkey],
+    authority: &Pubkey,
 ) -> Instruction {
     let tournament_pda =
         Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
             .0;
-    let shard_pda = |shard: u8| {
+    let mut data = anchor_discriminator("complete_swiss_tournament").to_vec();
+    data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&(places.len() as u32).to_le_bytes());
+    for place in places {
+        data.extend_from_slice(place.as_ref());
+    }
+    let mut accounts = vec![AccountMeta::new(tournament_pda, false)];
+    accounts.extend(
+        swiss_shard_metas(program_id, tournament_id, max_players)
+            .into_iter()
+            .map(|meta| AccountMeta::new_readonly(meta.pubkey, false)),
+    );
+    accounts.push(AccountMeta::new_readonly(*authority, true));
+    Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    }
+}
+
+/// Seats a tournament pairing in an Active Game with both players' per-game move
+/// sessions pointing at `session_key`. Signed (and rent paid) by the tournament
+/// authority.
+#[allow(clippy::too_many_arguments)]
+pub fn create_tournament_game_ix(
+    program_id: &Pubkey,
+    tournament_id: u64,
+    max_players: u16,
+    game_id: u64,
+    white: &Pubkey,
+    black: &Pubkey,
+    session_key: &Pubkey,
+    authority: &Pubkey,
+) -> Instruction {
+    let tournament_pda =
+        Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
+            .0;
+    let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
+    let session_pda = |player: &Pubkey| {
         Pubkey::find_program_address(
             &[
-                TOURNAMENT_PLAYERS_SEED,
-                &[shard],
-                &tournament_id.to_le_bytes(),
+                SESSION_DELEGATION_SEED,
+                &game_id.to_le_bytes(),
+                player.as_ref(),
             ],
             program_id,
         )
         .0
     };
-    let shard_meta = |shard: u8, present: bool| {
-        if present {
-            AccountMeta::new(shard_pda(shard), false)
-        } else {
-            AccountMeta::new_readonly(*program_id, false)
-        }
-    };
-    let mut data = anchor_discriminator("complete_swiss_tournament").to_vec();
+    let mut data = anchor_discriminator("create_tournament_game").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
+    data.extend_from_slice(&game_id.to_le_bytes());
+    data.extend_from_slice(session_key.as_ref());
+
+    let mut accounts = vec![AccountMeta::new_readonly(tournament_pda, false)];
+    accounts.extend(
+        swiss_shard_metas(program_id, tournament_id, max_players)
+            .into_iter()
+            .map(|meta| AccountMeta::new_readonly(meta.pubkey, false)),
+    );
+    accounts.extend([
+        AccountMeta::new(game_pda, false),
+        AccountMeta::new(session_pda(white), false),
+        AccountMeta::new(session_pda(black), false),
+        AccountMeta::new_readonly(*white, false),
+        AccountMeta::new_readonly(*black, false),
+        AccountMeta::new(*authority, true),
+        AccountMeta::new_readonly(solana_system_interface::program::id(), false),
+    ]);
     Instruction {
         program_id: *program_id,
-        accounts: vec![
-            AccountMeta::new(tournament_pda, false),
-            AccountMeta::new(shard_pda(0), false),
-            shard_meta(1, max_players >= 128),
-            shard_meta(2, max_players >= 256),
-            shard_meta(3, max_players >= 256),
-            AccountMeta::new_readonly(*cranker, true),
-        ],
+        accounts,
         data,
     }
 }
 
+/// On-chain `SwissMatchResult` Borsh variant tags.
+pub const SWISS_WHITE_WIN: u8 = 0;
+pub const SWISS_BLACK_WIN: u8 = 1;
+pub const SWISS_DRAW: u8 = 2;
+/// A bye, reported as a pseudo-board with the bye player as both `white` and `black`.
+pub const SWISS_BYE: u8 = 3;
+
+/// Records one board of the current on-chain Swiss round. `round` and `board` are
+/// the program's 0-based indices.
+#[allow(clippy::too_many_arguments)]
 pub fn record_swiss_result_ix(
     program_id: &Pubkey,
     tournament_id: u64,
@@ -1073,47 +1163,26 @@ pub fn record_swiss_result_ix(
     round: u8,
     board: u16,
     result_variant: u8,
-    player: &Pubkey,
-    opponent: &Pubkey,
+    white: &Pubkey,
+    black: &Pubkey,
+    authority: &Pubkey,
 ) -> Instruction {
     let tournament_pda =
         Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
             .0;
-    let shard_pda = |shard: u8| {
-        Pubkey::find_program_address(
-            &[
-                TOURNAMENT_PLAYERS_SEED,
-                &[shard],
-                &tournament_id.to_le_bytes(),
-            ],
-            program_id,
-        )
-        .0
-    };
-    let shard_meta = |shard: u8, present: bool| {
-        if present {
-            AccountMeta::new(shard_pda(shard), false)
-        } else {
-            AccountMeta::new_readonly(*program_id, false)
-        }
-    };
     let mut data = anchor_discriminator("record_swiss_result").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.push(round);
     data.extend_from_slice(&board.to_le_bytes());
     data.push(result_variant);
+    let mut accounts = vec![AccountMeta::new(tournament_pda, false)];
+    accounts.extend(swiss_shard_metas(program_id, tournament_id, max_players));
+    accounts.push(AccountMeta::new_readonly(*authority, true));
+    accounts.push(AccountMeta::new_readonly(*white, false));
+    accounts.push(AccountMeta::new_readonly(*black, false));
     Instruction {
         program_id: *program_id,
-        accounts: vec![
-            AccountMeta::new(tournament_pda, false),
-            AccountMeta::new(shard_pda(0), false),
-            shard_meta(1, max_players >= 128),
-            shard_meta(2, max_players >= 256),
-            shard_meta(3, max_players >= 256),
-            AccountMeta::new(*player, true),
-            AccountMeta::new_readonly(*opponent, false),
-            AccountMeta::new_readonly(solana_system_interface::program::id(), false),
-        ],
+        accounts,
         data,
     }
 }
@@ -1461,5 +1530,78 @@ mod tests {
             &game_id.to_le_bytes(),
             "task_id must equal game_id"
         );
+    }
+}
+
+#[cfg(test)]
+mod swiss_instruction_layout_tests {
+    use super::*;
+
+    fn placeholder_count(ix: &Instruction, program_id: &Pubkey) -> usize {
+        ix.accounts
+            .iter()
+            .filter(|meta| meta.pubkey == *program_id)
+            .count()
+    }
+
+    #[test]
+    fn record_swiss_result_matches_the_authority_signed_layout() {
+        let program_id = Pubkey::new_unique();
+        let (white, black, authority) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let ix = record_swiss_result_ix(
+            &program_id,
+            9,
+            8,
+            2,
+            3,
+            SWISS_DRAW,
+            &white,
+            &black,
+            &authority,
+        );
+        // tournament, shards 0-3, authority, white, black
+        assert_eq!(ix.accounts.len(), 8);
+        assert!(ix.accounts[5].is_signer && ix.accounts[5].pubkey == authority);
+        assert_eq!(ix.accounts[6].pubkey, white);
+        assert_eq!(ix.accounts[7].pubkey, black);
+        assert!(!ix.accounts[6].is_signer && !ix.accounts[7].is_signer);
+        assert_eq!(&ix.data[8..16], &9u64.to_le_bytes());
+        assert_eq!(&ix.data[16..], &[2, 3, 0, SWISS_DRAW]);
+    }
+
+    #[test]
+    fn swiss_shards_follow_required_shards() {
+        let program_id = Pubkey::new_unique();
+        let any = Pubkey::new_unique();
+        for (max_players, absent) in [(8u16, 3usize), (64, 3), (100, 2), (128, 2), (200, 0)] {
+            let ix = record_swiss_result_ix(&program_id, 1, max_players, 0, 0, 0, &any, &any, &any);
+            assert_eq!(
+                placeholder_count(&ix, &program_id),
+                absent,
+                "{max_players} players"
+            );
+        }
+    }
+
+    #[test]
+    fn advance_and_complete_encode_their_new_arguments() {
+        let program_id = Pubkey::new_unique();
+        let authority = Pubkey::new_unique();
+
+        let advance = advance_round_ix(&program_id, 5, 7, &authority);
+        assert_eq!(&advance.data[8..], &[5, 0, 0, 0, 0, 0, 0, 0, 7, 0]);
+        assert!(advance.accounts[1].is_signer);
+
+        let places = [Pubkey::new_unique(), Pubkey::new_unique()];
+        let complete = complete_swiss_tournament_ix(&program_id, 5, 8, &places, &authority);
+        assert_eq!(&complete.data[16..20], &2u32.to_le_bytes());
+        assert_eq!(&complete.data[20..52], places[0].as_ref());
+        assert_eq!(complete.data.len(), 20 + 64);
+        assert_eq!(complete.accounts.len(), 6);
+        assert!(complete.accounts[5].is_signer && complete.accounts[5].pubkey == authority);
     }
 }

@@ -9,7 +9,8 @@ pub struct CompleteSwissTournament<'info> {
     #[account(
         mut,
         seeds = [TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
-        bump = tournament.bump
+        bump = tournament.bump,
+        constraint = tournament.authority == authority.key() @ GameErrorCode::NotTournamentAuthority
     )]
     pub tournament: Account<'info, Tournament>,
     #[account(
@@ -32,10 +33,19 @@ pub struct CompleteSwissTournament<'info> {
         bump
     )]
     pub tournament_players_shard_3: Option<Account<'info, TournamentPlayersShard>>,
-    pub cranker: Signer<'info>,
+    pub authority: Signer<'info>,
 }
 
-pub fn handler(ctx: Context<CompleteSwissTournament>, tournament_id: u64) -> Result<()> {
+/// Finalises a Swiss tournament. Tiebreaks (Buchholz, Sonneborn-Berger) need each
+/// player's full opponent history, which only the off-chain pairing engine holds, so
+/// the authority supplies the final top places. The program checks that order
+/// against on-chain scores: every listed player is registered and distinct, scores
+/// never increase down the list, and nobody left off the list outscores its last entry.
+pub fn handler(
+    ctx: Context<CompleteSwissTournament>,
+    tournament_id: u64,
+    places: Vec<Pubkey>,
+) -> Result<()> {
     let t = &mut ctx.accounts.tournament;
 
     require!(
@@ -71,28 +81,23 @@ pub fn handler(ctx: Context<CompleteSwissTournament>, tournament_id: u64) -> Res
         standings.extend(shard.swiss_standings.iter().cloned());
     }
 
-    standings.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then(b.buchholz.cmp(&a.buchholz))
-            .then(b.sonneborn.cmp(&a.sonneborn))
-    });
+    validate_places(&standings, &places)?;
 
-    let mut places: [Option<Pubkey>; 10] = [None; 10];
-    for (i, standing) in standings.iter().take(10).enumerate() {
-        places[i] = Some(standing.player);
+    let mut slots: [Option<Pubkey>; 10] = [None; 10];
+    for (slot, player) in slots.iter_mut().zip(places.iter()) {
+        *slot = Some(*player);
     }
 
-    t.winner = places[0];
-    t.second_place = places[1];
-    t.third_place = places[2];
-    t.fourth_place = places[3];
-    t.fifth_place = places[4];
-    t.sixth_place = places[5];
-    t.seventh_place = places[6];
-    t.eighth_place = places[7];
-    t.ninth_place = places[8];
-    t.tenth_place = places[9];
+    t.winner = slots[0];
+    t.second_place = slots[1];
+    t.third_place = slots[2];
+    t.fourth_place = slots[3];
+    t.fifth_place = slots[4];
+    t.sixth_place = slots[5];
+    t.seventh_place = slots[6];
+    t.eighth_place = slots[7];
+    t.ninth_place = slots[8];
+    t.tenth_place = slots[9];
 
     t.status = TournamentStatus::Completed;
     t.completed_at = Some(Clock::get()?.unix_timestamp);
@@ -104,5 +109,40 @@ pub fn handler(ctx: Context<CompleteSwissTournament>, tournament_id: u64) -> Res
         t.winner
     );
 
+    Ok(())
+}
+
+fn validate_places(standings: &[SwissStanding], places: &[Pubkey]) -> Result<()> {
+    require!(
+        places.len() == standings.len().min(10),
+        GameErrorCode::InvalidSwissPlaces
+    );
+
+    let mut previous_score: Option<u8> = None;
+    for (i, player) in places.iter().enumerate() {
+        require!(
+            !places[..i].contains(player),
+            GameErrorCode::InvalidSwissPlaces
+        );
+        let score = standings
+            .iter()
+            .find(|s| s.player == *player)
+            .ok_or(GameErrorCode::InvalidSwissPlaces)?
+            .score;
+        if let Some(prev) = previous_score {
+            require!(score <= prev, GameErrorCode::InvalidSwissPlaces);
+        }
+        previous_score = Some(score);
+    }
+
+    if let Some(cutoff) = previous_score {
+        require!(
+            standings
+                .iter()
+                .filter(|s| !places.contains(&s.player))
+                .all(|s| s.score <= cutoff),
+            GameErrorCode::InvalidSwissPlaces
+        );
+    }
     Ok(())
 }

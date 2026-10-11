@@ -45,8 +45,9 @@ oneshot channel.
 .route("/api/auth/login", post(api_login))
 ```
 
-CORS is restricted to local/tauri origins. Further hardening (per-launch bearer token,
-signed updater, CSP) is tracked in [docs/TAURI_REMEDIATION.md](docs/TAURI_REMEDIATION.md).
+Wallet routes validate popup session/request identity and local origins. Current
+ownership and cancellation behavior is described in [the shell guide](src/README.md).
+See [security boundaries](../docs/architecture/security.md) for review obligations.
 
 ## Build & run
 

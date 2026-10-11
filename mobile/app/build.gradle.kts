@@ -16,8 +16,16 @@ android {
         // Match cargo-ndk API 31 and GameActivity's minimum; lower sysroots lack aaudio.
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // Release CI passes the tag version (e.g. 0.3.0); versionCode must rise
+        // with every store release, so derive it as major*10000 + minor*100 + patch.
+        val release = System.getenv("XFCHESS_RELEASE_VERSION")?.removePrefix("v")
+        val parts = release?.substringBefore('-')?.split('.')?.mapNotNull { it.toIntOrNull() }
+        versionName = release ?: "0.1.0"
+        versionCode = if (parts != null && parts.size == 3) {
+            parts[0] * 10000 + parts[1] * 100 + parts[2]
+        } else {
+            1
+        }
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -51,6 +59,12 @@ android {
             // Reference shared assets relative to the Gradle module directory.
             assets.directories.add("../../assets")
         }
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.androidResources.ignoreAssetsPatterns.add("stockfish.exe")
     }
 }
 

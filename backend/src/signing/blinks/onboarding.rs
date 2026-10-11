@@ -146,12 +146,10 @@ impl OnboardingStateMachine {
                     Some("https://xfchess.com/fund?amount=0.5".to_string())
                 }
             }
-            OnboardingState::ReadyToRegister => {
-                Some(format!(
-                    "/api/actions/tournament/{}/register",
-                    session.tournament_id
-                ))
-            }
+            OnboardingState::ReadyToRegister => Some(format!(
+                "/api/actions/tournament/{}/register",
+                session.tournament_id
+            )),
             OnboardingState::Registered => {
                 if let Some(wallet) = &session.wallet {
                     Some(format!(
@@ -184,7 +182,7 @@ static ONBOARDING_MACHINE: once_cell::sync::OnceCell<OnboardingStateMachine> =
     once_cell::sync::OnceCell::new();
 
 pub fn get_onboarding_machine() -> &'static OnboardingStateMachine {
-    ONBOARDING_MACHINE.get_or_init(|| OnboardingStateMachine::new())
+    ONBOARDING_MACHINE.get_or_init(OnboardingStateMachine::new)
 }
 
 #[cfg(test)]

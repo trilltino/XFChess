@@ -29,8 +29,9 @@ Android builds require the SDK, NDK, JDK and cargo-ndk described in
 Packages land in `release/local` or `release/dev`, with a `launch.bat` entry
 point. Local packages include a copy of `backend/.env` and supply missing
 development secrets in the staged copy; keep that package private. Remote
-packages default to `https://xfchess.com`. Stockfish is copied if already
-present; installable public releases are built by CI.
+packages default to `https://xfchess.com`. Put the Windows engine at
+`assets/bin/stockfish.exe`; packaging includes it with the assets when present.
+Installable public releases are built by CI and require the engine.
 
 `release` defaults to pushing the branch and tag. `-Deploy` waits for the
 release workflow, checks its Chrome OS asset, then calls `ops/scripts/deploy.ps1`.
