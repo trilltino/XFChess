@@ -22,7 +22,12 @@ pub fn spawn_background_tasks(
         state.vps_authority.clone(),
         state.tournament_fee_recipient,
     ));
-    let trigger_tx = spawn_tournament_scheduler(tournament_store, braid_hub, on_chain);
+    let trigger_tx = spawn_tournament_scheduler(
+        tournament_store,
+        braid_hub,
+        Some(state.swiss_service.clone()),
+        on_chain,
+    );
     info!("[Tasks] Tournament scheduler spawned with async-fill and Braid publication");
 
     spawn_prize_distributor(

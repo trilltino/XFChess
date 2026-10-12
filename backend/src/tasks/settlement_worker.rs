@@ -1,9 +1,9 @@
 use crate::db::repository::GameRepository;
 use crate::signing::anticheat_enqueue::{enqueue_game_analysis, FinalizedGame};
 use crate::signing::solana::{self, GAME_SEED};
-use crate::signing::storage::tournament::TournamentFormat;
-use crate::signing::swiss::orchestrator::OrchestratorEvent;
+use crate::signing::storage::tournament::GameOutcome;
 use crate::signing::AppState;
+use crate::signing::OrchestratorEvent;
 use crate::telemetry::worker_metrics;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signer::Signer;
@@ -974,56 +974,28 @@ async fn finalize_on_chain(
     )
     .await;
 
-    if let Some(tournament_id) = snap.tournament_id {
-        let is_swiss = state
-            .tournament_store
-            .get(tournament_id)
+    // Tournament games, any format and draws included, go to the orchestrator,
+    // which applies the format's rules and mirrors the result on-chain.
+    if let (Some(tournament_id), Some(tx)) = (snap.tournament_id, &state.orchestrator_tx) {
+        let outcome = match winner_side {
+            Some("white") => GameOutcome::WhiteWin,
+            Some("black") => GameOutcome::BlackWin,
+            _ => GameOutcome::Draw,
+        };
+        if let Err(e) = tx
+            .send(OrchestratorEvent::GameEnded {
+                tournament_id,
+                game_id,
+                white: white.clone(),
+                black: black.clone(),
+                outcome,
+            })
             .await
-            .is_some_and(|t| matches!(t.format, TournamentFormat::Swiss { .. }));
-        if is_swiss {
-            if let Some(tx) = &state.orchestrator_tx {
-                let result = match winner_side {
-                    Some("white") => swiss_pairing::MatchResult::WhiteWin,
-                    Some("black") => swiss_pairing::MatchResult::BlackWin,
-                    _ => swiss_pairing::MatchResult::Draw,
-                };
-                if let Err(e) = tx
-                    .send(OrchestratorEvent::GameEnded {
-                        tournament_id,
-                        game_id,
-                        white: white.clone(),
-                        black: black.clone(),
-                        result,
-                    })
-                    .await
-                {
-                    warn!(
-                        "[settlement] Failed to queue Swiss result for game {}: {}",
-                        game_id, e
-                    );
-                }
-            }
-        } else if let Some(tx) = &state.tournament_trigger {
-            if let Some((winner, loser)) = match winner_side {
-                Some("white") => Some((white.clone(), black.clone())),
-                Some("black") => Some((black.clone(), white.clone())),
-                _ => None,
-            } {
-                if let Err(e) = tx
-                    .send(crate::signing::TournamentTrigger::GameSettled {
-                        tournament_id,
-                        game_id,
-                        winner,
-                        loser,
-                    })
-                    .await
-                {
-                    warn!(
-                        "[settlement] Failed to queue elimination result for game {}: {}",
-                        game_id, e
-                    );
-                }
-            }
+        {
+            warn!(
+                "[settlement] Failed to queue tournament result for game {}: {}",
+                game_id, e
+            );
         }
     }
 

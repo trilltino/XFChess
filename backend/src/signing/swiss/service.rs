@@ -1,7 +1,6 @@
 use crate::signing::storage::tournament::{
-    SwissStorageData, TournamentRecord, TournamentStatus, TournamentStore,
+    FormatState, GameOutcome, SwissStorageData, TournamentRecord, TournamentStatus, TournamentStore,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use swiss_pairing::{
@@ -10,19 +9,6 @@ use swiss_pairing::{
 };
 use tracing::{info, warn};
 use xfchess_braid_server::{bridge, ResourceHub};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SwissData {
-    pub current_round: u8,
-    pub total_rounds: u8,
-    pub rounds: Vec<SwissRound>,
-    pub results: Vec<(u8, u16, MatchResult)>,
-    pub standings: Vec<StandingsEntry>,
-    pub absent_players: Vec<String>,
-    pub withdrawn_players: Vec<String>,
-    pub forbidden_pairs: Vec<(String, String)>,
-    pub manual_pairings_next_round: Vec<ManualPairing>,
-}
 
 /// Owns every Swiss state transition. Results come in through [`Self::record_result`]
 /// (settled games, admin entry, forfeits); when a round's last board lands it pairs
@@ -58,11 +44,7 @@ impl SwissService {
 
         self.store
             .update(tournament_id, |t| {
-                t.format = crate::signing::storage::tournament::TournamentFormat::Swiss { rounds };
-                t.swiss_data = Some(SwissStorageData {
-                    total_rounds: rounds,
-                    ..Default::default()
-                });
+                t.state = FormatState::Swiss(SwissStorageData::new(rounds));
                 t.status = TournamentStatus::Active;
                 t.started_at = Some(chrono::Utc::now().timestamp());
             })
@@ -175,6 +157,35 @@ impl SwissService {
         Ok(standings)
     }
 
+    /// Records a settled game: its id names the board, and its players must be the
+    /// board's pairing.
+    pub async fn record_game(
+        &self,
+        tournament_id: u64,
+        game_id: u64,
+        white: &str,
+        black: &str,
+        outcome: GameOutcome,
+    ) -> Result<(u8, u16), SwissServiceError> {
+        let (round, board) = TournamentStore::swiss_board_for_game_id(tournament_id, game_id)
+            .ok_or(SwissServiceError::UnknownGame(game_id))?;
+        let sd = self.swiss_data(tournament_id).await?;
+        let pairing = sd
+            .round(round)
+            .and_then(|r| r.pairings.iter().find(|p| p.board == board))
+            .ok_or(SwissServiceError::UnknownGame(game_id))?;
+        if pairing.white != white || pairing.black != black {
+            return Err(SwissServiceError::PlayersMismatch {
+                game_id,
+                white: white.to_string(),
+                black: black.to_string(),
+            });
+        }
+        self.record_result(tournament_id, round, board, outcome.into())
+            .await?;
+        Ok((round, board))
+    }
+
     pub async fn get_pairings(
         &self,
         tournament_id: u64,
@@ -200,12 +211,16 @@ impl SwissService {
     }
 
     async fn swiss_data(&self, tournament_id: u64) -> Result<SwissStorageData, SwissServiceError> {
-        self.store
+        match self
+            .store
             .get(tournament_id)
             .await
             .ok_or(SwissServiceError::TournamentNotFound)?
-            .swiss_data
-            .ok_or(SwissServiceError::NotSwissFormat)
+            .state
+        {
+            FormatState::Swiss(sd) => Ok(sd),
+            FormatState::Elimination(_) => Err(SwissServiceError::NotSwissFormat),
+        }
     }
 
     /// Marks a player absent and, if their board in `round` is still open, scores it
@@ -237,7 +252,7 @@ impl SwissService {
 
         self.store
             .update(tournament_id, |t| {
-                if let Some(ref mut sd) = t.swiss_data {
+                if let Some(sd) = t.swiss_mut() {
                     if !sd.absent_players.iter().any(|p| p == player_id) {
                         sd.absent_players.push(player_id.to_string());
                     }
@@ -275,7 +290,7 @@ impl SwissService {
 
         self.store
             .update(tournament_id, |t| {
-                if let Some(ref mut sd) = t.swiss_data {
+                if let Some(sd) = t.swiss_mut() {
                     if !sd.withdrawn_players.iter().any(|p| p == player_id) {
                         sd.withdrawn_players.push(player_id.to_string());
                     }
@@ -303,8 +318,7 @@ impl SwissService {
             .ok_or(SwissServiceError::TournamentNotFound)?;
 
         let swiss_data = tournament
-            .swiss_data
-            .as_ref()
+            .swiss()
             .ok_or(SwissServiceError::NotSwissFormat)?;
 
         if swiss_data.withdrawn_players.iter().any(|p| p == player_id) {
@@ -316,7 +330,7 @@ impl SwissService {
 
         self.store
             .update(tournament_id, |t| {
-                if let Some(ref mut sd) = t.swiss_data {
+                if let Some(sd) = t.swiss_mut() {
                     sd.absent_players.retain(|id| id != player_id);
                 }
             })
@@ -333,7 +347,7 @@ impl SwissService {
     ) -> Result<(), SwissServiceError> {
         self.store
             .update(tournament_id, |t| {
-                if let Some(ref mut sd) = t.swiss_data {
+                if let Some(sd) = t.swiss_mut() {
                     let pair = (player_a.to_string(), player_b.to_string());
                     if !sd.forbidden_pairs.contains(&pair) {
                         sd.forbidden_pairs.push(pair);
@@ -352,7 +366,7 @@ impl SwissService {
     ) -> Result<(), SwissServiceError> {
         self.store
             .update(tournament_id, |t| {
-                if let Some(ref mut sd) = t.swiss_data {
+                if let Some(sd) = t.swiss_mut() {
                     sd.forbidden_pairs.retain(|(a, b)| {
                         !((a == player_a && b == player_b) || (a == player_b && b == player_a))
                     });
@@ -370,7 +384,7 @@ impl SwissService {
     ) -> Result<(), SwissServiceError> {
         self.store
             .update(tournament_id, |t| {
-                if let Some(ref mut sd) = t.swiss_data {
+                if let Some(sd) = t.swiss_mut() {
                     sd.manual_pairings_next_round.push(ManualPairing {
                         white: white.to_string(),
                         black: black.to_string(),
@@ -389,7 +403,7 @@ impl SwissService {
     ) -> Result<(), SwissServiceError> {
         self.store
             .update(tournament_id, |t| {
-                if let Some(ref mut sd) = t.swiss_data {
+                if let Some(sd) = t.swiss_mut() {
                     sd.manual_pairings_next_round
                         .retain(|mp| !(mp.white == white && mp.black == black));
                 }
@@ -414,8 +428,8 @@ impl SwissService {
             .update(tournament_id, |t| {
                 outcome = (|| {
                     let mut sd = t
-                        .swiss_data
-                        .clone()
+                        .swiss()
+                        .cloned()
                         .ok_or(SwissServiceError::NotSwissFormat)?;
                     match sd
                         .results
@@ -431,7 +445,7 @@ impl SwissService {
                     if t.status == TournamentStatus::Completed {
                         apply_places(t, &standings);
                     }
-                    t.swiss_data = Some(sd);
+                    t.state = FormatState::Swiss(sd);
                     Ok(standings)
                 })();
             })
@@ -448,10 +462,7 @@ impl SwissService {
 }
 
 fn pair_next_round(t: &mut TournamentRecord) -> Result<SwissRound, SwissServiceError> {
-    let sd = t
-        .swiss_data
-        .as_ref()
-        .ok_or(SwissServiceError::NotSwissFormat)?;
+    let sd = t.swiss().ok_or(SwissServiceError::NotSwissFormat)?;
     if t.status == TournamentStatus::Completed {
         return Err(SwissServiceError::TournamentComplete);
     }
@@ -477,7 +488,9 @@ fn pair_next_round(t: &mut TournamentRecord) -> Result<SwissRound, SwissServiceE
         )));
     }
 
-    let sd = t.swiss_data.as_mut().expect("checked above");
+    let Some(sd) = t.swiss_mut() else {
+        return Err(SwissServiceError::NotSwissFormat);
+    };
     sd.current_round = next_round;
     sd.rounds.push(round.clone());
     sd.manual_pairings_next_round.clear();
@@ -492,8 +505,8 @@ fn apply_result(
     result: MatchResult,
 ) -> Result<(Vec<StandingsEntry>, bool, bool), SwissServiceError> {
     let mut sd = t
-        .swiss_data
-        .clone()
+        .swiss()
+        .cloned()
         .ok_or(SwissServiceError::NotSwissFormat)?;
     if round != sd.current_round {
         return Err(SwissServiceError::InvalidRound(round));
@@ -515,7 +528,7 @@ fn apply_result(
 
     let round_complete = sd.round_complete(round);
     let completed = round_complete && round >= sd.total_rounds;
-    t.swiss_data = Some(sd);
+    t.state = FormatState::Swiss(sd);
 
     if completed {
         t.status = TournamentStatus::Completed;
@@ -652,4 +665,14 @@ pub enum SwissServiceError {
 
     #[error("Player has permanently withdrawn and cannot rejoin")]
     PlayerWithdrawn,
+
+    #[error("game {0} is not a board of this event")]
+    UnknownGame(u64),
+
+    #[error("game {game_id} was played by {white} / {black}, not by the board's pairing")]
+    PlayersMismatch {
+        game_id: u64,
+        white: String,
+        black: String,
+    },
 }

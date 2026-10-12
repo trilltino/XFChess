@@ -1,6 +1,17 @@
-use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
+//! Tournament records and their store.
+//!
+//! A record holds what every tournament has (players, fees, placings, prizes) plus
+//! its format's own state in [`FormatState`]: a bracket for single elimination
+//! ([`crate::signing::elimination`]) or rounds and standings for Swiss
+//! ([`crate::signing::swiss`]). Format rules live in those modules; this one
+//! dispatches to them.
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sqlx::SqlitePool;
 use std::collections::HashMap;
+
+pub use crate::signing::elimination::{EliminationState, TournamentMatch};
+pub use crate::signing::swiss::state::SwissStorageData;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TournamentFormat {
@@ -8,47 +19,182 @@ pub enum TournamentFormat {
     Swiss { rounds: u8 },
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct SwissStorageData {
-    pub current_round: u8,
-    pub total_rounds: u8,
-    pub rounds: Vec<swiss_pairing::SwissRound>,
-    pub results: Vec<(u8, u16, swiss_pairing::MatchResult)>,
-    pub standings: Vec<swiss_pairing::StandingsEntry>,
-    #[serde(default)]
-    pub round_deadline_at: Option<i64>,
-    #[serde(default)]
-    pub absent_players: Vec<String>,
-    #[serde(default)]
-    pub withdrawn_players: Vec<String>,
-    #[serde(default)]
-    pub forbidden_pairs: Vec<(String, String)>,
-    #[serde(default)]
-    pub manual_pairings_next_round: Vec<swiss_pairing::ManualPairing>,
-    /// `(round, board)` results already written on-chain via `record_swiss_result`
-    /// (backend 1-based numbering). Lets the chain reconciler resume after a restart.
-    #[serde(default)]
-    pub chain_boards_recorded: Vec<(u8, u16)>,
-    /// Set once `complete_swiss_tournament` has landed on-chain.
-    #[serde(default)]
-    pub chain_completed: bool,
+/// The format's own state. A record is one format or the other, never both.
+///
+/// Stored records and the public tournament API have always carried this as three
+/// keys, `format`, `matches` (the bracket) and `swiss_data`; the record flattens it
+/// back into exactly that shape, so older rows still load.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormatState {
+    Elimination(EliminationState),
+    Swiss(SwissStorageData),
 }
 
-impl SwissStorageData {
-    pub fn has_result(&self, round: u8, board: u16) -> bool {
-        self.results
-            .iter()
-            .any(|(r, b, _)| *r == round && *b == board)
+#[derive(Serialize)]
+struct FormatWireRef<'a> {
+    format: TournamentFormat,
+    matches: &'a [TournamentMatch],
+    swiss_data: Option<&'a SwissStorageData>,
+}
+
+#[derive(Deserialize)]
+struct FormatWire {
+    format: TournamentFormat,
+    // Older rows padded an undrawn bracket with nulls.
+    #[serde(default)]
+    matches: Vec<Option<TournamentMatch>>,
+    // Older rows left this empty until a Swiss event's first round was set up.
+    #[serde(default)]
+    swiss_data: Option<SwissStorageData>,
+}
+
+impl Serialize for FormatState {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let (matches, swiss_data): (&[TournamentMatch], _) = match self {
+            Self::Elimination(bracket) => (&bracket.matches, None),
+            Self::Swiss(sd) => (&[], Some(sd)),
+        };
+        FormatWireRef {
+            format: self.format(),
+            matches,
+            swiss_data,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FormatState {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = FormatWire::deserialize(deserializer)?;
+        Ok(match wire.format {
+            TournamentFormat::SingleElimination => Self::Elimination(EliminationState {
+                matches: wire.matches.into_iter().flatten().collect(),
+            }),
+            TournamentFormat::Swiss { rounds } => Self::Swiss(
+                wire.swiss_data
+                    .unwrap_or_else(|| SwissStorageData::new(rounds)),
+            ),
+        })
+    }
+}
+
+impl FormatState {
+    /// A format's state before the event starts.
+    pub fn for_format(format: &TournamentFormat) -> Self {
+        match format {
+            TournamentFormat::SingleElimination => Self::Elimination(EliminationState::default()),
+            TournamentFormat::Swiss { rounds } => Self::Swiss(SwissStorageData::new(*rounds)),
+        }
     }
 
-    pub fn round(&self, round: u8) -> Option<&swiss_pairing::SwissRound> {
-        self.rounds.iter().find(|r| r.round == round)
+    pub fn format(&self) -> TournamentFormat {
+        match self {
+            Self::Elimination(_) => TournamentFormat::SingleElimination,
+            Self::Swiss(sd) => TournamentFormat::Swiss {
+                rounds: sd.total_rounds,
+            },
+        }
     }
 
-    /// Every board of `round` has a result (a round with no boards is complete).
-    pub fn round_complete(&self, round: u8) -> bool {
-        self.round(round)
-            .is_some_and(|r| r.pairings.iter().all(|p| self.has_result(round, p.board)))
+    /// 0-based round in play, for either format.
+    pub fn current_round(&self) -> Option<u8> {
+        match self {
+            Self::Elimination(bracket) => bracket.current_round(),
+            Self::Swiss(sd) => sd.current_round_index(),
+        }
+    }
+
+    pub fn total_rounds(&self) -> u8 {
+        match self {
+            Self::Elimination(bracket) => bracket.total_rounds(),
+            Self::Swiss(sd) => sd.total_rounds,
+        }
+    }
+
+    /// Undecided games in the 0-based `round`.
+    pub fn open_matches_in(&self, round: u8) -> usize {
+        match self {
+            Self::Elimination(bracket) => bracket.open_matches_in(round),
+            Self::Swiss(sd) => sd.open_boards_in(round),
+        }
+    }
+
+    pub fn assignment_for(
+        &self,
+        tournament_id: u64,
+        player: &str,
+        node_ids: &HashMap<String, String>,
+    ) -> Option<MatchAssignment> {
+        match self {
+            Self::Elimination(bracket) => bracket.assignment_for(player, node_ids),
+            Self::Swiss(sd) => sd.assignment_for(tournament_id, player, node_ids),
+        }
+    }
+
+    /// Games that can be played now: both players known, no result yet.
+    pub fn open_games(&self, tournament_id: u64) -> Vec<AssignedGame> {
+        match self {
+            Self::Elimination(bracket) => bracket.open_games(tournament_id),
+            Self::Swiss(sd) => sd.open_games(tournament_id),
+        }
+    }
+
+    /// Every game the event has scheduled, including drawn bracket games that were
+    /// replayed.
+    pub fn game_ids(&self, tournament_id: u64) -> Vec<u64> {
+        match self {
+            Self::Elimination(bracket) => bracket.game_ids(),
+            Self::Swiss(sd) => sd.game_ids(tournament_id),
+        }
+    }
+
+    /// The 0-based round `game_id` belongs to, if it is one of this event's games.
+    pub fn round_of_game(&self, tournament_id: u64, game_id: u64) -> Option<u8> {
+        match self {
+            Self::Elimination(bracket) => bracket.match_for_game(game_id).map(|m| m.round),
+            Self::Swiss(sd) => sd.round_of_game(tournament_id, game_id),
+        }
+    }
+
+    /// The bracket view's `matches` and 0-based `current_round` (255 once a bracket's
+    /// final is decided).
+    pub fn bracket_view(&self, tournament_id: u64) -> (serde_json::Value, serde_json::Value) {
+        match self {
+            Self::Elimination(bracket) => {
+                let finished = bracket
+                    .matches
+                    .last()
+                    .is_some_and(TournamentMatch::is_decided);
+                let current_round = if finished {
+                    255
+                } else {
+                    bracket.current_round().unwrap_or(0)
+                };
+                (
+                    serde_json::to_value(&bracket.matches).unwrap_or_default(),
+                    serde_json::json!(current_round),
+                )
+            }
+            Self::Swiss(sd) => (
+                sd.bracket_matches(tournament_id),
+                serde_json::json!(sd.current_round.saturating_sub(1)),
+            ),
+        }
+    }
+
+    /// The bracket view's entry for the match or board `game_id` was played in.
+    pub fn match_view(&self, tournament_id: u64, game_id: u64) -> Option<serde_json::Value> {
+        match self {
+            Self::Elimination(bracket) => {
+                serde_json::to_value(bracket.match_for_game(game_id)?).ok()
+            }
+            Self::Swiss(sd) => match sd.bracket_matches(tournament_id) {
+                serde_json::Value::Array(boards) => boards
+                    .into_iter()
+                    .find(|board| board["game_id"] == serde_json::json!(game_id)),
+                _ => None,
+            },
+        }
     }
 }
 
@@ -58,6 +204,18 @@ pub enum TournamentStatus {
     Active,
     Completed,
     Cancelled,
+}
+
+impl TournamentStatus {
+    /// The value of the `tournaments.status` column (the serde name).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Registration => "Registration",
+            Self::Active => "Active",
+            Self::Completed => "Completed",
+            Self::Cancelled => "Cancelled",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -73,20 +231,8 @@ pub enum ResultSource {
     Oracle,
     Forfeit,
     DrawAgreed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TournamentMatch {
-    pub match_index: u16,
-    pub round: u8,
-    pub player_white: Option<String>,
-    pub player_black: Option<String>,
-    pub winner: Option<String>,
-    pub game_id: Option<u64>,
-    pub status: MatchStatus,
-    pub result_source: Option<ResultSource>,
-    pub next_match_for_winner: Option<u16>,
-    pub next_match_slot: u8,
+    /// Every game of a bracket match was drawn; the higher seed went through.
+    SeedTiebreak,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,11 +244,11 @@ pub struct TournamentRecord {
     pub prize_pool: u64,
     pub max_players: u16,
     pub status: TournamentStatus,
-    pub format: TournamentFormat,
+    #[serde(flatten)]
+    pub state: FormatState,
     pub players: Vec<String>,
     pub player_elos: Vec<u32>,
     pub node_ids: HashMap<String, String>,
-    pub matches: Vec<Option<TournamentMatch>>,
     pub winner: Option<String>,
     pub second_place: Option<String>,
     pub third_place: Option<String>,
@@ -114,7 +260,6 @@ pub struct TournamentRecord {
     pub ninth_place: Option<String>,
     pub tenth_place: Option<String>,
     pub prize_shares: [u16; 10],
-    pub swiss_data: Option<SwissStorageData>,
     pub elo_min: Option<u32>,
     pub elo_max: Option<u32>,
     pub min_players: Option<u16>,
@@ -143,43 +288,11 @@ impl TournamentRecord {
             tournament_id,
             name: name.to_string(),
             entry_fee_lamports,
-            platform_fee_lamports: 4_000_000, // Default to 50p
-            prize_pool: 0,
-            max_players: 8,
-            status: TournamentStatus::Registration,
-            format: TournamentFormat::SingleElimination,
-            players: Vec::new(),
-            player_elos: Vec::new(),
-            node_ids: HashMap::new(),
-            matches: vec![None; 7],
-            winner: None,
-            second_place: None,
-            third_place: None,
-            fourth_place: None,
-            fifth_place: None,
-            sixth_place: None,
-            seventh_place: None,
-            eighth_place: None,
-            ninth_place: None,
-            tenth_place: None,
-            password_hash: None,
-            scheduled_at: None,
-            started_at: None,
-            completed_at: None,
-            min_players: None,
-            swiss_data: None,
-            prize_shares: [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            elo_min: None,
-            elo_max: None,
-            created_at: chrono::Utc::now().timestamp(),
-            kyc_required: false,
-            prizes_distributed: false,
-            prize_release_approved: false,
-            broadcast_delay_secs: 0,
-            provisioned_game_ids: Vec::new(),
+            ..Self::default()
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_config(
         tournament_id: u64,
         name: String,
@@ -194,45 +307,22 @@ impl TournamentRecord {
         scheduled_at: Option<i64>,
         kyc_required: bool,
     ) -> Self {
-        let total_matches = (max_players - 1) as usize;
         Self {
             tournament_id,
             name,
             entry_fee_lamports,
             platform_fee_lamports,
-            prize_pool: 0,
             max_players,
-            status: TournamentStatus::Registration,
-            format,
+            state: FormatState::for_format(&format),
             players: Vec::with_capacity(max_players as usize),
             player_elos: Vec::with_capacity(max_players as usize),
-            node_ids: HashMap::new(),
-            matches: vec![None; total_matches],
-            winner: None,
-            second_place: None,
-            third_place: None,
-            fourth_place: None,
-            fifth_place: None,
-            sixth_place: None,
-            seventh_place: None,
-            eighth_place: None,
-            ninth_place: None,
-            tenth_place: None,
-            password_hash: None,
-            scheduled_at,
-            started_at: None,
-            completed_at: None,
-            min_players,
-            swiss_data: None,
             prize_shares,
             elo_min,
             elo_max,
-            created_at: chrono::Utc::now().timestamp(),
+            min_players,
+            scheduled_at,
             kyc_required,
-            prizes_distributed: false,
-            prize_release_approved: false,
-            broadcast_delay_secs: 0,
-            provisioned_game_ids: Vec::new(),
+            ..Self::default()
         }
     }
 
@@ -240,78 +330,109 @@ impl TournamentRecord {
         self.players.len() >= self.max_players as usize
     }
 
-    /// 0-based round in play (bracket rounds are 0-based; Swiss rounds are stored
-    /// 1-based and shifted here). `None` before a Swiss event pairs round 1.
-    pub fn current_round(&self) -> Option<u8> {
-        if matches!(self.format, TournamentFormat::Swiss { .. }) {
-            return self
-                .swiss_data
-                .as_ref()
-                .filter(|sd| sd.current_round > 0)
-                .map(|sd| sd.current_round - 1);
-        }
-        self.matches
-            .iter()
-            .flatten()
-            .filter(|m| m.status != MatchStatus::Completed)
-            .map(|m| m.round)
-            .min()
+    pub fn format(&self) -> TournamentFormat {
+        self.state.format()
     }
 
-    /// Unfinished matches in the 0-based `round`.
-    pub fn matches_remaining_in_round(&self, round: u8) -> usize {
-        if matches!(self.format, TournamentFormat::Swiss { .. }) {
-            let Some(sd) = self.swiss_data.as_ref() else {
-                return 0;
-            };
-            let swiss_round = round + 1;
-            return sd.round(swiss_round).map_or(0, |r| {
-                r.pairings
-                    .iter()
-                    .filter(|p| !sd.has_result(swiss_round, p.board))
-                    .count()
-            });
+    pub fn is_swiss(&self) -> bool {
+        matches!(self.state, FormatState::Swiss(_))
+    }
+
+    /// Results still to mirror on-chain: decided bracket matches not yet synced,
+    /// or a Swiss event whose on-chain completion has not landed. A bracket's
+    /// final is mirrored after the event completes, so this outlives `Active`.
+    pub fn chain_sync_pending(&self) -> bool {
+        matches!(
+            self.status,
+            TournamentStatus::Active | TournamentStatus::Completed
+        ) && match &self.state {
+            FormatState::Elimination(bracket) => bracket.unsynced().next().is_some(),
+            FormatState::Swiss(sd) => !sd.chain_completed,
         }
-        self.matches
-            .iter()
-            .flatten()
-            .filter(|m| m.round == round && m.status != MatchStatus::Completed)
-            .count()
+    }
+
+    /// Completed with a prize pool and a winner, and not paid out yet.
+    pub fn awaiting_prizes(&self) -> bool {
+        self.status == TournamentStatus::Completed
+            && !self.prizes_distributed
+            && self.prize_pool > 0
+            && self.winner.is_some()
+    }
+
+    pub fn swiss(&self) -> Option<&SwissStorageData> {
+        match &self.state {
+            FormatState::Swiss(sd) => Some(sd),
+            FormatState::Elimination(_) => None,
+        }
+    }
+
+    pub fn swiss_mut(&mut self) -> Option<&mut SwissStorageData> {
+        match &mut self.state {
+            FormatState::Swiss(sd) => Some(sd),
+            FormatState::Elimination(_) => None,
+        }
+    }
+
+    pub fn elimination(&self) -> Option<&EliminationState> {
+        match &self.state {
+            FormatState::Elimination(bracket) => Some(bracket),
+            FormatState::Swiss(_) => None,
+        }
+    }
+
+    /// 0-based round in play. `None` before a Swiss event pairs round 1 and once a
+    /// bracket is decided.
+    pub fn current_round(&self) -> Option<u8> {
+        self.state.current_round()
+    }
+
+    /// Undecided games in the 0-based `round`.
+    pub fn matches_remaining_in_round(&self, round: u8) -> usize {
+        self.state.open_matches_in(round)
     }
 
     pub fn total_rounds(&self) -> u8 {
-        match self.format {
-            TournamentFormat::Swiss { rounds } => rounds,
-            TournamentFormat::SingleElimination => self
-                .matches
-                .iter()
-                .flatten()
-                .map(|m| m.round)
-                .max()
-                .map(|r| r + 1)
-                .unwrap_or(0),
-        }
+        self.state.total_rounds()
     }
 
-    fn last_finished_match(&self, player: &str) -> Option<(u8, bool, String)> {
-        self.matches
+    /// Players best first: highest rating, earlier registration on a tie. Brackets
+    /// are drawn and draws are broken in this order.
+    pub fn seeding(&self) -> Vec<(String, u32)> {
+        let mut seeded: Vec<(String, u32)> = self
+            .players
             .iter()
-            .flatten()
-            .filter(|m| m.status == MatchStatus::Completed)
-            .filter(|m| {
-                m.player_white.as_deref() == Some(player)
-                    || m.player_black.as_deref() == Some(player)
-            })
-            .max_by_key(|m| m.round)
-            .map(|m| {
-                let won = m.winner.as_deref() == Some(player);
-                let opponent = if m.player_white.as_deref() == Some(player) {
-                    m.player_black.clone().unwrap_or_default()
-                } else {
-                    m.player_white.clone().unwrap_or_default()
-                };
-                (m.round, won, opponent)
-            })
+            .cloned()
+            .zip(self.player_elos.iter().copied())
+            .collect();
+        seeded.sort_by_key(|&(_, elo)| std::cmp::Reverse(elo));
+        seeded
+    }
+
+    /// Seeds the players and sets the event going: a bracket is drawn, a Swiss event
+    /// waits for its first round to be paired. A drawn bracket is never redrawn, so a
+    /// repeated start cannot wipe results.
+    pub fn start(&mut self) -> Result<(), String> {
+        if matches!(
+            self.status,
+            TournamentStatus::Completed | TournamentStatus::Cancelled
+        ) {
+            return Err(format!("Tournament is {:?}", self.status));
+        }
+        if self.elimination().is_some_and(EliminationState::is_drawn) {
+            return Err("Bracket already drawn".to_string());
+        }
+        if self.is_swiss() && self.players.len() < usize::from(self.min_players.unwrap_or(2)) {
+            return Err("Not enough players for Swiss tournament".to_string());
+        }
+        let (players, elos) = self.seeding().into_iter().unzip();
+        self.players = players;
+        self.player_elos = elos;
+        if let FormatState::Elimination(bracket) = &mut self.state {
+            *bracket = EliminationState::draw(self.tournament_id, &self.players);
+        }
+        self.status = TournamentStatus::Active;
+        self.started_at = Some(chrono::Utc::now().timestamp());
+        Ok(())
     }
 
     fn placing_for(&self, player: &str) -> Option<u8> {
@@ -336,24 +457,17 @@ impl TournamentRecord {
     pub fn player_status(&self, player: &str) -> PlayerTournamentStatus {
         let registered = self.players.iter().any(|p| p == player);
         let current_round = self.current_round();
-        let total_rounds = self.total_rounds();
-        let last_result = self
-            .last_finished_match(player)
-            .map(|(round, won, opponent)| LastMatchResult {
-                round,
-                won,
-                opponent,
-            });
-
         let mut status = PlayerTournamentStatus {
             state: PlayerState::NotRegistered,
             registered,
             tournament_status: self.status.clone(),
             round: current_round,
-            total_rounds,
+            total_rounds: self.total_rounds(),
             r#match: None,
             blocked_by: None,
-            last_result,
+            last_result: self
+                .elimination()
+                .and_then(|bracket| bracket.last_result_for(player)),
             placing: None,
             prize_lamports: None,
         };
@@ -385,125 +499,40 @@ impl TournamentRecord {
             TournamentStatus::Active => {}
         }
 
-        if matches!(self.format, TournamentFormat::Swiss { .. }) {
-            return self.swiss_player_status(player, status);
+        let assignment = self.match_for_player(player);
+        match &self.state {
+            // Swiss players are never knocked out, only withdrawn.
+            FormatState::Swiss(sd) if sd.is_withdrawn(player) => {
+                status.state = PlayerState::Eliminated;
+                return status;
+            }
+            FormatState::Elimination(bracket)
+                if assignment.is_none() && bracket.is_knocked_out(player) =>
+            {
+                status.state = PlayerState::Eliminated;
+                status.placing = self.placing_for(player);
+                status.prize_lamports = status.placing.map(|p| self.calculate_prize(p));
+                return status;
+            }
+            _ => {}
         }
 
-        // Active: is the player seated in an unfinished match?
-        if let Some(assignment) = self.match_for_player(player) {
-            status.state = if assignment.game_id.is_some() {
+        if let Some(seat) = assignment.as_ref().filter(|a| !a.is_bye) {
+            status.state = if seat.game_id.is_some() {
                 PlayerState::MatchReady
             } else {
-                // Both players known but the scheduler hasn't stamped a game
-                // ID yet — a brief window, not an error.
+                // Both players known but the game is not scheduled yet.
                 PlayerState::AwaitingGameId
             };
-            status.r#match = Some(assignment);
+            status.r#match = assignment;
             return status;
         }
 
-        // No playable match. Either they were knocked out, or they advanced
-        // and their next opponent is still being decided.
-        let knocked_out = self.matches.iter().flatten().any(|m| {
-            m.status == MatchStatus::Completed
-                && (m.player_white.as_deref() == Some(player)
-                    || m.player_black.as_deref() == Some(player))
-                && m.winner.as_deref() != Some(player)
-        });
-
-        if knocked_out {
-            status.state = PlayerState::Eliminated;
-            status.placing = self.placing_for(player);
-            status.prize_lamports = status.placing.map(|p| self.calculate_prize(p));
-        } else {
-            status.state = PlayerState::AwaitingOpponent;
-            if let Some(round) = current_round {
-                status.blocked_by = Some(BlockedBy {
-                    round,
-                    matches_remaining: self.matches_remaining_in_round(round),
-                });
-            }
-        }
-        status
-    }
-
-    pub fn final_match_index(&self) -> usize {
-        self.matches.len() - 1
-    }
-
-    pub fn semifinal1_index(&self) -> usize {
-        self.final_match_index().saturating_sub(2)
-    }
-
-    pub fn semifinal2_index(&self) -> usize {
-        self.final_match_index().saturating_sub(1)
-    }
-
-    pub fn match_for_player(&self, player: &str) -> Option<MatchAssignment> {
-        if matches!(self.format, TournamentFormat::Swiss { .. }) {
-            return self.swiss_match_for_player(player);
-        }
-
-        for m in self.matches.iter().flatten() {
-            if m.status == MatchStatus::Completed {
-                continue;
-            }
-            let is_white = m.player_white.as_deref() == Some(player);
-            let is_black = m.player_black.as_deref() == Some(player);
-            if !is_white && !is_black {
-                continue;
-            }
-            let opponent = if is_white {
-                m.player_black.clone()?
-            } else {
-                m.player_white.clone()?
-            };
-            let opponent_node_id = self.node_ids.get(&opponent).cloned();
-            return Some(MatchAssignment {
-                match_index: m.match_index,
-                round: Some(m.round),
-                board: None,
-                game_id: m.game_id,
-                opponent_pubkey: opponent,
-                opponent_node_id,
-                your_color: if is_white { "white" } else { "black" }.to_string(),
-                status: m.status.clone(),
-                is_bye: false,
-            });
-        }
-        None
-    }
-
-    /// Swiss players never get "knocked out": between their own games they wait
-    /// for the round to finish, unless they withdrew.
-    fn swiss_player_status(
-        &self,
-        player: &str,
-        mut status: PlayerTournamentStatus,
-    ) -> PlayerTournamentStatus {
-        let withdrawn = self
-            .swiss_data
-            .as_ref()
-            .is_some_and(|sd| sd.withdrawn_players.iter().any(|p| p == player));
-        if withdrawn {
-            status.state = PlayerState::Eliminated;
-            return status;
-        }
-
-        let assignment = self.swiss_match_for_player(player);
-        if let Some(a) = assignment.as_ref().filter(|a| !a.is_bye) {
-            status.state = if a.game_id.is_some() {
-                PlayerState::MatchReady
-            } else {
-                PlayerState::AwaitingGameId
-            };
-            status.r#match = Some(a.clone());
-            return status;
-        }
-
+        // Between games: a bracket winner waiting for the next opponent, or a Swiss
+        // player (or bye) waiting for the round to finish.
         status.state = PlayerState::AwaitingOpponent;
         status.r#match = assignment;
-        if let Some(round) = status.round {
+        if let Some(round) = current_round {
             status.blocked_by = Some(BlockedBy {
                 round,
                 matches_remaining: self.matches_remaining_in_round(round),
@@ -512,111 +541,21 @@ impl TournamentRecord {
         status
     }
 
-    /// The player's assignment in the latest Swiss round: their bye, or their board
-    /// while it has no result yet. `None` once their game is decided.
-    fn swiss_match_for_player(&self, player: &str) -> Option<MatchAssignment> {
-        let swiss = self.swiss_data.as_ref()?;
-        let round = swiss.rounds.last()?;
-
-        if round.byes.iter().any(|bye| bye == player) {
-            return Some(MatchAssignment {
-                match_index: 0,
-                round: Some(round.round),
-                board: None,
-                game_id: None,
-                opponent_pubkey: String::new(),
-                opponent_node_id: None,
-                your_color: "bye".to_string(),
-                status: MatchStatus::Completed,
-                is_bye: true,
-            });
-        }
-
-        let pairing = round
-            .pairings
-            .iter()
-            .enumerate()
-            .find(|(_, p)| p.white == player || p.black == player)?;
-
-        let (idx, p) = pairing;
-        if swiss.has_result(round.round, p.board) {
-            return None;
-        }
-        let is_white = p.white == player;
-        let opponent = if is_white {
-            p.black.clone()
-        } else {
-            p.white.clone()
-        };
-
-        Some(MatchAssignment {
-            match_index: idx as u16,
-            round: Some(round.round),
-            board: Some(p.board),
-            game_id: TournamentStore::swiss_game_id(self.tournament_id, round.round, p.board),
-            opponent_node_id: self.node_ids.get(&opponent).cloned(),
-            opponent_pubkey: opponent,
-            your_color: if is_white { "white" } else { "black" }.to_string(),
-            status: MatchStatus::Active,
-            is_bye: false,
-        })
+    pub fn match_for_player(&self, player: &str) -> Option<MatchAssignment> {
+        self.state
+            .assignment_for(self.tournament_id, player, &self.node_ids)
     }
 
-    pub fn generate_bracket(&mut self) {
-        let player_count = self.players.len();
-        if player_count < 2 {
-            self.matches.clear();
-            return;
-        }
-        let max_players = player_count as u16;
-        let total_matches = player_count - 1;
-        let round1_matches = player_count / 2;
-
-        self.matches = (0..total_matches)
-            .map(|i| {
-                let (round, next_match, next_slot) =
-                    crate::signing::solana::bracket_position(max_players, i as u16);
-
-                // Seed round 1 highest against lowest ELO; later rounds fill as winners are recorded.
-                let (player_white, player_black) = if i < round1_matches {
-                    (
-                        Some(self.players[i].clone()),
-                        Some(self.players[player_count - 1 - i].clone()),
-                    )
-                } else {
-                    (None, None)
-                };
-
-                Some(TournamentMatch {
-                    match_index: i as u16,
-                    round,
-                    player_white,
-                    player_black,
-                    winner: None,
-                    game_id: None,
-                    status: MatchStatus::Pending,
-                    result_source: None,
-                    next_match_for_winner: next_match,
-                    next_match_slot: next_slot,
-                })
-            })
-            .collect();
-    }
-
+    /// Lamports `place` (1-based, up to tenth) wins from the prize pool.
     pub fn calculate_prize(&self, place: u8) -> u64 {
-        let share_bps = match place {
-            1 => self.prize_shares[0],
-            2 => self.prize_shares[1],
-            3 => self.prize_shares[2],
-            4 => self.prize_shares[3],
-            _ => 0,
-        };
-
-        if share_bps == 0 {
+        let Some(&share_bps) = usize::from(place)
+            .checked_sub(1)
+            .and_then(|i| self.prize_shares.get(i))
+        else {
             return 0;
-        }
-
-        (self.prize_pool as u128 * share_bps as u128 / 10000) as u64
+        };
+        let prize = u128::from(self.prize_pool) * u128::from(share_bps) / 10_000;
+        u64::try_from(prize).unwrap_or(u64::MAX)
     }
 }
 
@@ -672,6 +611,23 @@ pub struct MatchAssignment {
     pub is_bye: bool,
 }
 
+/// A game a tournament has scheduled: both players known, no result yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssignedGame {
+    pub tournament_id: u64,
+    pub game_id: u64,
+    pub white: String,
+    pub black: String,
+}
+
+/// How a tournament game ended, as the settlement worker reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameOutcome {
+    WhiteWin,
+    BlackWin,
+    Draw,
+}
+
 #[derive(Clone)]
 pub struct TournamentStore {
     pool: SqlitePool,
@@ -698,21 +654,107 @@ pub struct TournamentTransaction {
     pub created_at: i64,
 }
 
+/// The record is the JSON in `data`. `status`, `chain_sync_pending` and
+/// `prizes_pending` are derived from it on every write ([`IndexColumns`]), so the
+/// background loops select only the events they act on instead of parsing every
+/// tournament ever held.
+const TOURNAMENTS_SCHEMA: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS tournaments (
+        id                 INTEGER PRIMARY KEY,
+        data               TEXT    NOT NULL,
+        updated_at         INTEGER NOT NULL DEFAULT 0,
+        status             TEXT,
+        chain_sync_pending INTEGER NOT NULL DEFAULT 0,
+        prizes_pending     INTEGER NOT NULL DEFAULT 0
+    )",
+    // Rows from before these columns existed get them NULL / 0 and are filled
+    // in by `backfill_index_columns`.
+    "ALTER TABLE tournaments ADD COLUMN status TEXT",
+    "ALTER TABLE tournaments ADD COLUMN chain_sync_pending INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE tournaments ADD COLUMN prizes_pending INTEGER NOT NULL DEFAULT 0",
+    "CREATE INDEX IF NOT EXISTS idx_tournaments_status ON tournaments (status)",
+    "CREATE INDEX IF NOT EXISTS idx_tournaments_chain_sync ON tournaments (id) WHERE chain_sync_pending = 1",
+    "CREATE INDEX IF NOT EXISTS idx_tournaments_prizes ON tournaments (id) WHERE prizes_pending = 1",
+];
+
+/// The columns stored beside a record's JSON for filtering.
+struct IndexColumns {
+    status: &'static str,
+    chain_sync_pending: bool,
+    prizes_pending: bool,
+}
+
+impl IndexColumns {
+    fn of(t: &TournamentRecord) -> Self {
+        Self {
+            status: t.status.as_str(),
+            chain_sync_pending: t.chain_sync_pending(),
+            prizes_pending: t.awaiting_prizes(),
+        }
+    }
+}
+
+/// Parses a stored record, logging one that no longer parses instead of letting
+/// it vanish from every query.
+fn decode(id: i64, data: &str) -> Option<TournamentRecord> {
+    serde_json::from_str(data)
+        .inspect_err(|e| tracing::error!("[tournament-store] tournament {id} is unreadable: {e}"))
+        .ok()
+}
+
+/// Fills the index columns of rows written before they existed. Runs at every
+/// start; after the first it finds nothing to do.
+async fn backfill_index_columns(pool: &SqlitePool) {
+    let rows: Vec<(i64, String)> =
+        match sqlx::query_as("SELECT id, data FROM tournaments WHERE status IS NULL")
+            .fetch_all(pool)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("[tournament-store] backfill query failed: {e}");
+                return;
+            }
+        };
+    let mut filled = 0usize;
+    for (id, data) in rows {
+        let Some(record) = decode(id, &data) else {
+            continue;
+        };
+        let columns = IndexColumns::of(&record);
+        let updated = sqlx::query(
+            "UPDATE tournaments SET status = ?, chain_sync_pending = ?, prizes_pending = ?
+             WHERE id = ? AND status IS NULL",
+        )
+        .bind(columns.status)
+        .bind(columns.chain_sync_pending)
+        .bind(columns.prizes_pending)
+        .bind(id)
+        .execute(pool)
+        .await;
+        match updated {
+            Ok(_) => filled += 1,
+            Err(e) => tracing::error!("[tournament-store] backfill of tournament {id} failed: {e}"),
+        }
+    }
+    if filled > 0 {
+        tracing::info!("[tournament-store] indexed {filled} existing tournament(s)");
+    }
+}
+
 impl TournamentStore {
     pub async fn new(pool: SqlitePool) -> Self {
         crate::signing::tournament_operations::init(&pool)
             .await
             .expect("tournament operations storage must be available");
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS tournaments (
-                id       INTEGER PRIMARY KEY,
-                data     TEXT    NOT NULL,
-                updated_at INTEGER NOT NULL DEFAULT 0
-            );",
-        )
-        .execute(&pool)
-        .await
-        .ok();
+        for statement in TOURNAMENTS_SCHEMA {
+            if let Err(e) = sqlx::query(*statement).execute(&pool).await {
+                if !e.to_string().contains("duplicate column") {
+                    tracing::error!("[tournament-store] schema statement failed: {e}");
+                }
+            }
+        }
+        backfill_index_columns(&pool).await;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS tournament_registration_transactions (
                 tournament_id INTEGER NOT NULL,
@@ -830,37 +872,96 @@ impl TournamentStore {
     }
 
     pub async fn create_checked(&self, record: TournamentRecord) -> Result<(), sqlx::Error> {
-        let data = serde_json::to_string(&record).unwrap_or_default();
+        let data = serde_json::to_string(&record).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+        let columns = IndexColumns::of(&record);
         let now = chrono::Utc::now().timestamp();
-        sqlx::query("INSERT INTO tournaments (id, data, updated_at) VALUES (?, ?, ?)")
-            .bind(record.tournament_id as i64)
-            .bind(&data)
-            .bind(now)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
+        sqlx::query(
+            "INSERT INTO tournaments (id, data, updated_at, status, chain_sync_pending, prizes_pending)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(record.tournament_id as i64)
+        .bind(&data)
+        .bind(now)
+        .bind(columns.status)
+        .bind(columns.chain_sync_pending)
+        .bind(columns.prizes_pending)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
     }
 
     pub async fn get(&self, id: u64) -> Option<TournamentRecord> {
-        let row = sqlx::query("SELECT data FROM tournaments WHERE id = ?")
-            .bind(id as i64)
+        let id = id as i64;
+        let data: String = sqlx::query_scalar("SELECT data FROM tournaments WHERE id = ?")
+            .bind(id)
             .fetch_optional(&self.pool)
             .await
             .ok()??;
-        serde_json::from_str(&row.get::<String, _>(0)).ok()
+        decode(id, &data)
     }
 
+    /// Every tournament ever held. For on-demand lookups only: a polling loop
+    /// selects what it acts on with [`Self::with_status`],
+    /// [`Self::chain_sync_pending`] or [`Self::awaiting_prizes`].
     pub async fn list(&self) -> Vec<TournamentRecord> {
-        let rows = sqlx::query("SELECT data FROM tournaments")
-            .fetch_all(&self.pool)
+        self.select(sqlx::query_as("SELECT id, data FROM tournaments"))
             .await
-            .unwrap_or_else(|e| {
-                tracing::error!("Failed to fetch tournaments from database: {}", e);
+    }
+
+    pub async fn with_status(&self, status: TournamentStatus) -> Vec<TournamentRecord> {
+        self.select(
+            sqlx::query_as("SELECT id, data FROM tournaments WHERE status = ?")
+                .bind(status.as_str()),
+        )
+        .await
+    }
+
+    /// Events with results still to mirror on-chain
+    /// ([`TournamentRecord::chain_sync_pending`]).
+    pub async fn chain_sync_pending(&self) -> Vec<TournamentRecord> {
+        self.select(sqlx::query_as(
+            "SELECT id, data FROM tournaments WHERE chain_sync_pending = 1",
+        ))
+        .await
+    }
+
+    /// Completed events whose prizes are not paid out yet
+    /// ([`TournamentRecord::awaiting_prizes`]).
+    pub async fn awaiting_prizes(&self) -> Vec<TournamentRecord> {
+        self.select(sqlx::query_as(
+            "SELECT id, data FROM tournaments WHERE prizes_pending = 1",
+        ))
+        .await
+    }
+
+    /// The tournament `game_id` was scheduled by. A bracket or Swiss game id
+    /// carries its tournament's id above the low 16 bits; a game id an admin
+    /// assigned by hand is looked for among running events.
+    pub async fn find_by_game(&self, game_id: u64) -> Option<TournamentRecord> {
+        let owns = |t: &TournamentRecord| t.state.round_of_game(t.tournament_id, game_id).is_some();
+        if let Some(t) = self.get(game_id >> 16).await.filter(owns) {
+            return Some(t);
+        }
+        self.with_status(TournamentStatus::Active)
+            .await
+            .into_iter()
+            .find(owns)
+    }
+
+    async fn select<'q>(
+        &self,
+        query: sqlx::query::QueryAs<'q, sqlx::Sqlite, (i64, String), sqlx::sqlite::SqliteArguments>,
+    ) -> Vec<TournamentRecord> {
+        match query.fetch_all(&self.pool).await {
+            Ok(rows) => rows
+                .into_iter()
+                .filter_map(|(id, data)| decode(id, &data))
+                .collect(),
+            Err(e) => {
+                tracing::error!("[tournament-store] tournament query failed: {e}");
                 Vec::new()
-            });
-        rows.into_iter()
-            .filter_map(|r| serde_json::from_str::<TournamentRecord>(&r.get::<String, _>(0)).ok())
-            .collect()
+            }
+        }
     }
 
     pub async fn visible(&self) -> Result<Vec<TournamentRecord>, sqlx::Error> {
@@ -906,13 +1007,21 @@ impl TournamentStore {
             f(&mut record);
             let data =
                 serde_json::to_string(&record).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+            let columns = IndexColumns::of(&record);
             let now = chrono::Utc::now().timestamp();
-            sqlx::query("UPDATE tournaments SET data = ?, updated_at = ? WHERE id = ?")
-                .bind(data)
-                .bind(now)
-                .bind(id as i64)
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(
+                "UPDATE tournaments
+                 SET data = ?, updated_at = ?, status = ?, chain_sync_pending = ?, prizes_pending = ?
+                 WHERE id = ?",
+            )
+            .bind(data)
+            .bind(now)
+            .bind(columns.status)
+            .bind(columns.chain_sync_pending)
+            .bind(columns.prizes_pending)
+            .bind(id as i64)
+            .execute(&mut *tx)
+            .await?;
             tx.commit().await
         } else {
             Err(sqlx::Error::RowNotFound)
@@ -939,18 +1048,18 @@ impl TournamentStore {
         .await
     }
 
-    pub async fn set_match_game_id(&self, id: u64, match_index: usize, game_id: u64) -> bool {
-        self.update(id, |t| {
-            if let Some(m) = t.matches[match_index].as_mut() {
-                m.game_id = Some(game_id);
-                m.status = MatchStatus::Active;
-            }
-        })
-        .await
-    }
-
     pub fn deterministic_game_id(tournament_id: u64, match_index: u16) -> Option<u64> {
         (tournament_id < (1u64 << 48)).then_some((tournament_id << 16) | u64::from(match_index))
+    }
+
+    /// A bracket match's game id. `attempt` counts the match's drawn games, so each
+    /// replay gets a fresh id (`attempt << 8 | match_index`; a bracket has at most 255
+    /// matches). A tournament is one format, so this never meets a Swiss id.
+    pub fn bracket_game_id(tournament_id: u64, match_index: u16, attempt: u8) -> Option<u64> {
+        if match_index > 0xff {
+            return None;
+        }
+        Self::deterministic_game_id(tournament_id, (u16::from(attempt) << 8) | match_index)
     }
 
     /// Swiss boards reuse the deterministic scheme with `match_index = round << 8 |
@@ -974,80 +1083,6 @@ impl TournamentStore {
         (round > 0 && board > 0).then_some((round, board))
     }
 
-    pub async fn assign_ready_game_ids(&self, id: u64) -> Vec<(u16, u64)> {
-        let mut assigned = Vec::new();
-        self.update(id, |t| {
-            for (index, maybe_match) in t.matches.iter_mut().enumerate() {
-                let Some(m) = maybe_match else { continue };
-                if m.game_id.is_some() || m.player_white.is_none() || m.player_black.is_none() {
-                    continue;
-                }
-                let Some(game_id) = Self::deterministic_game_id(id, m.match_index) else {
-                    continue;
-                };
-                m.game_id = Some(game_id);
-                m.status = MatchStatus::Active;
-                assigned.push((index as u16, game_id));
-            }
-        })
-        .await;
-        assigned
-    }
-
-    pub async fn record_result(
-        &self,
-        id: u64,
-        match_index: usize,
-        winner: String,
-        loser: String,
-    ) -> bool {
-        let updated = self
-            .update(id, |t| {
-                if let Some(m) = t.matches[match_index].as_mut() {
-                    m.winner = Some(winner.clone());
-                    m.status = MatchStatus::Completed;
-                }
-
-                // Advance the winner into their next-round match slot (if any).
-                let next = t.matches[match_index].as_ref().and_then(|m| {
-                    m.next_match_for_winner
-                        .map(|n| (n as usize, m.next_match_slot))
-                });
-                if let Some((next_idx, slot)) = next {
-                    if next_idx < t.matches.len() {
-                        if let Some(nm) = t.matches[next_idx].as_mut() {
-                            if slot == 0 {
-                                nm.player_white = Some(winner.clone());
-                            } else {
-                                nm.player_black = Some(winner.clone());
-                            }
-                        }
-                    }
-                }
-
-                let final_idx = t.final_match_index();
-
-                // Check final before semifinals; a two-player bracket has no semifinal matches.
-                if match_index == final_idx {
-                    // Final complete - tournament done
-                    t.winner = Some(winner);
-                    t.second_place = Some(loser);
-                    t.status = TournamentStatus::Completed;
-                    t.completed_at = Some(chrono::Utc::now().timestamp());
-                } else if t.matches.len() >= 3 && match_index == t.semifinal1_index() {
-                    t.fourth_place = Some(loser);
-                } else if t.matches.len() >= 3 && match_index == t.semifinal2_index() {
-                    // Second semifinal - loser is 3rd place
-                    t.third_place = Some(loser);
-                }
-            })
-            .await;
-        if updated {
-            self.assign_ready_game_ids(id).await;
-        }
-        updated
-    }
-
     pub async fn update_status(&self, id: u64, status: TournamentStatus) -> bool {
         self.update(id, |t| {
             t.status = status;
@@ -1055,69 +1090,11 @@ impl TournamentStore {
         .await
     }
 
-    pub async fn seed_players_by_elo(&self, id: u64) -> bool {
-        self.update(id, |t| {
-            let mut indexed: Vec<(usize, u32)> =
-                t.player_elos.iter().copied().enumerate().collect();
-            indexed.sort_by(|a, b| b.1.cmp(&a.1)); // descending ELO
-
-            // Reorder players and elos by sorted index
-            let mut sorted_players = Vec::new();
-            let mut sorted_elos = Vec::new();
-            for (idx, _) in indexed {
-                sorted_players.push(t.players[idx].clone());
-                sorted_elos.push(t.player_elos[idx]);
-            }
-            t.players = sorted_players;
-            t.player_elos = sorted_elos;
-        })
-        .await
-    }
-
-    pub async fn generate_bracket(&self, id: u64) -> bool {
-        self.update(id, |t| {
-            if t.format != TournamentFormat::SingleElimination {
-                return;
-            }
-            // Builds every round up front (later-round matches start with empty
-            // player slots); record_result advances winners into them.
-            t.generate_bracket();
-        })
-        .await
-    }
-
+    /// Seeds the players and starts the event ([`TournamentRecord::start`]).
     pub async fn start_tournament(&self, id: u64) -> Result<(), String> {
-        let tournament = self.get(id).await.ok_or("Tournament not found")?;
-
-        if !self.seed_players_by_elo(id).await {
-            return Err("Failed to seed players".to_string());
-        }
-
-        match tournament.format {
-            TournamentFormat::SingleElimination => {
-                if !self.generate_bracket(id).await {
-                    return Err("Failed to generate bracket".to_string());
-                }
-            }
-            TournamentFormat::Swiss { .. } => {
-                // Swiss bracket generation handled by swiss service
-                // Just verify we have enough players for at least one pairing
-                if tournament.players.len() < tournament.min_players.unwrap_or(2) as usize {
-                    return Err("Not enough players for Swiss tournament".to_string());
-                }
-            }
-        }
-
-        if !self.update_status(id, TournamentStatus::Active).await {
-            return Err("Failed to update tournament status".to_string());
-        }
-
-        self.update(id, |t| {
-            t.started_at = Some(chrono::Utc::now().timestamp());
-        })
-        .await;
-
-        Ok(())
+        let mut outcome = Err("Tournament not found".to_string());
+        self.update(id, |t| outcome = t.start()).await;
+        outcome
     }
 }
 
@@ -1127,15 +1104,14 @@ impl Default for TournamentRecord {
             tournament_id: 0,
             name: String::new(),
             entry_fee_lamports: 0,
-            platform_fee_lamports: 4_000_000,
+            platform_fee_lamports: 4_000_000, // 50p
             prize_pool: 0,
             max_players: 8,
             status: TournamentStatus::Registration,
-            format: TournamentFormat::SingleElimination,
+            state: FormatState::for_format(&TournamentFormat::SingleElimination),
             players: Vec::new(),
             player_elos: Vec::new(),
             node_ids: HashMap::new(),
-            matches: vec![None; 7],
             winner: None,
             second_place: None,
             third_place: None,
@@ -1151,7 +1127,6 @@ impl Default for TournamentRecord {
             started_at: None,
             completed_at: None,
             min_players: None,
-            swiss_data: None,
             prize_shares: [10000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             elo_min: None,
             elo_max: None,
@@ -1179,199 +1154,199 @@ mod tests {
         t
     }
 
-    async fn mem_store() -> TournamentStore {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        TournamentStore::new(pool).await
+    fn started_bracket(tournament_id: u64, n: usize) -> TournamentRecord {
+        let mut t = record_with_players(tournament_id, n);
+        t.start().unwrap();
+        t
+    }
+
+    fn swiss_record(tournament_id: u64) -> TournamentRecord {
+        let mut t = record_with_players(tournament_id, 5);
+        let mut sd = SwissStorageData::new(3);
+        sd.current_round = 1;
+        sd.rounds = vec![swiss_pairing::SwissRound {
+            round: 1,
+            pairings: vec![
+                swiss_pairing::Pairing {
+                    white: "P0".into(),
+                    black: "P2".into(),
+                    board: 1,
+                },
+                swiss_pairing::Pairing {
+                    white: "P3".into(),
+                    black: "P1".into(),
+                    board: 2,
+                },
+            ],
+            byes: vec!["P4".into()],
+            float_downs: vec![],
+            float_ups: vec![],
+        }];
+        t.state = FormatState::Swiss(sd);
+        t.status = TournamentStatus::Active;
+        t
+    }
+
+    /// `t` as an older row stored it: an undrawn bracket padded with nulls and no
+    /// Swiss data before round 1.
+    fn legacy_json(t: &TournamentRecord, padding: usize) -> String {
+        let mut v = serde_json::to_value(t).unwrap();
+        v["matches"] = serde_json::Value::Array(vec![serde_json::Value::Null; padding]);
+        v["swiss_data"] = serde_json::Value::Null;
+        v.to_string()
     }
 
     #[test]
-    fn bracket_two_players_is_a_single_final() {
-        let mut t = record_with_players(1, 2);
-        t.generate_bracket();
+    fn older_bracket_rows_load_and_save_in_the_same_shape() {
+        let t = record_with_players(1, 8);
+        let loaded: TournamentRecord = serde_json::from_str(&legacy_json(&t, 7)).unwrap();
+        assert_eq!(loaded.format(), TournamentFormat::SingleElimination);
+        assert_eq!(loaded.elimination(), Some(&EliminationState::default()));
 
-        assert_eq!(t.matches.len(), 1);
-        let m = t.matches[0].as_ref().unwrap();
-        assert_eq!(m.round, 0);
-        assert_eq!(m.player_white.as_deref(), Some("P0"));
-        assert_eq!(m.player_black.as_deref(), Some("P1"));
-        // The only match is the final — it must not point past the bracket.
-        assert_eq!(m.next_match_for_winner, None);
+        let saved = serde_json::to_value(started_bracket(1, 8)).unwrap();
+        assert_eq!(saved["format"], serde_json::json!("SingleElimination"));
+        assert_eq!(saved["matches"].as_array().unwrap().len(), 7);
+        assert!(saved["swiss_data"].is_null());
+        let again: TournamentRecord = serde_json::from_value(saved).unwrap();
+        assert_eq!(again.state, started_bracket(1, 8).state);
     }
 
     #[test]
-    fn bracket_four_players_semis_feed_the_final() {
-        let mut t = record_with_players(1, 4);
-        t.generate_bracket();
+    fn older_swiss_rows_without_swiss_data_keep_their_round_count() {
+        let mut t = record_with_players(2, 6);
+        t.state = FormatState::for_format(&TournamentFormat::Swiss { rounds: 5 });
+        let loaded: TournamentRecord = serde_json::from_str(&legacy_json(&t, 5)).unwrap();
+        assert_eq!(loaded.format(), TournamentFormat::Swiss { rounds: 5 });
+        assert_eq!(loaded.swiss().map(|sd| sd.total_rounds), Some(5));
 
-        assert_eq!(t.matches.len(), 3);
-        // Semifinal 0: seed 1 vs seed 4, winner goes to final slot 0
-        let m0 = t.matches[0].as_ref().unwrap();
-        assert_eq!(m0.player_white.as_deref(), Some("P0"));
-        assert_eq!(m0.player_black.as_deref(), Some("P3"));
-        assert_eq!(m0.next_match_for_winner, Some(2));
-        assert_eq!(m0.next_match_slot, 0);
-        // Semifinal 1: seed 2 vs seed 3, winner goes to final slot 1
-        let m1 = t.matches[1].as_ref().unwrap();
-        assert_eq!(m1.player_white.as_deref(), Some("P1"));
-        assert_eq!(m1.player_black.as_deref(), Some("P2"));
-        assert_eq!(m1.next_match_for_winner, Some(2));
-        assert_eq!(m1.next_match_slot, 1);
-        // Final exists as an empty shell awaiting winners
-        let m2 = t.matches[2].as_ref().unwrap();
-        assert_eq!(m2.round, 1);
-        assert!(m2.player_white.is_none() && m2.player_black.is_none());
-        assert_eq!(m2.next_match_for_winner, None);
-    }
-
-    #[test]
-    fn bracket_eight_players_next_pointers_stay_in_bounds() {
-        let mut t = record_with_players(1, 8);
-        t.generate_bracket();
-
-        assert_eq!(t.matches.len(), 7);
-        for m in t.matches.iter().flatten() {
-            if let Some(next) = m.next_match_for_winner {
-                assert!((next as usize) < t.matches.len());
-                assert!(next > m.match_index);
-            } else {
-                assert_eq!(m.match_index, 6); // only the final has no successor
-            }
-        }
-        // Semifinal winners meet in the final
+        let saved = serde_json::to_value(swiss_record(2)).unwrap();
         assert_eq!(
-            t.matches[4].as_ref().unwrap().next_match_for_winner,
-            Some(6)
+            saved["format"],
+            serde_json::json!({ "Swiss": { "rounds": 3 } })
         );
+        assert_eq!(saved["matches"], serde_json::json!([]));
+        assert_eq!(saved["swiss_data"]["current_round"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn starting_a_bracket_seeds_by_rating_and_schedules_round_one() {
+        let mut t = record_with_players(3, 4);
+        t.players.reverse();
+        t.player_elos.reverse();
+        t.start().unwrap();
+        assert_eq!(t.players, vec!["P0", "P1", "P2", "P3"]);
+        assert_eq!(t.status, TournamentStatus::Active);
+        let ready: Vec<_> = t
+            .state
+            .open_games(3)
+            .into_iter()
+            .map(|g| (g.white, g.black))
+            .collect();
         assert_eq!(
-            t.matches[5].as_ref().unwrap().next_match_for_winner,
-            Some(6)
+            ready,
+            vec![("P0".into(), "P3".into()), ("P1".into(), "P2".into())]
         );
     }
 
     #[test]
-    fn deterministic_game_ids_are_stable_and_bounded() {
+    fn a_swiss_event_needs_its_minimum_to_start_and_pairs_later() {
+        let mut t = record_with_players(4, 3);
+        t.state = FormatState::for_format(&TournamentFormat::Swiss { rounds: 3 });
+        t.min_players = Some(4);
+        assert!(t.start().is_err());
+        t.min_players = Some(3);
+        t.start().unwrap();
+        assert_eq!(
+            t.current_round(),
+            None,
+            "round 1 is paired by the Swiss service"
+        );
+        assert!(t.state.open_games(4).is_empty());
+    }
+
+    #[test]
+    fn game_ids_are_unique_per_match_replay_and_board() {
         assert_eq!(
             TournamentStore::deterministic_game_id(42, 7),
             Some((42 << 16) | 7)
         );
         assert_eq!(TournamentStore::deterministic_game_id(1 << 48, 0), None);
-    }
+        assert_eq!(
+            TournamentStore::bracket_game_id(42, 7, 0),
+            Some((42 << 16) | 7)
+        );
+        assert_ne!(
+            TournamentStore::bracket_game_id(42, 7, 0),
+            TournamentStore::bracket_game_id(42, 7, 1)
+        );
+        assert_eq!(TournamentStore::bracket_game_id(42, 256, 0), None);
 
-    #[tokio::test]
-    async fn two_player_tournament_completes_on_its_only_match() {
-        let store = mem_store().await;
-        let mut t = record_with_players(11, 2);
-        t.generate_bracket();
-        t.status = TournamentStatus::Active;
-        store.create(t).await;
-
-        assert!(store.record_result(11, 0, "P1".into(), "P0".into()).await);
-
-        let t = store.get(11).await.unwrap();
-        assert_eq!(t.status, TournamentStatus::Completed);
-        assert_eq!(t.winner.as_deref(), Some("P1"));
-        assert_eq!(t.second_place.as_deref(), Some("P0"));
-        // A head-to-head has no semifinals — no phantom 3rd/4th placements.
-        assert!(t.third_place.is_none());
-        assert!(t.fourth_place.is_none());
-    }
-
-    #[tokio::test]
-    async fn four_player_tournament_advances_winners_and_completes() {
-        let store = mem_store().await;
-        let mut t = record_with_players(12, 4);
-        t.generate_bracket();
-        t.status = TournamentStatus::Active;
-        store.create(t).await;
-
-        // Semifinal 0: P0 beats P3 (P3 -> 4th)
-        assert!(store.record_result(12, 0, "P0".into(), "P3".into()).await);
-        // Semifinal 1: P1 beats P2 (P2 -> 3rd)
-        assert!(store.record_result(12, 1, "P1".into(), "P2".into()).await);
-
-        // Both winners must have been advanced into the final.
-        let t = store.get(12).await.unwrap();
-        let final_match = t.matches[2].as_ref().unwrap();
-        assert_eq!(final_match.player_white.as_deref(), Some("P0"));
-        assert_eq!(final_match.player_black.as_deref(), Some("P1"));
-        assert_eq!(t.status, TournamentStatus::Active);
-        assert_eq!(t.fourth_place.as_deref(), Some("P3"));
-        assert_eq!(t.third_place.as_deref(), Some("P2"));
-
-        // Final: P1 beats P0
-        assert!(store.record_result(12, 2, "P1".into(), "P0".into()).await);
-        let t = store.get(12).await.unwrap();
-        assert_eq!(t.status, TournamentStatus::Completed);
-        assert_eq!(t.winner.as_deref(), Some("P1"));
-        assert_eq!(t.second_place.as_deref(), Some("P0"));
-    }
-}
-
-#[cfg(test)]
-mod player_status_tests {
-    use super::*;
-
-    fn record_with_players(tournament_id: u64, n: usize) -> TournamentRecord {
-        let mut t = TournamentRecord::new(tournament_id, "test", 0);
-        t.max_players = n as u16;
-        for i in 0..n {
-            t.players.push(format!("P{i}"));
-            t.player_elos.push(2000 - i as u32);
-        }
-        t
+        let id = TournamentStore::swiss_game_id(7, 3, 12).unwrap();
+        assert_eq!(
+            TournamentStore::swiss_board_for_game_id(7, id),
+            Some((3, 12))
+        );
+        assert_eq!(TournamentStore::swiss_board_for_game_id(8, id), None);
+        assert_eq!(TournamentStore::swiss_game_id(7, 0, 1), None);
+        assert_eq!(TournamentStore::swiss_game_id(7, 1, 0), None);
+        assert_eq!(TournamentStore::swiss_game_id(7, 1, 256), None);
     }
 
     #[test]
-    fn winner_awaiting_opponent_is_not_confused_with_a_stranger() {
-        let mut t = record_with_players(1, 4);
-        t.generate_bracket();
-        t.status = TournamentStatus::Active;
+    fn every_format_lists_its_games_and_their_rounds() {
+        let swiss = swiss_record(9);
+        let board_two = TournamentStore::swiss_game_id(9, 1, 2).unwrap();
+        assert_eq!(swiss.state.game_ids(9).len(), 2);
+        assert_eq!(swiss.state.round_of_game(9, board_two), Some(0));
+        assert_eq!(swiss.state.round_of_game(9, 12345), None);
 
-        // Semifinal 0 done: P0 beat P3. Semifinal 1 still in progress.
-        {
-            let m = t.matches[0].as_mut().unwrap();
-            m.winner = Some("P0".into());
-            m.status = MatchStatus::Completed;
-        }
-        // Advance P0 into the final, as record_result would.
-        t.matches[2].as_mut().unwrap().player_white = Some("P0".into());
+        let bracket = started_bracket(10, 4);
+        let first = bracket.state.open_games(10)[0].game_id;
+        assert_eq!(
+            bracket.state.game_ids(10).len(),
+            2,
+            "the final has no game yet"
+        );
+        assert_eq!(bracket.state.round_of_game(10, first), Some(0));
+    }
+
+    #[test]
+    fn every_paid_place_gets_its_share() {
+        let mut t = record_with_players(5, 4);
+        t.prize_pool = 1_000_000;
+        t.prize_shares = [4000, 2000, 1000, 1000, 500, 500, 300, 300, 200, 200];
+        assert_eq!(t.calculate_prize(1), 400_000);
+        assert_eq!(t.calculate_prize(5), 50_000);
+        assert_eq!(t.calculate_prize(10), 20_000);
+        assert_eq!(t.calculate_prize(0), 0);
+        assert_eq!(t.calculate_prize(11), 0);
+    }
+
+    #[test]
+    fn bracket_players_see_their_match_then_the_next_one() {
+        let mut t = started_bracket(1, 4);
+        let ready = t.player_status("P0");
+        assert_eq!(ready.state, PlayerState::MatchReady);
+        assert!(ready.r#match.unwrap().game_id.is_some());
+
+        let FormatState::Elimination(bracket) = &mut t.state else {
+            unreachable!()
+        };
+        bracket
+            .decide(1, 0, "P0", "P3", ResultSource::OnChain)
+            .unwrap();
 
         let advanced = t.player_status("P0");
         assert_eq!(advanced.state, PlayerState::AwaitingOpponent);
-        assert!(advanced.registered);
-        let blocked = advanced.blocked_by.expect("should report what it waits on");
-        assert_eq!(
-            blocked.round, 0,
-            "still blocked on the unfinished semifinal"
-        );
-        assert_eq!(blocked.matches_remaining, 1);
-        let last = advanced.last_result.expect("should recall the win");
-        assert!(last.won);
-        assert_eq!(last.opponent, "P3");
+        let blocked = advanced.blocked_by.expect("waits on the other semifinal");
+        assert_eq!((blocked.round, blocked.matches_remaining), (0, 1));
+        let last = advanced.last_result.expect("recalls the win");
+        assert!(last.won && last.opponent == "P3");
 
-        // The loser is eliminated, not waiting.
         assert_eq!(t.player_status("P3").state, PlayerState::Eliminated);
-
-        // Someone who never registered is neither.
         let stranger = t.player_status("NOT_A_PLAYER");
         assert_eq!(stranger.state, PlayerState::NotRegistered);
-        assert!(!stranger.registered);
         assert!(stranger.blocked_by.is_none());
-    }
-
-    #[test]
-    fn match_ready_only_once_a_game_id_exists() {
-        let mut t = record_with_players(2, 4);
-        t.generate_bracket();
-        t.status = TournamentStatus::Active;
-
-        // Seated, both players known, but the scheduler hasn't stamped an id.
-        assert_eq!(t.player_status("P0").state, PlayerState::AwaitingGameId);
-
-        t.matches[0].as_mut().unwrap().game_id = Some(99);
-        let ready = t.player_status("P0");
-        assert_eq!(ready.state, PlayerState::MatchReady);
-        assert_eq!(ready.r#match.expect("match present").game_id, Some(99));
     }
 
     #[test]
@@ -1379,7 +1354,7 @@ mod player_status_tests {
         let mut t = record_with_players(3, 4);
         assert_eq!(t.player_status("P0").state, PlayerState::Registered);
 
-        t.generate_bracket();
+        t.start().unwrap();
         t.status = TournamentStatus::Completed;
         t.winner = Some("P1".into());
         t.second_place = Some("P0".into());
@@ -1388,13 +1363,16 @@ mod player_status_tests {
 
         let champ = t.player_status("P1");
         assert_eq!(champ.state, PlayerState::Champion);
-        assert_eq!(champ.placing, Some(1));
-        assert_eq!(champ.prize_lamports, Some(600_000));
-
+        assert_eq!(
+            (champ.placing, champ.prize_lamports),
+            (Some(1), Some(600_000))
+        );
         let runner_up = t.player_status("P0");
         assert_eq!(runner_up.state, PlayerState::Eliminated);
-        assert_eq!(runner_up.placing, Some(2));
-        assert_eq!(runner_up.prize_lamports, Some(300_000));
+        assert_eq!(
+            (runner_up.placing, runner_up.prize_lamports),
+            (Some(2), Some(300_000))
+        );
 
         t.status = TournamentStatus::Cancelled;
         assert_eq!(t.player_status("P0").state, PlayerState::Cancelled);
@@ -1402,75 +1380,28 @@ mod player_status_tests {
 
     #[test]
     fn sixteen_player_bracket_reports_round_progress() {
-        let mut t = record_with_players(4, 16);
-        t.generate_bracket();
-        t.status = TournamentStatus::Active;
+        let mut t = started_bracket(4, 16);
         assert_eq!(t.total_rounds(), 4);
-
-        // Finish all 8 round-0 matches; P0 wins its own.
-        for i in 0..8 {
-            let m = t.matches[i].as_mut().unwrap();
-            let w = m.player_white.clone().unwrap();
-            m.winner = Some(w);
-            m.status = MatchStatus::Completed;
+        let FormatState::Elimination(bracket) = &mut t.state else {
+            unreachable!()
+        };
+        for i in 0..8u16 {
+            let (white, black) = {
+                let m = &bracket.matches[i as usize];
+                (
+                    m.player_white.clone().unwrap(),
+                    m.player_black.clone().unwrap(),
+                )
+            };
+            bracket
+                .decide(4, i, &white, &black, ResultSource::OnChain)
+                .unwrap();
         }
         assert_eq!(t.current_round(), Some(1));
         assert_eq!(t.matches_remaining_in_round(1), 4);
-
-        // P0 advanced but its round-1 opponent isn't decided yet.
-        t.matches[8].as_mut().unwrap().player_white = Some("P0".into());
-        t.matches[8].as_mut().unwrap().player_black = None;
         let s = t.player_status("P0");
-        assert_eq!(s.state, PlayerState::AwaitingOpponent);
-        assert_eq!(s.round, Some(1));
-        assert_eq!(s.total_rounds, 4);
-    }
-
-    fn swiss_record(tournament_id: u64) -> TournamentRecord {
-        let mut t = record_with_players(tournament_id, 5);
-        t.format = TournamentFormat::Swiss { rounds: 3 };
-        t.status = TournamentStatus::Active;
-        t.swiss_data = Some(SwissStorageData {
-            current_round: 1,
-            total_rounds: 3,
-            rounds: vec![swiss_pairing::SwissRound {
-                round: 1,
-                pairings: vec![
-                    swiss_pairing::Pairing {
-                        white: "P0".into(),
-                        black: "P2".into(),
-                        board: 1,
-                    },
-                    swiss_pairing::Pairing {
-                        white: "P3".into(),
-                        black: "P1".into(),
-                        board: 2,
-                    },
-                ],
-                byes: vec!["P4".into()],
-                float_downs: vec![],
-                float_ups: vec![],
-            }],
-            ..Default::default()
-        });
-        t
-    }
-
-    #[test]
-    fn swiss_game_ids_round_trip_and_stay_in_their_tournament() {
-        let id = TournamentStore::swiss_game_id(7, 3, 12).unwrap();
-        assert_eq!(
-            TournamentStore::swiss_board_for_game_id(7, id),
-            Some((3, 12))
-        );
-        assert_eq!(TournamentStore::swiss_board_for_game_id(8, id), None);
-        assert_ne!(
-            TournamentStore::swiss_game_id(7, 1, 2),
-            TournamentStore::swiss_game_id(7, 2, 1)
-        );
-        assert_eq!(TournamentStore::swiss_game_id(7, 0, 1), None);
-        assert_eq!(TournamentStore::swiss_game_id(7, 1, 0), None);
-        assert_eq!(TournamentStore::swiss_game_id(7, 1, 256), None);
+        assert_eq!(s.state, PlayerState::MatchReady);
+        assert_eq!((s.round, s.total_rounds), (Some(1), 4));
     }
 
     #[test]
@@ -1485,12 +1416,10 @@ mod player_status_tests {
             "round is reported 0-based like brackets"
         );
         let m = white.r#match.unwrap();
+        assert_eq!(m.round, Some(0), "and so is the board's round");
         assert_eq!(m.your_color, "white");
         assert_eq!(m.game_id, TournamentStore::swiss_game_id(9, 1, 1));
-
-        let black = t.player_status("P1");
-        assert_eq!(black.state, PlayerState::MatchReady);
-        assert_eq!(black.r#match.unwrap().your_color, "black");
+        assert_eq!(t.player_status("P1").r#match.unwrap().your_color, "black");
 
         // The bye waits for the round instead of being sent into a game.
         let bye = t.player_status("P4");
@@ -1498,8 +1427,7 @@ mod player_status_tests {
         assert_eq!(bye.blocked_by.unwrap().matches_remaining, 2);
 
         // Once board 1 is decided its players wait for board 2.
-        t.swiss_data
-            .as_mut()
+        t.swiss_mut()
             .unwrap()
             .results
             .push((1, 1, swiss_pairing::MatchResult::Draw));
@@ -1512,11 +1440,166 @@ mod player_status_tests {
     #[test]
     fn withdrawn_swiss_player_is_out() {
         let mut t = swiss_record(9);
-        t.swiss_data
-            .as_mut()
-            .unwrap()
-            .withdrawn_players
-            .push("P2".into());
+        t.swiss_mut().unwrap().withdrawn_players.push("P2".into());
         assert_eq!(t.player_status("P2").state, PlayerState::Eliminated);
+    }
+
+    /// One connection: each `sqlite::memory:` connection is its own database.
+    async fn memory_pool() -> SqlitePool {
+        sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap()
+    }
+
+    fn ids(records: Vec<TournamentRecord>) -> Vec<u64> {
+        let mut ids: Vec<u64> = records.iter().map(|t| t.tournament_id).collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    #[tokio::test]
+    async fn each_loop_sees_only_the_events_it_acts_on() {
+        let store = TournamentStore::new(memory_pool().await).await;
+        store.create(record_with_players(21, 4)).await;
+        store.create(started_bracket(22, 4)).await;
+        let mut unpaid = record_with_players(23, 4);
+        unpaid.status = TournamentStatus::Completed;
+        unpaid.prize_pool = 1_000;
+        unpaid.winner = Some("P0".into());
+        store.create(unpaid.clone()).await;
+        let mut paid = unpaid.clone();
+        paid.tournament_id = 24;
+        paid.prizes_distributed = true;
+        store.create(paid).await;
+        let mut cancelled = record_with_players(25, 4);
+        cancelled.status = TournamentStatus::Cancelled;
+        store.create(cancelled).await;
+
+        assert_eq!(
+            ids(store.with_status(TournamentStatus::Registration).await),
+            [21]
+        );
+        assert_eq!(ids(store.with_status(TournamentStatus::Active).await), [22]);
+        assert_eq!(ids(store.awaiting_prizes().await), [23]);
+        assert!(store.chain_sync_pending().await.is_empty());
+        assert_eq!(store.list().await.len(), 5);
+
+        // Every write re-derives the columns from the record.
+        store.start_tournament(21).await.unwrap();
+        assert_eq!(
+            ids(store.with_status(TournamentStatus::Active).await),
+            [21, 22]
+        );
+        store
+            .update(22, |t| {
+                let FormatState::Elimination(bracket) = &mut t.state else {
+                    unreachable!()
+                };
+                bracket
+                    .decide(22, 0, "P0", "P3", ResultSource::OnChain)
+                    .unwrap();
+            })
+            .await;
+        assert_eq!(ids(store.chain_sync_pending().await), [22]);
+        store
+            .update(22, |t| {
+                if let FormatState::Elimination(bracket) = &mut t.state {
+                    bracket.mark_synced(0);
+                }
+            })
+            .await;
+        assert!(store.chain_sync_pending().await.is_empty());
+        store.update(23, |t| t.prizes_distributed = true).await;
+        assert!(store.awaiting_prizes().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn rows_from_before_the_index_columns_are_backfilled() {
+        let pool = memory_pool().await;
+        sqlx::raw_sql(
+            "CREATE TABLE tournaments (id INTEGER PRIMARY KEY, data TEXT NOT NULL, \
+             updated_at INTEGER NOT NULL DEFAULT 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut unpaid = started_bracket(41, 2);
+        unpaid.status = TournamentStatus::Completed;
+        unpaid.prize_pool = 1_000;
+        unpaid.winner = Some("P0".into());
+        for (id, data) in [
+            (41, serde_json::to_string(&unpaid).unwrap()),
+            (42, "{not a record".to_string()),
+        ] {
+            sqlx::query("INSERT INTO tournaments (id, data) VALUES (?, ?)")
+                .bind(id)
+                .bind(data)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let store = TournamentStore::new(pool.clone()).await;
+        assert_eq!(
+            ids(store.with_status(TournamentStatus::Completed).await),
+            [41]
+        );
+        assert_eq!(ids(store.awaiting_prizes().await), [41]);
+        assert_eq!(
+            ids(store.list().await),
+            [41],
+            "the unreadable row is skipped"
+        );
+        let unindexed: Option<String> =
+            sqlx::query_scalar("SELECT status FROM tournaments WHERE id = 42")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(unindexed, None, "left for a later start to retry");
+
+        // A restart finds nothing left to fill.
+        let again = TournamentStore::new(pool).await;
+        assert_eq!(ids(again.awaiting_prizes().await), [41]);
+    }
+
+    #[tokio::test]
+    async fn a_game_leads_to_its_tournament() {
+        let store = TournamentStore::new(memory_pool().await).await;
+        let bracket = started_bracket(31, 4);
+        let bracket_game = bracket.state.open_games(31)[0].game_id;
+        store.create(bracket).await;
+        store.create(swiss_record(32)).await;
+        let swiss_game = TournamentStore::swiss_game_id(32, 1, 2).unwrap();
+
+        let found = |game_id| {
+            let store = store.clone();
+            async move { store.find_by_game(game_id).await.map(|t| t.tournament_id) }
+        };
+        assert_eq!(found(bracket_game).await, Some(31));
+        assert_eq!(found(swiss_game).await, Some(32));
+        assert_eq!(found((31 << 16) | 200).await, None, "not one of 31's games");
+
+        // A game id an admin assigned by hand is found among running events.
+        store
+            .update(31, |t| {
+                if let FormatState::Elimination(bracket) = &mut t.state {
+                    bracket.set_game_id(1, 999_999).unwrap();
+                }
+            })
+            .await;
+        assert_eq!(found(999_999).await, Some(31));
+    }
+
+    #[tokio::test]
+    async fn the_store_starts_an_event_once() {
+        let store = TournamentStore::new(memory_pool().await).await;
+        store.create(record_with_players(11, 2)).await;
+        store.start_tournament(11).await.unwrap();
+        let t = store.get(11).await.unwrap();
+        assert_eq!(t.status, TournamentStatus::Active);
+        assert_eq!(t.elimination().unwrap().matches.len(), 1);
+        assert!(store.start_tournament(99).await.is_err());
     }
 }

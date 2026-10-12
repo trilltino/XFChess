@@ -11,7 +11,7 @@ use super::{
 
 const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
-const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
+pub(crate) const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";
 
 pub(crate) fn anchor_discriminator(name: &str) -> [u8; 8] {

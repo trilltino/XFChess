@@ -1,6 +1,5 @@
 use crate::infrastructure::{initialize_pools, run_migrations, spawn_background_tasks};
 use crate::signing::storage::tournament::TournamentStore;
-use crate::signing::storage::SessionStore;
 use crate::signing::{AppState, SigningConfig};
 use std::sync::Arc;
 use tracing::info;
@@ -70,16 +69,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     run_migrations(&pools).await?;
     info!("[signing-server] Database migrations completed");
 
-    // Initialize tables before AppState constructs the live SessionStore.
-    let schema_vault = crate::signing::identity::IdentityVault::new(
-        &config.identity_encryption_key,
-        &config.identity_salt,
-    )
-    .expect("Failed to initialize IdentityVault from env config");
-    let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
-    session_store.init().await?;
-    info!("[signing-server] Session store initialized");
-
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
     info!("[signing-server] Tournament store initialized");
 
@@ -93,27 +82,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     info!("[signing-server] Money action store initialized");
 
     // Restore lobby rooms / JOIN_ACK mailboxes that were live when the
-    // previous process stopped (migration 033); expired rooms are dropped.
+    // previous process stopped; expired rooms are dropped.
     match state.p2p_relay_store.hydrate(&state.p2p_relay).await {
         Ok(n) => info!("[signing-server] Restored {n} P2P relay room(s)"),
         Err(e) => tracing::warn!("[signing-server] P2P relay hydrate failed: {e}"),
     }
 
-    let orchestrator_tx = crate::signing::swiss::spawn_orchestrator(
+    let orchestrator_tx = crate::signing::orchestrator::spawn_orchestrator(
         tournament_store.clone(),
         state.swiss_service.clone(),
-        Some(crate::signing::swiss::orchestrator::SwissOnChainConfig {
+        Some(crate::signing::orchestrator::ChainConfig {
             program_id: config.program_id.clone(),
             rpc_url: config.solana_rpc_url.clone(),
             authority: state.vps_authority.clone(),
         }),
     );
     state.orchestrator_tx = Some(orchestrator_tx);
-
-    if let Err(e) = state.friends.init().await {
-        tracing::warn!("[signing-server] Failed to init friends tables: {}", e);
-    }
-    info!("[signing-server] Social tables initialized");
 
     // Publish each fact once to the hub; fan out the same versioned update
     // over HTTP 209 and gossip.

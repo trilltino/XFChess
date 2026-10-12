@@ -3,12 +3,14 @@ pub mod auth;
 pub mod auth_ws;
 pub mod blinks;
 pub mod config;
+pub mod elimination;
 pub mod elo_cache;
 pub mod feepayer;
 pub mod game_pgn;
 pub mod identity;
 pub mod lichess_puzzles;
 pub mod linkage;
+pub mod orchestrator;
 pub mod p2p_relay;
 pub mod privy;
 pub mod routes;
@@ -40,7 +42,9 @@ pub use identity::IdentityVault;
 pub use routes::matchmaking::SharedMatchmakingState;
 pub use social::{FriendManager, PresenceStore};
 pub use storage::{tournament::TournamentStore, SessionStore};
-pub use swiss::{OrchestratorEvent, SwissService};
+pub use elimination::EliminationService;
+pub use orchestrator::OrchestratorEvent;
+pub use swiss::SwissService;
 pub use tournament_gossip::TournamentGossipService;
 pub use xfchess_anticheat::engine::job_queue::AnalysisQueue;
 pub use xfchess_braid_server::ResourceHub;
@@ -65,6 +69,7 @@ pub struct AppState {
     pub treasury_authority_pubkey: Pubkey,
     pub tournament_store: Arc<TournamentStore>,
     pub swiss_service: Arc<SwissService>,
+    pub elimination_service: EliminationService,
     pub tournament_gossip: Arc<TournamentGossipService>,
     pub tournament_fee_recipient: Pubkey,
     pub usdc_mint_pubkey: Pubkey,
@@ -213,6 +218,7 @@ impl AppState {
         let mut _swiss = swiss::SwissService::new((*tournament_store).clone());
         _swiss.set_braid_hub(Arc::clone(&braid_hub));
         let swiss_service = Arc::new(_swiss);
+        let elimination_service = EliminationService::new((*tournament_store).clone());
 
         let tournament_gossip = Arc::new(TournamentGossipService::new(
             (*tournament_store).clone(),
@@ -263,6 +269,7 @@ impl AppState {
             treasury_authority_pubkey,
             tournament_store,
             swiss_service,
+            elimination_service,
             tournament_gossip,
             tournament_fee_recipient,
             usdc_mint_pubkey,

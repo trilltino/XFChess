@@ -294,6 +294,6 @@ async fn override_result(
 /// request: a full queue is fine, the orchestrator's timer catches up.
 fn request_reconcile(state: &AppState, tournament_id: u64) {
     if let Some(tx) = &state.orchestrator_tx {
-        let _ = tx.try_send(super::OrchestratorEvent::Reconcile { tournament_id });
+        let _ = tx.try_send(crate::signing::OrchestratorEvent::Reconcile { tournament_id });
     }
 }

@@ -1,13 +1,9 @@
-use crate::signing::solana::{record_result_ix, sign_and_submit};
-use crate::signing::storage::tournament::{MatchStatus, TournamentFormat, TournamentStatus};
-use crate::signing::AppState;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signer;
+use crate::signing::storage::tournament::{ResultSource, TournamentStatus};
+use crate::signing::{AppState, OrchestratorEvent};
 use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 const FORFEIT_TICK: Duration = Duration::from_secs(10);
 
@@ -45,33 +41,30 @@ async fn run_tick(
         .map(|p| p.node_id)
         .collect();
 
-    let tournaments = state.tournament_store.list().await;
+    let tournaments = state
+        .tournament_store
+        .with_status(TournamentStatus::Active)
+        .await;
     let mut still_offline: HashMap<(u64, String), Instant> = HashMap::new();
 
     for t in tournaments {
-        if t.status != TournamentStatus::Active {
-            continue;
-        }
-
-        if t.format == TournamentFormat::SingleElimination {
+        if let Some(bracket) = t.elimination() {
             let Some(round) = t.current_round() else {
                 continue;
             };
-            for m in t.matches.iter().flatten() {
-                if m.round != round || m.status == MatchStatus::Completed {
+            for m in &bracket.matches {
+                if m.round != round || m.is_decided() {
                     continue;
                 }
-                let (Some(white), Some(black)) = (m.player_white.clone(), m.player_black.clone())
-                else {
+                let (Some(white), Some(black)) = (&m.player_white, &m.player_black) else {
                     continue; // opponent not decided yet — nothing to forfeit
                 };
 
-                for (player_id, opponent) in [(&white, &black), (&black, &white)] {
+                for (player_id, opponent) in [(white, black), (black, white)] {
                     let Some(node_id) = t.node_ids.get(player_id) else {
                         continue;
                     };
-                    let is_online = online_node_ids.contains(node_id);
-                    if is_online {
+                    if online_node_ids.contains(node_id) {
                         continue;
                     }
 
@@ -98,10 +91,10 @@ async fn run_tick(
                         since.elapsed().as_secs(),
                         opponent
                     );
-                    forfeit_single_elim_match(
+                    forfeit_bracket_match(
                         state,
                         t.tournament_id,
-                        m.match_index as usize,
+                        m.match_index,
                         opponent,
                         player_id,
                     )
@@ -112,20 +105,16 @@ async fn run_tick(
             continue;
         }
 
-        let Some(sd) = t.swiss_data.as_ref() else {
+        let Some(sd) = t.swiss() else {
             continue;
         };
         let round = sd.current_round;
-        let Some(r) = sd.rounds.iter().find(|r| r.round == round) else {
+        let Some(r) = sd.round(round) else {
             continue;
         };
 
         for pairing in &r.pairings {
-            let has_result = sd
-                .results
-                .iter()
-                .any(|(rd, board, _)| *rd == round && *board == pairing.board);
-            if has_result {
+            if sd.has_result(round, pairing.board) {
                 continue;
             }
 
@@ -138,8 +127,7 @@ async fn run_tick(
                 let Some(node_id) = t.node_ids.get(player_id) else {
                     continue;
                 };
-                let is_online = online_node_ids.contains(node_id);
-                if is_online {
+                if online_node_ids.contains(node_id) {
                     continue; // seen this tick — no tracked offline-since carried forward
                 }
 
@@ -167,6 +155,8 @@ async fn run_tick(
                             player_id, t.tournament_id
                         );
                         still_offline.insert(key, since); // retry next tick
+                    } else {
+                        reconcile(state, t.tournament_id).await;
                     }
                     // Successful pairings are excluded by has_result/absent_players and need no retry.
                 } else {
@@ -179,99 +169,40 @@ async fn run_tick(
     still_offline
 }
 
-async fn forfeit_single_elim_match(
+/// Decides the match off-chain; the orchestrator mirrors it on-chain.
+async fn forfeit_bracket_match(
     state: &Arc<AppState>,
     tournament_id: u64,
-    match_index: usize,
+    match_index: u16,
     winner: &str,
     loser: &str,
 ) {
-    let store = &state.tournament_store;
-    let next = store.get(tournament_id).await.and_then(|t| {
-        t.matches
-            .get(match_index)
-            .and_then(|m| m.as_ref())
-            .and_then(|m| m.next_match_for_winner)
-    });
-
-    let (Ok(program_id), Ok(winner_pk), Ok(loser_pk)) = (
-        Pubkey::from_str(&state.config.program_id),
-        Pubkey::from_str(winner),
-        Pubkey::from_str(loser),
-    ) else {
-        // Bot/test wallets aren't real pubkeys; they cannot be mirrored on-chain.
-        if !store
-            .record_result(
-                tournament_id,
-                match_index,
-                winner.to_string(),
-                loser.to_string(),
-            )
-            .await
-        {
-            warn!(
-                "[tournament-forfeit] record_result failed for match {} of tournament {}",
-                match_index, tournament_id
-            );
-        }
-        return;
-    };
-
-    let authority = state.vps_authority.clone();
-    let rpc_url = state.config.solana_rpc_url.clone();
-
-    let submitted = tokio::task::spawn_blocking(move || {
-        let rpc = crate::signing::solana::make_rpc(&rpc_url);
-        let ix = record_result_ix(
-            &program_id,
-            tournament_id,
-            match_index as u16,
-            &winner_pk,
-            &loser_pk,
-            &authority.pubkey(),
-        );
-        sign_and_submit(&rpc, &authority, &[ix]).map_err(|e| e.to_string())?;
-        if let Some(next_idx) = next {
-            let ix = crate::signing::solana::advance_winner_ix(
-                &program_id,
-                tournament_id,
-                match_index as u16,
-                next_idx,
-                &authority.pubkey(),
-            );
-            sign_and_submit(&rpc, &authority, &[ix]).map_err(|e| e.to_string())?;
-        }
-        Ok::<(), String>(())
-    })
-    .await;
-
-    match submitted {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => {
-            error!(
-                "[tournament-forfeit] on-chain mirror failed for match {} of tournament {}: {e}",
-                match_index, tournament_id
-            );
-            return;
-        }
-        Err(e) => {
-            error!("[tournament-forfeit] on-chain mirror task panicked: {e}");
-            return;
-        }
-    }
-
-    if !store
-        .record_result(
+    match state
+        .elimination_service
+        .record_decision(
             tournament_id,
             match_index,
-            winner.to_string(),
-            loser.to_string(),
+            winner,
+            loser,
+            ResultSource::Forfeit,
         )
         .await
     {
-        warn!(
-            "[tournament-forfeit] record_result failed for match {} of tournament {} after on-chain mirror",
-            match_index, tournament_id
-        );
+        Ok(_) => reconcile(state, tournament_id).await,
+        Err(e) => warn!(
+            "[tournament-forfeit] forfeit of match {match_index} in tournament {tournament_id} \
+             not recorded: {e}"
+        ),
+    }
+}
+
+async fn reconcile(state: &Arc<AppState>, tournament_id: u64) {
+    if let Some(tx) = &state.orchestrator_tx {
+        if let Err(e) = tx
+            .send(OrchestratorEvent::Reconcile { tournament_id })
+            .await
+        {
+            warn!("[tournament-forfeit] orchestrator unavailable: {e}");
+        }
     }
 }
