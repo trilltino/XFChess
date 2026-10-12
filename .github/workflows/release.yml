@@ -311,7 +311,9 @@ jobs:
     needs: verify-backend
     # Build x86_64 game, bridge, and Stockfish together; Apple Silicon uses Rosetta 2.
     runs-on: macos-15-intel
-    timeout-minutes: 120
+    # A cold build (no Rust cache, e.g. after a dependency upgrade) takes over
+    # 100 minutes on these runners; v0.1.0's first run hit the old 120 limit.
+    timeout-minutes: 240
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
     steps:
