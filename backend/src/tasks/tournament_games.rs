@@ -11,9 +11,8 @@
 //! player who reaches `MatchReady` finds their Game on-chain.
 
 use crate::signing::solana::{create_tournament_game_ix, make_rpc, sign_and_submit, GAME_SEED};
-use crate::signing::storage::tournament::{
-    MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus, TournamentStore,
-};
+pub use crate::signing::storage::tournament::AssignedGame;
+use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus};
 use crate::signing::AppState;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signer;
@@ -24,62 +23,13 @@ use tracing::{error, info, warn};
 
 const PROVISION_TICK: Duration = Duration::from_secs(5);
 
-/// A match that has a game id and both players but may not have its Game yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssignedGame {
-    pub tournament_id: u64,
-    pub game_id: u64,
-    pub white: String,
-    pub black: String,
-}
-
 /// Matches of `t` that are assigned and undecided, minus those already provisioned.
 pub fn games_to_provision(t: &TournamentRecord) -> Vec<AssignedGame> {
     if t.status != TournamentStatus::Active {
         return Vec::new();
     }
-    let assigned: Vec<AssignedGame> = match t.format {
-        TournamentFormat::SingleElimination => t
-            .matches
-            .iter()
-            .flatten()
-            .filter(|m| m.status != MatchStatus::Completed)
-            .filter_map(|m| {
-                Some(AssignedGame {
-                    tournament_id: t.tournament_id,
-                    game_id: m.game_id?,
-                    white: m.player_white.clone()?,
-                    black: m.player_black.clone()?,
-                })
-            })
-            .collect(),
-        TournamentFormat::Swiss { .. } => {
-            let Some(sd) = t.swiss_data.as_ref() else {
-                return Vec::new();
-            };
-            let Some(round) = sd.rounds.last() else {
-                return Vec::new();
-            };
-            round
-                .pairings
-                .iter()
-                .filter(|p| !sd.has_result(round.round, p.board))
-                .filter_map(|p| {
-                    Some(AssignedGame {
-                        tournament_id: t.tournament_id,
-                        game_id: TournamentStore::swiss_game_id(
-                            t.tournament_id,
-                            round.round,
-                            p.board,
-                        )?,
-                        white: p.white.clone(),
-                        black: p.black.clone(),
-                    })
-                })
-                .collect()
-        }
-    };
-    assigned
+    t.state
+        .open_games(t.tournament_id)
         .into_iter()
         .filter(|g| !t.provisioned_game_ids.contains(&g.game_id))
         .collect()
@@ -94,7 +44,11 @@ pub fn spawn_tournament_game_provisioner(state: Arc<AppState>) {
         let mut ticker = tokio::time::interval(PROVISION_TICK);
         loop {
             ticker.tick().await;
-            for t in state.tournament_store.list().await {
+            let running = state
+                .tournament_store
+                .with_status(TournamentStatus::Active)
+                .await;
+            for t in running {
                 for game in games_to_provision(&t) {
                     if let Err(e) = provision(&state, &game, t.max_players).await {
                         warn!(
@@ -198,80 +152,83 @@ async fn provision(state: &AppState, game: &AssignedGame, max_players: u16) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signing::storage::tournament::{SwissStorageData, TournamentMatch};
+    use crate::signing::storage::tournament::{
+        EliminationState, FormatState, GameOutcome, SwissStorageData, TournamentStore,
+    };
 
-    fn active(format: TournamentFormat) -> TournamentRecord {
+    fn active(state: FormatState) -> TournamentRecord {
         let mut t = TournamentRecord::new(5, "t", 0);
-        t.format = format;
+        t.state = state;
         t.status = TournamentStatus::Active;
         t
     }
 
-    fn bracket_match(
-        index: u16,
-        game_id: Option<u64>,
-        black: Option<&str>,
-        status: MatchStatus,
-    ) -> Option<TournamentMatch> {
-        Some(TournamentMatch {
-            match_index: index,
-            round: 0,
-            player_white: Some("W".into()),
-            player_black: black.map(str::to_string),
-            winner: None,
-            game_id,
-            status,
-            result_source: None,
-            next_match_for_winner: None,
-            next_match_slot: 0,
-        })
+    #[test]
+    fn bracket_games_are_the_seated_undecided_unprovisioned_matches() {
+        let seeds: Vec<String> = (0..4).map(|i| format!("P{i}")).collect();
+        let mut bracket = EliminationState::draw(5, &seeds);
+        let (first, second) = (
+            bracket.matches[0].game_id.unwrap(),
+            bracket.matches[1].game_id.unwrap(),
+        );
+        bracket
+            .apply_game(5, first, "P0", "P3", GameOutcome::WhiteWin, &seeds)
+            .unwrap();
+        let mut t = active(FormatState::Elimination(bracket));
+        // Match 0 is decided; the final still waits for its second player.
+        let ids: Vec<u64> = games_to_provision(&t).iter().map(|g| g.game_id).collect();
+        assert_eq!(ids, vec![second]);
+
+        t.provisioned_game_ids = vec![second];
+        assert!(games_to_provision(&t).is_empty());
     }
 
     #[test]
-    fn bracket_games_need_an_id_both_players_and_no_result() {
-        let mut t = active(TournamentFormat::SingleElimination);
-        t.matches = vec![
-            bracket_match(0, Some(10), Some("B"), MatchStatus::Active),
-            bracket_match(1, None, Some("B"), MatchStatus::Pending),
-            bracket_match(2, Some(12), None, MatchStatus::Pending),
-            bracket_match(3, Some(13), Some("B"), MatchStatus::Completed),
-            bracket_match(4, Some(14), Some("B"), MatchStatus::Active),
-        ];
-        t.provisioned_game_ids = vec![14];
-        let ids: Vec<u64> = games_to_provision(&t).iter().map(|g| g.game_id).collect();
-        assert_eq!(ids, vec![10]);
+    fn a_drawn_bracket_game_needs_its_replay_provisioned() {
+        let seeds: Vec<String> = vec!["A".into(), "B".into()];
+        let mut bracket = EliminationState::draw(5, &seeds);
+        let first = bracket.matches[0].game_id.unwrap();
+        bracket
+            .apply_game(5, first, "A", "B", GameOutcome::Draw, &seeds)
+            .unwrap();
+        let mut t = active(FormatState::Elimination(bracket));
+        t.provisioned_game_ids = vec![first];
+        let games = games_to_provision(&t);
+        assert_eq!(games.len(), 1);
+        assert_ne!(games[0].game_id, first);
+        assert_eq!(
+            (games[0].white.as_str(), games[0].black.as_str()),
+            ("B", "A")
+        );
     }
 
     #[test]
     fn swiss_games_are_the_open_boards_of_the_latest_round() {
-        let mut t = active(TournamentFormat::Swiss { rounds: 3 });
         let pairing = |board: u16| swiss_pairing::Pairing {
             white: format!("w{board}"),
             black: format!("b{board}"),
             board,
         };
-        t.swiss_data = Some(SwissStorageData {
-            current_round: 2,
-            total_rounds: 3,
-            rounds: vec![
-                swiss_pairing::SwissRound {
-                    round: 1,
-                    pairings: vec![pairing(1)],
-                    byes: vec![],
-                    float_downs: vec![],
-                    float_ups: vec![],
-                },
-                swiss_pairing::SwissRound {
-                    round: 2,
-                    pairings: vec![pairing(1), pairing(2)],
-                    byes: vec![],
-                    float_downs: vec![],
-                    float_ups: vec![],
-                },
-            ],
-            results: vec![(2, 1, swiss_pairing::MatchResult::Draw)],
-            ..Default::default()
-        });
+        let mut sd = SwissStorageData::new(3);
+        sd.current_round = 2;
+        sd.rounds = vec![
+            swiss_pairing::SwissRound {
+                round: 1,
+                pairings: vec![pairing(1)],
+                byes: vec![],
+                float_downs: vec![],
+                float_ups: vec![],
+            },
+            swiss_pairing::SwissRound {
+                round: 2,
+                pairings: vec![pairing(1), pairing(2)],
+                byes: vec![],
+                float_downs: vec![],
+                float_ups: vec![],
+            },
+        ];
+        sd.results = vec![(2, 1, swiss_pairing::MatchResult::Draw)];
+        let mut t = active(FormatState::Swiss(sd));
         let games = games_to_provision(&t);
         assert_eq!(games.len(), 1);
         assert_eq!(

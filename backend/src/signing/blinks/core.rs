@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 
+use crate::signing::elimination::chain::initialize_match_batches;
 use crate::signing::solana;
-use crate::signing::solana::{claim_prize_ix, initialize_match_ix, start_tournament_ix};
+use crate::signing::solana::{claim_prize_ix, start_tournament_ix};
 use crate::signing::storage::tournament::TournamentStore;
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
@@ -221,65 +222,28 @@ pub async fn build_start_tournament_transactions(
         solana::make_rpc(&solana::rpc_url_or_devnet()).get_latest_blockhash()
     })
     .await??;
-    let mut out = Vec::new();
+    // The bracket the store draws when the event starts (none for Swiss).
+    let mut started = tournament.clone();
+    started.start().map_err(anyhow::Error::msg)?;
 
-    // Tx 1: start_tournament
-    {
-        let ix = start_tournament_ix(
-            program_id,
-            tournament_id,
-            tournament.max_players,
-            &authority.pubkey(),
-            host_treasury,
-        );
-        use solana_sdk::{message::Message, transaction::Transaction};
-        let msg = Message::new(&[ix], Some(&authority.pubkey()));
-        let tx = Transaction::new(&[authority], msg, bh);
-        out.push(BASE64_STANDARD.encode(bincode::serialize(&tx)?));
-    }
+    let start = start_tournament_ix(
+        program_id,
+        tournament_id,
+        tournament.max_players,
+        &authority.pubkey(),
+        host_treasury,
+    );
+    let match_batches = started.elimination().map_or_else(Vec::new, |bracket| {
+        initialize_match_batches(program_id, &authority.pubkey(), tournament_id, bracket)
+    });
 
-    // Tx batches: initialize_match for every bracket slot. Round-1 matches
-    // carry their seeded players; later rounds are filled by advance_winner.
-    let total_matches = tournament.max_players as usize - 1;
-    let round1_pairs = crate::tasks::tournament_scheduler::round1_pairings(&tournament);
-    let mut match_idx = 0u16;
-
-    for chunk in std::iter::repeat_n((), total_matches.div_ceil(20)).zip(0..) {
-        let _ = chunk;
-        let end = ((match_idx as usize + 20).min(total_matches)) as u16;
-        let ixs: Vec<_> = (match_idx..end)
-            .map(|idx| {
-                // Linear bracket layout: round 1 first, final at the last
-                // index — must match the store and on-chain final_match_index.
-                let (round, next, slot) =
-                    crate::signing::solana::bracket_position(tournament.max_players, idx);
-                let (white, black) = round1_pairs
-                    .get(idx as usize)
-                    .cloned()
-                    .unwrap_or((None, None));
-                initialize_match_ix(
-                    program_id,
-                    tournament_id,
-                    idx,
-                    round,
-                    white.as_ref(),
-                    black.as_ref(),
-                    next,
-                    slot,
-                    &authority.pubkey(),
-                )
-            })
-            .collect();
-
-        use solana_sdk::{message::Message, transaction::Transaction};
+    // Tx 1 starts the event; the rest create the bracket's match accounts.
+    use solana_sdk::{message::Message, transaction::Transaction};
+    let mut out = Vec::with_capacity(1 + match_batches.len());
+    for ixs in std::iter::once(vec![start]).chain(match_batches) {
         let msg = Message::new(&ixs, Some(&authority.pubkey()));
         let tx = Transaction::new(&[authority], msg, bh);
         out.push(BASE64_STANDARD.encode(bincode::serialize(&tx)?));
-
-        match_idx = end;
-        if match_idx as usize >= total_matches {
-            break;
-        }
     }
 
     Ok(out)

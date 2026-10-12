@@ -538,24 +538,26 @@ async fn load_anticheat_value(state: &AppState, game_id: &str) -> Result<Value, 
 async fn linked_tournament_context(state: &AppState, game_id: &str) -> Option<Value> {
     let numeric_game_id = game_id.parse::<u64>().ok()?;
     for tournament in state.tournament_store.list().await {
-        for m in tournament.matches.iter().flatten() {
-            if m.game_id == Some(numeric_game_id) {
-                let transactions = state
-                    .tournament_store
-                    .transactions(tournament.tournament_id)
-                    .await;
-                let registration_transactions = state
-                    .tournament_store
-                    .registration_transactions(tournament.tournament_id)
-                    .await;
-                return Some(json!({
-                    "tournament": tournament,
-                    "match": m,
-                    "transactions": transactions,
-                    "registration_transactions": registration_transactions,
-                }));
-            }
-        }
+        let Some(m) = tournament
+            .state
+            .match_view(tournament.tournament_id, numeric_game_id)
+        else {
+            continue;
+        };
+        let transactions = state
+            .tournament_store
+            .transactions(tournament.tournament_id)
+            .await;
+        let registration_transactions = state
+            .tournament_store
+            .registration_transactions(tournament.tournament_id)
+            .await;
+        return Some(json!({
+            "tournament": tournament,
+            "match": m,
+            "transactions": transactions,
+            "registration_transactions": registration_transactions,
+        }));
     }
     None
 }
@@ -680,12 +682,10 @@ async fn search_debug_games(
 
     if let Ok(tournament_id) = query.parse::<u64>() {
         if let Some(tournament) = state.tournament_store.get(tournament_id).await {
-            for m in tournament.matches.iter().flatten() {
-                if let Some(game_id) = m.game_id {
-                    if let Ok(Some(game)) = repo.get_game(&game_id.to_string()).await {
-                        if seen.insert(game.id.clone()) {
-                            games.push(game);
-                        }
+            for game_id in tournament.state.game_ids(tournament_id) {
+                if let Ok(Some(game)) = repo.get_game(&game_id.to_string()).await {
+                    if seen.insert(game.id.clone()) {
+                        games.push(game);
                     }
                 }
             }
@@ -1784,7 +1784,6 @@ async fn fill_tournament_bots(
         })
         .await;
 
-    store.generate_bracket(id).await;
     match store.start_tournament(id).await {
         Ok(()) => {
             add_audit(

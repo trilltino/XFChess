@@ -98,9 +98,106 @@ pub fn fetch_swiss_progress(
     parse_swiss_progress(&account.data)
 }
 
+/// On-chain `MatchStatus::Completed`.
+pub const MATCH_STATUS_COMPLETED: u8 = 2;
+
+/// The fields of an on-chain bracket `TournamentMatch` the chain mirror checks
+/// before writing, so a retried mirror never re-sends a landed transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BracketMatchOnChain {
+    pub player_white: Option<solana_sdk::pubkey::Pubkey>,
+    pub player_black: Option<solana_sdk::pubkey::Pubkey>,
+    pub winner: Option<solana_sdk::pubkey::Pubkey>,
+    pub status: u8,
+}
+
+impl Cursor<'_> {
+    fn pubkey_option(&mut self) -> Result<Option<solana_sdk::pubkey::Pubkey>, String> {
+        if self.u8()? == 0 {
+            return Ok(None);
+        }
+        let bytes: [u8; 32] = self
+            .take(32)?
+            .try_into()
+            .map_err(|_| "pubkey is 32 bytes")?;
+        Ok(Some(solana_sdk::pubkey::Pubkey::new_from_array(bytes)))
+    }
+}
+
+pub fn parse_bracket_match(data: &[u8]) -> Result<BracketMatchOnChain, String> {
+    let mut c = Cursor { data, at: 0 };
+    c.take(8)?; // Anchor discriminator
+    c.take(8 + 2 + 1)?; // tournament_id, match_index, round
+    let player_white = c.pubkey_option()?;
+    let player_black = c.pubkey_option()?;
+    let winner = c.pubkey_option()?;
+    c.skip_option(32)?; // game_pda
+    c.skip_option(8)?; // game_id
+    let status = c.u8()?;
+    Ok(BracketMatchOnChain {
+        player_white,
+        player_black,
+        winner,
+        status,
+    })
+}
+
+pub fn fetch_bracket_match(
+    rpc: &solana_client::rpc_client::RpcClient,
+    program_id: &solana_sdk::pubkey::Pubkey,
+    tournament_id: u64,
+    match_index: u16,
+) -> Result<BracketMatchOnChain, String> {
+    let pda = solana_sdk::pubkey::Pubkey::find_program_address(
+        &[
+            super::instructions::TOURNAMENT_MATCH_SEED,
+            &tournament_id.to_le_bytes(),
+            &match_index.to_le_bytes(),
+        ],
+        program_id,
+    )
+    .0;
+    let account = rpc
+        .get_account(&pda)
+        .map_err(|e| format!("fetch match {match_index} of tournament {tournament_id}: {e}"))?;
+    if account.owner != *program_id {
+        return Err(format!("match {match_index} has the wrong owner"));
+    }
+    parse_bracket_match(&account.data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_bracket_match_seats_winner_and_status() {
+        use solana_sdk::pubkey::Pubkey;
+        let (white, black) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let mut d = vec![0u8; 8 + 8 + 2 + 1];
+        for seat in [Some(white), Some(black), Some(black), None] {
+            match seat {
+                Some(key) => {
+                    d.push(1);
+                    d.extend(key.to_bytes());
+                }
+                None => d.push(0),
+            }
+        }
+        d.extend([1, 9, 0, 0, 0, 0, 0, 0, 0]); // game_id: Some(9)
+        d.push(MATCH_STATUS_COMPLETED);
+        d.extend([0u8; 16]);
+        assert_eq!(
+            parse_bracket_match(&d).unwrap(),
+            BracketMatchOnChain {
+                player_white: Some(white),
+                player_black: Some(black),
+                winner: Some(black),
+                status: MATCH_STATUS_COMPLETED,
+            }
+        );
+        assert!(parse_bracket_match(&d[..20]).is_err());
+    }
 
     fn account(name: &str, status: u8, start: Option<i64>, current: u8, total: u8) -> Vec<u8> {
         let mut d = vec![0u8; 8 + 8 + 32];

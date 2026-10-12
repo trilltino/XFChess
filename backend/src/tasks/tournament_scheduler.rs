@@ -1,9 +1,7 @@
-use crate::signing::storage::tournament::{
-    MatchStatus, TournamentFormat, TournamentRecord, TournamentStatus, TournamentStore,
-};
-use solana_sdk::signature::{Keypair, Signer};
+use crate::signing::storage::tournament::{TournamentRecord, TournamentStatus, TournamentStore};
+use crate::signing::swiss::{SwissService, SwissServiceError};
+use solana_sdk::signature::Keypair;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -17,38 +15,12 @@ pub const TOURNAMENT_TRIGGER_CHANNEL_SIZE: usize = 256;
 /// a single-elimination bracket when it is completely full, so a partial bracket is
 /// never a startable state, whatever `min_players` says.
 fn default_min_players(tournament: &TournamentRecord) -> usize {
-    if matches!(tournament.format, TournamentFormat::SingleElimination) {
+    if !tournament.is_swiss() {
         return tournament.max_players as usize;
     }
     tournament
         .min_players
         .unwrap_or_else(|| tournament.max_players.min(8)) as usize
-}
-
-pub fn round1_pairings(
-    tournament: &TournamentRecord,
-) -> Vec<(
-    Option<solana_sdk::pubkey::Pubkey>,
-    Option<solana_sdk::pubkey::Pubkey>,
-)> {
-    use crate::signing::storage::tournament::TournamentFormat;
-
-    if tournament.format != TournamentFormat::SingleElimination
-        || tournament.players.len() != tournament.max_players as usize
-    {
-        return Vec::new();
-    }
-    let mut seeded: Vec<(&str, u32)> = tournament
-        .players
-        .iter()
-        .map(String::as_str)
-        .zip(tournament.player_elos.iter().copied())
-        .collect();
-    seeded.sort_by(|a, b| b.1.cmp(&a.1));
-    let n = seeded.len();
-    (0..n / 2)
-        .map(|i| (seeded[i].0.parse().ok(), seeded[n - 1 - i].0.parse().ok()))
-        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -69,12 +41,6 @@ pub enum TournamentTrigger {
     FillGraceExpired {
         tournament_id: u64,
     },
-    GameSettled {
-        tournament_id: u64,
-        game_id: u64,
-        winner: String,
-        loser: String,
-    },
 }
 
 pub struct TournamentScheduler {
@@ -83,6 +49,7 @@ pub struct TournamentScheduler {
     trigger_rx: mpsc::Receiver<TournamentTrigger>,
     fill_timers: HashMap<u64, JoinHandle<()>>,
     braid_hub: Option<Arc<ResourceHub>>,
+    swiss: Option<Arc<SwissService>>,
     on_chain: Option<OnChainConfig>,
 }
 
@@ -115,6 +82,7 @@ impl TournamentScheduler {
                 trigger_rx,
                 fill_timers: HashMap::new(),
                 braid_hub: None,
+                swiss: None,
                 on_chain: None,
             },
             trigger_tx,
@@ -123,6 +91,11 @@ impl TournamentScheduler {
 
     pub fn set_braid_hub(&mut self, hub: Arc<ResourceHub>) {
         self.braid_hub = Some(hub);
+    }
+
+    /// Lets the scheduler pair a Swiss event's first round when it starts one.
+    pub fn set_swiss(&mut self, swiss: Arc<SwissService>) {
+        self.swiss = Some(swiss);
     }
 
     pub fn set_on_chain(
@@ -176,101 +149,7 @@ impl TournamentScheduler {
                     self.fill_timers.remove(&tournament_id);
                     self.handle_fill_grace_expired(tournament_id).await;
                 }
-                TournamentTrigger::GameSettled {
-                    tournament_id,
-                    game_id,
-                    winner,
-                    loser,
-                } => {
-                    self.handle_game_settled(tournament_id, game_id, winner, loser)
-                        .await;
-                }
             }
-        }
-    }
-
-    async fn handle_game_settled(
-        &self,
-        tournament_id: u64,
-        game_id: u64,
-        winner: String,
-        loser: String,
-    ) {
-        let Some(tournament) = self.store.get(tournament_id).await else {
-            return;
-        };
-        if !matches!(tournament.format, TournamentFormat::SingleElimination) {
-            return;
-        }
-        let Some(source) = tournament
-            .matches
-            .iter()
-            .flatten()
-            .find(|m| m.game_id == Some(game_id) && m.status != MatchStatus::Completed)
-        else {
-            return;
-        };
-        let match_index = source.match_index;
-        let next_match = source.next_match_for_winner;
-        if let Some(cfg) = &self.on_chain {
-            let Ok(program_id) = solana_sdk::pubkey::Pubkey::from_str(&cfg.program_id) else {
-                return;
-            };
-            let rpc_url = cfg.rpc_url.clone();
-            let authority = cfg.vps_authority.clone();
-            let winner_pk = match solana_sdk::pubkey::Pubkey::from_str(&winner) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-            let loser_pk = match solana_sdk::pubkey::Pubkey::from_str(&loser) {
-                Ok(pk) => pk,
-                Err(_) => return,
-            };
-            let next = next_match;
-            let result = tokio::task::spawn_blocking(move || {
-                let rpc = crate::signing::solana::make_rpc(&rpc_url);
-                let result_ix = crate::signing::solana::record_result_ix(
-                    &program_id,
-                    tournament_id,
-                    match_index,
-                    &winner_pk,
-                    &loser_pk,
-                    &authority.pubkey(),
-                );
-                crate::signing::solana::sign_and_submit(&rpc, &authority, &[result_ix])
-                    .map_err(|e| format!("record_match_result: {e}"))?;
-                if let Some(next_match) = next {
-                    let advance_ix = crate::signing::solana::advance_winner_ix(
-                        &program_id,
-                        tournament_id,
-                        match_index,
-                        next_match,
-                        &authority.pubkey(),
-                    );
-                    crate::signing::solana::sign_and_submit(&rpc, &authority, &[advance_ix])
-                        .map_err(|e| format!("advance_winner: {e}"))?;
-                }
-                Ok::<(), String>(())
-            })
-            .await;
-            if !matches!(result, Ok(Ok(()))) {
-                error!(
-                    "[tournament-scheduler] On-chain advancement failed for tournament {} match {}: {:?}",
-                    tournament_id, match_index, result
-                );
-                return;
-            }
-        }
-
-        if !self
-            .store
-            .record_result(tournament_id, match_index as usize, winner, loser)
-            .await
-        {
-            error!(
-                "[tournament-scheduler] Failed to persist result for tournament {} match {}",
-                tournament_id, match_index
-            );
         }
     }
 
@@ -426,31 +305,30 @@ impl TournamentScheduler {
         } else {
             return;
         }
+        let Some(record) = self.store.get(tournament_id).await else {
+            return;
+        };
         if let Some(cfg) = &self.on_chain {
-            let record = self.store.get(tournament_id).await;
-            let max_players = record.as_ref().map(|t| t.max_players).unwrap_or(0);
-            let round1_pairs = record.as_ref().map(round1_pairings).unwrap_or_default();
-
+            // Draw the bracket the store will keep, so the chain gets the very same
+            // one. A Swiss event has no bracket: its rounds are paired off-chain and
+            // reported per board.
+            let mut started = record.clone();
+            if let Err(e) = started.start() {
+                warn!(
+                    "[tournament-scheduler] Tournament {} cannot start: {}",
+                    tournament_id, e
+                );
+                return;
+            }
+            let bracket = started.elimination().cloned();
+            let max_players = record.max_players;
             let program_id_str = cfg.program_id.clone();
             let rpc_url = cfg.rpc_url.clone();
             let authority = cfg.vps_authority.clone();
             let host_treasury = cfg.host_treasury;
-            // Swiss rounds are paired off-chain and reported per board, so they have
-            // no bracket matches to initialise.
-            let is_swiss = record
-                .as_ref()
-                .is_some_and(|t| matches!(t.format, TournamentFormat::Swiss { .. }));
-            let total_matches = if is_swiss {
-                0
-            } else {
-                max_players.saturating_sub(1) as usize
-            };
 
             let result = tokio::task::spawn_blocking(move || {
-                use crate::signing::solana::{
-                    bracket_position, initialize_match_ix, make_rpc, sign_and_submit,
-                    start_tournament_ix,
-                };
+                use crate::signing::solana::{make_rpc, sign_and_submit, start_tournament_ix};
                 use solana_sdk::pubkey::Pubkey;
                 use solana_sdk::signature::Signer;
                 use std::str::FromStr;
@@ -468,35 +346,14 @@ impl TournamentScheduler {
                 );
                 sign_and_submit(&rpc, &authority, &[ix])
                     .map_err(|e| format!("start_tournament tx: {e}"))?;
-
-                // Initialize matches in batches of 20, round one through final. Indices must
-                // match the store and program; round-one player slots must be populated.
-                let mut idx = 0u16;
-                while (idx as usize) < total_matches {
-                    let end = ((idx as usize + 20).min(total_matches)) as u16;
-                    let ixs: Vec<_> = (idx..end)
-                        .map(|i| {
-                            let (round, next, slot) = bracket_position(max_players, i);
-                            let (white, black) = round1_pairs
-                                .get(i as usize)
-                                .cloned()
-                                .unwrap_or((None, None));
-                            initialize_match_ix(
-                                &program_id,
-                                tournament_id,
-                                i,
-                                round,
-                                white.as_ref(),
-                                black.as_ref(),
-                                next,
-                                slot,
-                                &authority.pubkey(),
-                            )
-                        })
-                        .collect();
-                    sign_and_submit(&rpc, &authority, &ixs)
-                        .map_err(|e| format!("initialize_match batch {idx}: {e}"))?;
-                    idx = end;
+                if let Some(bracket) = bracket {
+                    crate::signing::elimination::chain::initialize_matches(
+                        &rpc,
+                        &program_id,
+                        &authority,
+                        tournament_id,
+                        &bracket,
+                    )?;
                 }
                 Ok::<(), String>(())
             })
@@ -532,13 +389,26 @@ impl TournamentScheduler {
             return;
         }
 
-        let assigned = self.store.assign_ready_game_ids(tournament_id).await;
-        if !assigned.is_empty() {
-            info!(
-                "[tournament-scheduler] Assigned {} deterministic game IDs for tournament {}",
-                assigned.len(),
-                tournament_id
-            );
+        // A Swiss event plays as soon as round 1 is paired (the admin's
+        // initialize-swiss route may have paired it already).
+        if record.is_swiss() {
+            match self.swiss.as_ref() {
+                Some(swiss) => match swiss.start_round(tournament_id).await {
+                    Ok(round) => info!(
+                        "[tournament-scheduler] Tournament {} round {} paired",
+                        tournament_id, round.round
+                    ),
+                    Err(SwissServiceError::RoundIncomplete(_)) => {}
+                    Err(e) => error!(
+                        "[tournament-scheduler] Tournament {} round 1 not paired: {}",
+                        tournament_id, e
+                    ),
+                },
+                None => warn!(
+                    "[tournament-scheduler] No Swiss service — tournament {} round 1 not paired",
+                    tournament_id
+                ),
+            }
         }
 
         let player_count = self
@@ -573,11 +443,15 @@ impl TournamentScheduler {
 pub fn spawn_tournament_scheduler(
     store: TournamentStore,
     braid_hub: Option<Arc<ResourceHub>>,
+    swiss: Option<Arc<SwissService>>,
     on_chain: Option<(String, String, Arc<Keypair>, solana_sdk::pubkey::Pubkey)>,
 ) -> mpsc::Sender<TournamentTrigger> {
     let (mut scheduler, trigger_tx) = TournamentScheduler::new(store.clone());
     if let Some(hub) = braid_hub {
         scheduler.set_braid_hub(hub);
+    }
+    if let Some(swiss) = swiss {
+        scheduler.set_swiss(swiss);
     }
     if let Some((program_id, rpc_url, authority, host_treasury)) = on_chain {
         scheduler.set_on_chain(program_id, rpc_url, authority, host_treasury);
@@ -613,11 +487,11 @@ async fn anticheat_gate(
     pool: &sqlx::SqlitePool,
     t: &crate::signing::storage::tournament::TournamentRecord,
 ) -> PrizeGate {
+    // Every game of the event, either format, replays included.
     let game_ids: Vec<String> = t
-        .matches
-        .iter()
-        .flatten()
-        .filter_map(|m| m.game_id)
+        .state
+        .game_ids(t.tournament_id)
+        .into_iter()
         .map(|g| g.to_string())
         .collect();
     if game_ids.is_empty() {
@@ -709,15 +583,7 @@ pub fn spawn_prize_distributor(
                     .unwrap_or(0),
                 Ordering::Relaxed,
             );
-            for t in store.list().await {
-                if t.status != TournamentStatus::Completed
-                    || t.prizes_distributed
-                    || t.prize_pool == 0
-                    || t.winner.is_none()
-                {
-                    continue;
-                }
-
+            for t in store.awaiting_prizes().await {
                 let flagged = match anticheat_gate(&pool, &t).await {
                     PrizeGate::Hold => {
                         worker_metrics::PRIZE_DISTRIBUTION_HELD_TOTAL
@@ -863,10 +729,7 @@ pub fn spawn_scheduled_start_ticker(
                 std::sync::atomic::Ordering::Relaxed,
             );
             let now = chrono::Utc::now().timestamp();
-            for t in store.list().await {
-                if t.status != TournamentStatus::Registration {
-                    continue;
-                }
+            for t in store.with_status(TournamentStatus::Registration).await {
                 let Some(scheduled_at) = t.scheduled_at else {
                     continue;
                 };
@@ -891,54 +754,24 @@ pub fn spawn_scheduled_start_ticker(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signing::storage::tournament::TournamentFormat;
+    use crate::signing::storage::tournament::{
+        EliminationState, FormatState, ResultSource, SwissStorageData, TournamentFormat,
+    };
 
-    fn record(n: usize) -> TournamentRecord {
+    #[test]
+    fn a_bracket_starts_full_but_a_swiss_event_at_its_minimum() {
         let mut t = TournamentRecord::new(1, "t", 0);
-        t.max_players = n as u16;
-        t.format = TournamentFormat::SingleElimination;
-        for i in 0..n {
-            // Real pubkeys so parsing succeeds; descending ELO in insertion order.
-            t.players
-                .push(solana_sdk::pubkey::Pubkey::new_unique().to_string());
-            t.player_elos.push(2000 - i as u32);
-        }
-        t
-    }
-
-    #[test]
-    fn round1_pairings_two_players_single_final() {
-        let t = record(2);
-        let pairs = round1_pairings(&t);
-        assert_eq!(pairs.len(), 1);
-        assert_eq!(pairs[0].0.unwrap().to_string(), t.players[0]);
-        assert_eq!(pairs[0].1.unwrap().to_string(), t.players[1]);
-    }
-
-    #[test]
-    fn round1_pairings_four_players_high_vs_low() {
-        let t = record(4);
-        let pairs = round1_pairings(&t);
-        assert_eq!(pairs.len(), 2);
-        // Seed 1 vs seed 4, seed 2 vs seed 3.
-        assert_eq!(pairs[0].0.unwrap().to_string(), t.players[0]);
-        assert_eq!(pairs[0].1.unwrap().to_string(), t.players[3]);
-        assert_eq!(pairs[1].0.unwrap().to_string(), t.players[1]);
-        assert_eq!(pairs[1].1.unwrap().to_string(), t.players[2]);
-    }
-
-    #[test]
-    fn round1_pairings_empty_for_partial_bracket() {
-        let mut t = record(4);
-        t.players.pop();
-        t.player_elos.pop();
-        assert!(round1_pairings(&t).is_empty());
+        t.max_players = 16;
+        assert_eq!(default_min_players(&t), 16);
+        t.state = FormatState::for_format(&TournamentFormat::Swiss { rounds: 4 });
+        assert_eq!(default_min_players(&t), 8);
+        t.min_players = Some(5);
+        assert_eq!(default_min_players(&t), 5);
     }
 
     async fn anticheat_migrated_pool() -> sqlx::SqlitePool {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::raw_sql(include_str!("../../migrations/008_anticheat.sql"))
-            .execute(&pool)
+        crate::infrastructure::migrate_session_db(&pool)
             .await
             .unwrap();
         pool
@@ -947,19 +780,12 @@ mod tests {
     fn tournament_with_one_match(game_id: u64, completed_at: Option<i64>) -> TournamentRecord {
         let mut t = TournamentRecord::new(1, "t", 0);
         t.completed_at = completed_at;
-        t.matches
-            .push(Some(crate::signing::storage::tournament::TournamentMatch {
-                match_index: 0,
-                round: 0,
-                player_white: Some("white".to_string()),
-                player_black: Some("black".to_string()),
-                winner: Some("white".to_string()),
-                game_id: Some(game_id),
-                status: crate::signing::storage::tournament::MatchStatus::Completed,
-                result_source: None,
-                next_match_for_winner: None,
-                next_match_slot: 0,
-            }));
+        let mut bracket = EliminationState::draw(1, &["white".to_string(), "black".to_string()]);
+        bracket.matches[0].game_id = Some(game_id);
+        bracket
+            .decide(1, 0, "white", "black", ResultSource::OnChain)
+            .unwrap();
+        t.state = FormatState::Elimination(bracket);
         t
     }
 
@@ -1089,6 +915,44 @@ mod tests {
         assert!(
             matches!(gate, PrizeGate::Proceed { flagged } if flagged.is_empty()),
             "a Flag verdict for a game outside this tournament's own matches must not surface here"
+        );
+    }
+
+    #[tokio::test]
+    async fn prize_gate_checks_swiss_board_games_too() {
+        let pool = anticheat_migrated_pool().await;
+        let mut sd = SwissStorageData::new(1);
+        sd.current_round = 1;
+        sd.rounds = vec![swiss_pairing::SwissRound {
+            round: 1,
+            pairings: vec![swiss_pairing::Pairing {
+                white: "cheater".into(),
+                black: "honest".into(),
+                board: 1,
+            }],
+            byes: vec![],
+            float_downs: vec![],
+            float_ups: vec![],
+        }];
+        let mut t = TournamentRecord::new(3, "t", 0);
+        t.state = FormatState::Swiss(sd);
+        let board_game =
+            crate::signing::storage::tournament::TournamentStore::swiss_game_id(3, 1, 1).unwrap();
+        sqlx::query(
+            "INSERT INTO anticheat_verdicts
+             (game_id, white_pubkey, black_pubkey, white_verdict, black_verdict,
+              white_score, black_score, white_signals, black_signals)
+             VALUES (?, 'cheater', 'honest', 'Flag', 'Clean', 0.9, 0.1, '{}', '{}')",
+        )
+        .bind(board_game.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let gate = anticheat_gate(&pool, &t).await;
+        assert!(
+            matches!(gate, PrizeGate::Proceed { ref flagged } if flagged == &["cheater"]),
+            "a flagged Swiss game must withhold that player's prize"
         );
     }
 }

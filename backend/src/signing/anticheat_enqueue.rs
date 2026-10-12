@@ -302,11 +302,9 @@ async fn resolve_tournament_context(
         t: &crate::signing::storage::tournament::TournamentRecord,
         game_id: u64,
     ) -> Option<u32> {
-        t.matches
-            .iter()
-            .flatten()
-            .find(|m| m.game_id == Some(game_id))
-            .map(|m| m.round as u32 + 1)
+        t.state
+            .round_of_game(t.tournament_id, game_id)
+            .map(|round| u32::from(round) + 1)
     }
 
     if let Some(tid) = hint {
@@ -317,10 +315,8 @@ async fn resolve_tournament_context(
         return (Some(tid), round);
     }
 
-    for t in state.tournament_store.list().await {
-        if let Some(round) = round_in(&t, game_id) {
-            return (Some(t.tournament_id), Some(round));
-        }
+    match state.tournament_store.find_by_game(game_id).await {
+        Some(t) => (Some(t.tournament_id), round_in(&t, game_id)),
+        None => (None, None),
     }
-    (None, None)
 }
