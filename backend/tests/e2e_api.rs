@@ -9,9 +9,7 @@ use tower::ServiceExt; // for `oneshot`
 
 use backend::db::repository::GameRepository;
 use backend::infrastructure::{build_app_router, initialize_pools, run_migrations};
-use backend::signing::identity::IdentityVault;
 use backend::signing::storage::tournament::TournamentStore;
-use backend::signing::storage::SessionStore;
 use backend::signing::{AppState, SigningConfig};
 use std::sync::Mutex;
 
@@ -240,11 +238,6 @@ async fn spawn_app_on(session_url: &str, vault_url: &str) -> TestApp {
         .expect("init pools");
     run_migrations(&pools).await.expect("run migrations");
 
-    // Initialize tables here; AppState owns the store used by the test.
-    let schema_vault = IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
-    let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
-    session_store.init().await.expect("session store init");
-
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
 
     let state = AppState::new(
@@ -253,8 +246,6 @@ async fn spawn_app_on(session_url: &str, vault_url: &str) -> TestApp {
         pools.vault_pool.clone(),
         Arc::new(tournament_store),
     );
-    // Social tables (some routes touch them; harmless for the rest).
-    let _ = state.friends.init().await;
     // Same startup step as `server::run`: restore persisted relay rooms.
     state
         .p2p_relay_store
@@ -1617,7 +1608,9 @@ async fn puzzle_next_filters_by_theme_and_validates_input() {
 
     let (status, _) = app.get("/puzzle/next?wallet=themeW&theme=nope").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, _) = app.get("/puzzle/next?wallet=themeW&difficulty=insane").await;
+    let (status, _) = app
+        .get("/puzzle/next?wallet=themeW&difficulty=insane")
+        .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let (status, themes) = app.get("/puzzle/themes").await;
@@ -1632,9 +1625,7 @@ async fn puzzle_next_filters_by_theme_and_validates_input() {
 #[tokio::test]
 async fn puzzle_from_lichess_requires_wallet_auth() {
     let app = spawn_app().await;
-    let (status, _) = app
-        .get("/puzzle/next?wallet=lichessW&source=lichess")
-        .await;
+    let (status, _) = app.get("/puzzle/next?wallet=lichessW&source=lichess").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
@@ -1652,7 +1643,10 @@ async fn solve(app: &TestApp, wallet: &str, hint: bool) -> Value {
     let (_, first) = app
         .post_json("/puzzle/move", &json!({ "nonce": nonce, "uci": "e7e5" }))
         .await;
-    assert_eq!(first, json!({ "correct": true, "done": false, "reply": "g1f3" }));
+    assert_eq!(
+        first,
+        json!({ "correct": true, "done": false, "reply": "g1f3" })
+    );
     let (_, last) = app
         .post_json("/puzzle/move", &json!({ "nonce": nonce, "uci": "b8c6" }))
         .await;

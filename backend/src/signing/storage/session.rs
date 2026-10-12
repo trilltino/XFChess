@@ -37,151 +37,6 @@ impl SessionStore {
         self.pool.clone()
     }
 
-    pub async fn init(&self) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS sessions (
-                game_id   INTEGER PRIMARY KEY,
-                keypair   BLOB    NOT NULL,
-                wallet    TEXT    NOT NULL,
-                active    INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL DEFAULT 0
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Mirror migration 026 for deployments that skip sqlx migrations.
-        let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0")
-            .execute(&self.pool)
-            .await;
-        let _ =
-            sqlx::query("ALTER TABLE sessions ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")
-                .execute(&self.pool)
-                .await;
-
-        // Mirror per-wallet activation migration 025 for deployments that skip sqlx migrations.
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS session_wallet_activations (
-                game_id INTEGER NOT NULL,
-                wallet  TEXT    NOT NULL,
-                sig     TEXT    NOT NULL,
-                PRIMARY KEY (game_id, wallet)
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Wallet-first user table — no password_hash
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS users_v2 (
-                wallet      TEXT PRIMARY KEY,
-                username    TEXT NOT NULL,
-                email       TEXT UNIQUE,
-                password_hash TEXT,
-                kyc_status  TEXT NOT NULL DEFAULT 'none',
-                created_at  INTEGER NOT NULL DEFAULT 0,
-                deleted_at  INTEGER
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_v2_username ON users_v2 (LOWER(username));"
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Mirror telemetry migrations 013/014 for deployments that skip sqlx migrations.
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS move_telemetry (
-                game_id     TEXT    NOT NULL,
-                move_number INTEGER NOT NULL,
-                color       TEXT    NOT NULL,
-                blurred     INTEGER NOT NULL DEFAULT 0,
-                think_ms    INTEGER,
-                reported_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                PRIMARY KEY (game_id, move_number)
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // SQLite lacks ADD COLUMN IF NOT EXISTS; ignore duplicate-column errors for existing schemas.
-        let _ = sqlx::query("ALTER TABLE move_telemetry ADD COLUMN think_ms INTEGER")
-            .execute(&self.pool)
-            .await;
-
-        // Per-game broadcast delay (migration 015) — same guarded-ALTER pattern.
-        let _ = sqlx::query(
-            "ALTER TABLE games ADD COLUMN broadcast_delay_secs INTEGER NOT NULL DEFAULT 0",
-        )
-        .execute(&self.pool)
-        .await;
-
-        // Idempotently add repository columns missing from the migration-006 schema;
-        // the alternate db::schema initialization path does not run here.
-        let _ = sqlx::query("ALTER TABLE games ADD COLUMN pgn_text TEXT")
-            .execute(&self.pool)
-            .await;
-        let _ = sqlx::query("ALTER TABLE moves ADD COLUMN move_san TEXT")
-            .execute(&self.pool)
-            .await;
-        let _ = sqlx::query("ALTER TABLE moves ADD COLUMN fen_before TEXT")
-            .execute(&self.pool)
-            .await;
-
-        // Account-linkage / Sybil signals (migration 016).
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS account_linkage (
-                wallet        TEXT    PRIMARY KEY,
-                funder        TEXT,
-                device_hash   TEXT,
-                ip_count      INTEGER NOT NULL DEFAULT 0,
-                flagged       INTEGER NOT NULL DEFAULT 0,
-                hard_blocked  INTEGER NOT NULL DEFAULT 0,
-                first_seen    INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                last_seen     INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_linkage_funder ON account_linkage(funder)")
-            .execute(&self.pool)
-            .await
-            .ok();
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_linkage_device ON account_linkage(device_hash)",
-        )
-        .execute(&self.pool)
-        .await
-        .ok();
-
-        // Reject JWTs issued at or before the subject’s logout cutoff, valid_after.
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS jwt_revocations (
-                subject     TEXT    PRIMARY KEY,
-                valid_after INTEGER NOT NULL
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
     pub async fn revoke_tokens_before(
         &self,
         subject: &str,
@@ -296,7 +151,6 @@ impl SessionStore {
         .await?;
         Ok(())
     }
-
 
     pub async fn find_wallet_by_social(&self, provider: &str, subject: &str) -> Option<String> {
         sqlx::query_as::<_, (String,)>(
@@ -758,7 +612,9 @@ mod tests {
             .expect("in-memory sqlite pool");
         let vault = IdentityVault::new(&"1".repeat(64), &"2".repeat(64)).expect("test vault");
         let store = SessionStore::new(pool, vault);
-        store.init().await.expect("init");
+        crate::infrastructure::migrate_session_db(&store.pool)
+            .await
+            .expect("migrate");
         store
     }
 

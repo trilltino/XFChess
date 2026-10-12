@@ -55,150 +55,189 @@ pub async fn initialize_pools(
     })
 }
 
+/// A schema script from `migrations/`. Every script runs on every start, so each
+/// must be idempotent (see `migrations/README.md`).
+struct Script {
+    name: &'static str,
+    sql: &'static str,
+}
+
+macro_rules! scripts {
+    ($dir:literal: $($name:literal),+ $(,)?) => {
+        &[$(Script {
+            name: concat!($dir, "/", $name),
+            sql: include_str!(concat!("../../migrations/", $dir, "/", $name, ".sql")),
+        }),+]
+    };
+}
+
+/// `sessions.db`: everything but identity data.
+const SESSION_SCRIPTS: &[Script] = scripts!("session":
+    "001_accounts",
+    "002_signing_sessions",
+    "003_game_history",
+    "004_live_games",
+    "005_matchmaking",
+    "006_anticheat",
+    "007_moderation",
+    "008_compliance",
+    "009_lichess",
+    "010_puzzles",
+    "011_friends",
+    "012_job_queue",
+    "013_admin",
+    "014_offline_tournaments",
+);
+
+/// `vault.db`: identity and KYC data, kept apart from game data.
+const VAULT_SCRIPTS: &[Script] = scripts!("vault":
+    "001_identity_vault",
+    "002_kyc_and_erasure",
+);
+
 pub async fn run_migrations(pools: &DatabasePools) -> Result<(), sqlx::Error> {
-    // Helper to run a semicolon-separated SQL script on a pool
-    async fn run_script(
-        pool: &sqlx::SqlitePool,
-        script: &str,
-        name: &str,
-    ) -> Result<(), sqlx::Error> {
-        // Strip comments to avoid breaking on semicolons inside comments
-        let mut clean_script = String::new();
-        for line in script.lines() {
-            if let Some(comment_start) = line.find("--") {
-                clean_script.push_str(&line[..comment_start]);
-            } else {
-                clean_script.push_str(line);
-            }
-            clean_script.push(' '); // Replace newline with space
-        }
-
-        for statement in clean_script.split(';') {
-            let statement = statement.trim();
-            if statement.is_empty() {
-                continue;
-            }
-            // SAFETY: `statement` comes from splitting one of this module's own
-            // hardcoded `migration_NNN` const literals on `;` — never user input.
-            if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(statement))
-                .execute(pool)
-                .await
-            {
-                // For ALTER TABLE, we ignore "duplicate column" errors
-                let err_msg = e.to_string().to_lowercase();
-                if err_msg.contains("duplicate column") || err_msg.contains("already exists") {
-                    continue;
-                }
-                tracing::error!(
-                    "Migration {} failed on statement: {}: {}",
-                    name,
-                    statement,
-                    e
-                );
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-
-    let migration_001 = include_str!("../../migrations/001_initial.sql");
-    run_script(&pools.session_pool, migration_001, "001 (session)").await?;
-    run_script(&pools.vault_pool, migration_001, "001 (vault)").await?;
-
-    let migration_002 = include_str!("../../migrations/002_kyc_gdpr.sql");
-    run_script(&pools.vault_pool, migration_002, "002 (vault)").await?;
-    run_script(&pools.session_pool, migration_002, "002 (session)").await?;
-
-    let migration_003 = include_str!("../../migrations/003_wallet_first_auth.sql");
-    run_script(&pools.session_pool, migration_003, "003").await?;
-
-    let migration_004 = include_str!("../../migrations/004_indexes_and_wal.sql");
-    run_script(&pools.vault_pool, migration_004, "004 (vault)").await?;
-    run_script(&pools.session_pool, migration_004, "004 (session)").await?;
-
-    let migration_005 = include_str!("../../migrations/005_disputes.sql");
-    run_script(&pools.session_pool, migration_005, "005").await?;
-
-    let migration_006 = include_str!("../../migrations/006_game_history.sql");
-    run_script(&pools.session_pool, migration_006, "006").await?;
-
-    let migration_007 = include_str!("../../migrations/007_add_password_hash.sql");
-    run_script(&pools.session_pool, migration_007, "007").await?;
-
-    let migration_008 = include_str!("../../migrations/008_anticheat.sql");
-    run_script(&pools.session_pool, migration_008, "008").await?;
-
-    let migration_009 = include_str!("../../migrations/009_external_elo.sql");
-    run_script(&pools.session_pool, migration_009, "009").await?;
-
-    let migration_010 = include_str!("../../migrations/010_cacf_compliance.sql");
-    run_script(&pools.session_pool, migration_010, "010").await?;
-
-    let migration_011 = include_str!("../../migrations/011_friends.sql");
-    run_script(&pools.session_pool, migration_011, "011").await?;
-
-    let migration_012 = include_str!("../../migrations/012_perf_indexes.sql");
-    run_script(&pools.session_pool, migration_012, "012").await?;
-
-    // Apply puzzle migration here; migrations 013-017 are handled by SessionStore::init.
-    let migration_018 = include_str!("../../migrations/018_puzzles.sql");
-    run_script(&pools.session_pool, migration_018, "018").await?;
-
-    let migration_019 = include_str!("../../migrations/019_job_queue.sql");
-    run_script(&pools.session_pool, migration_019, "019").await?;
-
-    let migration_020 = include_str!("../../migrations/020_casual_games_and_sponsorship.sql");
-    run_script(&pools.session_pool, migration_020, "020").await?;
-
-    let migration_021 = include_str!("../../migrations/021_active_sessions.sql");
-    run_script(&pools.session_pool, migration_021, "021").await?;
-
-    let migration_022 = include_str!("../../migrations/022_matchmaking_queue.sql");
-    run_script(&pools.session_pool, migration_022, "022").await?;
-
-    let migration_023 = include_str!("../../migrations/023_player_bans.sql");
-    run_script(&pools.session_pool, migration_023, "023").await?;
-
-    let migration_024 = include_str!("../../migrations/024_flagged_games.sql");
-    run_script(&pools.session_pool, migration_024, "024").await?;
-
-    // ── Migration 025: session_wallet_activations (per-wallet activation idempotency) ──
-    let migration_025 = include_str!("../../migrations/025_session_wallet_activations.sql");
-    run_script(&pools.session_pool, migration_025, "025").await?;
-
-    // ── Migration 026: sessions.is_global (per-game vs global session flow) ──
-    let migration_026 = include_str!("../../migrations/026_sessions_is_global.sql");
-    run_script(&pools.session_pool, migration_026, "026").await?;
-
-    // ── Migration 027: game_event_log (durable Braid moves/resign/chat log) ──
-    let migration_027 = include_str!("../../migrations/027_game_event_log.sql");
-    run_script(&pools.session_pool, migration_027, "027").await?;
-
-    // ── Migration 028: admin_audit_log (persistent, named-actor audit trail) ─
-    let migration_028 = include_str!("../../migrations/028_admin_audit_log.sql");
-    run_script(&pools.session_pool, migration_028, "028").await?;
-
-    // ── Migration 029: tournament_templates (backend-persisted, was localStorage) ─
-    let migration_029 = include_str!("../../migrations/029_tournament_templates.sql");
-    run_script(&pools.session_pool, migration_029, "029").await?;
-
-    // ── Migration 030: social_identities (Privy Google/email → wallet mapping) ─
-    let migration_030 = include_str!("../../migrations/030_social_identities.sql");
-    run_script(&pools.session_pool, migration_030, "030").await?;
-
-    let migration_032 = include_str!("../../migrations/032_casual_game_participants.sql");
-    run_script(&pools.session_pool, migration_032, "032").await?;
-
-    let migration_033 = include_str!("../../migrations/033_p2p_relay_rooms.sql");
-    run_script(&pools.session_pool, migration_033, "033").await?;
-
-    // ── Migration 034: per-game seat leases (one playing device per player) ──
-    let migration_034 = include_str!("../../migrations/034_game_seat_leases.sql");
-    run_script(&pools.session_pool, migration_034, "034").await?;
-
-    let migration_035 = include_str!("../../migrations/035_puzzle_lichess.sql");
-    run_script(&pools.session_pool, migration_035, "035").await?;
-
+    migrate_session_db(&pools.session_pool).await?;
+    migrate_vault_db(&pools.vault_pool).await?;
     info!("[Database] All migrations completed successfully");
     Ok(())
+}
+
+/// Brings a session database's schema up to date.
+pub async fn migrate_session_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    run_scripts(pool, SESSION_SCRIPTS).await
+}
+
+/// Brings a vault database's schema up to date.
+pub async fn migrate_vault_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    run_scripts(pool, VAULT_SCRIPTS).await
+}
+
+async fn run_scripts(pool: &SqlitePool, scripts: &[Script]) -> Result<(), sqlx::Error> {
+    for script in scripts {
+        for statement in statements(script.sql) {
+            // SAFETY: statements come from the scripts compiled into this module,
+            // never from input.
+            let Err(e) = sqlx::query(sqlx::AssertSqlSafe(statement.as_str()))
+                .execute(pool)
+                .await
+            else {
+                continue;
+            };
+            // An upgrade ALTER on a column the CREATE already made, or an object
+            // created by an earlier start.
+            let message = e.to_string().to_lowercase();
+            if message.contains("duplicate column") || message.contains("already exists") {
+                continue;
+            }
+            tracing::error!("Migration {} failed on `{statement}`: {e}", script.name);
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+/// The script's statements with `--` comments removed, so a `;` inside a comment
+/// does not split one.
+fn statements(script: &str) -> Vec<String> {
+    let code = script
+        .lines()
+        .map(|line| line.split_once("--").map_or(line, |(code, _)| code))
+        .collect::<Vec<_>>()
+        .join(" ");
+    code.split(';')
+        .map(str::trim)
+        .filter(|statement| !statement.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn listed(dir: &str, scripts: &[Script]) -> Vec<String> {
+        let mut names: Vec<String> = scripts
+            .iter()
+            .map(|s| s.name.trim_start_matches(&format!("{dir}/")).to_string())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn on_disk(dir: &str) -> Vec<String> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("migrations")
+            .join(dir);
+        let mut names: Vec<String> = std::fs::read_dir(path)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|ext| ext == "sql"))
+            .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn every_script_on_disk_is_run() {
+        assert_eq!(listed("session", SESSION_SCRIPTS), on_disk("session"));
+        assert_eq!(listed("vault", VAULT_SCRIPTS), on_disk("vault"));
+        let top_level = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"))
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().is_file())
+            .count();
+        assert_eq!(
+            top_level, 1,
+            "only README.md sits beside the session/ and vault/ folders"
+        );
+    }
+
+    #[test]
+    fn comments_never_split_or_leak_into_statements() {
+        let sql = "-- a; b\nCREATE TABLE t (a TEXT); -- trailing; note\n\nALTER TABLE t ADD COLUMN b TEXT;";
+        assert_eq!(
+            statements(sql),
+            vec!["CREATE TABLE t (a TEXT)", "ALTER TABLE t ADD COLUMN b TEXT"]
+        );
+    }
+
+    #[tokio::test]
+    async fn scripts_can_run_on_every_start() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        migrate_session_db(&pool).await.unwrap();
+        migrate_session_db(&pool).await.unwrap();
+        let vault = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        migrate_vault_db(&vault).await.unwrap();
+        migrate_vault_db(&vault).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_older_database_gets_the_newer_columns() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE sessions (game_id INTEGER PRIMARY KEY, keypair BLOB NOT NULL, \
+             wallet TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE game_event_log (game_id TEXT NOT NULL, seq INTEGER NOT NULL, \
+             kind TEXT NOT NULL, version_hash TEXT NOT NULL, parent_version TEXT NOT NULL, \
+             payload_json TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (game_id, seq));
+             CREATE INDEX idx_game_event_log_game ON game_event_log(game_id, seq);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        migrate_session_db(&pool).await.unwrap();
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('sessions')")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert!(columns.ends_with(&["move_count".into(), "is_global".into(), "created_at".into()]));
+        let retired: Option<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE name = 'idx_game_event_log_game'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert_eq!(retired, None, "redundant indexes are dropped");
+    }
 }

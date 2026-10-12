@@ -420,10 +420,6 @@ db-reset:
     @Remove-Item -Force backend/vault.db-wal -ErrorAction SilentlyContinue
     @Write-Host "[DB] Done — databases will be recreated with migrations on next backend start" -ForegroundColor Green
 
-# Run SQLx migrations manually
-db-migrate:
-    Set-Location backend; sqlx migrate run
-
 
 # Auto-rebuild + restart backend on file changes (requires: cargo install cargo-watch)
 watch-backend:

@@ -767,16 +767,9 @@ mod tests {
 
     pub(super) async fn migrated_pool() -> sqlx::SqlitePool {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::raw_sql(include_str!("../../../migrations/027_game_event_log.sql"))
-            .execute(&pool)
+        crate::infrastructure::migrate_session_db(&pool)
             .await
             .unwrap();
-        sqlx::raw_sql(include_str!(
-            "../../../migrations/032_casual_game_participants.sql"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
         pool
     }
 

@@ -79,7 +79,7 @@ pub async fn join(
         queue.push(ticket.clone());
     }
 
-    // Persist so a backend restart doesn't drop this ticket (migration 022).
+    // Persist so a backend restart doesn't drop this ticket.
     if let Err(e) = sqlx::query(
         "INSERT OR REPLACE INTO matchmaking_queue (pubkey, elo, joined_at) VALUES (?, ?, ?)",
     )
@@ -111,7 +111,7 @@ pub async fn status(
     };
 
     if let Some(res) = removed {
-        // One-time retrieval — clear the persisted copy too (migration 022).
+        // One-time retrieval — clear the persisted copy too.
         if let Err(e) = sqlx::query("DELETE FROM matchmaking_matches WHERE pubkey = ?")
             .bind(&pubkey)
             .execute(&app_state.store.pool())

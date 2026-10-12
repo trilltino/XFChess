@@ -113,15 +113,9 @@ mod tests {
 
     async fn store() -> SeatLeaseStore {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        // Same schema as migrations/034_game_seat_leases.sql.
-        sqlx::query(
-            "CREATE TABLE game_seat_leases (game_id TEXT NOT NULL, wallet TEXT NOT NULL, \
-             device_id TEXT NOT NULL, epoch INTEGER NOT NULL, updated_at INTEGER NOT NULL, \
-             PRIMARY KEY (game_id, wallet))",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        crate::infrastructure::migrate_session_db(&pool)
+            .await
+            .unwrap();
         SeatLeaseStore::new(pool)
     }
 
