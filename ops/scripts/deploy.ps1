@@ -28,9 +28,11 @@ try {
     try {
         $env:VITE_BACKEND_URL = "https://$Domain"
         $env:SIGNING_SERVICE_URL = "https://$Domain"
-        & npm ci
+        # npm.cmd, not npm: npm's npm.ps1 shim reads $MyInvocation.Statement, which
+        # Windows PowerShell 5.1 lacks, and fails under ssh.ps1's StrictMode.
+        & npm.cmd ci
         if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency install failed.' }
-        & npm run build
+        & npm.cmd run build
         if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
         & tar -czf "$workspace\web.tar.gz" -C dist .
         if ($LASTEXITCODE -ne 0) { throw 'Frontend archive failed.' }
