@@ -227,9 +227,7 @@ mod tests {
 
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        // raw_sql executes the multi-statement migration script as-is.
-        sqlx::raw_sql(include_str!("../../migrations/019_job_queue.sql"))
-            .execute(&pool)
+        crate::infrastructure::migrate_session_db(&pool)
             .await
             .unwrap();
         pool

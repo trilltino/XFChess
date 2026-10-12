@@ -66,7 +66,7 @@ POST /game/finalize      -> settle wager (also done automatically by tasks/settl
   (SQLite `tournaments` table, JSON blob per record) — survives restarts.
 - Wager routes check [src/signing/cacf/](src/signing/cacf/) jurisdiction rules (UK, Brazil,
   Germany, Canada) before building transactions.
-- Schema changes = new numbered file in [migrations/](migrations/); never edit old ones.
+- Schema: [migrations/](migrations/README.md), one idempotent file per area, applied on every start.
 
 Observability: `GET /health`, `GET /metrics` (Prometheus). More detail in
 [CLAUDE.md](CLAUDE.md) and [src/README.md](src/README.md).

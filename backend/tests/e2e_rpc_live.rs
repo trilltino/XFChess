@@ -137,9 +137,7 @@ fn debug_transaction_reports_real_on_chain_failure() {
 
 async fn spawn_live_app(rpc_url: &str) -> axum::Router {
     use backend::infrastructure::{build_app_router, initialize_pools, run_migrations};
-    use backend::signing::identity::IdentityVault;
     use backend::signing::storage::tournament::TournamentStore;
-    use backend::signing::storage::SessionStore;
     use backend::signing::{AppState, SigningConfig};
 
     let nanos = std::time::SystemTime::now()
@@ -153,10 +151,6 @@ async fn spawn_live_app(rpc_url: &str) -> axum::Router {
         .await
         .expect("init pools");
     run_migrations(&pools).await.expect("run migrations");
-    // Initialize tables here; AppState owns the store used by the test.
-    let schema_vault = IdentityVault::new(&"0".repeat(64), &"0".repeat(64)).expect("test vault");
-    let session_store = SessionStore::new(pools.session_pool.clone(), schema_vault);
-    session_store.init().await.expect("session store init");
     let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
 
     let config = SigningConfig {
@@ -186,7 +180,6 @@ async fn spawn_live_app(rpc_url: &str) -> axum::Router {
         pools.vault_pool.clone(),
         std::sync::Arc::new(tournament_store),
     );
-    let _ = state.friends.init().await;
     build_app_router(state.clone()).with_state(state)
 }
 

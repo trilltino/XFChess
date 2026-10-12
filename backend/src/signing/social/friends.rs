@@ -49,49 +49,6 @@ impl FriendManager {
         Self { pool }
     }
 
-    pub async fn init(&self) -> Result<()> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS friend_requests (
-                id           TEXT PRIMARY KEY,
-                from_node_id TEXT NOT NULL,
-                from_pubkey  TEXT,
-                from_display TEXT NOT NULL,
-                to_node_id   TEXT,
-                to_pubkey    TEXT,
-                message      TEXT,
-                status       TEXT NOT NULL DEFAULT 'pending',
-                created_at   TEXT NOT NULL,
-                responded_at TEXT,
-                UNIQUE(from_node_id, to_node_id),
-                UNIQUE(from_node_id, to_pubkey)
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS contacts (
-                id               TEXT PRIMARY KEY,
-                owner_node_id    TEXT NOT NULL,
-                contact_node_id  TEXT NOT NULL,
-                contact_pubkey   TEXT,
-                contact_display  TEXT NOT NULL,
-                contact_elo      INTEGER,
-                created_at       TEXT NOT NULL,
-                UNIQUE(owner_node_id, contact_node_id)
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        info!("[Friends] Tables initialized");
-        Ok(())
-    }
-
     pub async fn send_request(
         &self,
         from_node_id: String,

@@ -1,9 +1,7 @@
 # backend/src/db
 
-SQLite persistence layer (SQLx 0.8, WAL mode). Two schema sources coexist: numbered
-migrations in [../../migrations/](../../migrations/) (001–019: KYC, auth, disputes,
-anticheat, friends, puzzles, job queue, …) and the runtime `create_tables` bootstrap
-in [schema.rs](schema.rs) for the games/moves feed tables.
+SQLite persistence layer (SQLx 0.9, WAL mode). The schema for these tables lives in
+[../../migrations/](../../migrations/README.md).
 
 ## Role in XFChess
 
@@ -17,7 +15,6 @@ JSON blob per record by [../signing/storage/tournament.rs](../signing/storage/to
 
 | File | Contents |
 |------|----------|
-| [schema.rs](schema.rs) | `init_db` — pool setup (WAL, 30s busy timeout) + games/moves table bootstrap |
 | [repository.rs](repository.rs) | Game/move records; zstd+base64 PGN compression; `filter_visible_moves` (anti-cheat broadcast delay) |
 | [sessions.rs](sessions.rs) | `SessionStatus` (`Active/Paused/Resumable/Expired`) — disconnect recovery |
 
@@ -36,7 +33,7 @@ pub fn filter_visible_moves(moves: Vec<MoveRecord>, now_ts: i64, delay_secs: i64
 
 ## Invariants
 
-- Schema changes go in a **new** numbered migration file; never edit an existing one.
+- Schema changes follow [../../migrations/README.md](../../migrations/README.md).
 - PGN text may be stored raw or `zstd:`-prefixed compressed — always read through
   `decompress_pgn`, never assume plain text.
 - Queries use runtime `sqlx::query` (no compile-time `query!` macros), so there is no

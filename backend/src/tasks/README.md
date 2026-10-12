@@ -15,7 +15,7 @@ client involvement.
 | [settlement_worker.rs](settlement_worker.rs) | Scans active sessions every 30s, reads the `Game` PDA, auto-submits `finalize_game` once a result is committed. Spawned by `server.rs`, not `spawn_background_tasks` — see note above. |
 | [tournament_scheduler.rs](tournament_scheduler.rs) | Auto-starts scheduled tournaments; `spawn_prize_distributor` cranks the permissionless `distribute_tournament_prizes` instruction |
 | [matchmaking.rs](matchmaking.rs) | Elo-based pairing queue |
-| [anticheat_worker.rs](anticheat_worker.rs) | Consumes the anticheat queue ([queue.rs](queue.rs), migration 019) and runs engine-similarity analysis |
+| [anticheat_worker.rs](anticheat_worker.rs) | Consumes the anticheat queue ([queue.rs](queue.rs)) and runs engine-similarity analysis |
 | [archiver.rs](archiver.rs) | Moves finished games into the archive tables (compressed PGN) |
 
 ## Invariants
