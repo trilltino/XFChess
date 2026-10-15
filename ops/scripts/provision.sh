@@ -52,4 +52,4 @@ EOF
 /usr/sbin/sshd -t
 systemctl reload ssh
 echo 'Operator accounts provisioned. Existing SSH keys, secrets and firewall rules preserved.'
-echo 'Finish Rust/toolchain, Docker Compose, TLS and backend environment setup (see ops/docs/).'
+echo 'Finish Rust/toolchain, Docker Compose, TLS and backend environment setup using ops/OPERATIONS.md.'

@@ -56,7 +56,7 @@ pub async fn initialize_pools(
 }
 
 /// A schema script from `migrations/`. Every script runs on every start, so each
-/// must be idempotent.
+/// must be idempotent (see `MIGRATIONS.md`).
 struct Script {
     name: &'static str,
     sql: &'static str,

@@ -1,7 +1,7 @@
 # Operations validation
 
 The former remediation checklist described retired deployment paths. Current
-operating instructions live in the
+operating instructions live in [ops/OPERATIONS.md](../OPERATIONS.md), the
 [hosted verification checklist](HOSTED_BACKEND_CHECKLIST.md) and
 [recovery guide](ROLLBACK_GUIDE.md).
 

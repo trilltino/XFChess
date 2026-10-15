@@ -20,3 +20,5 @@
 - Verify an encrypted offsite backup with `restore-db.sh --check`. Confirm the
   backup timer is enabled and the age identity/vault secrets are recoverable offline.
 - Before a schema change, assess [rollback compatibility](ROLLBACK_GUIDE.md).
+
+See [ops/OPERATIONS.md](../OPERATIONS.md) for setup, commands and persistent paths.
