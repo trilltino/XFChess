@@ -56,7 +56,7 @@ pub async fn initialize_pools(
 }
 
 /// A schema script from `migrations/`. Every script runs on every start, so each
-/// must be idempotent (see `migrations/README.md`).
+/// must be idempotent.
 struct Script {
     name: &'static str,
     sql: &'static str,
@@ -187,8 +187,8 @@ mod tests {
             .filter(|e| e.as_ref().unwrap().path().is_file())
             .count();
         assert_eq!(
-            top_level, 1,
-            "only README.md sits beside the session/ and vault/ folders"
+            top_level, 0,
+            "only the session/ and vault/ folders live in migrations/"
         );
     }
 

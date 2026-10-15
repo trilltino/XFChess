@@ -6,7 +6,7 @@ release=${1:?release} sha=${2:?commit} domain=${3:?domain} monitor=${4:-0}
 lock_release
 [[ -f "$ROOT/.env" && -d "$ROOT/data" ]] || die 'Provision the server and configure /opt/xfchess/.env first.'
 [[ -f "/etc/letsencrypt/live/$domain/fullchain.pem" ]] || die 'Provision a trusted TLS certificate before deploying.'
-[[ -L /etc/nginx/sites-enabled/xfchess ]] || die 'Enable the XFChess nginx site first (see ops/README.md).'
+[[ -L /etc/nginx/sites-enabled/xfchess ]] || die 'Enable the XFChess nginx site first.'
 incoming="$ROOT/incoming/$release"
 dest="$ROOT/releases/$release"
 [[ ! -e $dest ]] || die 'Release already exists; inspect its state before retrying.'

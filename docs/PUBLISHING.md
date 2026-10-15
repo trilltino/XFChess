@@ -9,7 +9,7 @@ results for a release; do not infer signing or publication from a local build.
 On Windows, `just release -DryRun` previews branch/tag actions.
 `just release` pushes the branch and a version tag; `-Version vX.Y.Z` selects
 a version. `-Deploy` also requests the separate VPS deployment after CI.
-See [scripts](../scripts/README.md).
+See [scripts](../scripts/).
 
 A pushed `v*` tag triggers release attachment. Manual dispatch builds workflow
 artifacts without attaching them to a GitHub Release:
@@ -55,6 +55,6 @@ certificate fingerprint. See [Android](runbooks/android-release.md) and
 - A release tag, backend health SHA and deployed program bytes are separate evidence.
 
 Run the [verification checklist](development/verification.md). Backend releases
-use [ops](../ops/README.md); game-program upgrades use
+use [ops](../ops/); game-program upgrades use
 [the upgrade runbook](runbooks/program-upgrade.md). Confirm caller/IDL compatibility
 when a release changes on-chain instructions.
