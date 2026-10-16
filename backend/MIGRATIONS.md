@@ -1,12 +1,12 @@
-# backend/migrations
+# Backend migrations
 
-The backend's SQLite schema, applied at startup by
-[`infrastructure/database.rs`](../src/infrastructure/database.rs) (`run_migrations`).
+The SQLite schema in [migrations/](migrations/), applied at startup by
+[`infrastructure/database.rs`](src/infrastructure/database.rs) (`run_migrations`).
 
 | Folder | Database | Contents |
 |--------|----------|----------|
-| [session/](session/) | `sessions.db` (`SESSION_DB_URL`) | Everything except identity data |
-| [vault/](vault/) | `vault.db` (`VAULT_DB_URL`) | Encrypted identities, KYC records, GDPR trail |
+| [session/](migrations/session/) | `sessions.db` (`SESSION_DB_URL`) | Everything except identity data |
+| [vault/](migrations/vault/) | `vault.db` (`VAULT_DB_URL`) | Encrypted identities, KYC records, GDPR trail |
 
 Each file holds the tables for one area, named after it (`003_game_history.sql`,
 `010_puzzles.sql`, ...), and each `CREATE TABLE` shows the table as it is today.

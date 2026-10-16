@@ -336,7 +336,7 @@ Never patch a payout with a one-off lamport transfer in an instruction handler. 
 
 Chess-clock timeouts are enforced entirely on the ER via MagicBlock's scheduled-task
 ("crank") mechanism — no off-chain poller needed, matching the whitepaper's gasless
-ticking model. See `programs/xfchess-game/src/crank_ix/README.md` for the on-chain
+ticking model. See `programs/xfchess-game/src/crank_ix/` for the on-chain
 side (`schedule_time_check_crank`, `crank_time_check`, `cancel_time_check_crank`).
 
 Backend wiring:

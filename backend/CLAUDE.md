@@ -71,7 +71,7 @@ SQLite with SQLx 0.9, two databases: `sessions.db` and `vault.db` (identity/KYC)
 schema is in `backend/migrations/session/` and `backend/migrations/vault/`, one file per
 area. The server applies it on every start; there is no `sqlx migrate` version table.
 Every statement must be idempotent. A new column goes into its `CREATE TABLE` and into an
-`ALTER TABLE … ADD COLUMN` after it. Rules: [migrations/README.md](migrations/README.md).
+`ALTER TABLE … ADD COLUMN` after it. Rules: [MIGRATIONS.md](MIGRATIONS.md).
 Tests get the schema from `migrate_session_db` / `migrate_vault_db`, not copied DDL.
 
 ## Testing

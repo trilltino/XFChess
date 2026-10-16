@@ -18,7 +18,7 @@ cargo test -p cu_benchmark --all-targets
 
 Build SBF before program-test: `just build-program`, then
 `cargo test -p xfchess-game --no-fail-fast`. Confirm the runner loads the fresh
-binary. [Protocol models](../../specs/README.md) test bounded abstractions; they
+binary. [Protocol models](../../specs/) test bounded abstractions; they
 do not replace Rust integration tests. Run frontend tests/builds in the affected
 npm project. [Ops validation](../../ops/docs/E2E_REMEDIATION.md) covers proxy,
 release recovery, backup mechanics and monitoring fixtures.

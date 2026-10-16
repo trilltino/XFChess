@@ -7,7 +7,7 @@ metadata:
 
 # Triton One and Yellowstone
 
-Use `crates/cu_benchmark/`, its README and cost/report models, plus backend RPC
+Use `crates/cu_benchmark/`, its cost/report models, plus backend RPC
 telemetry. Triton One is the Solana provider; this skill does not cover GPU Triton.
 
 - Discover current provider documentation through its index. Verify the endpoint's

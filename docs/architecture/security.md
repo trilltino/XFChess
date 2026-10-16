@@ -28,5 +28,5 @@ a permissive development fallback; deployment configuration matters.
 Before real-money release, verify secret rotation, program bytes, client/IDL
 compatibility, recovery drills and payout timing. Keep keys, tokens, identity
 records and unredacted logs out of issues/PRs. See
-[secret rotation](../../ops/SECRETS_ROTATION.md), [ops](../../ops/README.md) and
+[secret rotation](../../ops/SECRETS_ROTATION.md), [ops](../../ops/OPERATIONS.md) and
 [verification](../development/verification.md).

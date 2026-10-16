@@ -13,8 +13,8 @@ Use [the backend template](../backend/.env.example). Secrets stay in untracked,
 root-owned environment files; systemd supplies them to the service user. Staging
 must not share production databases or signing authorities.
 
-[Staging](../staging/README.md) is installed and verified separately. Current
+[Staging](../staging/STAGING.md) is installed and verified separately. Current
 release scripts target `/opt/xfchess`; they do not implement `-Environment` or
 same-binary promotion. Releases build clean committed source and verify health,
-readiness, build SHA and public HTTPS readiness. See [ops](../README.md) and
+readiness, build SHA and public HTTPS readiness. See [ops](../OPERATIONS.md) and
 [rollback](ROLLBACK_GUIDE.md).

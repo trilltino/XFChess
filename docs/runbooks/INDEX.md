@@ -11,6 +11,6 @@
 | Program upgrade | [Upgrade and compatibility](program-upgrade.md) |
 | Android build/distribution | [Android release](android-release.md) |
 
-[Operations](../../ops/README.md) owns service deployment and monitoring.
+[Operations](../../ops/OPERATIONS.md) owns service deployment and monitoring.
 [Rollback/database recovery](../../ops/docs/ROLLBACK_GUIDE.md) owns restore commands;
 [reliability](../../ops/docs/RELIABILITY.md) distinguishes targets from evidence.

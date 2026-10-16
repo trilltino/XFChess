@@ -1,7 +1,7 @@
 # XFChess Keypairs
 
 This directory is gitignored (`keys/` in `.gitignore`), but this specific
-file — `KEYS_README.md` — is tracked in git despite that (predates the
+file — `KEYS.md` — is tracked in git despite that (predates the
 ignore rule; `git add` needs `-f` to touch it again). Every other file here
 is untracked and never leaves your machine.
 All `.json` files here are Solana keypairs — never commit them.
