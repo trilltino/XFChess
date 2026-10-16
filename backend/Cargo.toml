@@ -135,6 +135,9 @@ polling = []
 
 [dev-dependencies]
 cu_benchmark = { path = "../tools/cu_benchmark" }
+# Layout tests decode accounts the program itself serialized.
+xfchess-game = { workspace = true }
+anchor-lang = { workspace = true }
 serde_json = "1.0"
 wiremock = "0.6"
 tower = { version = "0.4", features = ["util"] }

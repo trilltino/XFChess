@@ -1777,6 +1777,7 @@ name = "backend"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "anchor-lang",
  "anyhow",
  "argon2",
  "async-stream",
@@ -1834,6 +1835,7 @@ dependencies = [
  "x509-parser 0.18.1",
  "xfchess-anticheat",
  "xfchess-braid-server",
+ "xfchess-game",
  "xfchess-rules",
  "zstd",
 ]

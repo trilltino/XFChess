@@ -7,6 +7,7 @@ use crate::signing::OrchestratorEvent;
 use crate::telemetry::worker_metrics;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signer::Signer;
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -73,12 +74,30 @@ fn resolve_missing_game(
     }
 }
 
+/// The last settle-ready snapshot of each game the worker has tried to
+/// finalize, kept until the game's off-chain effects are recorded. It lets a
+/// game whose PDA closes out from under the worker still be recorded.
+type SettleReady = HashMap<u64, GameSnapshot>;
+
+/// Whether a settlement path already recorded the game. A completed row with
+/// no settlement signature is an off-chain (free-rated) result written by a
+/// player and is not proof that settlement bookkeeping ran.
+async fn already_recorded(state: &AppState, game_id: u64) -> bool {
+    let repo = GameRepository::new(state.store.pool());
+    matches!(
+        repo.get_game(&game_id.to_string()).await,
+        Ok(Some(record)) if record.status == "completed"
+            && record.finalize_sig.as_deref().is_some_and(|sig| !sig.trim().is_empty())
+    )
+}
+
 /// Retire sessions whose Game PDA is gone only when the escrow PDA confirms
 /// the stake was paid out or refunded; otherwise keep them and report.
 async fn reconcile_missing_games(
     state: &Arc<AppState>,
     program_id: &Pubkey,
     missing: Vec<u64>,
+    settle_ready: &mut SettleReady,
     now: i64,
 ) -> u64 {
     if missing.is_empty() {
@@ -122,7 +141,15 @@ async fn reconcile_missing_games(
                     "[settlement] game {}: Game PDA closed and escrow empty; retiring session",
                     game_id
                 );
-                state.store.deactivate(game_id).await;
+                match settle_ready.remove(&game_id) {
+                    // Settled by another caller, or by our own transaction whose
+                    // confirmation was lost: the result is known from the last
+                    // snapshot, so the off-chain effects must still happen.
+                    Some(snap) if !already_recorded(state, game_id).await => {
+                        record_settled_game(state, game_id, &snap, None).await
+                    }
+                    _ => state.store.deactivate(game_id).await,
+                }
                 resolved += 1;
             }
             MissingGameResolution::FundsHeld(lamports) => error!(
@@ -197,6 +224,7 @@ pub fn spawn_settlement_worker(state: Arc<AppState>) {
         }
         let mut ticker = tokio::time::interval(SETTLEMENT_TICK);
         ticker.tick().await; // skip the immediate first tick
+        let mut settle_ready = SettleReady::new();
 
         loop {
             ticker.tick().await;
@@ -209,7 +237,7 @@ pub fn spawn_settlement_worker(state: Arc<AppState>) {
                     .unwrap_or(0),
                 Ordering::Relaxed,
             );
-            let scanned = match run_tick(&state).await {
+            let scanned = match run_tick(&state, &mut settle_ready).await {
                 Ok(n) => n,
                 Err(e) => {
                     warn!("[settlement] tick failed: {e}");
@@ -273,12 +301,13 @@ async fn reconcile_startup_sessions(state: &Arc<AppState>) -> Result<u64, String
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    deactivated += reconcile_missing_games(state, &program_id, missing, now).await;
+    deactivated +=
+        reconcile_missing_games(state, &program_id, missing, &mut SettleReady::new(), now).await;
 
     Ok(deactivated)
 }
 
-async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
+async fn run_tick(state: &Arc<AppState>, settle_ready: &mut SettleReady) -> Result<u64, String> {
     let game_ids = state
         .store
         .try_list_active_game_ids()
@@ -304,8 +333,8 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
         return Err("batched fetch returned wrong length".into());
     }
 
-    // Indices of games whose devnet copy says they're delegated to the ER.
-    let mut delegated: Vec<usize> = Vec::new();
+    // Games whose base copy says they are delegated, with that last committed copy.
+    let mut delegated: Vec<(usize, GameSnapshot)> = Vec::new();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -336,65 +365,27 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
                         );
                         state.store.deactivate(game_id).await;
                     }
-                    STATUS_CANCELLED if !snap.is_delegated => {
+                    STATUS_CANCELLED | STATUS_FINISHED
+                        if !snap.is_delegated
+                            && (snap.status == STATUS_CANCELLED
+                                || snap.result_tag != RESULT_NONE) =>
+                    {
+                        settle_ready.insert(game_id, snap.clone());
                         match state.store.get(game_id).await {
                             Some(entry) => {
-                                if let Err(e) =
-                                    finalize_on_chain(state, game_id, &entry.keypair(), &snap).await
+                                match finalize_on_chain(state, game_id, &entry.keypair(), &snap)
+                                    .await
                                 {
-                                    warn!("[settlement] game {}: {}", game_id, e);
+                                    Ok(()) => {
+                                        settle_ready.remove(&game_id);
+                                    }
+                                    Err(e) => warn!("[settlement] game {}: {}", game_id, e),
                                 }
                             }
                             None => warn!("[settlement] game {}: session disappeared", game_id),
                         }
                     }
-                    STATUS_FINISHED if snap.result_tag != RESULT_NONE && !snap.is_delegated => {
-                        match state.store.get(game_id).await {
-                            Some(entry) => {
-                                if let Err(e) =
-                                    finalize_on_chain(state, game_id, &entry.keypair(), &snap).await
-                                {
-                                    warn!("[settlement] game {}: {}", game_id, e);
-                                }
-                            }
-                            None => warn!("[settlement] game {}: session disappeared", game_id),
-                        }
-                    }
-                    _ if snap.is_delegated => {
-                        let stale_for = now.saturating_sub(snap.updated_at);
-                        if stale_for > STALE_DELEGATION_SECS {
-                            stale_delegated += 1;
-                            warn!(
-                                "[settlement] game {} has been delegated with no on-chain \
-                                 activity for over {}m — possible stuck ER delegation",
-                                game_id,
-                                STALE_DELEGATION_SECS / 60
-                            );
-                            // Request forced undelegation once after the staleness threshold. See
-                            // MAGICBLOCK.md for ER-unavailability recovery.
-                            if stale_for
-                                < STALE_DELEGATION_SECS + SETTLEMENT_TICK.as_secs() as i64 * 2
-                            {
-                                request_force_undelegate_for_stale_game(
-                                    state,
-                                    game_id,
-                                    &program_id,
-                                )
-                                .await;
-                            }
-                            // After the request window, recover without the ER and release escrow.
-                            // Read both players before wiping the account.
-                            force_undelegate_if_request_expired(
-                                state,
-                                game_id,
-                                &program_id,
-                                snap.white,
-                                snap.black,
-                            )
-                            .await;
-                        }
-                        delegated.push(i)
-                    }
+                    _ if snap.is_delegated => delegated.push((i, snap)),
                     STATUS_ACTIVE if !snap.is_delegated && snap.wager_amount > 0 => {
                         let stale_for = now.saturating_sub(snap.updated_at);
                         if stale_for > STALE_UNDELEGATED_SECS {
@@ -420,28 +411,58 @@ async fn run_tick(state: &Arc<AppState>) -> Result<u64, String> {
         }
     }
 
-    reconcile_missing_games(state, &program_id, missing, now).await;
+    reconcile_missing_games(state, &program_id, missing, settle_ready, now).await;
+    // Games retired by any other path no longer need a fallback snapshot.
+    settle_ready.retain(|game_id, _| game_ids.contains(game_id));
 
-    // The devnet copy is frozen while delegated; check the live ER copies and
-    // pull finished games back to devnet so finalize can run next tick.
+    // The base copy only changes on commits; the live ER copy decides what a
+    // delegated game needs.
     if !delegated.is_empty() {
-        let er_pdas: Vec<Pubkey> = delegated.iter().map(|&i| pdas[i]).collect();
+        let er_pdas: Vec<Pubkey> = delegated.iter().map(|(i, _)| pdas[*i]).collect();
         let er_fetched = fetch_accounts_batched(
             state.config.er_rpc_url.clone(),
             er_pdas,
             state.metrics.clone(),
         )
         .await;
-        for (j, f) in er_fetched.iter().enumerate() {
-            let game_id = game_ids[delegated[j]];
-            if let Fetched::Found(acc) = f {
-                if let Some(er_snap) = parse_game_account(&acc.data) {
-                    if er_snap.status == STATUS_FINISHED && er_snap.result_tag != RESULT_NONE {
-                        if let Err(e) = undelegate_from_er(state, game_id, &program_id).await {
-                            warn!("[settlement] game {}: {}", game_id, e);
-                        }
+        if er_fetched.len() != delegated.len() {
+            // A failed batch reads as no copies; acting on that would look like an ER outage.
+            warn!("[settlement] batched ER fetch returned the wrong account count; retrying next tick");
+            delegated.clear();
+        }
+        for ((i, base), er) in delegated.iter().zip(er_fetched) {
+            let game_id = game_ids[*i];
+            let er_snap = match &er {
+                Fetched::Found(acc) => parse_game_account(&acc.data),
+                Fetched::Missing | Fetched::Unknown => None,
+            };
+            match delegated_action(er_snap.as_ref(), now) {
+                DelegatedAction::Undelegate => {
+                    match undelegate_from_er(state, game_id, &program_id).await {
+                        Ok(()) => continue,
+                        Err(e) => warn!("[settlement] game {}: {}", game_id, e),
                     }
                 }
+                DelegatedAction::ClaimTimeout => {
+                    claim_timeout_on_er(state, game_id, &program_id).await;
+                    continue;
+                }
+                DelegatedAction::Wait => continue,
+                DelegatedAction::CheckErHealth => {}
+            }
+            // Here the ER has no live copy of the game, or cannot return a finished
+            // one. Only then, and only once the committed copy has gone quiet, is
+            // the wipe-and-refund escape hatch appropriate (MAGICBLOCK.md).
+            if now.saturating_sub(base.updated_at) > STALE_DELEGATION_SECS {
+                stale_delegated += 1;
+                warn!(
+                    "[settlement] game {} is delegated but the ER cannot serve or return it \
+                     and nothing was committed for over {}m — driving forced undelegation",
+                    game_id,
+                    STALE_DELEGATION_SECS / 60
+                );
+                drive_forced_undelegation(state, game_id, &program_id, base.white, base.black)
+                    .await;
             }
         }
     }
@@ -678,7 +699,84 @@ fn parse_undelegation_request_expiry(data: &[u8]) -> Option<u64> {
     Some(u64::from_le_bytes(data.get(o..o + 8)?.try_into().ok()?))
 }
 
-async fn force_undelegate_if_request_expired(
+/// What a delegated game needs, judged from its live ER copy.
+#[derive(Debug, PartialEq, Eq)]
+enum DelegatedAction {
+    /// The game has a terminal result: return it to base for settlement.
+    Undelegate,
+    /// The side to move has been idle past its whole clock: end it on time.
+    ClaimTimeout,
+    /// The ER is serving a game still in play.
+    Wait,
+    /// No usable ER copy: the ER may have stopped serving the game.
+    CheckErHealth,
+}
+
+fn delegated_action(er: Option<&GameSnapshot>, now: i64) -> DelegatedAction {
+    let Some(er) = er else {
+        return DelegatedAction::CheckErHealth;
+    };
+    // The ER has already run undelegate_game; the commit is in flight.
+    if !er.is_delegated {
+        return DelegatedAction::CheckErHealth;
+    }
+    match er.status {
+        STATUS_FINISHED if er.result_tag != RESULT_NONE => DelegatedAction::Undelegate,
+        // A zero-move timeout cancels; settlement refunds both stakes.
+        STATUS_CANCELLED => DelegatedAction::Undelegate,
+        STATUS_ACTIVE if now.saturating_sub(er.updated_at) > er.timeout_claimable_after_secs() => {
+            DelegatedAction::ClaimTimeout
+        }
+        STATUS_ACTIVE => DelegatedAction::Wait,
+        _ => DelegatedAction::CheckErHealth,
+    }
+}
+
+/// Ends an abandoned game through the program's own timeout rule. Nothing
+/// else does so while the ER is healthy: clients do not claim timeouts, and
+/// without this an abandoned game would sit delegated until it looked like an
+/// ER failure and was wiped and refunded 50/50.
+async fn claim_timeout_on_er(state: &Arc<AppState>, game_id: u64, program_id: &Pubkey) {
+    let Some(entry) = state.store.get(game_id).await else {
+        warn!(
+            "[settlement] game {}: session disappeared before timeout claim",
+            game_id
+        );
+        return;
+    };
+    let session_kp = entry.keypair();
+    let ix = solana::claim_timeout_ix(program_id, &session_kp.pubkey(), game_id);
+    let er_url = solana::rpc_url_for(&state.config, solana::RoutedInstr::ClaimTimeout);
+    let result = tokio::task::spawn_blocking(move || {
+        let rpc = solana::make_rpc(&er_url);
+        solana::sign_and_submit_er(&rpc, &session_kp, &[ix])
+    })
+    .await;
+    match result {
+        Ok(Ok(sig)) => {
+            info!(
+                "[settlement] game {} ended on time via claim_timeout, sig {}",
+                game_id, sig
+            );
+            worker_metrics::SETTLEMENT_TIMEOUT_CLAIMED_TOTAL
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        Ok(Err(e)) => {
+            warn!("[settlement] game {}: claim_timeout failed: {}", game_id, e);
+            worker_metrics::SETTLEMENT_TIMEOUT_CLAIM_FAILED_TOTAL
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        Err(e) => warn!(
+            "[settlement] game {}: claim_timeout join error: {}",
+            game_id, e
+        ),
+    }
+}
+
+/// Drives the ER-unavailability escape hatch one step per tick: request a
+/// forced undelegation when none exists, and complete it (wiping the Game
+/// account) once the request has expired. Both instructions are idempotent.
+async fn drive_forced_undelegation(
     state: &Arc<AppState>,
     game_id: u64,
     program_id: &Pubkey,
@@ -694,13 +792,18 @@ async fn force_undelegate_if_request_expired(
     );
 
     let rpc_url = state.config.solana_rpc_url.clone();
-    let (request_account, current_slot) = match tokio::task::spawn_blocking(move || {
+    let lookup = tokio::task::spawn_blocking(move || {
         let rpc = solana::make_rpc(&rpc_url);
-        (rpc.get_account(&request_pda).ok(), rpc.get_slot().ok())
+        let request = rpc
+            .get_account_with_commitment(&request_pda, rpc.commitment())
+            .map(|response| response.value);
+        (request, rpc.get_slot())
     })
-    .await
-    {
-        Ok(pair) => pair,
+    .await;
+    let (account, current_slot) = match lookup {
+        Ok((Ok(account), Ok(slot))) => (account, slot),
+        // RPC hiccup: an absent request cannot be told apart, so retry next tick.
+        Ok(_) => return,
         Err(e) => {
             warn!(
                 "[settlement] game {}: request-expiry check join error: {}",
@@ -709,8 +812,9 @@ async fn force_undelegate_if_request_expired(
             return;
         }
     };
-    let (Some(account), Some(current_slot)) = (request_account, current_slot) else {
-        return; // no request yet, or RPC hiccup — retried next tick
+    let Some(account) = account else {
+        request_force_undelegate_for_stale_game(state, game_id, program_id).await;
+        return;
     };
     let Some(expires_at_slot) = parse_undelegation_request_expiry(&account.data) else {
         warn!(
@@ -852,6 +956,10 @@ async fn auto_recover_stuck_delegation(
     }
 }
 
+/// Submits `finalize_game` and runs the off-chain bookkeeping once the Game PDA
+/// is settled. A confirmation timeout is not treated as a failure: when the PDA
+/// is gone afterwards the game was settled (by this transaction or by any other
+/// caller of the permissionless instruction) and the bookkeeping still runs.
 async fn finalize_on_chain(
     state: &Arc<AppState>,
     game_id: u64,
@@ -860,52 +968,76 @@ async fn finalize_on_chain(
 ) -> Result<(), String> {
     let program_id =
         Pubkey::from_str(&state.config.program_id).map_err(|e| format!("bad program_id: {e}"))?;
-    let winner_side = match snap.winner {
-        Some(w) if w == snap.white => Some("white"),
-        Some(_) => Some("black"),
-        None => None, // draw
-    };
     // Pass recorded game.fee_payer for rent reimbursement; session_kp still signs the transaction.
     let ix = solana::finalize_game_ix(
         &program_id,
         game_id,
         &snap.white,
         &snap.black,
-        winner_side,
+        None,
         &snap.fee_payer,
     );
 
     let rpc_url = solana::rpc_url_for(&state.config, solana::RoutedInstr::FinalizeGame);
     let kp_bytes = session_kp.to_bytes();
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let submit_started = std::time::Instant::now();
     state.metrics.record_transaction_submitted("solana");
-    let sig_result = tokio::task::spawn_blocking(move || {
+    let (signature, result, settled_anyway) = tokio::task::spawn_blocking(move || {
         let kp = solana_sdk::signature::Keypair::try_from(kp_bytes.as_slice())
             .map_err(|e| format!("bad keypair: {e}"))?;
         let rpc = solana::make_rpc(&rpc_url);
-        solana::sign_and_submit(&rpc, &kp, &[ix]).map_err(|e| format!("finalize: {e}"))
+        let (signature, result) = solana::sign_and_submit_tracked(&rpc, &kp, &[ix]);
+        let result = result.map_err(|e| format!("finalize: {e}"));
+        // Only a confirmed-missing account proves settlement; an RPC error does not.
+        let settled_anyway = result.is_err()
+            && matches!(rpc.get_account_with_commitment(&game_pda, rpc.commitment()),
+                Ok(response) if response.value.is_none());
+        let landed = match (&result, signature) {
+            (Ok(_), _) => true,
+            (Err(_), Some(sig)) if settled_anyway => {
+                solana::signature_landed(&rpc, &sig).unwrap_or(false)
+            }
+            _ => false,
+        };
+        Ok::<_, String>((
+            landed.then_some(signature).flatten(),
+            result,
+            settled_anyway,
+        ))
     })
     .await
-    .map_err(|e| format!("join error: {e}"))?;
-    let sig = match sig_result {
-        Ok(sig) => {
-            state.metrics.record_transaction_confirmed(
-                "solana",
-                submit_started.elapsed().as_millis() as f64,
-            );
-            sig
-        }
+    .map_err(|e| format!("join error: {e}"))??;
+
+    match result {
+        Ok(_) => state
+            .metrics
+            .record_transaction_confirmed("solana", submit_started.elapsed().as_millis() as f64),
         Err(e) => {
             let category = solana::classify_error_str(&e).to_string();
             state.metrics.record_transaction_failed("solana", &category);
-            return Err(e);
+            if !settled_anyway {
+                return Err(e);
+            }
+            warn!(
+                "[settlement] game {}: finalize reported an error ({}) but the Game PDA is closed; \
+                 recording the settlement (our signature landed: {})",
+                game_id,
+                e,
+                signature.is_some()
+            );
         }
-    };
+    }
 
     worker_metrics::SETTLEMENT_FINALIZED_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let sig = signature.map(|s| s.to_string());
     info!(
-        "[FINALIZED] game {} auto-settled on devnet — winner={:?}, payout sig {} — inspect: https://solscan.io/tx/{}?cluster=devnet",
-        game_id, winner_side, sig, sig
+        "[FINALIZED] game {} settled — status={} winner={:?}, payout sig {}",
+        game_id,
+        snap.status,
+        snap.winner,
+        sig.as_deref().unwrap_or("unknown")
     );
     if snap.country_fee > 0 {
         let treasury_vault =
@@ -915,8 +1047,26 @@ async fn finalize_on_chain(
             game_id, snap.country_fee, treasury_vault
         );
     }
+    record_settled_game(state, game_id, snap, sig.as_deref()).await;
+    Ok(())
+}
 
-    // Mirror the result into the SQLite game record.
+/// The off-chain effects of a settled game: the SQLite record, PGN, rating
+/// cache, anti-cheat analysis, the tournament result and session retirement.
+/// Every value comes from `snap`, the on-chain Game read before settlement,
+/// never from a client request. Callers run it once per settled game; each
+/// step tolerates a repeat (upsert, `INSERT OR IGNORE`, idempotent orchestrator).
+pub async fn record_settled_game(
+    state: &AppState,
+    game_id: u64,
+    snap: &GameSnapshot,
+    settlement_sig: Option<&str>,
+) {
+    let winner_side = match snap.winner {
+        Some(w) if w == snap.white => Some("white"),
+        Some(_) => Some("black"),
+        None => None, // draw or cancellation
+    };
     let repo = GameRepository::new(state.store.pool());
     let white = snap.white.to_string();
     let black = snap.black.to_string();
@@ -931,7 +1081,7 @@ async fn finalize_on_chain(
             black_username.as_deref(),
             winner_side,
             None,
-            &sig.to_string(),
+            settlement_sig.unwrap_or_default(),
             snap.wager_amount as f64 / 1e9,
         )
         .await
@@ -942,7 +1092,6 @@ async fn finalize_on_chain(
         );
     }
 
-    // Use the same tagged PGN assembly as the HTTP finalization route.
     crate::signing::game_pgn::assemble_and_store_pgn(
         &repo,
         &state.elo_cache,
@@ -957,8 +1106,7 @@ async fn finalize_on_chain(
     state.elo_cache.invalidate(&white);
     state.elo_cache.invalidate(&black);
 
-    // Same anti-cheat path as the HTTP finalize route — auto-settled games
-    // must not skip analysis (crash-and-settle is the cheater's exit).
+    // Crash-and-settle must not skip analysis.
     enqueue_game_analysis(
         state,
         FinalizedGame {
@@ -1000,7 +1148,6 @@ async fn finalize_on_chain(
     }
 
     state.store.deactivate(game_id).await;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -1225,6 +1372,64 @@ mod tests {
         // And comfortably shorter than the delegated-staleness window — no
         // ER-liveness excuse applies to a game that was never delegated.
         assert!(STALE_UNDELEGATED_SECS < STALE_DELEGATION_SECS);
+    }
+
+    fn er_copy(status: u8, result_tag: u8, updated_at: i64) -> GameSnapshot {
+        let white = Pubkey::new_unique();
+        let data = build_game_data(
+            white,
+            Pubkey::new_unique(),
+            status,
+            (result_tag == RESULT_WINNER).then_some(white),
+            result_tag,
+            None,
+            true,
+            None,
+            updated_at,
+        );
+        parse_game_account(&data).expect("fixture parses")
+    }
+
+    #[test]
+    fn healthy_er_games_are_never_sent_to_the_escape_hatch() {
+        // Fixture: 300s base, 2s increment, 10 plies -> a 310s clock for the mover.
+        let now = 1_000_000;
+        let live = er_copy(STATUS_ACTIVE, RESULT_NONE, now - 300);
+        assert_eq!(delegated_action(Some(&live), now), DelegatedAction::Wait);
+
+        let abandoned = er_copy(STATUS_ACTIVE, RESULT_NONE, now - 311);
+        assert_eq!(
+            delegated_action(Some(&abandoned), now),
+            DelegatedAction::ClaimTimeout,
+            "an abandoned game ends on time, not by a 50/50 wipe"
+        );
+    }
+
+    #[test]
+    fn terminal_er_games_are_returned_for_settlement() {
+        let now = 1_000_000;
+        let won = er_copy(STATUS_FINISHED, RESULT_WINNER, now);
+        assert_eq!(
+            delegated_action(Some(&won), now),
+            DelegatedAction::Undelegate
+        );
+        let cancelled = er_copy(STATUS_CANCELLED, RESULT_NONE, now);
+        assert_eq!(
+            delegated_action(Some(&cancelled), now),
+            DelegatedAction::Undelegate
+        );
+    }
+
+    #[test]
+    fn missing_or_returned_er_copies_need_a_health_check() {
+        let now = 1_000_000;
+        assert_eq!(delegated_action(None, now), DelegatedAction::CheckErHealth);
+        let mut in_flight = er_copy(STATUS_FINISHED, RESULT_WINNER, now);
+        in_flight.is_delegated = false;
+        assert_eq!(
+            delegated_action(Some(&in_flight), now),
+            DelegatedAction::CheckErHealth
+        );
     }
 
     #[test]

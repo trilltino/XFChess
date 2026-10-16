@@ -478,6 +478,15 @@ fn awaiting_prize_release_approval(prize_pool: u64, approved: bool, threshold: u
     prize_pool > threshold && !approved
 }
 
+/// What one distributor pass did for a tournament.
+enum Distribution {
+    Paid(solana_sdk::signature::Signature),
+    /// Winners claimed every funded place themselves.
+    NothingOwed,
+    /// This many funded places are flagged; the instruction cannot skip them.
+    Withheld(usize),
+}
+
 enum PrizeGate {
     Hold,
     Proceed { flagged: Vec<String> },
@@ -612,76 +621,51 @@ pub fn spawn_prize_distributor(
                     continue;
                 }
 
-                use solana_sdk::pubkey::Pubkey;
-                use std::str::FromStr;
-                let places = [
-                    &t.winner,
-                    &t.second_place,
-                    &t.third_place,
-                    &t.fourth_place,
-                    &t.fifth_place,
-                    &t.sixth_place,
-                    &t.seventh_place,
-                    &t.eighth_place,
-                    &t.ninth_place,
-                    &t.tenth_place,
-                ];
-                let flagged_places = places
-                    .iter()
-                    .filter_map(|p| p.as_deref())
-                    .filter(|s| flagged.iter().any(|f| f == s))
-                    .count() as u64;
-                if flagged_places > 0 {
-                    worker_metrics::PRIZE_DISTRIBUTION_FLAGGED_TOTAL
-                        .fetch_add(flagged_places, Ordering::Relaxed);
-                    warn!(
-                        "[prize-distributor] Tournament {}: withholding {} flagged prize place(s) — \
-                         resolve via governance dispute",
-                        t.tournament_id, flagged_places
-                    );
-                }
-                let winners: Vec<Pubkey> = places
-                    .iter()
-                    .filter_map(|p| p.as_deref())
-                    .filter(|s| !flagged.iter().any(|f| f == s))
-                    .filter_map(|s| Pubkey::from_str(s).ok())
-                    .collect();
-                if winners.is_empty() {
-                    // Every payable place is flagged — stop retrying; the
-                    // escrow stays claimable through governance resolution.
-                    warn!(
-                        "[prize-distributor] Tournament {}: all prize places flagged, leaving escrow for governance",
-                        t.tournament_id
-                    );
-                    continue;
-                }
-
                 let tournament_id = t.tournament_id;
                 let program_id_str = program_id_str.clone();
                 let rpc_url = rpc_url.clone();
                 let authority = authority.clone();
                 let result = tokio::task::spawn_blocking(move || {
+                    use crate::signing::solana::tournament_account::fetch_prize_ledger;
                     use crate::signing::solana::{
                         distribute_tournament_prizes_ix, make_rpc, sign_and_submit,
                     };
+                    use solana_sdk::pubkey::Pubkey;
                     use solana_sdk::signature::Signer;
+                    use std::str::FromStr;
 
                     let program_id = Pubkey::from_str(&program_id_str)
                         .map_err(|e| format!("bad program_id: {e}"))?;
                     let rpc = make_rpc(&rpc_url);
+                    // The program pays every funded, unclaimed place in one
+                    // instruction and rejects any other wallet list, so the list
+                    // comes from the chain: places, shares and claimed bits.
+                    let wallets =
+                        fetch_prize_ledger(&rpc, &program_id, tournament_id)?.unpaid_wallets();
+                    if wallets.is_empty() {
+                        return Ok(Distribution::NothingOwed);
+                    }
+                    let flagged_places = wallets
+                        .iter()
+                        .filter(|w| flagged.contains(&w.to_string()))
+                        .count();
+                    if flagged_places > 0 {
+                        return Ok(Distribution::Withheld(flagged_places));
+                    }
                     let ix = distribute_tournament_prizes_ix(
                         &program_id,
                         tournament_id,
                         &authority.pubkey(),
-                        &winners,
+                        &wallets,
                     );
                     sign_and_submit(&rpc, &authority, &[ix])
+                        .map(Distribution::Paid)
                         .map_err(|e| format!("distribute tx: {e}"))
                 })
                 .await;
 
                 match result {
-                    Ok(Ok(sig)) => {
+                    Ok(Ok(Distribution::Paid(sig))) => {
                         worker_metrics::PRIZE_DISTRIBUTED_TOTAL.fetch_add(1, Ordering::Relaxed);
                         info!(
                             "[prize-distributor] Tournament {} prizes distributed, sig {}",
@@ -690,6 +674,27 @@ pub fn spawn_prize_distributor(
                         store
                             .update(tournament_id, |t| t.prizes_distributed = true)
                             .await;
+                    }
+                    Ok(Ok(Distribution::NothingOwed)) => {
+                        info!(
+                            "[prize-distributor] Tournament {}: every funded place is already claimed",
+                            tournament_id
+                        );
+                        store
+                            .update(tournament_id, |t| t.prizes_distributed = true)
+                            .await;
+                    }
+                    Ok(Ok(Distribution::Withheld(places))) => {
+                        worker_metrics::PRIZE_DISTRIBUTION_FLAGGED_TOTAL
+                            .fetch_add(places as u64, Ordering::Relaxed);
+                        // Withholding is advisory: claim_tournament_prize is
+                        // permissionless, so it does not stop a flagged winner
+                        // who claims directly. See docs/development/backlog.md.
+                        warn!(
+                            "[prize-distributor] Tournament {}: {} funded place(s) flagged by \
+                             anti-cheat — distribution withheld for governance review",
+                            tournament_id, places
+                        );
                     }
                     Ok(Err(e)) => warn!(
                         "[prize-distributor] Tournament {} distribution failed (will retry): {}",

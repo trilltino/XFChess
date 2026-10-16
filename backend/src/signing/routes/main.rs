@@ -1330,24 +1330,15 @@ fn cancel_time_check_crank(
     }
 }
 
-struct GameFeeBreakdown {
-    fees_advanced: u64,
-    country_fee: u64,
-}
-
-fn read_game_fee_breakdown(
+fn read_game_snapshot(
     rpc: &solana_client::rpc_client::RpcClient,
     program_id: &Pubkey,
     game_id: u64,
-) -> Option<GameFeeBreakdown> {
+) -> Option<solana::game_account::GameAccount> {
     let game_pda =
         Pubkey::find_program_address(&[solana::GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let data = rpc.get_account_data(&game_pda).ok()?;
-    let game = solana::game_account::parse(&data)?;
-    Some(GameFeeBreakdown {
-        fees_advanced: game.fees_advanced,
-        country_fee: game.country_fee,
-    })
+    solana::game_account::parse(&data)
 }
 
 const ELO_FEE_LAMPORTS: u64 = 5_000;
@@ -1431,50 +1422,68 @@ pub async fn finalize_game(
             (StatusCode::NOT_FOUND, msg)
         })?;
 
-    let white = Pubkey::from_str(&req.white_pubkey).map_err(|e| {
-        let msg = format!("Bad white_pubkey '{}': {e}", req.white_pubkey);
-        (StatusCode::BAD_REQUEST, msg)
+    // Players, result and fees come from the Game account, read before
+    // finalize closes it. The request's players and winner are not trusted:
+    // they would otherwise be written into the game record and anti-cheat.
+    let game_id = req.game_id;
+    let program_id = state.program_id;
+    let rpc_url = solana::rpc_url_for(&state.config, solana::RoutedInstr::FinalizeGame);
+    let snap = {
+        let rpc_url = rpc_url.clone();
+        tokio::task::spawn_blocking(move || {
+            read_game_snapshot(&solana::make_rpc(&rpc_url), &program_id, game_id)
+        })
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("game read task: {e}"),
+            )
+        })?
+    }
+    .ok_or_else(|| {
+        let msg = format!("Could not read game {game_id} on-chain");
+        warn!("[VPS] {msg}");
+        (StatusCode::BAD_GATEWAY, msg)
     })?;
-    let black = Pubkey::from_str(&req.black_pubkey).map_err(|e| {
-        let msg = format!("Bad black_pubkey '{}': {e}", req.black_pubkey);
-        (StatusCode::BAD_REQUEST, msg)
-    })?;
-    let winner = req.winner.as_deref();
 
-    // Use session key as fee_payer for now (will be replaced with ER relayer pubkey in production)
-    let fee_payer = session_kp.pubkey();
-
+    // The program pays the closed Game's rent to the recorded fee payer.
     let ix = solana::finalize_game_ix(
-        &state.program_id,
-        req.game_id,
-        &white,
-        &black,
-        winner,
-        &fee_payer,
+        &program_id,
+        game_id,
+        &snap.white,
+        &snap.black,
+        None,
+        &snap.fee_payer,
     );
-    let rpc = solana::rpc_for(&state.config, solana::RoutedInstr::FinalizeGame);
-
-    // Read the actual fees that will be charged BEFORE finalize closes the
-    // Game account out from under us.
-    let fee_breakdown = read_game_fee_breakdown(&rpc, &state.program_id, req.game_id);
-
-    let sig = solana::sign_and_submit(&rpc, &session_kp, &[ix]).map_err(|e| {
-        let msg = format!("finalize_game failed for game {}: {e}", req.game_id);
+    let sig = tokio::task::spawn_blocking(move || {
+        solana::sign_and_submit(&solana::make_rpc(&rpc_url), &session_kp, &[ix])
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("finalize task: {e}"),
+        )
+    })?
+    .map_err(|e| {
+        let msg = format!("finalize_game failed for game {game_id}: {e}");
         error!("[VPS] {msg}");
         (StatusCode::BAD_GATEWAY, msg)
     })?;
     info!(
-        "[FINALIZED] game {} settled on devnet — winner={:?} wager_lamports={} payout sig {} — inspect: https://solscan.io/tx/{}?cluster=devnet",
-        req.game_id, req.winner, req.wager_lamports, sig, sig
+        "[FINALIZED] game {} settled — status={} winner={:?} wager_lamports={} payout sig {}",
+        game_id, snap.status, snap.winner, snap.wager_amount, sig
     );
+    let winner_wallet = snap.winner.map(|w| w.to_string());
     if let Ok(record) = state
         .money_actions
         .create_or_get(crate::signing::storage::money_action::NewMoneyAction {
             action_type: "finalize_game".to_string(),
             scope_type: "game".to_string(),
-            game_id: Some(req.game_id as i64),
+            game_id: Some(game_id as i64),
             tournament_id: None,
-            wallet: req.winner.clone(),
+            wallet: winner_wallet,
             signature: Some(sig.to_string()),
             status: "submitted".to_string(),
             reason: Some("backend submitted game finalization/payout".to_string()),
@@ -1491,103 +1500,35 @@ pub async fn finalize_game(
         });
     }
     let treasury_vault =
-        Pubkey::find_program_address(&[solana::TREASURY_VAULT_SEED], &state.program_id).0;
-    match &fee_breakdown {
-        Some(f) if f.country_fee > 0 => info!(
-            "[TREASURY] game {} paid {} lamports platform fee + {} lamports operating-cost reimbursement to treasury_vault {}",
-            req.game_id, f.country_fee, f.fees_advanced, treasury_vault
-        ),
-        Some(f) => info!(
-            "[TREASURY] game {} — free/unwagered game, no platform fee charged (backend ate {} lamports operating cost with no clawback)",
-            req.game_id, f.fees_advanced
-        ),
-        None => warn!(
-            "[TREASURY] game {} — could not read on-chain fee breakdown before finalize; treasury_vault {} payment amount unconfirmed",
-            req.game_id, treasury_vault
-        ),
-    }
+        Pubkey::find_program_address(&[solana::TREASURY_VAULT_SEED], &program_id).0;
+    info!(
+        "[TREASURY] game {} paid {} lamports platform fee + {} lamports operating-cost reimbursement to treasury_vault {}",
+        game_id, snap.country_fee, snap.fees_advanced, treasury_vault
+    );
 
-    // Fire-and-forget DB write (log errors but don't fail the HTTP response)
-    let game_id_str = req.game_id.to_string();
-    let game_id = req.game_id;
-    let wager_lamports = req.wager_lamports;
-    let pool = state.store.pool();
-    let elo_cache = state.elo_cache.clone();
-    let white = req.white_pubkey.clone();
-    let black = req.black_pubkey.clone();
-    let winner = req.winner.clone();
+    // The same bookkeeping as automatic settlement: game record, PGN, ratings
+    // cache, anti-cheat with tournament context, tournament result, session retirement.
     let sig_str = sig.to_string();
     let app_state = state.clone();
+    let recorded = snap.clone();
     tokio::spawn(async move {
-        let repo = GameRepository::new(pool.clone());
-        // Look up usernames from users_v2
-        let white_username = repo.get_username(&white).await.ok();
-        let black_username = repo.get_username(&black).await.ok();
-        // Finalize the game record
-        if let Err(e) = repo
-            .complete_game(
-                &game_id_str,
-                Some(&white),
-                Some(&black),
-                white_username.as_deref(),
-                black_username.as_deref(),
-                winner.as_deref(),
-                None, // final_fen (not provided in request)
-                &sig_str,
-                0.0, // stake_amount (not provided in request)
-            )
-            .await
-        {
-            error!("[DB] Failed to finalize game {}: {}", game_id_str, e);
-        }
-
-        // Share PGN assembly with automatic settlement so metadata is identical.
-        crate::signing::game_pgn::assemble_and_store_pgn(
-            &repo,
-            &elo_cache,
-            &game_id_str,
-            &white,
-            &black,
-            white_username.as_deref(),
-            black_username.as_deref(),
-            winner.as_deref(),
-        )
-        .await;
-
-        elo_cache.invalidate(&white);
-        elo_cache.invalidate(&black);
-
-        // Enqueue post-game anti-cheat analysis via the shared path (also used
-        // by the auto-settlement worker), which resolves tournament context.
-        crate::signing::anticheat_enqueue::enqueue_game_analysis(
+        crate::tasks::settlement_worker::record_settled_game(
             &app_state,
-            crate::signing::anticheat_enqueue::FinalizedGame {
-                game_id,
-                white: white.clone(),
-                black: black.clone(),
-                winner: winner.clone(),
-                wager_lamports,
-                tournament_id: None,
-                base_time_seconds: 0,
-                increment_seconds: 0,
-            },
+            game_id,
+            &recorded,
+            Some(&sig_str),
         )
         .await;
     });
 
-    // Prefer on-chain payout values to estimates.
-    let country_fee = fee_breakdown
-        .as_ref()
-        .map(|f| f.country_fee)
-        .unwrap_or_else(|| estimate_country_fee(req.wager_lamports));
-    let operating_cost_lamports = fee_breakdown.as_ref().map(|f| f.fees_advanced).unwrap_or(0);
+    let has_winner = snap.winner.is_some();
     let winner_lamports = compute_winner_lamports(
-        req.wager_lamports,
-        country_fee,
-        operating_cost_lamports,
-        req.winner.is_some(),
+        snap.wager_amount,
+        snap.country_fee,
+        snap.fees_advanced,
+        has_winner,
     );
-    let elo_fee = if req.wager_lamports > 0 {
+    let elo_fee = if snap.wager_amount > 0 {
         ELO_FEE_LAMPORTS
     } else {
         0
@@ -1596,8 +1537,8 @@ pub async fn finalize_game(
     Ok(Json(FinalizeResp {
         sig: sig.to_string(),
         winner_lamports,
-        country_fee,
-        operating_cost_lamports,
+        country_fee: snap.country_fee,
+        operating_cost_lamports: snap.fees_advanced,
         elo_fee,
     }))
 }
