@@ -18,7 +18,7 @@ Establish baselines before treating these targets as gates.
 `/health` reports process/build identity; `/readyz` checks database readiness;
 `/health/detailed` exposes dependency/resources. Private `/metrics` serves
 Prometheus. Grafana/Alertmanager remain on loopback; delivery needs a configured
-receiver. See [monitoring](../README.md#monitoring-and-backups).
+receiver. See [monitoring](../OPERATIONS.md#monitoring-and-backups).
 
 A release restarts a single service. Graceful shutdown and rollback help recovery
 but do not provide zero-downtime rolling deployment. Migrations are not reversed.
@@ -31,4 +31,4 @@ sessions or tournament records.
 
 Follow [recovery](ROLLBACK_GUIDE.md) with explicit encrypted objects and compatible
 vault secrets. A new VPS needs provisioning, TLS/env setup, a verified release
-and recovered data before switching traffic. See [runbooks](../../docs/runbooks/README.md).
+and recovered data before switching traffic. See [runbooks](../../docs/runbooks/INDEX.md).

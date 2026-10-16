@@ -23,7 +23,7 @@ clients. Configure local secrets from `.env.example`; never commit real keys.
 The just launch recipes use Windows PowerShell. On other platforms, use the
 component Cargo/npm commands and install the native libraries from CI.
 
-[Development](docs/development/README.md) maps components to guides and checks.
+[Development](docs/development/) holds component guides and checks.
 [Installation](docs/INSTALL.md) covers prebuilt releases.
 
 ## Changes and validation
@@ -53,7 +53,7 @@ evidence, such as screenshots/video, where the change affects user interaction.
 
 ## Artwork and documentation
 
-Use [design references](docs/design/README.md) and existing runtime asset folders.
+Use [design references](docs/design/) and existing runtime asset folders.
 Keep docs concise, link to one canonical guide and check paths/commands against
-the current tree. [The documentation index](docs/README.md) lists contributor,
+the current tree. [docs/](docs/) holds contributor,
 architecture and operator material.

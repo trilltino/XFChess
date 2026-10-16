@@ -16,7 +16,7 @@ implementing a proposed fix.
 | Authority hygiene | Confirm historical credential rotation and recovery access; retain the chosen dedicated-wallet model | [Secret rotation](../../ops/SECRETS_ROTATION.md) |
 | Android distribution | Signing, store setup and physical-device lifecycle verification | [Android runbook](../runbooks/android-release.md) |
 | Operator actions | Keep unsupported actions explicit; force-resign returns `not_implemented` | [Admin routes](../../backend/src/signing/routes/admin.rs) |
-| Website discovery | Verify canonical routes and submit the sitemap through owner accounts | [Website guide](../../xfchessdotcom/README.md) |
+| Website discovery | Verify canonical routes and submit the sitemap through owner accounts | [Website](../../xfchessdotcom/) |
 
 Capacity changes need measured bottlenecks; see [capacity](../../ops/docs/CAPACITY.md).
 Account-layout changes require an ABI/migration plan, even for fields that appear

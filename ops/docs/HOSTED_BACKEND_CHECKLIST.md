@@ -21,4 +21,4 @@
   backup timer is enabled and the age identity/vault secrets are recoverable offline.
 - Before a schema change, assess [rollback compatibility](ROLLBACK_GUIDE.md).
 
-See [ops/README.md](../README.md) for setup, commands and persistent paths.
+See [ops/OPERATIONS.md](../OPERATIONS.md) for setup, commands and persistent paths.

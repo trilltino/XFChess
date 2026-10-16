@@ -36,5 +36,5 @@ Implementation: [transport](../../src/multiplayer/network/braid_transport.rs),
 [game log](../../backend/src/signing/routes/game_log.rs),
 [resume](../../src/multiplayer/resume.rs),
 [board application](../../src/game/systems/network_move.rs).
-[Protocol models](../../specs/README.md) cover bounded invariants;
+[Protocol models](../../specs/) cover bounded invariants;
 [verification](../development/verification.md) covers live failure drills.
