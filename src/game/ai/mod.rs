@@ -1,5 +1,4 @@
-//! The computer opponent: the in-process `nimzovich` engine or an external Stockfish
-//! process (desktop only), run off the main thread with results applied as moves.
+//! Stockfish computer opponent and asynchronous UCI scheduling.
 
 pub mod resource;
 pub mod systems;

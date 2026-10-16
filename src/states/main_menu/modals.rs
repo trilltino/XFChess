@@ -149,35 +149,7 @@ pub(super) fn render_ai_setup_modal(
             );
             ui.add_space(6.0);
 
-            // Android ships no Stockfish engine; offer only engines available on this platform.
-            #[cfg(target_os = "android")]
-            let engine_options: Vec<(&str, crate::game::ai::resource::AIEngine)> = vec![(
-                "XFChessEngine",
-                crate::game::ai::resource::AIEngine::XFChessEngine,
-            )];
-            #[cfg(not(target_os = "android"))]
-            let engine_options: Vec<(&str, crate::game::ai::resource::AIEngine)> = vec![
-                ("Stockfish", crate::game::ai::resource::AIEngine::Stockfish),
-                (
-                    "XFChessEngine",
-                    crate::game::ai::resource::AIEngine::XFChessEngine,
-                ),
-            ];
-
-            ui.vertical_centered(|ui| {
-                ui.horizontal(|ui| {
-                    for (label, engine) in engine_options {
-                        let selected = competitive.ai_engine == engine;
-                        let response =
-                            StyledButton::chip(ui, label, selected, egui::Vec2::new(100.0, 28.0));
-                        if response.clicked() {
-                            competitive.ai_engine = engine;
-                        }
-                        ui.add_space(8.0);
-                    }
-                });
-            });
-
+            ui.label("Stockfish");
             ui.add_space(16.0);
 
             // Side selection (buttons are self-explanatory)
@@ -236,7 +208,6 @@ pub(super) fn render_ai_setup_modal(
                             AISide::White => crate::rendering::pieces::PieceColor::Black,
                         },
                     };
-                    ai_config.engine = competitive.ai_engine;
                     *core_mode = GameMode::SinglePlayer;
                     active_tc.control = competitive.ai_time_control;
                     active_tc.ai_game = true;
@@ -384,7 +355,7 @@ pub(super) fn render_pgn_input_modal(
                 );
 
                 if load_btn.clicked() {
-                    match nimzovich_engine::parse_pgn(&competitive.pgn_input_text) {
+                    match xfchess_rules::parse_pgn(&competitive.pgn_input_text) {
                         Ok(pgn) => {
                             info!("[PGN] Loaded game: {} moves", pgn.moves.len());
                             commands.insert_resource(

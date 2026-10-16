@@ -1,6 +1,8 @@
 use crate::constants::RECORD_RESULT_COST;
 use crate::errors::GameErrorCode;
-use crate::state::{Game, GameResult, GameStatus};
+#[cfg(feature = "move-validation")]
+use crate::state::GameResult;
+use crate::state::{Game, GameStatus};
 use anchor_lang::prelude::*;
 
 #[cfg(feature = "move-validation")]

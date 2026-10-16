@@ -58,7 +58,7 @@ foreach ($proc in (Get-CimInstance Win32_Process -ErrorAction SilentlyContinue))
     $name = [string]$proc.Name
     if ($cmd -match 'kill_stale_xfchess_dev\.ps1') { continue }
     if (($name -match 'signing-server|xfchess|xfchess-tauri|node|npm|npx|vite|powershell') -and
-        ($cmd -match 'XFChess|xfchessdotcom|wallet-ui|tournament-admin|tmp\\dev|tmp\\dev2|signing-server.exe|xfchess.exe|xfchess-tauri.exe|npx vite|vite --port|npm run dev|npm run build')) {
+        ($cmd -match 'XFChess|xfchessdotcom|wallet-ui|tournament-admin|XFChess-dev|tmp\\dev|tmp\\dev2|signing-server.exe|xfchess.exe|xfchess-tauri.exe|npx vite|vite --port|npm run dev|npm run build')) {
         Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
         Write-Host "  Killed repo-owned process PID $($proc.ProcessId) ($($proc.Name))"
     }
@@ -70,8 +70,8 @@ foreach ($n in 'signing-server','xfchess','xfchess-tauri','xfchess-viz') {
 
 foreach ($pattern in @(
     (Join-Path $env:TEMP 'xfchess-wallet-*.port'),
-    (Join-Path $root 'tmp/dev*.ps1'),
-    (Join-Path $root 'tmp/dev2*.ps1')
+    (Join-Path $env:TEMP 'XFChess-dev/dev*.ps1'),
+    (Join-Path $env:TEMP 'XFChess-dev/dev2*.ps1')
 )) {
     if (Test-Path $pattern) {
         Remove-Item $pattern -Force -ErrorAction SilentlyContinue

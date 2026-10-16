@@ -6,7 +6,6 @@ use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-
 #[derive(Resource, Default)]
 pub struct ReplayAnnotations {
     pub arrows: Vec<(u8, u8, u8, u8, u8)>,
@@ -29,7 +28,6 @@ pub struct ScreenshotRequested;
 
 #[derive(Component)]
 pub struct ReplayAnnotation3D;
-
 
 fn sq_center_3d(file: u8, rank: u8) -> Vec3 {
     Vec3::new(file as f32, 0.20, rank as f32)
@@ -91,7 +89,6 @@ fn piece_sym(piece_type: PieceType, color: PieceColor) -> &'static str {
     }
 }
 
-
 pub fn replay_2d_annotation_system(
     mut contexts: EguiContexts,
     mut annotations: ResMut<ReplayAnnotations>,
@@ -120,218 +117,227 @@ pub fn replay_2d_annotation_system(
             fill: egui::Color32::from_rgb(20, 20, 20),
             ..Default::default()
         })
-        .show(&mut crate::ui::egui_ext::viewport_ui(ctx, "replay_shorts_root"), |ui| {
-            // Board is 8×8 squares. Leave 260px on the right for the move list panel.
-            let avail = ui.available_size();
-            let right_panel_w = 260.0;
-            let usable_w = (avail.x - right_panel_w).max(100.0);
-            let board_size = usable_w.min(avail.y).floor();
-            let sq = board_size / 8.0;
+        .show(
+            &mut crate::ui::egui_ext::viewport_ui(ctx, "replay_shorts_root"),
+            |ui| {
+                // Board is 8×8 squares. Leave 260px on the right for the move list panel.
+                let avail = ui.available_size();
+                let right_panel_w = 260.0;
+                let usable_w = (avail.x - right_panel_w).max(100.0);
+                let board_size = usable_w.min(avail.y).floor();
+                let sq = board_size / 8.0;
 
-            let x_off = ((usable_w - board_size) / 2.0).max(0.0);
-            let y_off = ((avail.y - board_size) / 2.0).max(0.0);
+                let x_off = ((usable_w - board_size) / 2.0).max(0.0);
+                let y_off = ((avail.y - board_size) / 2.0).max(0.0);
 
-            ui.add_space(y_off);
-            ui.horizontal(|ui| {
-                ui.add_space(x_off);
+                ui.add_space(y_off);
+                ui.horizontal(|ui| {
+                    ui.add_space(x_off);
 
-                let (board_rect, board_resp) = ui.allocate_exact_size(
-                    egui::Vec2::splat(board_size),
-                    egui::Sense::click_and_drag(),
-                );
+                    let (board_rect, board_resp) = ui.allocate_exact_size(
+                        egui::Vec2::splat(board_size),
+                        egui::Sense::click_and_drag(),
+                    );
 
-                let kind: u8 = if keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
-                    1
-                } else if keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
-                    2
-                } else {
-                    0
-                };
+                    let kind: u8 =
+                        if keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+                            1
+                        } else if keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
+                            2
+                        } else {
+                            0
+                        };
 
-                // Right-click drag → draw arrow; click on same square → highlight toggle
-                if board_resp.drag_started_by(egui::PointerButton::Secondary) {
-                    if let Some(pos) = board_resp.interact_pointer_pos() {
-                        annotations.drag_from = s2b(pos, board_rect.min, sq);
-                    }
-                }
-                if board_resp.drag_stopped_by(egui::PointerButton::Secondary) {
-                    if let Some(from) = annotations.drag_from.take() {
+                    // Right-click drag → draw arrow; click on same square → highlight toggle
+                    if board_resp.drag_started_by(egui::PointerButton::Secondary) {
                         if let Some(pos) = board_resp.interact_pointer_pos() {
-                            if let Some(to) = s2b(pos, board_rect.min, sq) {
-                                if to != from {
-                                    annotations.arrows.push((from.0, from.1, to.0, to.1, kind));
-                                } else {
-                                    let idx = annotations
-                                        .highlights
-                                        .iter()
-                                        .position(|&(f, r, _)| f == from.0 && r == from.1);
-                                    if let Some(i) = idx {
-                                        annotations.highlights.remove(i);
+                            annotations.drag_from = s2b(pos, board_rect.min, sq);
+                        }
+                    }
+                    if board_resp.drag_stopped_by(egui::PointerButton::Secondary) {
+                        if let Some(from) = annotations.drag_from.take() {
+                            if let Some(pos) = board_resp.interact_pointer_pos() {
+                                if let Some(to) = s2b(pos, board_rect.min, sq) {
+                                    if to != from {
+                                        annotations.arrows.push((from.0, from.1, to.0, to.1, kind));
                                     } else {
-                                        annotations.highlights.push((from.0, from.1, kind));
+                                        let idx = annotations
+                                            .highlights
+                                            .iter()
+                                            .position(|&(f, r, _)| f == from.0 && r == from.1);
+                                        if let Some(i) = idx {
+                                            annotations.highlights.remove(i);
+                                        } else {
+                                            annotations.highlights.push((from.0, from.1, kind));
+                                        }
                                     }
+                                    annotations.dirty = true;
                                 }
-                                annotations.dirty = true;
                             }
                         }
                     }
-                }
-                // Right-click with no drag → clear all
-                if board_resp.secondary_clicked() && annotations.drag_from.is_none() {
-                    annotations.arrows.clear();
-                    annotations.highlights.clear();
-                    annotations.dirty = true;
-                }
-
-                let painter = ui.painter_at(board_rect);
-
-                // ── Board squares ──
-                for rank in 0..8u8 {
-                    for file in 0..8u8 {
-                        let off = b2s(file, rank, sq);
-                        let rect =
-                            egui::Rect::from_min_size(board_rect.min + off, egui::Vec2::splat(sq));
-                        let light = (file + rank) % 2 == 1;
-                        painter.rect_filled(
-                            rect,
-                            0.0,
-                            if light {
-                                egui::Color32::from_rgb(240, 217, 181)
-                            } else {
-                                egui::Color32::from_rgb(181, 136, 99)
-                            },
-                        );
+                    // Right-click with no drag → clear all
+                    if board_resp.secondary_clicked() && annotations.drag_from.is_none() {
+                        annotations.arrows.clear();
+                        annotations.highlights.clear();
+                        annotations.dirty = true;
                     }
-                }
 
-                // ── Last-move highlight ──
-                if pgn.is_some()
-                    && replay.current_ply > 0 {
+                    let painter = ui.painter_at(board_rect);
+
+                    // ── Board squares ──
+                    for rank in 0..8u8 {
+                        for file in 0..8u8 {
+                            let off = b2s(file, rank, sq);
+                            let rect = egui::Rect::from_min_size(
+                                board_rect.min + off,
+                                egui::Vec2::splat(sq),
+                            );
+                            let light = (file + rank) % 2 == 1;
+                            painter.rect_filled(
+                                rect,
+                                0.0,
+                                if light {
+                                    egui::Color32::from_rgb(240, 217, 181)
+                                } else {
+                                    egui::Color32::from_rgb(181, 136, 99)
+                                },
+                            );
+                        }
+                    }
+
+                    // ── Last-move highlight ──
+                    if pgn.is_some() && replay.current_ply > 0 {
                         // Highlight is shown via the engine state — we just tint lightly
                         // (actual from/to squares would require parsing the last SAN)
                     }
 
-                // ── Square highlights ──
-                for &(hf, hr, hk) in &annotations.highlights {
-                    let off = b2s(hf, hr, sq);
-                    let rect =
-                        egui::Rect::from_min_size(board_rect.min + off, egui::Vec2::splat(sq));
-                    painter.rect_filled(rect, 0.0, kind_highlight_egui(hk));
-                }
-
-                // ── Coordinate labels ──
-                for i in 0..8u8 {
-                    let file_char = (b'a' + i) as char;
-                    let rank_char = (b'1' + i) as char;
-                    let label_col = egui::Color32::from_rgba_unmultiplied(60, 40, 20, 160);
-                    let fs = egui::FontId::proportional((sq * 0.18).max(9.0));
-                    // File label along bottom edge
-                    let fx = board_rect.min.x + b2s(i, 0, sq).x + sq * 0.5;
-                    painter.text(
-                        egui::Pos2::new(fx, board_rect.max.y - 9.0),
-                        egui::Align2::CENTER_BOTTOM,
-                        file_char.to_string(),
-                        fs.clone(),
-                        label_col,
-                    );
-                    // Rank label along left edge
-                    let ry = board_rect.min.y + b2s(0, i, sq).y + sq * 0.5;
-                    painter.text(
-                        egui::Pos2::new(board_rect.min.x + 2.0, ry),
-                        egui::Align2::LEFT_CENTER,
-                        rank_char.to_string(),
-                        fs.clone(),
-                        label_col,
-                    );
-                }
-
-                for piece in pieces.iter() {
-                    let off = b2s(piece.x, piece.y, sq);
-                    let center = board_rect.min + off + egui::Vec2::splat(sq * 0.5);
-                    let sym = piece_sym(piece.piece_type, piece.color);
-                    let font_size = (sq * 0.70).max(12.0);
-                    // Drop shadow
-                    let shadow = if piece.color == PieceColor::White {
-                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 70)
-                    } else {
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40)
-                    };
-                    painter.text(
-                        center + egui::Vec2::new(1.5, 2.0),
-                        egui::Align2::CENTER_CENTER,
-                        sym,
-                        egui::FontId::proportional(font_size),
-                        shadow,
-                    );
-                    let col = if piece.color == PieceColor::White {
-                        egui::Color32::WHITE
-                    } else {
-                        egui::Color32::from_rgb(18, 18, 18)
-                    };
-                    painter.text(
-                        center,
-                        egui::Align2::CENTER_CENTER,
-                        sym,
-                        egui::FontId::proportional(font_size),
-                        col,
-                    );
-                }
-
-                // ── Stored arrows ──
-                for &(ff, fr, tf, tr, ak) in &annotations.arrows {
-                    let fc = board_rect.min + b2s(ff, fr, sq) + egui::Vec2::splat(sq * 0.5);
-                    let tc = board_rect.min + b2s(tf, tr, sq) + egui::Vec2::splat(sq * 0.5);
-                    painter.arrow(
-                        fc,
-                        tc - fc,
-                        egui::Stroke::new(sq * 0.12, kind_color_egui(ak)),
-                    );
-                }
-
-                // ── In-progress drag arrow ──
-                if let Some(from) = annotations.drag_from {
-                    if let Some(cursor) = board_resp.interact_pointer_pos() {
-                        let fc =
-                            board_rect.min + b2s(from.0, from.1, sq) + egui::Vec2::splat(sq * 0.5);
-                        let c = kind_color_egui(kind);
-                        let preview_col =
-                            egui::Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 120);
-                        painter.arrow(fc, cursor - fc, egui::Stroke::new(sq * 0.10, preview_col));
+                    // ── Square highlights ──
+                    for &(hf, hr, hk) in &annotations.highlights {
+                        let off = b2s(hf, hr, sq);
+                        let rect =
+                            egui::Rect::from_min_size(board_rect.min + off, egui::Vec2::splat(sq));
+                        painter.rect_filled(rect, 0.0, kind_highlight_egui(hk));
                     }
-                }
 
-                // ── Puzzle "Can you find it?" overlay ──
-                if puzzle.enabled && !puzzle.revealed {
-                    let overlay_rect = egui::Rect::from_min_size(
-                        board_rect.center() - egui::Vec2::new(120.0, 30.0),
-                        egui::Vec2::new(240.0, 60.0),
-                    );
-                    painter.rect_filled(
-                        overlay_rect,
-                        8.0,
-                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
-                    );
+                    // ── Coordinate labels ──
+                    for i in 0..8u8 {
+                        let file_char = (b'a' + i) as char;
+                        let rank_char = (b'1' + i) as char;
+                        let label_col = egui::Color32::from_rgba_unmultiplied(60, 40, 20, 160);
+                        let fs = egui::FontId::proportional((sq * 0.18).max(9.0));
+                        // File label along bottom edge
+                        let fx = board_rect.min.x + b2s(i, 0, sq).x + sq * 0.5;
+                        painter.text(
+                            egui::Pos2::new(fx, board_rect.max.y - 9.0),
+                            egui::Align2::CENTER_BOTTOM,
+                            file_char.to_string(),
+                            fs.clone(),
+                            label_col,
+                        );
+                        // Rank label along left edge
+                        let ry = board_rect.min.y + b2s(0, i, sq).y + sq * 0.5;
+                        painter.text(
+                            egui::Pos2::new(board_rect.min.x + 2.0, ry),
+                            egui::Align2::LEFT_CENTER,
+                            rank_char.to_string(),
+                            fs.clone(),
+                            label_col,
+                        );
+                    }
+
+                    for piece in pieces.iter() {
+                        let off = b2s(piece.x, piece.y, sq);
+                        let center = board_rect.min + off + egui::Vec2::splat(sq * 0.5);
+                        let sym = piece_sym(piece.piece_type, piece.color);
+                        let font_size = (sq * 0.70).max(12.0);
+                        // Drop shadow
+                        let shadow = if piece.color == PieceColor::White {
+                            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 70)
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40)
+                        };
+                        painter.text(
+                            center + egui::Vec2::new(1.5, 2.0),
+                            egui::Align2::CENTER_CENTER,
+                            sym,
+                            egui::FontId::proportional(font_size),
+                            shadow,
+                        );
+                        let col = if piece.color == PieceColor::White {
+                            egui::Color32::WHITE
+                        } else {
+                            egui::Color32::from_rgb(18, 18, 18)
+                        };
+                        painter.text(
+                            center,
+                            egui::Align2::CENTER_CENTER,
+                            sym,
+                            egui::FontId::proportional(font_size),
+                            col,
+                        );
+                    }
+
+                    // ── Stored arrows ──
+                    for &(ff, fr, tf, tr, ak) in &annotations.arrows {
+                        let fc = board_rect.min + b2s(ff, fr, sq) + egui::Vec2::splat(sq * 0.5);
+                        let tc = board_rect.min + b2s(tf, tr, sq) + egui::Vec2::splat(sq * 0.5);
+                        painter.arrow(
+                            fc,
+                            tc - fc,
+                            egui::Stroke::new(sq * 0.12, kind_color_egui(ak)),
+                        );
+                    }
+
+                    // ── In-progress drag arrow ──
+                    if let Some(from) = annotations.drag_from {
+                        if let Some(cursor) = board_resp.interact_pointer_pos() {
+                            let fc = board_rect.min
+                                + b2s(from.0, from.1, sq)
+                                + egui::Vec2::splat(sq * 0.5);
+                            let c = kind_color_egui(kind);
+                            let preview_col =
+                                egui::Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 120);
+                            painter.arrow(
+                                fc,
+                                cursor - fc,
+                                egui::Stroke::new(sq * 0.10, preview_col),
+                            );
+                        }
+                    }
+
+                    // ── Puzzle "Can you find it?" overlay ──
+                    if puzzle.enabled && !puzzle.revealed {
+                        let overlay_rect = egui::Rect::from_min_size(
+                            board_rect.center() - egui::Vec2::new(120.0, 30.0),
+                            egui::Vec2::new(240.0, 60.0),
+                        );
+                        painter.rect_filled(
+                            overlay_rect,
+                            8.0,
+                            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+                        );
+                        painter.text(
+                            overlay_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "🤔 Can you find the move?",
+                            egui::FontId::proportional(18.0),
+                            egui::Color32::from_rgb(255, 220, 60),
+                        );
+                    }
+
+                    // ── Annotation legend hint ──
                     painter.text(
-                        overlay_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "🤔 Can you find the move?",
-                        egui::FontId::proportional(18.0),
-                        egui::Color32::from_rgb(255, 220, 60),
+                        egui::Pos2::new(board_rect.max.x - 4.0, board_rect.max.y - 4.0),
+                        egui::Align2::RIGHT_BOTTOM,
+                        "Right-click drag = arrow • Shift/Alt = color • Right-click = clear",
+                        egui::FontId::proportional(9.0),
+                        egui::Color32::from_rgba_unmultiplied(200, 200, 200, 80),
                     );
-                }
-
-                // ── Annotation legend hint ──
-                painter.text(
-                    egui::Pos2::new(board_rect.max.x - 4.0, board_rect.max.y - 4.0),
-                    egui::Align2::RIGHT_BOTTOM,
-                    "Right-click drag = arrow • Shift/Alt = color • Right-click = clear",
-                    egui::FontId::proportional(9.0),
-                    egui::Color32::from_rgba_unmultiplied(200, 200, 200, 80),
-                );
-            });
-        });
+                });
+            },
+        );
 }
-
 
 pub fn replay_3d_annotations_system(
     mut commands: Commands,
@@ -449,7 +455,6 @@ pub fn replay_3d_annotations_system(
     }
 }
 
-
 pub fn replay_screenshot_system(
     mut events: MessageReader<ScreenshotRequested>,
     mut commands: Commands,
@@ -481,7 +486,6 @@ pub fn replay_screenshot_system(
     info!("[SHORTS] Screenshot saved to {}", path.display());
 }
 
-
 pub fn clear_annotations_on_ply_change(
     replay: Res<PgnReplayState>,
     mut annotations: ResMut<ReplayAnnotations>,
@@ -493,7 +497,6 @@ pub fn clear_annotations_on_ply_change(
     }
 }
 
-
 #[derive(Resource, Default)]
 pub struct CinematicEffect {
     pub flash_color: [f32; 3], // RGB 0..1
@@ -503,7 +506,7 @@ pub struct CinematicEffect {
 
 #[derive(Resource, Default)]
 pub struct QualityBadgeState {
-    pub quality: nimzovich_engine::MoveQuality,
+    pub quality: xfchess_rules::MoveQuality,
     pub timer: f32,
     pub alpha: f32,
 }
@@ -514,7 +517,6 @@ pub struct BlunderFlash;
 pub struct BrilliantGlow;
 #[derive(Message, Default)]
 pub struct CheckmateFlash;
-
 
 pub fn load_pgn_annotations_system(
     mut replay: ResMut<PgnReplayState>,
@@ -550,7 +552,7 @@ pub fn load_pgn_annotations_system(
     }
 
     // Quality badge
-    use nimzovich_engine::MoveQuality;
+    use xfchess_rules::MoveQuality;
     if quality != MoveQuality::Normal {
         badge.quality = quality;
         badge.timer = 1.8;
@@ -578,20 +580,12 @@ pub fn load_pgn_annotations_system(
     replay.cinematic_timer = timer;
 
     // Checkmate flash (detected via game state)
-    use nimzovich_engine::{get_game_state, COLOR_BLACK, COLOR_WHITE, STATE_CHECKMATE};
-    let color = if replay.engine.move_counter % 2 == 0 {
-        COLOR_WHITE
-    } else {
-        COLOR_BLACK
-    };
-    let state = get_game_state(&mut replay.engine, color);
-    if state == STATE_CHECKMATE {
+    if replay.engine.is_checkmate() {
         checkmate_ev.write(CheckmateFlash);
         replay.slow_factor = 0.08;
         replay.cinematic_timer = 4.0;
     }
 }
-
 
 pub fn cinematic_tick_system(
     time: Res<Time>,
@@ -653,7 +647,6 @@ pub fn cinematic_tick_system(
     }
 }
 
-
 pub fn cinematic_effect_system(
     mut contexts: EguiContexts,
     effect: Res<CinematicEffect>,
@@ -693,7 +686,6 @@ pub fn cinematic_effect_system(
         });
 }
 
-
 pub fn quality_badge_system(
     mut contexts: EguiContexts,
     badge: Res<QualityBadgeState>,
@@ -706,7 +698,7 @@ pub fn quality_badge_system(
         return;
     }
 
-    use nimzovich_engine::MoveQuality;
+    use xfchess_rules::MoveQuality;
     let (symbol, color_rgb) = match badge.quality {
         MoveQuality::Brilliant => ("!!", [255u8, 200, 30]),
         MoveQuality::Good => ("!", [100, 220, 100]),
@@ -750,7 +742,6 @@ pub fn quality_badge_system(
             );
         });
 }
-
 
 pub fn hook_text_system(
     mut contexts: EguiContexts,
@@ -851,7 +842,6 @@ pub fn hook_text_system(
             }
         });
 }
-
 
 pub fn capture_sequence_system(
     time: Res<Time>,

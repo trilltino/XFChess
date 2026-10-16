@@ -2,7 +2,6 @@ use super::*;
 use crate::game::components::{GamePhase, MoveRecord};
 use crate::rendering::pieces::PieceColor;
 
-
 #[test]
 fn test_current_turn_default() {
     let turn = CurrentTurn::default();
@@ -63,7 +62,6 @@ fn test_multiple_turn_switches() {
     assert_eq!(turn.move_number, 3);
 }
 
-
 #[test]
 fn test_game_phase_default() {
     let phase = CurrentGamePhase::default();
@@ -94,7 +92,6 @@ fn test_game_phase_transitions() {
     assert_eq!(phase.0, GamePhase::Playing);
 }
 
-
 #[test]
 fn test_move_history_default() {
     let history = MoveHistory::default();
@@ -108,6 +105,7 @@ fn test_move_history_add_move() {
     let mut history = MoveHistory::default();
 
     let move1 = MoveRecord {
+        promotion: None,
         from: (1, 4),
         to: (3, 4),
         piece_type: crate::rendering::pieces::PieceType::Pawn,
@@ -133,6 +131,7 @@ fn test_move_history_multiple_moves() {
     let mut history = MoveHistory::default();
 
     let move1 = MoveRecord {
+        promotion: None,
         from: (1, 4),
         to: (3, 4),
         piece_type: crate::rendering::pieces::PieceType::Pawn,
@@ -145,6 +144,7 @@ fn test_move_history_multiple_moves() {
     };
 
     let move2 = MoveRecord {
+        promotion: None,
         from: (6, 4),
         to: (4, 4),
         piece_type: crate::rendering::pieces::PieceType::Pawn,
@@ -157,6 +157,7 @@ fn test_move_history_multiple_moves() {
     };
 
     let move3 = MoveRecord {
+        promotion: None,
         from: (0, 1),
         to: (2, 2),
         piece_type: crate::rendering::pieces::PieceType::Knight,
@@ -184,6 +185,7 @@ fn test_move_history_with_capture() {
     let mut history = MoveHistory::default();
 
     let move_with_capture = MoveRecord {
+        promotion: None,
         from: (3, 4),
         to: (4, 5),
         piece_type: crate::rendering::pieces::PieceType::Pawn,
@@ -204,7 +206,6 @@ fn test_move_history_with_capture() {
         "Captured piece should be recorded"
     );
 }
-
 
 #[test]
 fn test_game_timer_default() {

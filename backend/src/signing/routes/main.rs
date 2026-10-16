@@ -625,25 +625,25 @@ pub async fn record_move(
         .flatten()
         .unwrap_or_else(|| "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
 
-    let mut game = nimzovich_engine::on_chain::CompactBoard::from_fen(&prev_fen).to_on_chain_game();
+    let mut game = xfchess_rules::Game::from_fen(&prev_fen)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     let mv_bytes = uci_to_fixed5(&req.move_uci).map_err(|_| {
         let msg = format!("Bad move_uci '{}' for game {}", req.move_uci, req.game_id);
         (StatusCode::BAD_REQUEST, msg)
     })?;
 
-    let _outcome = nimzovich_engine::on_chain_moves::validate_and_apply(&mut game, &mv_bytes)
-        .map_err(|e| {
-            let msg = format!(
-                "Move {} rejected by engine for game {}: {e:?}",
-                req.move_uci, req.game_id
-            );
-            (StatusCode::BAD_REQUEST, msg)
-        })?;
+    let _outcome = game.play_uci(&req.move_uci).map_err(|e| {
+        let msg = format!(
+            "Move {} rejected by engine for game {}: {e:?}",
+            req.move_uci, req.game_id
+        );
+        (StatusCode::BAD_REQUEST, msg)
+    })?;
 
     // Derive next FEN from the engine (discard client-provided next_fen)
-    let next_board = game.to_compact_board().to_bytes();
-    let derived_next_fen = game.to_compact_board().to_fen();
+    let next_board = game.compact_board().to_bytes();
+    let derived_next_fen = game.compact_board().to_fen();
 
     let program_id = Pubkey::from_str(&state.config.program_id).map_err(|e| {
         let msg = format!("Bad configured program_id: {e}");
@@ -1695,8 +1695,6 @@ async fn generate_san(
     move_uci: &str,
     move_number: i32,
 ) -> anyhow::Result<String> {
-    use nimzovich_engine::{do_move, game_from_fen_no_tt, move_to_san};
-
     // Get previous FEN: last move's fen_after, or start position
     let prev_fen = if move_number <= 1 {
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()
@@ -1711,46 +1709,8 @@ async fn generate_san(
             })
     };
 
-    // Replay and SAN need no search table; avoid allocating multi-GB memory per request.
-    let mut game = game_from_fen_no_tt(&prev_fen);
-
-    // Parse UCI: e.g., "e2e4" -> src=12, dst=28, promo=0
-    let bytes = move_uci.as_bytes();
-    if bytes.len() < 4 {
-        return Err(anyhow::anyhow!("Invalid UCI move: {}", move_uci));
-    }
-    let src_file = (bytes[0].wrapping_sub(b'a')) as i8;
-    let src_rank = (bytes[1].wrapping_sub(b'1')) as i8;
-    let dst_file = (bytes[2].wrapping_sub(b'a')) as i8;
-    let dst_rank = (bytes[3].wrapping_sub(b'1')) as i8;
-
-    if !(0..=7).contains(&src_file)
-        || !(0..=7).contains(&src_rank)
-        || !(0..=7).contains(&dst_file)
-        || !(0..=7).contains(&dst_rank)
-    {
-        return Err(anyhow::anyhow!("Invalid UCI move: {}", move_uci));
-    }
-
-    let src = src_rank * 8 + src_file;
-    let dst = dst_rank * 8 + dst_file;
-    let promo = if bytes.len() > 4 {
-        match bytes[4] {
-            b'q' | b'Q' => 5,
-            b'r' | b'R' => 4,
-            b'b' | b'B' => 3,
-            b'n' | b'N' => 2,
-            _ => 0,
-        }
-    } else {
-        0
-    };
-
-    do_move(&mut game, src, dst, true);
-
-    // Generate SAN
-    let san = move_to_san(&mut game, src, dst, promo);
-    Ok(san)
+    let game = xfchess_rules::Game::from_fen(&prev_fen).map_err(anyhow::Error::msg)?;
+    game.san(move_uci).map_err(anyhow::Error::msg)
 }
 
 pub async fn get_move_nonce(

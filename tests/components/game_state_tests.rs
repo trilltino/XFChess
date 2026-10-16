@@ -23,6 +23,7 @@ fn example_display_game_status() {
 #[test]
 fn example_recording_a_move() {
     let move_record = MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (4, 1), // e2
@@ -57,6 +58,7 @@ fn example_allow_moves_system() {
 fn example_scholars_mate_checkmate() {
     // Scholar's Mate final move: Qf7#
     let checkmate_move = MoveRecord {
+        promotion: None,
         piece_type: PieceType::Queen,
         piece_color: PieceColor::White,
         from: (3, 7),                    // d8 (assuming queen started there)

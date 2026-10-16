@@ -28,6 +28,8 @@ pub struct MoveRecord {
 
     pub captured: Option<PieceType>,
 
+    pub promotion: Option<PieceType>,
+
     pub is_castling: bool,
 
     pub is_en_passant: bool,
@@ -35,6 +37,26 @@ pub struct MoveRecord {
     pub is_check: bool,
 
     pub is_checkmate: bool,
+}
+
+impl MoveRecord {
+    pub fn uci(&self) -> String {
+        let suffix = match self.promotion {
+            Some(PieceType::Queen) => "q",
+            Some(PieceType::Rook) => "r",
+            Some(PieceType::Bishop) => "b",
+            Some(PieceType::Knight) => "n",
+            _ => "",
+        };
+        format!(
+            "{}{}{}{}{}",
+            (b'a' + self.from.0) as char,
+            (b'1' + self.from.1) as char,
+            (b'a' + self.to.0) as char,
+            (b'1' + self.to.1) as char,
+            suffix
+        )
+    }
 }
 
 #[cfg(test)]
@@ -99,6 +121,7 @@ mod tests {
     #[test]
     fn test_move_record_creation() {
         let move_rec = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::White,
             from: (4, 1),
@@ -119,6 +142,7 @@ mod tests {
     #[test]
     fn test_move_record_capture() {
         let capture_move = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Queen,
             piece_color: PieceColor::Black,
             from: (3, 7),
@@ -138,6 +162,7 @@ mod tests {
     #[test]
     fn test_move_record_castling() {
         let castling_move = MoveRecord {
+            promotion: None,
             piece_type: PieceType::King,
             piece_color: PieceColor::White,
             from: (4, 0),
@@ -156,6 +181,7 @@ mod tests {
     #[test]
     fn test_move_record_en_passant() {
         let en_passant = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::Black,
             from: (4, 3),
@@ -174,6 +200,7 @@ mod tests {
     #[test]
     fn test_move_record_checkmate() {
         let checkmate = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Queen,
             piece_color: PieceColor::White,
             from: (3, 4),
@@ -192,6 +219,7 @@ mod tests {
     #[test]
     fn test_move_record_clone() {
         let original = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Knight,
             piece_color: PieceColor::Black,
             from: (1, 0),
@@ -211,6 +239,7 @@ mod tests {
     #[test]
     fn test_move_record_copy() {
         let original = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Bishop,
             piece_color: PieceColor::White,
             from: (2, 0),

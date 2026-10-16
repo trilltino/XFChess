@@ -1,3 +1,5 @@
+**This software is provided “as is,” without warranties of any kind. You use it at your own risk. To the fullest extent permitted by law, the authors and maintainers are not liable for any loss of funds, assets, or other damages resulting from its use. Obtain your own independent security review before using it with real funds.**
+
 # Security Policy
 
 Security reviews and pentesting of XFChess are welcome. If you believe you've found

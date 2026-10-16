@@ -76,8 +76,9 @@ build-all: build-wallet-ui-force build-admin-ui-force build-release build-web
 
 # Cross-compile Android native library, then assemble the unsigned release APK
 build-android:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare_stockfish_android.ps1
     cargo ndk -t arm64-v8a -P 31 -o mobile/app/src/main/jniLibs build --release --lib --features solana
-    @Get-ChildItem -LiteralPath mobile/app/src/main/jniLibs/arm64-v8a -Filter *.so | Where-Object Name -ne 'libxfchess.so' | Remove-Item -Force -ErrorAction Stop
+    @Get-ChildItem -LiteralPath mobile/app/src/main/jniLibs/arm64-v8a -Filter *.so | Where-Object { $_.Name -notin @('libxfchess.so', 'libstockfish.so') } | Remove-Item -Force -ErrorAction Stop
     Set-Location mobile; ./gradlew.bat assembleRelease
 
 # Build and extract a Linux game folder via Docker
@@ -259,19 +260,20 @@ dev: kill build build-wallet-ui build-admin-ui build-web-ui
      if (-not $wt) { $cand = "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe"; if (Test-Path $cand) { $wt = $cand } }; \
      $bin = "{{bin}}"; \
      $root = (Get-Location).Path; \
-     New-Item -ItemType Directory -Force -Path "$root\tmp" | Out-Null; \
+     $tmp = Join-Path $env:TEMP 'XFChess-dev'; \
+     New-Item -ItemType Directory -Force -Path $tmp | Out-Null; \
      $env_common = "`$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:BACKEND_URL='{{BACKEND_URL}}'; `$env:RUST_LOG='{{RUST_LOG}}'; `$env:HELIUS_API_KEY='{{HELIUS_API_KEY}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:XFCHESS_WEB_URL='http://localhost:5173'"; \
-     Set-Content -Path "$root\tmp\dev-tauri.ps1" -Value "$env_common; `$env:XFCHESS_OPEN_ADMIN='1'; Set-Location '$root'; & '$root/$bin/xfchess-tauri.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev-game.ps1"  -Value "$env_common; Set-Location '$root'; & '$root/$bin/xfchess.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev-tauri.ps1" -Value "$env_common; `$env:XFCHESS_OPEN_ADMIN='1'; Set-Location '$root'; & '$root/$bin/xfchess-tauri.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev-game.ps1"  -Value "$env_common; Set-Location '$root'; & '$root/$bin/xfchess.exe'" -Encoding utf8; \
      if ($wt) { \
          Write-Host "[LAUNCH] Using Windows Terminal tabs" -ForegroundColor Green; \
          & $wt -w 0 nt --title "Backend" -d "$root/backend" powershell -NoProfile -NoExit -Command "& '$root/$bin/signing-server.exe'"; \
          Start-Sleep -Seconds 2; \
          & $wt -w 0 nt --title "Wallet UI" -d "$root/tauri/wallet-ui" powershell -NoProfile -NoExit -Command "npm run dev"; \
          Start-Sleep -Seconds 1; \
-         & $wt -w 0 nt --title "Tauri" -d "$root" powershell -NoProfile -NoExit -File "$root\tmp\dev-tauri.ps1"; \
+         & $wt -w 0 nt --title "Tauri" -d "$root" powershell -NoProfile -NoExit -File "$tmp\dev-tauri.ps1"; \
          Start-Sleep -Seconds 1; \
-         & $wt -w 0 nt --title "Game" -d "$root" powershell -NoProfile -NoExit -File "$root\tmp\dev-game.ps1"; \
+         & $wt -w 0 nt --title "Game" -d "$root" powershell -NoProfile -NoExit -File "$tmp\dev-game.ps1"; \
          & $wt -w 0 nt --title "Web Frontend" -d "$root/xfchessdotcom" powershell -NoProfile -NoExit -Command "npm run dev" \
      } else { \
          Write-Host "[LAUNCH] Windows Terminal not found, using separate windows" -ForegroundColor Yellow; \
@@ -279,9 +281,9 @@ dev: kill build build-wallet-ui build-admin-ui build-web-ui
          Start-Sleep -Seconds 2; \
          Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/tauri/wallet-ui'; npm run dev" -WindowStyle Normal; \
          Start-Sleep -Seconds 1; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev-tauri.ps1'" -WindowStyle Minimized; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev-tauri.ps1'" -WindowStyle Minimized; \
          Start-Sleep -Seconds 1; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev-game.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev-game.ps1'" -WindowStyle Normal; \
          Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/xfchessdotcom'; npm run dev" -WindowStyle Normal \
      }
     @Write-Host ""
@@ -297,35 +299,36 @@ dev: kill build build-wallet-ui build-admin-ui build-web-ui
 dev2: kill build build-wallet-ui build-admin-ui build-web-ui
     @$root = (Get-Location).Path; \
      $bin = ("{{bin}}" -replace '/', '\'); \
-     New-Item -ItemType Directory -Force -Path "$root\tmp" | Out-Null; \
+     $tmp = Join-Path $env:TEMP 'XFChess-dev'; \
+     New-Item -ItemType Directory -Force -Path $tmp | Out-Null; \
      $env_common = "`$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:BACKEND_URL='{{BACKEND_URL}}'; `$env:RUST_LOG='{{RUST_LOG}}'; `$env:HELIUS_API_KEY='{{HELIUS_API_KEY}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:XFCHESS_WEB_URL='http://localhost:5173'"; \
-     Set-Content -Path "$root\tmp\dev2-backend.ps1"   -Value "Set-Location '$root\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:IDENTITY_ENCRYPTION_KEY='{{IDENTITY_ENCRYPTION_KEY}}'; `$env:IDENTITY_SALT='{{IDENTITY_SALT}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:FEE_PAYER_KEYS='{{FEE_PAYER_KEYS}}'; `$env:VPS_AUTHORITY_KEY='{{VPS_AUTHORITY_KEY}}'; `$env:KYC_AUTHORITY_KEY='{{KYC_AUTHORITY_KEY}}'; `$env:TOURNAMENT_FEE_RECIPIENT='{{TOURNAMENT_FEE_RECIPIENT}}'; `$env:ADMIN_API_KEY='{{ADMIN_API_KEY}}'; `$env:RUST_LOG='{{RUST_LOG}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-wallet-p1.ps1" -Value "Set-Location '$root\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-tauri-p1.ps1"  -Value "$env_common; `$env:XFCHESS_OPEN_ADMIN='1'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-game-p1.ps1"   -Value "$env_common; `$env:XFCHESS_NODE_KEY_PATH='$root\tmp\node_key_p1'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-web.ps1"        -Value "Set-Location '$root\xfchessdotcom'; npm run dev" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7474'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
-     Set-Content -Path "$root\tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_NODE_KEY_PATH='$root\tmp\node_key_p2'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-backend.ps1"   -Value "Set-Location '$root\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:IDENTITY_ENCRYPTION_KEY='{{IDENTITY_ENCRYPTION_KEY}}'; `$env:IDENTITY_SALT='{{IDENTITY_SALT}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:FEE_PAYER_KEYS='{{FEE_PAYER_KEYS}}'; `$env:VPS_AUTHORITY_KEY='{{VPS_AUTHORITY_KEY}}'; `$env:KYC_AUTHORITY_KEY='{{KYC_AUTHORITY_KEY}}'; `$env:TOURNAMENT_FEE_RECIPIENT='{{TOURNAMENT_FEE_RECIPIENT}}'; `$env:ADMIN_API_KEY='{{ADMIN_API_KEY}}'; `$env:RUST_LOG='{{RUST_LOG}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-wallet-p1.ps1" -Value "Set-Location '$root\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-tauri-p1.ps1"  -Value "$env_common; `$env:XFCHESS_OPEN_ADMIN='1'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-game-p1.ps1"   -Value "$env_common; `$env:XFCHESS_NODE_KEY_PATH='$tmp\node_key_p1'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-web.ps1"        -Value "Set-Location '$root\xfchessdotcom'; npm run dev" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7474'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_NODE_KEY_PATH='$tmp\node_key_p2'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
      $wt = (Get-Command wt -ErrorAction SilentlyContinue).Source; \
      if (-not $wt) { $cand = "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe"; if (Test-Path $cand) { $wt = $cand } }; \
      if ($wt) { \
          Write-Host "[ P1 ] Opening Player 1 window..." -ForegroundColor Cyan; \
-         cmd /c "`"$wt`" -w new nt --title Backend -d `"$root`" powershell -NoProfile -NoExit -File `"$root\tmp\dev2-backend.ps1`" ; nt --title `"Wallet UI`" -d `"$root`" powershell -NoProfile -NoExit -File `"$root\tmp\dev2-wallet-p1.ps1`" ; nt --title Tauri -d `"$root`" powershell -NoProfile -NoExit -File `"$root\tmp\dev2-tauri-p1.ps1`" ; nt --title Game -d `"$root`" powershell -NoProfile -NoExit -File `"$root\tmp\dev2-game-p1.ps1`" ; nt --title `"Web Frontend`" -d `"$root`" powershell -NoProfile -NoExit -File `"$root\tmp\dev2-web.ps1`""; \
+         cmd /c "`"$wt`" -w new nt --title Backend -d `"$root`" powershell -NoProfile -NoExit -File `"$tmp\dev2-backend.ps1`" ; nt --title `"Wallet UI`" -d `"$root`" powershell -NoProfile -NoExit -File `"$tmp\dev2-wallet-p1.ps1`" ; nt --title Tauri -d `"$root`" powershell -NoProfile -NoExit -File `"$tmp\dev2-tauri-p1.ps1`" ; nt --title Game -d `"$root`" powershell -NoProfile -NoExit -File `"$tmp\dev2-game-p1.ps1`" ; nt --title `"Web Frontend`" -d `"$root`" powershell -NoProfile -NoExit -File `"$tmp\dev2-web.ps1`""; \
          Start-Sleep -Seconds 2; \
          Write-Host "[ P2 ] Opening Player 2 window..." -ForegroundColor Yellow; \
-         cmd /c "`"$wt`" -w new nt --title `"Wallet UI`" -d `"$root`" powershell -NoProfile -NoExit -File `"$root\tmp\dev2-wallet-p2.ps1`" ; nt --title Tauri -d `"$root`" powershell -NoProfile -NoExit -File `"$root\tmp\dev2-tauri-p2.ps1`" ; nt --title Game -d `"$root`" powershell -NoProfile -NoExit -File `"$root\tmp\dev2-game-p2.ps1`"" \
+         cmd /c "`"$wt`" -w new nt --title `"Wallet UI`" -d `"$root`" powershell -NoProfile -NoExit -File `"$tmp\dev2-wallet-p2.ps1`" ; nt --title Tauri -d `"$root`" powershell -NoProfile -NoExit -File `"$tmp\dev2-tauri-p2.ps1`" ; nt --title Game -d `"$root`" powershell -NoProfile -NoExit -File `"$tmp\dev2-game-p2.ps1`"" \
      } else { \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev2-backend.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev2-backend.ps1'" -WindowStyle Normal; \
          Start-Sleep -Seconds 2; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev2-wallet-p1.ps1'" -WindowStyle Normal; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev2-tauri-p1.ps1'" -WindowStyle Minimized; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev2-game-p1.ps1'" -WindowStyle Normal; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev2-web.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev2-wallet-p1.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev2-tauri-p1.ps1'" -WindowStyle Minimized; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev2-game-p1.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev2-web.ps1'" -WindowStyle Normal; \
          Start-Sleep -Seconds 1; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev2-wallet-p2.ps1'" -WindowStyle Normal; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev2-tauri-p2.ps1'" -WindowStyle Minimized; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$root\tmp\dev2-game-p2.ps1'" -WindowStyle Normal \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev2-wallet-p2.ps1'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev2-tauri-p2.ps1'" -WindowStyle Minimized; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev2-game-p2.ps1'" -WindowStyle Normal \
      }
     @Write-Host "  [P1] Backend :8090  Wallet UI :5174  Bridge :7454  (window: XFChess P1)" -ForegroundColor Cyan
     @Write-Host "  [P2] Wallet UI :5175  Bridge :7474  (window: XFChess P2)" -ForegroundColor Yellow
@@ -453,10 +456,6 @@ wallet-logs *args:
 # Launch eight isolated tournament participants; start 'just dev' first
 dev8:
     cmd /c scripts\dev8.bat
-
-# Run a Nimzovich/Rustic SPRT match through cutechess-cli
-engine-match:
-    cmd /c scripts\engine_match.bat
 
 # Exercise tournament RPC load (requires PowerShell 7; uses ADMIN_API_KEY)
 test-triton *args:

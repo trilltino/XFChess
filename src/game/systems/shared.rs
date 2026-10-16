@@ -106,13 +106,15 @@ pub fn update_piece_state(
     // Derive SAN before applying the move to the engine.
     let san = engine.move_to_san(from_pos, target, promotion);
 
+    let original_type = piece_component.piece_type;
     if let Some(new_type) = promotion {
         debug!("[SHARED] {origin}: Promoting piece to {:?}", new_type);
         piece_component.piece_type = new_type;
     }
 
     let move_record = MoveRecord {
-        piece_type: piece_component.piece_type,
+        promotion,
+        piece_type: original_type,
         piece_color: piece_component.color,
         from: from_pos,
         to: target,
