@@ -33,7 +33,8 @@ stateDiagram-v2
 - `delegate_game`: `ActiveBase -> ActiveEr` and delegate the `Game` PDA.
 - `record_move`: `Active* -> Active*` or `Finished*`, mutating only `Game`.
 - `resign`: `Active* -> Finished*`, mutating only `Game`.
-- `claim_timeout`: `Active* -> Finished*`, mutating only `Game`.
-- `undelegate_game`: delegated phase to base phase after commit.
+- `claim_timeout`: `Active* -> Finished*`, mutating only `Game`, once the side to move has been idle longer than its largest possible clock (`lifecycle/clock.rs`).
+- `record_move`: a move by the player a draw offer was made to declines the offer.
+- `undelegate_game`: delegated phase to base phase after commit. Live games: fee payer or a player only; terminal games: anyone.
 - `finalize_game`: `FinishedBase -> Settled`, with all money/profile effects.
 - `cancel_game`: base-only refund path before meaningful play.
