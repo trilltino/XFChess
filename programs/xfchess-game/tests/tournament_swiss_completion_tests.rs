@@ -348,3 +348,49 @@ async fn rejects_completion_by_non_authority() {
         Some(ec(GameErrorCode::NotTournamentAuthority))
     );
 }
+
+#[tokio::test]
+async fn rejects_completion_that_omits_a_required_shard() {
+    let authority = Keypair::new();
+    let (p1, p2, p3, p4) = (
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+    );
+    let (_, t_bump) = tournament_pda(TOURNAMENT_ID);
+    // 128 seats need shards 0 and 1; players in the missing shard 1 could
+    // outscore anyone in the submitted order.
+    let mut t = tournament(authority.pubkey(), p1, t_bump, 2);
+    t.max_players = 128;
+    let mut ctx = start(vec![
+        (
+            tournament_pda(TOURNAMENT_ID).0,
+            serialize_padded(&t, 8 + Tournament::INIT_SPACE),
+        ),
+        (
+            shard_pda(TOURNAMENT_ID, 0).0,
+            serialize_padded(
+                &shard0(p1, p2, p3, p4),
+                8 + TournamentPlayersShard::space_for(),
+            ),
+        ),
+    ])
+    .await;
+
+    let err = send(
+        &mut ctx,
+        complete_swiss_tournament_ix(authority.pubkey(), vec![p1, p3, p2, p4]),
+        &[&authority],
+    )
+    .await
+    .expect_err("completion must see every shard the field occupies");
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(GameErrorCode::InvalidSwissPlaces))
+    );
+    assert_eq!(
+        fetch_tournament(&mut ctx).await.status,
+        TournamentStatus::Active
+    );
+}

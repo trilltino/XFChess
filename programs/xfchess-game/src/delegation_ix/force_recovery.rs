@@ -25,6 +25,12 @@ pub fn handler_request_force_undelegate(
     ctx: Context<RequestForceUndelegateCtx>,
     game_id: u64,
 ) -> Result<()> {
+    {
+        // While delegated the account holds the last state committed to base.
+        let data = ctx.accounts.game.try_borrow_data()?;
+        let game = crate::state::Game::try_deserialize(&mut &data[..])?;
+        crate::lifecycle::guards::require_stuck_delegation(&game, Clock::get()?.unix_timestamp)?;
+    }
     let game_id_bytes = game_id.to_le_bytes();
     let game_bump = ctx.bumps.game;
     crate::magicblock::delegation::request_force_undelegate(

@@ -1,3 +1,7 @@
+//! Fixed-K Elo on the centiscale ratings stored in `PlayerProfile` (rating × 100):
+//! K = 32 and the 400-point logistic scale, both ×100. `PlayerProfile::rd` and
+//! `volatility` are reserved fields this update does not read or write.
+
 const K_SCALED: f64 = 3200.0;
 const DIVISOR: f64 = 40000.0;
 const ELO_FLOOR: f64 = 10000.0;

@@ -85,3 +85,28 @@ fn contract_and_host_agree_on_generated_games() {
         }
     }
 }
+
+#[test]
+fn contract_and_host_agree_on_insufficient_material() {
+    use nimzovich_engine::on_chain_moves::is_insufficient_material;
+    for fen in [
+        "8/8/4k3/8/8/4K3/8/8 w - - 0 1",
+        "8/8/4k3/8/8/4K3/8/5N2 w - - 0 1",
+        "8/8/4k3/8/8/4K3/8/6n1 b - - 0 1",
+        "5b2/8/4k3/8/8/4K3/8/2B5 w - - 0 1",
+        "2b5/8/4k3/8/8/4K3/8/2B5 w - - 0 1",
+        "8/8/4k3/8/8/4K3/8/1N3N2 w - - 0 1",
+        "8/8/4k3/8/8/4K3/8/2B2B2 w - - 0 1",
+        "8/8/4k3/8/8/4K3/8/1N3B2 w - - 0 1",
+        "8/8/4k3/8/8/4K3/4P3/8 w - - 0 1",
+        "8/8/4k3/8/8/4K3/8/R7 w - - 0 1",
+        xfchess_rules::STARTING_FEN,
+    ] {
+        let contract = is_insufficient_material(&CompactBoard::from_fen(fen).to_on_chain_game());
+        assert_eq!(
+            Game::from_fen(fen).unwrap().is_insufficient_material(),
+            contract,
+            "{fen}"
+        );
+    }
+}

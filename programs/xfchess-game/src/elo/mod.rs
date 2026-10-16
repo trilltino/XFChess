@@ -1,4 +1,4 @@
-pub mod glicko2;
+pub mod k_factor;
 pub mod rating;
 
-pub use glicko2::calculate_elo_update;
+pub use k_factor::calculate_elo_update;
