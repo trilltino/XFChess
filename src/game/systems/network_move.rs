@@ -99,24 +99,24 @@ pub fn handle_network_moves(
                 .find(|(_, p, _)| p.x == event.to.0 && p.y == event.to.1)
                 .map(|(e, p, _)| (e, *p));
 
-            let capture_target = if let Some((cap_entity, cap_piece)) = capture_data {
-                if cap_piece.color != piece.color {
-                    Some(CapturedTarget {
-                        entity: cap_entity,
-                        piece_type: cap_piece.piece_type,
-                        color: cap_piece.color,
-                    })
-                } else {
+            let capture_target = match capture_data {
+                // Unreachable while the board entities match the engine; if they
+                // diverge, the move must be rejected, not applied as a non-capture.
+                Some((_, cap_piece)) if cap_piece.color == piece.color => {
                     warn!("[NETWORK_MOVE] Attempted move to occupied square of same color!");
                     release_pending(&mut causal, &event.dedup_version, false);
                     results.write(crate::game::events::NetworkMoveResult {
                         version: event.dedup_version.clone(),
                         fen: None,
                     });
-                    None
+                    continue;
                 }
-            } else {
-                None
+                Some((cap_entity, cap_piece)) => Some(CapturedTarget {
+                    entity: cap_entity,
+                    piece_type: cap_piece.piece_type,
+                    color: cap_piece.color,
+                }),
+                None => None,
             };
 
             let was_first_move = if let Ok((_, _, has_moved)) = pieces_query.get(entity) {
@@ -366,6 +366,43 @@ mod application_tests {
                 .resource::<Messages<RemoteMoveApplied>>()
                 .is_empty());
         }
+    }
+
+    #[test]
+    fn move_onto_own_piece_is_rejected_once_when_board_and_engine_diverge() {
+        let mut app = game();
+        // The engine believes e4 is empty, but a stale white entity sits there.
+        app.world_mut().spawn((
+            Piece::new(PieceColor::White, PieceType::Knight, 4, 3),
+            HasMoved::default(),
+        ));
+        let fen_before = app
+            .world()
+            .resource::<ChessEngine>()
+            .current_fen()
+            .to_string();
+        app.world_mut().write_message(NetworkMoveEvent {
+            from: (4, 1),
+            to: (4, 3),
+            promotion: None,
+            expected_fen: None,
+            dedup_version: Some("diverged".into()),
+        });
+        app.update();
+
+        let results = app
+            .world()
+            .resource::<Messages<crate::game::events::NetworkMoveResult>>();
+        let mut cursor = bevy::ecs::message::MessageCursor::default();
+        let all: Vec<_> = cursor.read(results).collect();
+        assert_eq!(all.len(), 1, "one result per received move");
+        assert!(all[0].fen.is_none());
+        assert_eq!(
+            app.world().resource::<ChessEngine>().current_fen(),
+            fen_before,
+            "a rejected move must not advance the position"
+        );
+        assert!(app.world().resource::<Messages<MoveMadeEvent>>().is_empty());
     }
 }
 

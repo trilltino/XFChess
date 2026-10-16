@@ -270,6 +270,17 @@ impl ChessEngine {
         !self.move_cache.is_empty()
     }
 
+    /// The contract's insufficient-material draw (see `xfchess_rules`).
+    pub fn is_insufficient_material(&self) -> bool {
+        self.position_valid && self.game.is_insufficient_material()
+    }
+
+    /// The contract ends the game as a draw after 100 halfmoves without a
+    /// capture or pawn move.
+    pub fn fifty_move_rule_reached(&self) -> bool {
+        self.position_valid && self.game.halfmove_clock() >= xfchess_rules::FIFTY_MOVE_HALFMOVES
+    }
+
     pub fn move_to_san(
         &mut self,
         from: (u8, u8),
