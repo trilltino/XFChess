@@ -32,7 +32,7 @@ Spectators have separate recovery and delay rules.
 - Payout requires chain evidence; HTTP success or a peer result is insufficient.
 
 Implementation: [transport](../../src/multiplayer/network/braid_transport.rs),
-[journal](../../crates/zarathustra_net/braid_chess/src/journal.rs),
+[journal](../../libs/zarathustra_net/braid_chess/src/journal.rs),
 [game log](../../backend/src/signing/routes/game_log.rs),
 [resume](../../src/multiplayer/resume.rs),
 [board application](../../src/game/systems/network_move.rs).

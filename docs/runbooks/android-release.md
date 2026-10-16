@@ -28,6 +28,18 @@ outside Git, reuse it for updates and verify the certificate fingerprint.
 [Publishing](../PUBLISHING.md) lists the current artifact/signing boundaries.
 
 Verify the APK includes `libxfchess.so` and `libstockfish.so`. On a physical
-device test launch, touch play, both engines, wallet connection/rejection,
-a wagered match and background/resume mid-match. Publisher verification and
+device test launch, touch play, Stockfish at all eight difficulty levels playing
+both sides, wallet connection/rejection, a wagered match and background/resume mid-match. Publisher verification and
 store review remain external steps.
+
+Stockfish is the only AI engine. `just build-android` downloads the Stockfish 16
+Android ARMv8 executable when it is absent. For a direct Cargo/Gradle build,
+run `scripts/prepare_stockfish_android.ps1` first. Both paths place it at
+`mobile/app/src/main/jniLibs/arm64-v8a/libstockfish.so`; release CI also downloads it.
+Gradle extracts it to `nativeLibraryDir` for execution. Packaging cleanup must
+retain both `libxfchess.so` and `libstockfish.so`.
+
+The physical-device release gate is `scripts/test_stockfish_android.ps1` with
+an installed debug APK and a connected ARM64 device. After its UCI/search check,
+verify AI play, evaluation, leaving during a search, retry after a process failure,
+and background/resume. Record the device/API version and result in release notes.

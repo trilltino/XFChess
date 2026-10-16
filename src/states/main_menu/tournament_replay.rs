@@ -48,7 +48,7 @@ pub fn poll_pgn_replay_fetch(
         }
     };
 
-    match nimzovich_engine::parse_pgn(&pgn_text) {
+    match xfchess_rules::parse_pgn(&pgn_text) {
         Ok(mut pgn) => {
             info!("[replay] loaded tournament game: {} moves", pgn.moves.len());
             // Fill missing player tags in backend PGN so replay names match the selected pairing.

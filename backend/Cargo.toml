@@ -67,9 +67,9 @@ bs58 = "0.5"
 anyhow = "1.0.75"
 borsh = { workspace = true }
 
-braid-iroh = { path = "../crates/zarathustra_net/braid-iroh" }
+braid-iroh = { path = "../libs/zarathustra_net/braid-iroh" }
 iroh-gossip = { workspace = true }
-braid_chess = { path = "../crates/zarathustra_net/braid_chess" }
+braid_chess = { path = "../libs/zarathustra_net/braid_chess" }
 
 # Solana dependencies
 solana-sdk = { workspace = true }
@@ -95,16 +95,16 @@ x509-parser = "0.18"
 # Install the process CryptoProvider explicitly at startup; match the resolved lockfile version.
 rustls = "0.23.37"
 
-# Engine revision is pinned to match the workspace dependency.
-nimzovich_engine = { git = "https://github.com/trilltino/xfchess-contracts.git", rev = "67932ae105b67d58b78cd2203c9657204bf8b259", package = "nimzovich_engine", features = ["std", "search"] }
+# Shared chess rules and PGN; no in-process search engine.
+xfchess-rules = { workspace = true }
 
 # Anti-cheat analysis engine
-xfchess-anticheat = { path = "../crates/shared/xfchess-anticheat" }
+xfchess-anticheat = { path = "../libs/anti-cheat/xfchess-anticheat" }
 
-swiss-pairing = { path = "../crates/shared/swiss-pairing" }
+swiss-pairing = { path = "../libs/tournament/swiss-pairing" }
 
 # Braid HTTP-209 subscribe server
-xfchess-braid-server = { path = "../crates/zarathustra_net/xfchess-braid-server" }
+xfchess-braid-server = { path = "../libs/zarathustra_net/xfchess-braid-server" }
 
 # Global state for anti-cheat
 once_cell = "1.19"
@@ -134,7 +134,7 @@ ws_subscriber = []
 polling = []
 
 [dev-dependencies]
-cu_benchmark = { path = "../crates/cu_benchmark" }
+cu_benchmark = { path = "../tools/cu_benchmark" }
 serde_json = "1.0"
 wiremock = "0.6"
 tower = { version = "0.4", features = ["util"] }

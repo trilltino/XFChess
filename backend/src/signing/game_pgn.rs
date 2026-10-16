@@ -1,6 +1,6 @@
 use crate::db::repository::GameRepository;
 use crate::signing::elo_cache::EloCache;
-use nimzovich_engine::{PgnAssembler, PgnResult};
+use xfchess_rules::{PgnAssembler, PgnResult};
 
 pub async fn assemble_and_store_pgn(
     repo: &GameRepository,

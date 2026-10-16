@@ -7,6 +7,7 @@ fn example_execute_move_system() {
     let mut history = MoveHistory::default();
 
     let move_record = MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (4, 1),
@@ -27,6 +28,7 @@ fn example_display_last_move() {
     let mut history = MoveHistory::default();
 
     history.add_move(MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (4, 1),
@@ -51,6 +53,7 @@ fn example_add_move_method() {
     let mut history = MoveHistory::default();
 
     history.add_move(MoveRecord {
+        promotion: None,
         piece_type: PieceType::Knight,
         piece_color: PieceColor::Black,
         from: (1, 7),
@@ -72,6 +75,7 @@ fn example_last_move_en_passant_check() {
 
     // White pawn moves two squares
     history.add_move(MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (4, 1),
@@ -101,6 +105,7 @@ fn example_ply_count() {
     let mut history = MoveHistory::default();
     for _ in 0..3 {
         history.add_move(MoveRecord {
+            promotion: None,
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::White, // Simplified
             from: (0, 0),
@@ -134,6 +139,7 @@ fn example_is_empty() {
 fn example_clear_history() {
     let mut history = MoveHistory::default();
     history.add_move(MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (0, 0),
@@ -153,6 +159,7 @@ fn example_clear_history() {
 fn example_get_move() {
     let mut history = MoveHistory::default();
     history.add_move(MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (4, 1),
@@ -176,6 +183,7 @@ fn example_get_move() {
 fn example_iter_moves() {
     let mut history = MoveHistory::default();
     history.add_move(MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (0, 0),

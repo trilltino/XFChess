@@ -43,7 +43,7 @@ pub struct RollupNetworkBridge {
     pending_finalization: Option<PendingFinalization>,
     finalization_rx: Option<oneshot::Receiver<FinalizationResult>>,
     nonce_rx: Option<oneshot::Receiver<u64>>,
-    pgn_rx: Option<oneshot::Receiver<Option<nimzovich_engine::ParsedPgnGame>>>,
+    pgn_rx: Option<oneshot::Receiver<Option<xfchess_rules::ParsedPgnGame>>>,
     joiner_delegation_wait_rx: Option<oneshot::Receiver<Result<Pubkey, String>>>,
     joiner_delegation_wait_game_id: Option<u64>,
     game_end_moves_flushing: bool,

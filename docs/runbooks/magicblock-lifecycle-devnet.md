@@ -31,8 +31,8 @@ does not prove a live asynchronous commit/undelegation flow.
 ## Recovery/liveness drills — rehearsal schedule
 
 Live-devnet drills live in
-[chain/recovery.rs](../../crates/cu_benchmark/src/chain/recovery.rs), with CLI
-wiring in [live/recovery.rs](../../crates/cu_benchmark/src/cli/live/recovery.rs).
+[chain/recovery.rs](../../tools/cu_benchmark/src/chain/recovery.rs), with CLI
+wiring in [live/recovery.rs](../../tools/cu_benchmark/src/cli/live/recovery.rs).
 Check the runner's `--help` before selecting live recovery/crank flags.
 
 - `run_stuck_delegation_drill` — the full `request_force_undelegate` →

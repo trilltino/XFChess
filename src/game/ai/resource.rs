@@ -7,8 +7,6 @@ pub struct ChessAIResource {
     pub mode: AiMode,
 
     pub difficulty: AIDifficulty,
-
-    pub engine: AIEngine,
 }
 
 impl Default for ChessAIResource {
@@ -18,16 +16,8 @@ impl Default for ChessAIResource {
                 ai_color: PieceColor::Black,
             },
             difficulty: AIDifficulty::Level4,
-            engine: AIEngine::XFChessEngine,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Default)]
-pub enum AIEngine {
-    Stockfish,
-    #[default]
-    XFChessEngine,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]

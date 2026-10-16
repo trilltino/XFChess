@@ -43,11 +43,13 @@ required-features = ["solana"]
 [workspace]
 resolver = "2"
 members = [
-    "crates/zarathustra_net/*",
+    "libs/zarathustra_net/*",
+    "libs/tournament/*",
+    "libs/anti-cheat/*",
+    "libs/chess/*",
     # crates/solana/* removed — chess-logic-on-chain consolidated into
     # programs/xfchess-game/src/chess_logic_on_chain.rs
-    "crates/shared/*",
-    "crates/cu_benchmark",
+    "tools/cu_benchmark",
     "programs/*",
     "tauri",
     "tauri/viz/src-tauri",
@@ -123,14 +125,16 @@ ephemeral-rollups-sdk = { version = "=0.16.2", features = ["anchor", "instructio
 solana-security-txt = "=1.1.3"
 axum = "=0.8.9"
 tower-http = "=0.7.0"
-xfchess-game = { path = "programs/xfchess-game", version = "0.1.0" }
-braid-http = { path = "crates/zarathustra_net/braid-http" }
-braid-iroh = { path = "crates/zarathustra_net/braid-iroh" }
-braid_chess = { path = "crates/zarathustra_net/braid_chess" }
+xfchess-game = { path = "programs/xfchess-game", version = "0.1.0", default-features = false, features = ["no-entrypoint", "devnet"] }
+braid-http = { path = "libs/zarathustra_net/braid-http" }
+braid-iroh = { path = "libs/zarathustra_net/braid-iroh" }
+braid_chess = { path = "libs/zarathustra_net/braid_chess" }
 iroh-gossip = { version = "0.101.0" }
-# The public contracts repo is pinned so CI and clean checkouts can resolve it.
-nimzovich_engine = { git = "https://github.com/trilltino/xfchess-contracts.git", rev = "67932ae105b67d58b78cd2203c9657204bf8b259", package = "nimzovich_engine" }
-xfchess-anticheat = { path = "crates/shared/xfchess-anticheat" }
+# Contract-only rules dependency. Host applications use xfchess-rules.
+nimzovich_engine = { git = "https://github.com/trilltino/xfchess-contracts.git", rev = "67932ae105b67d58b78cd2203c9657204bf8b259", package = "nimzovich_engine", default-features = false }
+xfchess-anticheat = { path = "libs/anti-cheat/xfchess-anticheat" }
+xfchess-rules = { path = "libs/chess/xfchess-rules" }
+xfchess-stockfish = { path = "libs/chess/xfchess-stockfish" }
 # The exact Bevy pin matches release-candidate APIs used by feature-gated code;
 # check those paths when upgrading.
 bevy = { version = "=0.20.0", default-features = false, features = ["default", "webgl2", "mp3", "bevy_gltf", "jpeg", "hdr", "android-game-activity"] }
@@ -210,7 +214,8 @@ uuid.workspace = true
 web-time.workspace = true
 reqwest.workspace = true
 anchor-lang = { workspace = true, optional = true }
-nimzovich_engine = { workspace = true }
+xfchess-rules = { workspace = true }
+xfchess-stockfish = { workspace = true }
 bevy_egui = { workspace = true }
 solana-sdk = { workspace = true, optional = true }
 solana-client = { workspace = true, optional = true }

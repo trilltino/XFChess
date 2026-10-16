@@ -19,7 +19,7 @@ on-chain scores match the backend's exactly.
 
 Source: `programs/xfchess-game/src/tournament_ix/matches/record_swiss_result.rs`
 
-## Backend / pairing engine (`crates/shared/swiss-pairing`)
+## Backend / pairing engine (`libs/tournament/swiss-pairing`)
 
 The pairing engine uses FIDE standard floating-point scores.
 
@@ -30,7 +30,7 @@ The pairing engine uses FIDE standard floating-point scores.
 | Loss    | 0.0    |
 | Bye     | 1.0    |
 
-Source: `crates/shared/swiss-pairing/src/types.rs` — `MatchResult::white_score()` / `black_score()`
+Source: `libs/tournament/swiss-pairing/src/types.rs` — `MatchResult::white_score()` / `black_score()`
 
 ## Tiebreaks and final places
 

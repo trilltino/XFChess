@@ -1798,7 +1798,6 @@ dependencies = [
  "hex",
  "iroh-gossip",
  "jsonwebtoken",
- "nimzovich_engine",
  "once_cell",
  "parking_lot",
  "rand 0.10.2",
@@ -1835,6 +1834,7 @@ dependencies = [
  "x509-parser 0.18.1",
  "xfchess-anticheat",
  "xfchess-braid-server",
+ "xfchess-rules",
  "zstd",
 ]
 
@@ -4893,7 +4893,6 @@ dependencies = [
  "clap",
  "ephemeral-rollups-sdk",
  "futures",
- "nimzovich_engine",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -4910,6 +4909,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "url",
+ "xfchess-rules",
  "yellowstone-grpc-client",
  "yellowstone-grpc-proto",
 ]
@@ -9947,10 +9947,6 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 name = "nimzovich_engine"
 version = "0.1.0"
 source = "git+https://github.com/trilltino/xfchess-contracts.git?rev=67932ae105b67d58b78cd2203c9657204bf8b259#67932ae105b67d58b78cd2203c9657204bf8b259"
-dependencies = [
- "futures-lite",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "nix"
@@ -11302,6 +11298,17 @@ dependencies = [
  "indexmap 2.14.2",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "pgn-reader"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b822a2cfc1c90c109ea35458ad9bff6669198fdd4ea8de1132e702b4d9f64b88"
+dependencies = [
+ "btoi",
+ "memchr",
+ "shakmaty",
 ]
 
 [[package]]
@@ -23593,7 +23600,6 @@ dependencies = [
  "jni 0.22.4",
  "log",
  "ndk-context",
- "nimzovich_engine",
  "paranoid-android",
  "parking_lot",
  "proptest",
@@ -23622,6 +23628,8 @@ dependencies = [
  "windows 0.61.3",
  "winit",
  "xfchess-game",
+ "xfchess-rules",
+ "xfchess-stockfish",
  "zstd",
 ]
 
@@ -23679,6 +23687,23 @@ dependencies = [
  "solana-security-txt",
  "solana-system-interface 3.2.0",
  "tokio",
+ "xfchess-rules",
+]
+
+[[package]]
+name = "xfchess-rules"
+version = "0.1.0"
+dependencies = [
+ "pgn-reader",
+ "shakmaty",
+]
+
+[[package]]
+name = "xfchess-stockfish"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "xfchess-rules",
 ]
 
 [[package]]

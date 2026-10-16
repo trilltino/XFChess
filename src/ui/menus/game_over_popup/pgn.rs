@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Resource, Default)]
 pub struct CachedGamePgn {
-    pub pgn: Option<nimzovich_engine::ParsedPgnGame>,
+    pub pgn: Option<xfchess_rules::ParsedPgnGame>,
     pub pgn_string: String,
     pub final_fen: String,
     pub braid_pgn_ready: bool,
@@ -36,18 +36,14 @@ pub fn cache_pgn_on_game_over(
 }
 
 pub(super) fn build_final_fen(history: &MoveHistory) -> String {
-    use crate::game::components::PieceType;
-    use nimzovich_engine::{do_move_with_promo, game_to_fen, new_game_no_tt};
-
-    let mut game = new_game_no_tt();
+    let mut game = xfchess_rules::Game::default();
     for rec in &history.moves {
-        let src = rec.from.1 as i8 * 8 + rec.from.0 as i8;
-        let dst = rec.to.1 as i8 * 8 + rec.to.0 as i8;
-        let is_promo = rec.piece_type == PieceType::Pawn && (rec.to.1 == 7 || rec.to.1 == 0);
-        let promo: i8 = if is_promo { 5 } else { 0 };
-        do_move_with_promo(&mut game, src, dst, true, promo);
+        if let Err(e) = game.play_uci(&rec.uci()) {
+            warn!("PGN move history: {e}");
+            break;
+        }
     }
-    game_to_fen(&game)
+    game.fen()
 }
 
 pub(super) fn elo_tier(elo: u32) -> Option<&'static str> {
@@ -68,26 +64,22 @@ pub(super) fn build_pgn(
     result_str: &str,
     white_name: &str,
     black_name: &str,
-) -> nimzovich_engine::ParsedPgnGame {
-    use crate::game::components::PieceType;
-    use nimzovich_engine::{do_move_with_promo, move_to_san, new_game_no_tt};
+) -> xfchess_rules::ParsedPgnGame {
     use std::collections::BTreeMap;
-
-    // No search ever runs on this Game (just replay + SAN), so skip the
-    // multi-GB transposition table `new_game` would otherwise allocate.
-    let mut game = new_game_no_tt();
-    let mut san_moves: Vec<String> = Vec::with_capacity(history.moves.len());
-
+    let mut game = xfchess_rules::Game::default();
+    let mut san_moves = Vec::with_capacity(history.moves.len());
     for rec in &history.moves {
-        let src = rec.from.1 as i8 * 8 + rec.from.0 as i8;
-        let dst = rec.to.1 as i8 * 8 + rec.to.0 as i8;
-        // Default promo to queen (5); MoveRecord doesn't store promoted piece type
-        let is_promo = rec.piece_type == PieceType::Pawn && (rec.to.1 == 7 || rec.to.1 == 0);
-        let promo: i8 = if is_promo { 5 } else { 0 };
-
-        let san = move_to_san(&mut game, src, dst, promo);
-        san_moves.push(san);
-        do_move_with_promo(&mut game, src, dst, true, promo);
+        match game.san(&rec.uci()) {
+            Ok(san) => san_moves.push(san),
+            Err(e) => {
+                warn!("PGN move history: {e}");
+                break;
+            }
+        }
+        if let Err(e) = game.play_uci(&rec.uci()) {
+            warn!("PGN move history: {e}");
+            break;
+        }
     }
 
     let mut tags = BTreeMap::new();
@@ -104,7 +96,7 @@ pub(super) fn build_pgn(
     tags.insert("Black".to_string(), black_name.to_string());
     tags.insert("Result".to_string(), result_str.to_string());
 
-    nimzovich_engine::ParsedPgnGame {
+    xfchess_rules::ParsedPgnGame {
         tags,
         moves: san_moves,
         result: result_str.to_string(),
@@ -112,48 +104,6 @@ pub(super) fn build_pgn(
     }
 }
 
-pub fn pgn_to_string(pgn: &nimzovich_engine::ParsedPgnGame) -> String {
-    let mut out = String::new();
-    for (k, v) in nimzovich_engine::ordered_tags(&pgn.tags) {
-        out.push_str(&format!("[{} \"{}\"]\n", k, v));
-    }
-    out.push('\n');
-
-    let mut line = String::new();
-    let flush = |line: &mut String, out: &mut String| {
-        if !line.is_empty() {
-            out.push_str(line.trim_end());
-            out.push('\n');
-            line.clear();
-        }
-    };
-    for (ply, mv) in pgn.moves.iter().enumerate() {
-        let token = if ply.is_multiple_of(2) {
-            format!("{}. {}", ply / 2 + 1, mv)
-        } else {
-            mv.clone()
-        };
-        if !line.is_empty() && line.len() + 1 + token.len() > 80 {
-            flush(&mut line, &mut out);
-        }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        line.push_str(&token);
-    }
-    if !line.is_empty() {
-        if line.len() + 1 + pgn.result.len() > 80 {
-            out.push_str(line.trim_end());
-            out.push('\n');
-            out.push_str(&pgn.result);
-        } else {
-            out.push_str(line.trim_end());
-            out.push(' ');
-            out.push_str(&pgn.result);
-        }
-    } else {
-        out.push_str(&pgn.result);
-    }
-    out.push('\n');
-    out
+pub fn pgn_to_string(pgn: &xfchess_rules::ParsedPgnGame) -> String {
+    xfchess_rules::pgn_to_string(pgn)
 }

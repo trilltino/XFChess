@@ -1,7 +1,6 @@
 use super::*;
 use crate::rendering::pieces::{PieceColor, PieceType};
 
-
 #[test]
 fn test_game_phase_default() {
     let phase = GamePhase::default();
@@ -35,10 +34,10 @@ fn test_game_phase_all_variants() {
     assert_ne!(checkmate, stalemate);
 }
 
-
 #[test]
 fn test_move_record_simple_move() {
     let record = MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (1, 4),
@@ -64,6 +63,7 @@ fn test_move_record_simple_move() {
 #[test]
 fn test_move_record_with_capture() {
     let record = MoveRecord {
+        promotion: None,
         piece_type: PieceType::Knight,
         piece_color: PieceColor::White,
         from: (2, 2),
@@ -82,6 +82,7 @@ fn test_move_record_with_capture() {
 #[test]
 fn test_move_record_castling() {
     let kingside_castle = MoveRecord {
+        promotion: None,
         piece_type: PieceType::King,
         piece_color: PieceColor::White,
         from: (0, 4),
@@ -102,6 +103,7 @@ fn test_move_record_castling() {
 #[test]
 fn test_move_record_en_passant() {
     let en_passant_capture = MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (4, 3),
@@ -120,6 +122,7 @@ fn test_move_record_en_passant() {
 #[test]
 fn test_move_record_checkmate() {
     let checkmate_move = MoveRecord {
+        promotion: None,
         piece_type: PieceType::Queen,
         piece_color: PieceColor::White,
         from: (5, 3),
@@ -139,6 +142,7 @@ fn test_move_record_checkmate() {
 #[test]
 fn test_move_record_clone() {
     let original = MoveRecord {
+        promotion: None,
         piece_type: PieceType::Rook,
         piece_color: PieceColor::Black,
         from: (7, 0),
@@ -162,7 +166,6 @@ fn test_move_record_clone() {
     assert_eq!(cloned.is_check, original.is_check);
     assert_eq!(cloned.is_checkmate, original.is_checkmate);
 }
-
 
 #[test]
 fn test_has_moved_default() {

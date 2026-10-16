@@ -1,20 +1,6 @@
 {
   "version": 1,
   "skills": {
-    "android-native": {
-      "source": ".agents/skills/android-native",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://developer.android.com/games/agdk/game-activity",
-        "https://developer.android.com/training/articles/perf-jni",
-        "https://developer.android.com/build",
-        "https://github.com/bbqsrc/cargo-ndk",
-        "https://docs.solanamobile.com/get-started/kotlin/installation"
-      ],
-      "computedHash": "bc0bb7181598add9c149ca60ca180507f90f2de9b399c25700044dcaaae03d6c"
-    },
     "bevy": {
       "source": "chrisgliddon/bevy-skills",
       "sourceType": "github",
@@ -25,49 +11,11 @@
       "adapted": true,
       "computedHash": "897f6d27b7c9f0935af9efb4c033249b6d95128f5dbdf14402e0eb675aac7dae"
     },
-    "braid": {
-      "source": ".agents/skills/braid",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://github.com/braid-org/braid-spec",
-        "https://github.com/braid-org/braid-http",
-        "https://github.com/braid-org/braid-fuzz"
-      ],
-      "computedHash": "9858aeb1b7819afc65e6d0f042387c987698e67c3b530f60ae6ced1b80517f2c"
-    },
-    "chess-engine": {
-      "source": ".agents/skills/chess-engine",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://official-stockfish.github.io/docs/stockfish-wiki/",
-        "https://docs.rs/shakmaty/latest/shakmaty/",
-        "https://lichess.org/api",
-        "https://database.lichess.org/#puzzles"
-      ],
-      "computedHash": "d2690fcfa4c60cda5e49c6e004e4851949529874dc7f605bf845f3762efc51ab"
-    },
     "colosseum-copilot": {
       "source": "ColosseumOrg/colosseum-copilot",
       "sourceType": "github",
       "skillPath": "skills/colosseum-copilot/SKILL.md",
       "computedHash": "7859139478a5276c63a6114f0c3f9899ca4a30b5e4239825d16b92e8744e9e07"
-    },
-    "desktop-packaging": {
-      "source": ".agents/skills/desktop-packaging",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://learn.microsoft.com/powershell/",
-        "https://nsis.sourceforge.io/Docs/",
-        "https://v2.tauri.app/distribute/",
-        "https://developer.apple.com/documentation/security/code-signing-services"
-      ],
-      "computedHash": "f6bbd1dcbd94cb2f0e463aab2e03e1a94fe0b98fdee1d1e0d3d8fb8b6413b971"
     },
     "docker-build-strategies": {
       "source": "docker/skills",
@@ -89,33 +37,6 @@
       "adapted": true,
       "computedHash": "a9c34ab02d1d3e16780fa540c6bb033c43048d05d895a14811b88db1a2c19ecc"
     },
-    "egui": {
-      "source": ".agents/skills/egui",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://docs.rs/egui/latest/egui/",
-        "https://docs.rs/bevy_egui/latest/bevy_egui/",
-        "https://github.com/vladbat00/bevy_egui"
-      ],
-      "computedHash": "691fc76680a2d95e4f6f0d48d594ae6a966be7143668b75800093a387fad31ee"
-    },
-    "iroh": {
-      "source": ".agents/skills/iroh",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://docs.rs/iroh/latest/iroh/",
-        "https://docs.iroh.computer/protocols/using-quic",
-        "https://docs.iroh.computer/concepts/protocols",
-        "https://docs.iroh.computer/connecting/gossip",
-        "https://docs.iroh.computer/add-a-relay",
-        "https://docs.rs/h3/latest/h3/"
-      ],
-      "computedHash": "443f1e703510843cbac0c19d3d01d6fab54ce0cd10473a73995ff9f9548361dc"
-    },
     "magicblock": {
       "source": "magicblock-labs/magicblock-dev-skill",
       "sourceType": "github",
@@ -125,21 +46,6 @@
       "upstreamHash": "4da63f79b3a14d4e5a0bd92eb1fa7cfa6d63dd37d512a9ff8a9693147f826791",
       "adapted": false,
       "computedHash": "9c28f196e68714a2d8f41757837a87dbb993fd77e415839f68b02c6f8fc7678b"
-    },
-    "ops": {
-      "source": ".agents/skills/ops",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://nginx.org/en/docs/http/ngx_http_proxy_module.html",
-        "https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html",
-        "https://prometheus.io/docs/practices/naming/",
-        "https://grafana.com/docs/grafana/latest/administration/provisioning/",
-        "https://docs.github.com/en/actions/reference/security/secure-use",
-        "https://www.hetzner.com/cloud/"
-      ],
-      "computedHash": "c577002e3fe4e62dfb94a599702742efe8580fea702e9565c32a042c16f2a97a"
     },
     "privy": {
       "source": "https://docs.privy.io/skill.md",
@@ -159,23 +65,6 @@
       "adapted": true,
       "computedHash": "e1e36c71546bb48e2441cc1307da0c385a30d945cc97a071bc06dbea9d755b46"
     },
-    "rust-web": {
-      "source": ".agents/skills/rust-web",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://tokio.rs/tokio/tutorial",
-        "https://tokio.rs/tokio/topics/shutdown",
-        "https://docs.rs/axum/latest/axum/",
-        "https://docs.rs/tower-http/latest/tower_http/",
-        "https://docs.rs/reqwest/latest/reqwest/",
-        "https://docs.rs/tracing/latest/tracing/",
-        "https://docs.rs/jsonwebtoken/latest/jsonwebtoken/",
-        "https://docs.rs/argon2/latest/argon2/"
-      ],
-      "computedHash": "82e7abd8d3fd858fdf445bff2fa2bd269581f41bd01925b5888c08a8b1ea242f"
-    },
     "solana-dev": {
       "source": "solana-foundation/solana-dev-skill",
       "sourceType": "github",
@@ -185,19 +74,6 @@
       "upstreamHash": "a9088a49bb742e35b6f208e28937e13835b497a39ea672eca9485f75ad3377fe",
       "adapted": true,
       "computedHash": "7ed6e3a7f5a8fcfc6b60d95fc0d872ac5c406e9fff6728e6d090c8a8582b5c0c"
-    },
-    "sqlx-sqlite": {
-      "source": ".agents/skills/sqlx-sqlite",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://docs.rs/sqlx/0.9.0/sqlx/",
-        "https://www.sqlite.org/wal.html",
-        "https://www.sqlite.org/lang_transaction.html",
-        "https://www.sqlite.org/backup.html"
-      ],
-      "computedHash": "6c38a30e48781eaf09c3adeafb4954caabc32a226df888bd56e8e3b17f01a357"
     },
     "tauri-architecture": {
       "source": "fxckcode/tauri-skills",
@@ -249,20 +125,6 @@
       "adapted": true,
       "computedHash": "973d5b762f07cfdd20eedc27d351774645e6968bffabcfd79c8e7c77a188ba03"
     },
-    "triton-rpc": {
-      "source": ".agents/skills/triton-rpc",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://docs.triton.one/llms.txt",
-        "https://docs.triton.one/",
-        "https://github.com/rpcpool/yellowstone-grpc",
-        "https://solana.com/docs/rpc",
-        "https://www.hetzner.com/cloud/"
-      ],
-      "computedHash": "a6d698d87b0688b00da490ce77e16b598245b562169efbfe2da5099c9980f5c3"
-    },
     "vercel-react-best-practices": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",
@@ -292,22 +154,6 @@
       "upstreamHash": "21af2b13d47d31f3094b61c0f41abc8d6a7eed0df3c9a4029ea671f6978b7209",
       "adapted": true,
       "computedHash": "b58023efbafd4df7527a36384cc5851186b8028bf381b4da2e431926d5839ca9"
-    },
-    "web-ui": {
-      "source": ".agents/skills/web-ui",
-      "sourceType": "local",
-      "skillPath": "SKILL.md",
-      "provenance": "docs-derived",
-      "sourceUrls": [
-        "https://www.typescriptlang.org/docs/handbook/intro.html",
-        "https://react.dev/learn",
-        "https://reactrouter.com/7.18.4/start/declarative/routing",
-        "https://motion.dev/docs/react",
-        "https://echarts.apache.org/handbook/en/",
-        "https://lucide.dev/guide/packages/lucide-react",
-        "https://playwright.dev/docs/intro"
-      ],
-      "computedHash": "7ad099597b7ae5912c8a960646f88479edc9ca134c235202f74825dad1a45af3"
     }
   }
 }
