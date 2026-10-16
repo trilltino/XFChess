@@ -319,6 +319,15 @@ impl Plugin for GamePlugin {
         app.init_resource::<crate::ui::game::game_2d::Board2DLayout>();
         app.init_resource::<crate::ui::game::game_2d::EvalBarState>();
         app.init_resource::<crate::ui::game::game_2d::EvalHistory>();
+        app.add_systems(
+            OnEnter(crate::core::GameState::InGame),
+            crate::ui::game::game_2d::reset_evaluation,
+        );
+        app.add_systems(
+            OnExit(crate::core::states::InGameplay),
+            crate::ui::game::game_2d::reset_evaluation,
+        );
+
         app.init_resource::<crate::ui::game::game_2d::BoardFocus>();
         app.init_resource::<crate::ui::game::game_2d::CheckmateFlashState>();
         app.init_resource::<crate::ui::game::game_2d::BoardFadeState>();

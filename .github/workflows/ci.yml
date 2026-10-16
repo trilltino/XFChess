@@ -25,7 +25,13 @@ jobs:
             libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev \
             libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Check
-        run: cargo check --workspace --all-features
+        run: |
+          cargo check -p xfchess --all-targets
+          cargo check -p xfchess --all-targets --features solana
+          cargo check -p backend --all-targets
+          cargo check -p xfchess-game
+      - name: Verify application engine dependency boundary
+        run: pwsh -NoProfile -File scripts/check_engine_dependencies.ps1
 
   fmt:
     name: Format
@@ -55,7 +61,10 @@ jobs:
             libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev \
             libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Clippy
-        run: cargo clippy --workspace --all-features -- -D warnings
+        run: |
+          cargo clippy -p xfchess --all-targets --features solana -- -D warnings
+          cargo clippy -p backend -p xfchess-rules -p xfchess-stockfish --all-targets -- -D warnings
+          cargo clippy -p xfchess-game -- -D warnings
         continue-on-error: true
 
   test:
@@ -81,10 +90,12 @@ jobs:
         run: |
           export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
           cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml
-      - name: Run tests
-        run: cargo test --workspace
-
-  # Engine tests run in the sibling nimzovich repository.
+      - name: Application and engine tests (isolated from contract features)
+        run: cargo test -p xfchess -p backend -p xfchess-rules -p xfchess-stockfish
+      - name: Contract tests, including host-rules compatibility
+        run: cargo test -p xfchess-game
+      - name: Remaining workspace tests
+        run: cargo test --workspace --exclude xfchess --exclude backend --exclude xfchess-game --exclude xfchess-rules --exclude xfchess-stockfish
 
   wasm-build:
     name: WASM Build

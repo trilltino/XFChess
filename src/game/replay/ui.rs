@@ -29,24 +29,15 @@ pub fn replay_ui_system(
         match rx.try_recv() {
             Ok(Ok(text)) => {
                 replay.is_loading_file = false;
-                match nimzovich_engine::parse_pgn(&text) {
+                match xfchess_rules::parse_pgn(&text) {
                     Ok(pgn) => {
-                        let mut temp = new_game_no_tt();
-                        let mut snapshots =
-                            vec!["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-                                .to_string()];
-                        for (i, san) in pgn.moves.iter().enumerate() {
-                            match san_to_move(&mut temp, san) {
-                                Ok((src, dst, promo)) => {
-                                    do_move_with_promo(&mut temp, src, dst, true, promo);
-                                    snapshots.push(game_to_fen(&temp));
-                                }
-                                Err(e) => {
-                                    warn!("[REPLAY] Failed move {} '{}': {:?}", i + 1, san, e);
-                                    break;
-                                }
+                        let snapshots = match pgn.snapshots() {
+                            Ok(snapshots) => snapshots,
+                            Err(error) => {
+                                replay.pgn_input_error = Some(error);
+                                return;
                             }
-                        }
+                        };
                         replay.fen_snapshots = snapshots;
                         replay.current_ply = 0;
                         replay.board_ready = false;
@@ -212,6 +203,9 @@ pub fn replay_ui_system(
                             );
 
                             for (i, &score) in scores.iter().enumerate() {
+                                let Some(score) = score else {
+                                    continue;
+                                };
                                 let x = rect.left() + i as f32 * bar_w;
                                 let clamped = score.clamp(-800, 800) as f32;
                                 let frac = clamped / 800.0;
@@ -234,10 +228,7 @@ pub fn replay_ui_system(
                             }
 
                             // Current ply marker
-                            let cur = replay
-                                .current_ply
-                                .saturating_sub(1)
-                                .min(n.saturating_sub(1));
+                            let cur = replay.current_ply.min(n.saturating_sub(1));
                             let cx = rect.left() + cur as f32 * bar_w + bar_w / 2.0;
                             painter.line_segment(
                                 [

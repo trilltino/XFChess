@@ -12,9 +12,7 @@ use crate::rendering::pieces::{
 };
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use nimzovich_engine::{
-    do_move_with_promo, game_from_fen_no_tt, game_to_fen, new_game_no_tt, san_to_move,
-};
+use xfchess_rules::{game_to_fen, new_game};
 
 mod board;
 mod ui;
@@ -23,7 +21,7 @@ pub use ui::*;
 
 #[derive(Resource, Debug, Clone)]
 pub struct ParsedPgnGameResource {
-    pub inner: nimzovich_engine::ParsedPgnGame,
+    pub inner: xfchess_rules::ParsedPgnGame,
     pub show_eval_graph: bool,
     pub puzzle_mode: bool,
     pub puzzle_revealed: bool,
@@ -31,10 +29,8 @@ pub struct ParsedPgnGameResource {
 
 #[derive(Resource)]
 pub struct PgnReplayState {
-    /// Boxed: a `Game` carries tens of KB of inline tables, and this state is
-    /// moved through commands and UI closures, where debug builds copy it onto
-    /// the stack several times.
-    pub engine: Box<nimzovich_engine::Game>,
+    /// Owned rules position for the currently selected replay ply.
+    pub engine: Box<xfchess_rules::Game>,
     pub fen_snapshots: Vec<String>,
     pub current_ply: usize,
     pub paused: bool,
@@ -61,7 +57,7 @@ pub struct PgnReplayState {
 impl Default for PgnReplayState {
     fn default() -> Self {
         Self {
-            engine: Box::new(new_game_no_tt()),
+            engine: Box::new(new_game()),
             fen_snapshots: vec![
                 "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()
             ],
@@ -110,37 +106,15 @@ pub fn setup_replay(
     // Reset replay state
     *replay = PgnReplayState::default();
 
-    // Pre-generate all FEN snapshots by applying moves sequentially
-    let mut temp_engine = new_game_no_tt();
-    replay.fen_snapshots.clear();
-    replay
-        .fen_snapshots
-        .push("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
-
-    for (i, san) in pgn.inner.moves.iter().enumerate() {
-        match san_to_move(&mut temp_engine, san) {
-            Ok((src, dst, promo)) => {
-                do_move_with_promo(&mut temp_engine, src, dst, true, promo);
-                let fen = engine_to_fen(&temp_engine);
-                replay.fen_snapshots.push(fen);
-            }
-            Err(e) => {
-                warn!(
-                    "[REPLAY] Failed to resolve move {} '{}': {:?}",
-                    i + 1,
-                    san,
-                    e
-                );
-                break;
-            }
+    replay.fen_snapshots = match pgn.inner.snapshots() {
+        Ok(snapshots) => snapshots,
+        Err(error) => {
+            warn!("[REPLAY] Invalid PGN: {error}");
+            return;
         }
-    }
-
-    info!(
-        "[REPLAY] Generated {} FEN snapshots for {} plies",
-        replay.fen_snapshots.len(),
-        pgn.inner.moves.len()
-    );
+    };
+    *replay.engine =
+        xfchess_rules::Game::from_fen(&replay.fen_snapshots[0]).expect("validated PGN position");
 
     // Sync the main ChessEngine to starting position
     engine.set_from_fen(&replay.fen_snapshots[0]).ok();
@@ -210,7 +184,9 @@ pub fn replay_apply_move_system(
     // If we have a FEN snapshot, rebuild from it (handles both forward and backward)
     if target_ply < replay.fen_snapshots.len() {
         let fen = replay.fen_snapshots[target_ply].clone();
-        *replay.engine = game_from_fen_no_tt(&fen);
+        if let Ok(position) = xfchess_rules::Game::from_fen(&fen) {
+            *replay.engine = position;
+        }
         // Trigger piece re-spawn so the board visuals update.
         replay.board_ready = false;
     } else {
@@ -234,9 +210,9 @@ mod tests {
     fn replay_state_does_not_carry_the_engine_inline() {
         // Debug builds copy a resource several times on its way through
         // commands; with the engine inline, leaving a replay overflowed the stack.
-        let engine = std::mem::size_of::<nimzovich_engine::Game>();
+        let engine = std::mem::size_of::<xfchess_rules::Game>();
         let state = std::mem::size_of::<PgnReplayState>();
-        assert!(engine > 16 * 1024, "engine is {engine} bytes");
+        assert!(engine < 4096, "rules position is {engine} bytes");
         assert!(state < 1024, "replay state is {state} bytes");
     }
 }

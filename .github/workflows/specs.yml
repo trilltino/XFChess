@@ -14,8 +14,8 @@ on:
       - src/game/systems/network_move.rs
       - backend/src/signing/routes/game_log/**
       - backend/src/signing/routes/game_log.rs
-      - crates/zarathustra_net/braid_chess/src/journal.rs
-      - crates/zarathustra_net/braid_chess/src/subscriber.rs
+      - libs/zarathustra_net/braid_chess/src/journal.rs
+      - libs/zarathustra_net/braid_chess/src/subscriber.rs
       - programs/xfchess-game/src/moves_ix/**
       - justfile
       - .github/workflows/specs.yml
@@ -31,8 +31,8 @@ on:
       - src/game/systems/network_move.rs
       - backend/src/signing/routes/game_log/**
       - backend/src/signing/routes/game_log.rs
-      - crates/zarathustra_net/braid_chess/src/journal.rs
-      - crates/zarathustra_net/braid_chess/src/subscriber.rs
+      - libs/zarathustra_net/braid_chess/src/journal.rs
+      - libs/zarathustra_net/braid_chess/src/subscriber.rs
       - programs/xfchess-game/src/moves_ix/**
       - justfile
       - .github/workflows/specs.yml

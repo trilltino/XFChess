@@ -37,7 +37,6 @@ pub struct CompetitiveMenuState {
     pub show_controls_popup: bool,
     pub show_join_popup: bool,
     pub join_game_id: String,
-    pub ai_engine: crate::game::ai::resource::AIEngine,
     pub lobby_sort: crate::multiplayer::social::LobbySort,
     pub lobby_tc_min: Option<u32>,
     pub lobby_tc_max: Option<u32>,
@@ -66,11 +65,7 @@ impl Default for CompetitiveMenuState {
             show_controls_popup: false,
             show_join_popup: false,
             join_game_id: String::new(),
-            // Android ships only XFChessEngine, so it must be the default.
-            #[cfg(target_os = "android")]
-            ai_engine: crate::game::ai::resource::AIEngine::XFChessEngine,
-            #[cfg(not(target_os = "android"))]
-            ai_engine: crate::game::ai::resource::AIEngine::Stockfish,
+
             lobby_sort: crate::multiplayer::social::LobbySort::default(),
             lobby_tc_min: None,
             lobby_tc_max: None,

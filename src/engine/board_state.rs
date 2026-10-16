@@ -1,11 +1,8 @@
 use crate::game::components::HasMoved;
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use bevy::prelude::*;
-use nimzovich_engine::{
-    game_from_fen_no_tt, generate_pseudo_legal_moves, is_legal_move, is_legal_move_unchecked,
-    set_game_from_fen, Game, BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID,
-};
 use std::collections::HashMap;
+use xfchess_rules::{Game, BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID};
 
 const STARTING_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -13,6 +10,7 @@ const STARTING_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -
 pub struct ChessEngine {
     pub fen: String,
     game: Game,
+    position_valid: bool,
     pub halfmove_clock: u32,
     pub fullmove_counter: u32,
     pub current_turn: PieceColor,
@@ -46,11 +44,12 @@ impl std::fmt::Display for UciSquare {
 
 impl Default for ChessEngine {
     fn default() -> Self {
-        // This Game only validates moves and formats SAN; skip the multi-GB search table.
-        let game = game_from_fen_no_tt(STARTING_FEN);
+        // Rules positions contain no search state.
+        let game = Game::default();
         Self {
             fen: STARTING_FEN.to_string(),
             game,
+            position_valid: true,
             halfmove_clock: 0,
             fullmove_counter: 1,
             current_turn: PieceColor::White,
@@ -82,12 +81,20 @@ impl ChessEngine {
 
     /// Splits a UCI move such as `e7e8q` into its squares and promotion piece.
     pub fn parse_uci_move(uci: &str) -> Option<((u8, u8), (u8, u8), Option<char>)> {
+        if !matches!(uci.len(), 4 | 5) || !uci.is_ascii() {
+            return None;
+        }
         let from = Self::uci_to_coords(uci.get(0..2)?)?;
         let to = Self::uci_to_coords(uci.get(2..4)?)?;
-        let promotion = uci
-            .get(4..)
-            .and_then(|rest| rest.chars().next())
-            .filter(|c| "qrbn".contains(*c));
+        let promotion = if uci.len() == 5 {
+            let c = uci.as_bytes()[4] as char;
+            if !"qrbn".contains(c) {
+                return None;
+            }
+            Some(c)
+        } else {
+            None
+        };
         Some((from, to, promotion))
     }
 
@@ -198,18 +205,34 @@ impl ChessEngine {
     }
 
     pub fn refresh_position(&mut self) {
-        set_game_from_fen(&mut self.game, &self.fen);
+        self.move_cache.clear();
+        self.move_cache_valid = false;
+        match Game::from_fen(&self.fen) {
+            Ok(game) => {
+                self.game = game;
+                self.position_valid = true;
+            }
+            Err(error) => {
+                self.position_valid = false;
+                warn!("Invalid board position: {error}");
+                self.move_cache.clear();
+                self.move_cache_valid = false;
+            }
+        }
     }
 
     pub fn rebuild_legal_move_cache(&mut self) {
         self.move_cache.clear();
-        let side = if self.fen.contains(" w ") { 1 } else { -1 };
-        let moves = generate_pseudo_legal_moves(&self.game, side);
-        for mv in moves {
-            if is_legal_move_unchecked(&mut self.game, mv.src, mv.dst, side) {
-                let from = Self::index_to_coords(mv.src);
-                let to = Self::index_to_coords(mv.dst);
-                self.move_cache.entry(from).or_default().push(to);
+        if !self.position_valid {
+            self.move_cache_valid = false;
+            return;
+        }
+        for uci in self.game.legal_moves() {
+            if let Some((from, to, _)) = Self::parse_uci_move(&uci) {
+                let destinations = self.move_cache.entry(from).or_default();
+                if !destinations.contains(&to) {
+                    destinations.push(to);
+                }
             }
         }
         self.move_cache_valid = true;
@@ -224,30 +247,7 @@ impl ChessEngine {
     }
 
     pub fn is_move_legal_by_uci(&mut self, uci: &str) -> bool {
-        if uci.len() < 4 {
-            return false;
-        }
-        let from_str = &uci[0..2];
-        let to_str = &uci[2..4];
-        let Some(from) = Self::uci_to_coords(from_str) else {
-            return false;
-        };
-        let Some(to) = Self::uci_to_coords(to_str) else {
-            return false;
-        };
-
-        if !self.move_cache.is_empty() {
-            return self
-                .move_cache
-                .get(&from)
-                .is_some_and(|dsts| dsts.contains(&to));
-        }
-
-        // Fallback: single legality check without cache
-        let side = if self.fen.contains(" w ") { 1 } else { -1 };
-        let src = Self::square_to_index(from.0, from.1);
-        let dst = Self::square_to_index(to.0, to.1);
-        is_legal_move(&mut self.game, src, dst, side)
+        self.position_valid && self.game.is_legal_uci(uci)
     }
 
     pub fn current_fen(&self) -> &str {
@@ -263,8 +263,7 @@ impl ChessEngine {
     }
 
     pub fn is_check(&self) -> bool {
-        let side = if self.fen.contains(" w ") { 1 } else { -1 };
-        nimzovich_engine::is_in_check(&self.game, side)
+        self.position_valid && self.game.is_check()
     }
 
     pub fn has_legal_moves(&self) -> bool {
@@ -280,7 +279,10 @@ impl ChessEngine {
         let src = Self::square_to_index(from.0, from.1);
         let dst = Self::square_to_index(to.0, to.1);
         let promo = promotion.map(Self::piece_type_to_id).unwrap_or(0);
-        nimzovich_engine::move_to_san(&mut self.game, src, dst, promo)
+        xfchess_rules::move_to_san(&self.game, src, dst, promo).unwrap_or_else(|e| {
+            warn!("SAN: {e}");
+            String::new()
+        })
     }
 
     pub fn legal_moves(&self) -> Vec<MoveWrapper> {
@@ -316,10 +318,13 @@ impl ChessEngine {
     }
 
     pub fn set_from_fen(&mut self, fen_str: &str) -> Result<(), String> {
-        set_game_from_fen(&mut self.game, fen_str);
-        self.fen = fen_str.to_string();
+        self.game = Game::from_fen(fen_str)?;
+        self.position_valid = true;
+        self.move_cache.clear();
+        self.move_cache_valid = false;
+        self.fen = self.game.fen();
 
-        let parts: Vec<&str> = fen_str.split_whitespace().collect();
+        let parts: Vec<&str> = self.fen.split_whitespace().collect();
         if parts.len() >= 6 {
             self.current_turn = if parts[1] == "w" {
                 PieceColor::White

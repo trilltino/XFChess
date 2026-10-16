@@ -224,7 +224,15 @@ pub fn start_timer_when_ready(
     online_session: Option<
         Res<crate::multiplayer::network::online_game_session::OnlineGameSession>,
     >,
+    ai_status: Option<Res<crate::game::ai::systems::AIEngineStatus>>,
 ) {
+    if ai_status
+        .as_ref()
+        .is_some_and(|status| status.error.is_some())
+    {
+        return;
+    }
+
     if game_timer.is_running {
         *engine_inited = false; // reset for next game
         return;

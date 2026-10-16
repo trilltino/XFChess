@@ -1,5 +1,5 @@
-use nimzovich_engine::api::game::game_from_fen;
-use nimzovich_engine::{generate_pseudo_legal_moves, is_legal_move, Color};
+use xfchess_rules::Game;
+type Color = i8;
 use xfchess_game::chess_logic_on_chain::validation::is_move_legal;
 
 fn fen_color(fen: &str) -> Color {
@@ -32,29 +32,21 @@ type UciSet = std::collections::BTreeSet<String>;
 type FromToSet = std::collections::BTreeSet<(i8, i8)>;
 
 fn engine_legal(fen: &str) -> (UciSet, FromToSet) {
-    let mut g = game_from_fen(fen);
-    let color = fen_color(fen);
+    let g = Game::from_fen(fen).unwrap();
     let mut uci = UciSet::new();
     let mut from_to = FromToSet::new();
-    for mv in generate_pseudo_legal_moves(&g, color) {
-        if is_legal_move(&mut g, mv.src, mv.dst, color) {
-            // promo id lives in the high nibble of nxt_dir_idx (5=q,4=r,3=b,2=n)
-            let promo = match (mv.nxt_dir_idx >> 4) as i8 {
-                5 => "q",
-                4 => "r",
-                3 => "b",
-                2 => "n",
-                _ => "",
-            };
-            uci.insert(coord_uci(mv.src, mv.dst, promo));
-            from_to.insert((mv.src, mv.dst));
-        }
+    for mv in g.legal_moves() {
+        let b = mv.as_bytes();
+        let src = ((b[1] - b'1') * 8 + b[0] - b'a') as i8;
+        let dst = ((b[3] - b'1') * 8 + b[2] - b'a') as i8;
+        from_to.insert((src, dst));
+        uci.insert(mv);
     }
     (uci, from_to)
 }
 
 fn from_squares(fen: &str) -> Vec<i8> {
-    let g = game_from_fen(fen);
+    let g = Game::from_fen(fen).unwrap();
     let color = fen_color(fen);
     (0..64i8)
         .filter(|&sq| {

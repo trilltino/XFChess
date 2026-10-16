@@ -150,7 +150,11 @@ impl BoardView {
             // Use the engine's side to move for check; replay and network lag can
             // leave CurrentTurn stale.
             check_color: input_params.engine.side_to_move(),
-            last_move: input_params.move_history.moves.last().map(|m| (m.from, m.to)),
+            last_move: input_params
+                .move_history
+                .moves
+                .last()
+                .map(|m| (m.from, m.to)),
             theme,
             capture_flashes,
             pieces,
@@ -161,7 +165,13 @@ impl BoardView {
         }
     }
 
-    fn draw_piece(&self, painter: &egui::Painter, piece: (PieceType, PieceColor), rect: egui::Rect, tint: egui::Color32) {
+    fn draw_piece(
+        &self,
+        painter: &egui::Painter,
+        piece: (PieceType, PieceColor),
+        rect: egui::Rect,
+        tint: egui::Color32,
+    ) {
         if let Some(id) = self.textures.get(&piece) {
             painter.image(
                 *id,
@@ -322,7 +332,10 @@ fn handle_board_pointer(
     // Right-click drag release → store arrow
     if board_resp.drag_stopped_by(egui::PointerButton::Secondary) {
         if let Some(from) = extras.arrows.drag_from.take() {
-            if let Some(to) = board_resp.interact_pointer_pos().and_then(|p| geom.square_at(p)) {
+            if let Some(to) = board_resp
+                .interact_pointer_pos()
+                .and_then(|p| geom.square_at(p))
+            {
                 if to != from {
                     extras
                         .arrows
@@ -380,7 +393,10 @@ fn draw_square(
     painter.rect_filled(sq_rect, 0.0, view.theme.sq_color(file, rank));
 
     // Last-move highlight (golden tint, below selection)
-    if view.last_move.is_some_and(|(from, to)| sq == from || sq == to) {
+    if view
+        .last_move
+        .is_some_and(|(from, to)| sq == from || sq == to)
+    {
         painter.rect_filled(sq_rect, 0.0, tint(90, 205, 210, 100));
     }
     // Premove highlight (cyan tint)
@@ -445,8 +461,16 @@ fn draw_square(
     }
 
     // In-board corner coordinate labels (Lichess style)
-    let is_bottom_row = if view.black_view { rank == 7 } else { rank == 0 };
-    let is_left_col = if view.black_view { file == 7 } else { file == 0 };
+    let is_bottom_row = if view.black_view {
+        rank == 7
+    } else {
+        rank == 0
+    };
+    let is_left_col = if view.black_view {
+        file == 7
+    } else {
+        file == 0
+    };
     let label_color = view.theme.label_color(file, rank);
     let font = egui::FontId::proportional(9.0);
     if is_left_col {
@@ -538,8 +562,7 @@ fn draw_promotion_picker(
     if !extras.promotion.is_active() {
         return;
     }
-    let (Some((pf, pr)), Some(pcolor)) = (extras.promotion.position, extras.promotion.color)
-    else {
+    let (Some((pf, pr)), Some(pcolor)) = (extras.promotion.position, extras.promotion.color) else {
         return;
     };
     painter.rect_filled(
@@ -670,6 +693,21 @@ fn draw_eval_bar(painter: &egui::Painter, geom: BoardGeom, extras: &Board2DExtra
         egui::Vec2::new(bar_w, board_size),
     );
     painter.rect_filled(bar_rect, 3.0, egui::Color32::from_rgb(40, 40, 40));
+    if extras.eval_bar.status != EvaluationStatus::Ready {
+        let label = if extras.eval_bar.status == EvaluationStatus::Pending {
+            "..."
+        } else {
+            "?"
+        };
+        painter.text(
+            bar_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(10.0),
+            egui::Color32::GRAY,
+        );
+        return;
+    }
     let white_h = board_size * extras.eval_bar.white_fraction();
     let white_rect = egui::Rect::from_min_size(
         egui::Pos2::new(bar_x, geom.rect.max.y - white_h),
@@ -678,9 +716,9 @@ fn draw_eval_bar(painter: &egui::Painter, geom: BoardGeom, extras: &Board2DExtra
     painter.rect_filled(white_rect, 3.0, egui::Color32::from_rgb(230, 230, 230));
 
     let abs_cp = extras.eval_bar.score.unsigned_abs();
-    if abs_cp > 20 {
-        let label = if abs_cp >= 1000 {
-            format!("M{}", abs_cp / 100)
+    if abs_cp > 20 || extras.eval_bar.mate.is_some() {
+        let label = if let Some(mate) = extras.eval_bar.mate {
+            format!("M{}", mate.unsigned_abs())
         } else {
             format!("{:.1}", abs_cp as f32 / 100.0)
         };
@@ -710,10 +748,7 @@ fn draw_check_badge(painter: &egui::Painter, geom: BoardGeom, view: &BoardView) 
     };
     let (badge_w, badge_h) = (200.0_f32, 32.0_f32);
     let badge_rect = egui::Rect::from_min_size(
-        egui::Pos2::new(
-            geom.rect.center().x - badge_w / 2.0,
-            geom.rect.min.y + 8.0,
-        ),
+        egui::Pos2::new(geom.rect.center().x - badge_w / 2.0, geom.rect.min.y + 8.0),
         egui::Vec2::new(badge_w, badge_h),
     );
     painter.rect_filled(
@@ -731,7 +766,10 @@ fn draw_check_badge(painter: &egui::Painter, geom: BoardGeom, view: &BoardView) 
 }
 
 /// The piece on a square.
-fn piece_on(input_params: &mut InputSystemParams, (file, rank): (u8, u8)) -> Option<(Entity, Piece)> {
+fn piece_on(
+    input_params: &mut InputSystemParams,
+    (file, rank): (u8, u8),
+) -> Option<(Entity, Piece)> {
     input_params
         .pieces
         .p1()

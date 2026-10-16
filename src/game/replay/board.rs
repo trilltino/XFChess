@@ -116,12 +116,12 @@ pub fn replay_spawn_pieces_system(
     info!("[REPLAY] Pieces spawned successfully");
 }
 
-pub(super) fn engine_to_fen(game: &nimzovich_engine::Game) -> String {
+pub(super) fn engine_to_fen(game: &xfchess_rules::Game) -> String {
     game_to_fen(game)
 }
 
 pub(super) fn engine_id_to_piece_type(id: i8) -> PieceType {
-    use nimzovich_engine::{BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID};
+    use xfchess_rules::{BISHOP_ID, KING_ID, KNIGHT_ID, PAWN_ID, QUEEN_ID, ROOK_ID};
     match id {
         PAWN_ID => PieceType::Pawn,
         KNIGHT_ID => PieceType::Knight,

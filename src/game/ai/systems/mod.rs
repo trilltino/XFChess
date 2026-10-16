@@ -12,19 +12,17 @@ use crate::game::resources::{CapturedPieces, CurrentGamePhase, CurrentTurn, Move
 use crate::game::systems::shared::{execute_move, CapturedTarget, MoveContext};
 use bevy::ecs::system::{ParamSet, SystemParam};
 use bevy::prelude::*;
-use bevy::tasks::{AsyncComputeTaskPool, Task};
-use std::env;
-use std::io::{BufRead, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use xfchess_stockfish::{EnginePosition, SearchRequest, SearchTicket};
 
 mod stockfish;
 pub use stockfish::*;
 
 #[derive(Resource)]
 pub struct PendingAIMove {
-    pub task: Task<Result<AIMove, String>>,
+    pub ticket: SearchTicket,
+    fen: String,
+    game_id: u64,
     spawned_at: Instant,
     min_reveal_delay: Duration,
 }
@@ -33,10 +31,16 @@ pub struct PendingAIMove {
 pub struct AIMovePendingReveal {
     result: Result<AIMove, String>,
     ready_at: Instant,
+    fen: String,
+    game_id: u64,
 }
 
-#[derive(Resource, Clone)]
-pub struct XFChessGamePool(pub std::sync::Arc<std::sync::Mutex<Option<nimzovich_engine::Game>>>);
+#[derive(Resource, Default)]
+pub struct AIEngineStatus {
+    pub game_id: u64,
+    pub error: Option<String>,
+    pub clock_was_running: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct AIMove {
@@ -63,12 +67,12 @@ pub struct AIPlugin;
 impl Plugin for AIPlugin {
     fn build(&self, app: &mut App) {
         use crate::core::states::{GameMode, InGameplay};
-        use crate::game::ai::resource::AIEngine;
 
         // The AI only plays in vs-AI games; replay, spectating, puzzles and
         // online games never start a search.
         app.init_resource::<ChessAIResource>()
             .init_resource::<AIStatistics>()
+            .init_resource::<AIEngineStatus>()
             .register_type::<ChessAIResource>()
             .register_type::<AIStatistics>()
             .add_systems(
@@ -83,49 +87,84 @@ impl Plugin for AIPlugin {
             )
             .add_systems(
                 OnEnter(crate::core::GameState::InGame),
-                (
-                    warmup_xf_engine_pool.run_if(engine_is(AIEngine::XFChessEngine)),
-                    warm_up_stockfish.run_if(engine_is(AIEngine::Stockfish)),
-                )
+                (begin_ai_game, warm_up_stockfish)
+                    .chain()
+                    .after(clear_pending_ai_tasks)
                     .run_if(resource_equals(GameMode::SinglePlayer)),
             )
             // A search still running when the player leaves is dropped, not applied
             // to whatever is on the board next.
-            .add_systems(OnExit(InGameplay), clear_pending_ai_tasks);
+            .add_systems(
+                OnExit(InGameplay),
+                (clear_pending_ai_tasks, stop_stockfish).chain(),
+            )
+            .add_systems(
+                OnEnter(crate::core::GameState::GameOver),
+                clear_pending_ai_tasks,
+            );
 
-        let _pool = AsyncComputeTaskPool::get_or_init(Default::default);
+        app.add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            engine_error_dialog.run_if(resource_equals(GameMode::SinglePlayer)),
+        );
     }
 }
 
-/// Whether `engine` is the chosen AI engine.
-pub fn engine_is(
-    engine: crate::game::ai::resource::AIEngine,
-) -> impl FnMut(Res<ChessAIResource>) -> bool + Clone {
-    move |ai: Res<ChessAIResource>| ai.engine == engine
-}
-
-pub fn clear_pending_ai_tasks(mut commands: Commands) {
+fn begin_ai_game(mut status: ResMut<AIEngineStatus>, mut commands: Commands) {
+    status.game_id = status.game_id.wrapping_add(1);
+    status.error = None;
+    status.clock_was_running = false;
     commands.remove_resource::<PendingAIMove>();
     commands.remove_resource::<AIMovePendingReveal>();
 }
 
-fn warmup_xf_engine_pool(mut commands: Commands) {
-    let pool_arc = std::sync::Arc::new(std::sync::Mutex::new(None::<nimzovich_engine::Game>));
-    let fill = pool_arc.clone();
+pub fn clear_pending_ai_tasks(mut commands: Commands, status: Option<ResMut<AIEngineStatus>>) {
+    commands.remove_resource::<PendingAIMove>();
+    commands.remove_resource::<AIMovePendingReveal>();
+    if let Some(mut status) = status {
+        status.game_id = status.game_id.wrapping_add(1);
+        status.error = None;
+    }
+}
 
-    AsyncComputeTaskPool::get()
-        .spawn(async move {
-            let game = nimzovich_engine::game_from_fen(
-                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-            );
-            if let Ok(mut slot) = fill.lock() {
-                *slot = Some(game);
+fn stop_stockfish(mut commands: Commands) {
+    commands.remove_resource::<StockfishProcess>();
+}
+
+fn engine_error_dialog(
+    mut contexts: bevy_egui::EguiContexts,
+    mut status: ResMut<AIEngineStatus>,
+    mut timer: Option<ResMut<crate::game::resources::GameTimer>>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+    mut commands: Commands,
+) {
+    let Some(error) = status.error.clone() else {
+        return;
+    };
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    bevy_egui::egui::Window::new("Stockfish unavailable")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(
+            bevy_egui::egui::Align2::CENTER_CENTER,
+            bevy_egui::egui::Vec2::ZERO,
+        )
+        .show(ctx, |ui| {
+            ui.label("The game is paused because Stockfish could not complete its move.");
+            ui.label(error);
+            if ui.button("Retry").clicked() {
+                status.error = None;
+                if let Some(timer) = timer.as_mut() {
+                    timer.is_running = status.clock_was_running;
+                }
+                commands.remove_resource::<StockfishProcess>();
             }
-        })
-        .detach();
-
-    commands.insert_resource(XFChessGamePool(pool_arc));
-    info!("[AI] XFChess engine warm-up started");
+            if ui.button("Return to menu").clicked() {
+                next_state.set(crate::core::GameState::MainMenu);
+            }
+        });
 }
 
 #[derive(SystemParam)]
@@ -142,7 +181,7 @@ pub struct AiSpawnParams<'w, 's> {
     pub sf_process: Option<Res<'w, StockfishProcess>>,
     pub move_history: Res<'w, crate::game::resources::MoveHistory>,
     pub active_tc: Option<Res<'w, crate::game::resources::active_time_control::ActiveTimeControl>>,
-    pub game_pool: Option<Res<'w, XFChessGamePool>>,
+    pub status: Res<'w, AIEngineStatus>,
 }
 
 fn compute_think_params(
@@ -199,7 +238,8 @@ pub struct AiPollParams<'w, 's> {
     pub engine: ResMut<'w, ChessEngine>,
     pub sounds: Option<Res<'w, crate::game::resources::GameSounds>>,
     pub active_tc: Option<Res<'w, crate::game::resources::active_time_control::ActiveTimeControl>>,
-    pub game_pool: Option<Res<'w, XFChessGamePool>>,
+    pub status: ResMut<'w, AIEngineStatus>,
+    pub timer: Option<ResMut<'w, crate::game::resources::GameTimer>>,
     pub move_events: MessageWriter<'w, MoveMadeEvent>,
 }
 
@@ -216,141 +256,61 @@ fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
         return;
     }
 
-    // FEN is already current — game_logic.rs synced the engine and built the move cache.
-    let fen = params.engine.current_fen().to_string();
-    let depth = params.ai_config.difficulty.stockfish_depth();
-    let movetime_ms = params.ai_config.difficulty.stockfish_movetime_ms();
-    let ai_color = params.ai_config.mode.ai_color();
-
-    let spawned_at = Instant::now();
-    let (min_delay_ms, max_delay_ms) = params.ai_config.difficulty.thinking_delay_range_ms();
-    let min_reveal_delay = Duration::from_millis(rand::random_range(min_delay_ms..=max_delay_ms));
-
-    match params.ai_config.engine {
-        crate::game::ai::resource::AIEngine::Stockfish => {
-            info!("[AI] Spawning Stockfish task (persistent process)");
-            let base_think = movetime_ms.unwrap_or(1500) as f32 / 1000.0;
-            let (think_time, max_depth) = compute_think_params(
-                base_think,
-                params.move_history.len(),
-                params.active_tc.as_deref(),
-            );
-            let depth = max_depth
-                .map(|cap| depth.unwrap_or(cap).min(cap))
-                .or(depth)
-                .unwrap_or(12);
-            let movetime = (think_time * 1000.0).round().max(1.0) as u64;
-            let strength_elo = params.ai_config.difficulty.stockfish_elo();
-
-            // The task starts the process itself if no warm-up has.
-            let process = params.sf_process.as_deref().cloned().unwrap_or_else(|| {
-                let process = StockfishProcess::default();
-                commands.insert_resource(process.clone());
-                process
-            });
-
-            let task = spawn_stockfish_task_persistent(fen, depth, movetime, strength_elo, process);
-            commands.insert_resource(PendingAIMove {
-                task,
-                spawned_at,
-                min_reveal_delay,
-            });
-        }
-        crate::game::ai::resource::AIEngine::XFChessEngine => {
-            let base_think = params.ai_config.difficulty.seconds_per_move();
-            let (think_time, max_depth) = compute_think_params(
-                base_think,
-                params.move_history.len(),
-                params.active_tc.as_deref(),
-            );
-            info!(
-                "[AI] Spawning XFChessEngine task — think_time={:.2}s max_depth={:?}",
-                think_time, max_depth
-            );
-            // Reuse the pooled Game to avoid reallocating its 2.2 GB search table each move.
-            // Return it to the pool after searching.
-            let pool_arc = params.game_pool.as_ref().map(|p| p.0.clone());
-            let preloaded = pool_arc.as_ref().and_then(|arc| arc.lock().ok()?.take());
-            let task =
-                spawn_xf_engine_task(fen, think_time, max_depth, ai_color, preloaded, pool_arc);
-            commands.insert_resource(PendingAIMove {
-                task,
-                spawned_at,
-                min_reveal_delay,
-            });
-        }
+    if params.status.error.is_some() {
+        return;
     }
-}
-
-fn spawn_xf_engine_task(
-    fen: String,
-    think_time: f32,
-    max_depth: Option<u8>,
-    color: crate::rendering::pieces::PieceColor,
-    preloaded_game: Option<nimzovich_engine::Game>,
-    pool: Option<std::sync::Arc<std::sync::Mutex<Option<nimzovich_engine::Game>>>>,
-) -> Task<Result<AIMove, String>> {
-    AsyncComputeTaskPool::get().spawn(async move {
-        let start_time = Instant::now();
-
-        // Reuse the pre-warmed game to skip the 2.2 GB TT zero-write.
-        // If the warm-up hasn't finished yet, fall back to allocating a new game.
-        let mut game = match preloaded_game {
-            Some(mut g) => {
-                nimzovich_engine::set_game_from_fen(&mut g, &fen);
-                g
-            }
-            None => nimzovich_engine::game_from_fen(&fen),
-        };
-
-        game.secs_per_move = think_time;
-        if let Some(d) = max_depth {
-            game.abs_max_depth = d as i64;
+    let fen = params.engine.current_fen().to_string();
+    let (think_time, max_depth) = compute_think_params(
+        params.ai_config.difficulty.seconds_per_move(),
+        params.move_history.len(),
+        params.active_tc.as_deref(),
+    );
+    let depth = params
+        .ai_config
+        .difficulty
+        .stockfish_depth()
+        .map(|d| max_depth.map_or(d, |cap| cap.min(d)));
+    let process = match params
+        .sf_process
+        .as_deref()
+        .cloned()
+        .map(Ok)
+        .unwrap_or_else(StockfishProcess::start)
+    {
+        Ok(process) => process,
+        Err(error) => {
+            commands.queue(move |world: &mut World| {
+                world.resource_mut::<AIEngineStatus>().error = Some(error);
+            });
+            return;
         }
-
-        let engine_color = match color {
-            crate::rendering::pieces::PieceColor::White => 1,
-            crate::rendering::pieces::PieceColor::Black => -1,
-        };
-
-        let mv = nimzovich_engine::reply(&mut game, engine_color).await;
-
-        let depth_reached = game.max_depth_so_far as u8;
-
-        if let Some(arc) = pool {
-            if let Ok(mut guard) = arc.lock() {
-                *guard = Some(game);
-            }
-        }
-
-        let from_file = mv.src as u8 % 8;
-        let from_rank = mv.src as u8 / 8;
-        let to_file = mv.dst as u8 % 8;
-        let to_rank = mv.dst as u8 / 8;
-
-        let from_uci = ChessEngine::coords_to_uci(from_file, from_rank);
-        let to_uci = ChessEngine::coords_to_uci(to_file, to_rank);
-
-        let promo_char = match mv.promo {
-            5 => "q",
-            4 => "r",
-            3 => "b",
-            2 => "n",
-            _ => "",
-        };
-
-        let uci = format!("{}{}{}", from_uci, to_uci, promo_char);
-
-        Ok(AIMove {
-            from: (from_file, from_rank),
-            to: (to_file, to_rank),
-            uci,
-            score: mv.score as i32,
-            depth: depth_reached,
-            thinking_time: start_time.elapsed().as_secs_f32(),
-            nodes: 0,
-        })
-    })
+    };
+    commands.insert_resource(process.clone());
+    let mut position = EnginePosition::from_fen(xfchess_rules::STARTING_FEN);
+    position.moves = params
+        .move_history
+        .iter()
+        .map(|record| record.uci())
+        .collect();
+    // Custom starts and restored boards may not have a complete local move log.
+    if position.game().map(|g| g.fen()).as_deref() != Ok(fen.as_str()) {
+        position = EnginePosition::from_fen(fen.clone());
+    }
+    let ticket = process.0.search(SearchRequest {
+        game_id: params.status.game_id,
+        position,
+        movetime_ms: (think_time * 1000.0).round().max(1.0) as u64,
+        depth,
+        strength_elo: params.ai_config.difficulty.stockfish_elo(),
+    });
+    let (min, max) = params.ai_config.difficulty.thinking_delay_range_ms();
+    commands.insert_resource(PendingAIMove {
+        ticket,
+        fen,
+        game_id: params.status.game_id,
+        spawned_at: Instant::now(),
+        min_reveal_delay: Duration::from_millis(rand::random_range(min..=max)),
+    });
 }
 
 fn normalized_move_uci(from: (u8, u8), to: (u8, u8), promotion: Option<char>) -> String {
@@ -433,35 +393,68 @@ fn should_skip_ai_spawn(
 
 #[allow(clippy::too_many_arguments)]
 fn poll_ai_task_system(mut commands: Commands, mut params: AiPollParams) {
-    // A move already finished computing and is waiting out its reveal delay.
-    if let Some(pending_reveal) = params.pending_reveal.as_ref() {
-        if Instant::now() < pending_reveal.ready_at {
+    if params.status.error.is_some() {
+        if let Some(timer) = params.timer.as_mut() {
+            status_pause_clock(&mut params.status, timer);
+        }
+        return;
+    }
+    if let Some(reveal) = params.pending_reveal.as_ref() {
+        if reveal.game_id != params.status.game_id || reveal.fen != params.engine.current_fen() {
+            commands.remove_resource::<AIMovePendingReveal>();
             return;
         }
-        let result = pending_reveal.result.clone();
+        if Instant::now() < reveal.ready_at {
+            return;
+        }
+        let result = reveal.result.clone();
         commands.remove_resource::<AIMovePendingReveal>();
         apply_ai_result(result, &mut commands, &mut params);
         return;
     }
-
-    let Some(task_resource) = params.task_resource.as_mut() else {
+    let Some(task) = params.task_resource.as_ref() else {
         return;
     };
-
-    // Poll the in-flight search task.
-    let Some(result) =
-        futures_lite::future::block_on(futures_lite::future::poll_once(&mut task_resource.task))
-    else {
+    if task.game_id != params.status.game_id || task.fen != params.engine.current_fen() {
+        commands.remove_resource::<PendingAIMove>();
+        return;
+    }
+    let Some(result) = task.ticket.try_result() else {
         return;
     };
-
-    let ready_at = task_resource.spawned_at + task_resource.min_reveal_delay;
+    let result = result.and_then(|result| {
+        let uci = result.best_move.ok_or("Stockfish returned no move")?;
+        let (from, to, _) = ChessEngine::parse_uci_move(&uci).ok_or("Invalid Stockfish move")?;
+        Ok(AIMove {
+            from,
+            to,
+            uci,
+            score: result.score.map_or(0, |s| s.centipawns()),
+            depth: result.depth,
+            nodes: result.nodes,
+            thinking_time: result.elapsed,
+        })
+    });
+    let ready_at = task.spawned_at + task.min_reveal_delay;
+    let fen = task.fen.clone();
+    let game_id = task.game_id;
     commands.remove_resource::<PendingAIMove>();
-
-    if Instant::now() >= ready_at {
+    if Instant::now() >= ready_at || result.is_err() {
         apply_ai_result(result, &mut commands, &mut params);
     } else {
-        commands.insert_resource(AIMovePendingReveal { result, ready_at });
+        commands.insert_resource(AIMovePendingReveal {
+            result,
+            ready_at,
+            fen,
+            game_id,
+        });
+    }
+}
+
+fn status_pause_clock(status: &mut AIEngineStatus, timer: &mut crate::game::resources::GameTimer) {
+    if timer.is_running {
+        status.clock_was_running = true;
+        timer.is_running = false;
     }
 }
 
@@ -474,10 +467,7 @@ fn apply_ai_result(
 
     match result {
         Ok(ai_move) => {
-            info!(
-                "[AI] {:?} search finished: {}",
-                params.ai_config.engine, ai_move.uci
-            );
+            info!("[AI] Stockfish search finished: {}", ai_move.uci);
             move_found = Some(ai_move.uci);
 
             params.ai_stats.last_score = ai_move.score as i64;
@@ -487,28 +477,10 @@ fn apply_ai_result(
         }
         Err(e) => {
             error!("[AI] Stockfish task failed: {}", e);
-            let base_think = params.ai_config.difficulty.seconds_per_move();
-            let (think_time, max_depth) = compute_think_params(
-                base_think,
-                params.move_history.len(),
-                params.active_tc.as_deref(),
-            );
-            let pool_arc = params.game_pool.as_ref().map(|p| p.0.clone());
-            let preloaded = pool_arc.as_ref().and_then(|arc| arc.lock().ok()?.take());
-            let fallback = spawn_xf_engine_task(
-                params.engine.current_fen().to_string(),
-                think_time,
-                max_depth,
-                params.ai_config.mode.ai_color(),
-                preloaded,
-                pool_arc,
-            );
-            commands.insert_resource(PendingAIMove {
-                task: fallback,
-                spawned_at: Instant::now(),
-                min_reveal_delay: Duration::from_millis(0),
-            });
-            warn!("[AI] Falling back to XFChessEngine for this move");
+            params.status.error = Some(e);
+            if let Some(timer) = params.timer.as_mut() {
+                status_pause_clock(&mut params.status, timer);
+            }
             return;
         }
     }
@@ -548,7 +520,10 @@ fn apply_ai_result(
             let move_uci = normalized_move_uci(from_coords, to_coords, promotion_char);
 
             if !params.engine.is_move_legal_by_uci(&move_uci) {
-                warn!("[AI] Engine suggested illegal move {}", move_uci);
+                params.status.error = Some(format!("Stockfish move no longer legal: {move_uci}"));
+                if let Some(timer) = params.timer.as_mut() {
+                    status_pause_clock(&mut params.status, timer);
+                }
                 return;
             }
 
@@ -583,7 +558,11 @@ fn apply_ai_result(
                     &params.current_turn,
                 );
             } else {
-                warn!("[AI] Could not find valid piece at {:?}", from_coords);
+                params.status.error =
+                    Some(format!("No board piece for Stockfish move {best_move_str}"));
+                if let Some(timer) = params.timer.as_mut() {
+                    status_pause_clock(&mut params.status, timer);
+                }
             }
         }
     }
@@ -617,7 +596,7 @@ fn find_move_entities(
 mod tests {
     use super::*;
     use crate::core::states::{GameMode, GameState};
-    use crate::game::ai::resource::AIEngine;
+
     use crate::game::resources::player::{Player, Players};
     use crate::rendering::pieces::PieceColor;
 
@@ -628,7 +607,6 @@ mod tests {
             .init_state::<GameState>()
             .insert_resource(mode)
             .insert_resource(ChessAIResource {
-                engine: AIEngine::Stockfish,
                 ..Default::default()
             })
             .insert_resource(CurrentTurn {
@@ -670,83 +648,7 @@ mod tests {
                 !world.contains_resource::<StockfishProcess>(),
                 "{mode:?} started Stockfish"
             );
-            assert!(
-                !world.contains_resource::<XFChessGamePool>(),
-                "{mode:?} warmed the engine"
-            );
         }
-    }
-
-    #[test]
-    fn engine_condition_matches_the_chosen_engine() {
-        let mut world = World::new();
-        world.insert_resource(ChessAIResource {
-            engine: AIEngine::Stockfish,
-            ..Default::default()
-        });
-        use bevy::ecs::system::RunSystemOnce;
-        assert!(world
-            .run_system_once(engine_is(AIEngine::Stockfish))
-            .unwrap());
-        assert!(!world
-            .run_system_once(engine_is(AIEngine::XFChessEngine))
-            .unwrap());
-    }
-
-    /// Starts the real engine: `cargo test stockfish_process -- --ignored`.
-    #[test]
-    #[ignore = "launches the Stockfish binary"]
-    fn stockfish_process_starts_once_and_survives_a_failed_search() {
-        let _pool = AsyncComputeTaskPool::get_or_init(Default::default);
-        if resolve_stockfish_path().is_err() {
-            eprintln!("no Stockfish binary; skipping");
-            return;
-        }
-        let process = StockfishProcess::default();
-        let search = |fen: &str| {
-            futures_lite::future::block_on(spawn_stockfish_task_persistent(
-                fen.to_string(),
-                8,
-                100,
-                Some(1600),
-                process.clone(),
-            ))
-        };
-
-        let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        let first = search(start).expect("a move from the start position");
-        assert!(first.uci.len() >= 4, "{}", first.uci);
-
-        // White is checkmated: no move, so the process is dropped...
-        let mated = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
-        assert!(search(mated).is_err());
-        // ...and the next search starts a fresh one.
-        assert!(search(start).is_ok());
-    }
-
-    #[test]
-    fn limited_stockfish_commands_set_strength() {
-        assert_eq!(
-            stockfish_strength_commands(Some(1600)),
-            vec![
-                "setoption name UCI_LimitStrength value true",
-                "setoption name UCI_Elo value 1600",
-            ]
-        );
-    }
-
-    #[test]
-    fn unrestricted_stockfish_commands_disable_strength_limit() {
-        assert_eq!(
-            stockfish_strength_commands(None),
-            vec!["setoption name UCI_LimitStrength value false"]
-        );
-    }
-
-    #[test]
-    fn search_command_prefers_time_budget() {
-        assert_eq!(stockfish_search_command(12, 750), "go movetime 750");
-        assert_eq!(stockfish_search_command(12, 0), "go depth 12");
     }
 
     #[test]
@@ -759,5 +661,65 @@ mod tests {
                 format!("e7e8{promotion}")
             );
         }
+    }
+
+    fn poll_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<ChessAIResource>()
+            .init_resource::<AIEngineStatus>()
+            .init_resource::<AIStatistics>()
+            .init_resource::<CurrentTurn>()
+            .init_resource::<MoveHistory>()
+            .init_resource::<CapturedPieces>()
+            .init_resource::<crate::game::resources::PendingTurnAdvance>()
+            .init_resource::<crate::game::resources::GameTimer>()
+            .init_resource::<ChessEngine>()
+            .add_message::<MoveMadeEvent>()
+            .add_systems(Update, poll_ai_task_system);
+        app
+    }
+
+    #[test]
+    fn results_from_a_previous_game_or_position_are_discarded() {
+        for (game_id, fen) in [
+            (99, xfchess_rules::STARTING_FEN),
+            (0, "a different position"),
+        ] {
+            let mut app = poll_app();
+            app.insert_resource(AIMovePendingReveal {
+                result: Err("old worker error".into()),
+                ready_at: Instant::now(),
+                fen: fen.into(),
+                game_id,
+            });
+            app.update();
+            assert!(!app.world().contains_resource::<AIMovePendingReveal>());
+            assert!(app.world().resource::<AIEngineStatus>().error.is_none());
+            assert!(app.world().resource::<MoveHistory>().is_empty());
+        }
+    }
+
+    #[test]
+    fn failed_search_pauses_clock_and_does_not_create_another_search() {
+        let mut app = poll_app();
+        app.world_mut()
+            .resource_mut::<crate::game::resources::GameTimer>()
+            .is_running = true;
+        app.insert_resource(AIMovePendingReveal {
+            result: Err("Stockfish failed twice".into()),
+            ready_at: Instant::now(),
+            fen: xfchess_rules::STARTING_FEN.into(),
+            game_id: 0,
+        });
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<crate::game::resources::GameTimer>()
+                .is_running
+        );
+        assert!(app.world().resource::<AIEngineStatus>().clock_was_running);
+        assert!(app.world().resource::<AIEngineStatus>().error.is_some());
+        app.update();
+        assert!(!app.world().contains_resource::<PendingAIMove>());
     }
 }

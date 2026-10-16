@@ -156,6 +156,7 @@ name = "link_external_elo_tests"
 path = "tests/link_external_elo_tests.rs"
 
 [dev-dependencies]
+xfchess-rules = { workspace = true }
 tokio = { workspace = true }
 solana-program-test = { workspace = true }
 solana-sdk = { workspace = true }
@@ -163,8 +164,8 @@ solana-system-interface = { version = "3", features = ["bincode"] }
 # Decodes the "Program data: <base64>" log line to verify `emit!`ed events
 # (e.g. StuckDelegationRecovered) actually fire with correct fields.
 base64 = { workspace = true }
-# Use the same engine board logic as the program; std enables game_from_fen in tests.
-nimzovich_engine = { workspace = true, features = ["std"] }
+# Contract tests exercise the same no_std validator as deployed builds.
+nimzovich_engine = { workspace = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow" }
@@ -172,3 +173,8 @@ unexpected_cfgs = { level = "allow" }
 [[test]]
 name = "lifecycle_race_tests"
 path = "tests/lifecycle_race_tests.rs"
+
+[[test]]
+name = "rules_compatibility"
+path = "tests/rules_compatibility.rs"
+required-features = ["move-validation"]

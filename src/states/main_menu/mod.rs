@@ -162,10 +162,7 @@ impl Plugin for MainMenuPlugin {
                 // Start Stockfish while the player sets up a game against it; it
                 // takes seconds to load.
                 crate::game::ai::systems::warm_up_stockfish
-                    .run_if(|menu: Res<CompetitiveMenuState>| {
-                        menu.show_ai_setup
-                            && menu.ai_engine == crate::game::ai::resource::AIEngine::Stockfish
-                    })
+                    .run_if(|menu: Res<CompetitiveMenuState>| menu.show_ai_setup)
                     .after(menu_escape_system)
                     .in_set(crate::core::schedule::MenuSystems::Main),
             )
@@ -185,7 +182,9 @@ impl Plugin for MainMenuPlugin {
             Update,
             sync_bridge_pubkey_to_solana
                 .after(poll_wallet_bridge)
-                .before(crate::multiplayer::solana::integration::systems::initialize_solana_integration)
+                .before(
+                    crate::multiplayer::solana::integration::systems::initialize_solana_integration,
+                )
                 .in_set(crate::core::schedule::SessionSet::Wallet),
         );
     }

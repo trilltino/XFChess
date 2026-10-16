@@ -72,6 +72,7 @@ mod tests {
         let mut history = MoveHistory::default();
 
         let move_record = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::White,
             from: (4, 1),
@@ -95,6 +96,7 @@ mod tests {
         let mut history = MoveHistory::default();
 
         let first_move = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::White,
             from: (4, 1),
@@ -107,6 +109,7 @@ mod tests {
         };
 
         let second_move = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Knight,
             piece_color: PieceColor::Black,
             from: (1, 7),
@@ -134,6 +137,7 @@ mod tests {
 
         for i in 1..=10 {
             history.add_move(MoveRecord {
+                promotion: None,
                 piece_type: PieceType::Pawn,
                 piece_color: if i % 2 == 1 {
                     PieceColor::White
@@ -159,6 +163,7 @@ mod tests {
 
         for _ in 0..5 {
             history.add_move(MoveRecord {
+                promotion: None,
                 piece_type: PieceType::Pawn,
                 piece_color: PieceColor::White,
                 from: (0, 1),
@@ -185,6 +190,7 @@ mod tests {
         let mut history = MoveHistory::default();
 
         let move1 = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::White,
             from: (4, 1),
@@ -197,6 +203,7 @@ mod tests {
         };
 
         let move2 = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Knight,
             piece_color: PieceColor::Black,
             from: (1, 7),
@@ -231,6 +238,7 @@ mod tests {
 
         for i in 0..3 {
             history.add_move(MoveRecord {
+                promotion: None,
                 piece_type: PieceType::Pawn,
                 piece_color: if i % 2 == 0 {
                     PieceColor::White
@@ -261,6 +269,7 @@ mod tests {
         let mut history = MoveHistory::default();
 
         let capture_move = MoveRecord {
+            promotion: None,
             piece_type: PieceType::Queen,
             piece_color: PieceColor::White,
             from: (3, 4),
@@ -285,6 +294,7 @@ mod tests {
 
         // Castling
         history.add_move(MoveRecord {
+            promotion: None,
             piece_type: PieceType::King,
             piece_color: PieceColor::White,
             from: (0, 4),
@@ -298,6 +308,7 @@ mod tests {
 
         // En passant
         history.add_move(MoveRecord {
+            promotion: None,
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::Black,
             from: (4, 3),
@@ -311,6 +322,7 @@ mod tests {
 
         // Checkmate
         history.add_move(MoveRecord {
+            promotion: None,
             piece_type: PieceType::Queen,
             piece_color: PieceColor::White,
             from: (3, 4),
@@ -333,6 +345,7 @@ mod tests {
         let mut history = MoveHistory::default();
 
         history.add_move(MoveRecord {
+            promotion: None,
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::White,
             from: (1, 4),
@@ -346,6 +359,7 @@ mod tests {
 
         // 1... e5
         history.add_move(MoveRecord {
+            promotion: None,
             piece_type: PieceType::Pawn,
             piece_color: PieceColor::Black,
             from: (6, 4),
@@ -358,6 +372,7 @@ mod tests {
         });
 
         history.add_move(MoveRecord {
+            promotion: None,
             piece_type: PieceType::Knight,
             piece_color: PieceColor::White,
             from: (0, 6),

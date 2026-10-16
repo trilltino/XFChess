@@ -92,6 +92,8 @@ jobs:
           $output = @("uci", "quit") | & .\assets\bin\stockfish.exe
           if (-not ($output -match "uciok")) { throw "stockfish.exe did not respond to a UCI handshake — binary may be corrupt" }
           Write-Host "Stockfish OK"
+          cargo test -p xfchess-stockfish bundled_engine -- --ignored
+          if ($LASTEXITCODE -ne 0) { throw "Stockfish gameplay smoke tests failed" }
 
       - name: Stage payload
         shell: pwsh
@@ -229,6 +231,7 @@ jobs:
       - name: Verify Stockfish binary
         run: |
           printf 'uci\nquit\n' | release/linux/stockfish | grep -q '^uciok$'
+          STOCKFISH_PATH="$GITHUB_WORKSPACE/release/linux/stockfish" cargo test -p xfchess-stockfish bundled_engine -- --ignored
 
       - name: E2E smoke test (headless, connects to production backend)
         env:
@@ -371,6 +374,7 @@ jobs:
       - name: Verify Stockfish binary
         run: |
           printf 'uci\nquit\n' | "$GITHUB_WORKSPACE/stockfish" | grep -q '^uciok$'
+          STOCKFISH_PATH="$GITHUB_WORKSPACE/stockfish" cargo test -p xfchess-stockfish bundled_engine -- --ignored
 
       - name: Package, sign, notarize, DMG
         env:
@@ -449,9 +453,9 @@ jobs:
             build --release --lib --features solana
 
       - name: Strip stray cdylib artifacts from jniLibs
-        # cargo-ndk copies all target cdylibs; retain only the library MainActivity loads.
+        # Keep the game library and the executable Stockfish library.
         run: |
-          find mobile/app/src/main/jniLibs/arm64-v8a -name '*.so' ! -name 'libxfchess.so' -delete
+          find mobile/app/src/main/jniLibs/arm64-v8a -name '*.so' ! -name 'libxfchess.so' ! -name 'libstockfish.so' -delete
 
       - name: Assemble release APK
         working-directory: mobile
@@ -459,14 +463,16 @@ jobs:
           XFCHESS_RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Verify libxfchess.so is present and extractable in the built APK
+      - name: Verify game and Stockfish libraries are present in the APK
         # Verify native-library extraction settings to catch runtime permission errors.
         run: |
           apk="mobile/app/build/outputs/apk/release/app-release-unsigned.apk"
-          if ! unzip -l "$apk" | grep -q "lib/arm64-v8a/libxfchess.so"; then
-            echo "::error::libxfchess.so missing from the built APK"
-            exit 1
-          fi
+          for library in libxfchess.so libstockfish.so; do
+            if ! unzip -l "$apk" | grep -q "lib/arm64-v8a/$library"; then
+              echo "::error::$library missing from the built APK"
+              exit 1
+            fi
+          done
 
       - uses: actions/upload-artifact@v4
         with:

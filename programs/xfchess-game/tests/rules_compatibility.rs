@@ -1,0 +1,87 @@
+//! Host rules may change; contract move bytes and validation must remain compatible.
+use nimzovich_engine::{validate_and_apply, CompactBoard};
+use xfchess_rules::Game;
+
+const POSITIONS: &[&str] = &[
+    xfchess_rules::STARTING_FEN,
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+    "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2",
+    "7k/P7/8/8/8/8/8/7K w - - 0 1",
+    "7k/8/8/8/8/8/p7/7K b - - 0 1",
+    "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3",
+];
+
+fn apply_contract(fen: &str, uci: &str) -> Result<[u8; 68], String> {
+    let mut position = CompactBoard::from_fen(fen).to_on_chain_game();
+    let mut bytes = [b' '; 5];
+    bytes[..uci.len()].copy_from_slice(uci.as_bytes());
+    validate_and_apply(&mut position, &bytes).map_err(|e| format!("{e:?}"))?;
+    Ok(position.to_compact_board().to_bytes())
+}
+
+fn compare(game: &Game) {
+    let fen = game.fen();
+    assert_eq!(
+        game.compact_board().to_bytes(),
+        CompactBoard::from_fen(&fen).to_bytes(),
+        "{fen}"
+    );
+    assert_eq!(
+        game.compact_board().to_fen(),
+        CompactBoard::from_fen(&fen).to_fen()
+    );
+    for uci in game.legal_moves() {
+        let mut next = game.clone();
+        next.play_uci(&uci).unwrap();
+        assert_eq!(
+            apply_contract(&fen, &uci)
+                .unwrap_or_else(|e| panic!("Contract rejects {uci} at {fen}: {e}")),
+            next.compact_board().to_bytes(),
+            "{fen} {uci}"
+        );
+    }
+    // Compare ordinary illegal transitions as well as all legal promotions.
+    for from in 0..64 {
+        for to in 0..64 {
+            let uci = xfchess_rules::move_uci(from, to, 0).unwrap();
+            let promotion = game.board[from as usize].abs() == 1 && (to / 8 == 0 || to / 8 == 7);
+            if !promotion {
+                assert_eq!(
+                    apply_contract(&fen, &uci).is_ok(),
+                    game.is_legal_uci(&uci),
+                    "{fen} {uci}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn contract_and_host_agree_on_special_positions() {
+    for fen in POSITIONS {
+        compare(&Game::from_fen(fen).unwrap());
+    }
+}
+
+#[test]
+fn contract_and_host_agree_on_generated_games() {
+    let mut seed = 42u64;
+    for _ in 0..4 {
+        let mut game = Game::default();
+        for ply in 0..100 {
+            let legal = game.legal_moves();
+            if legal.is_empty() {
+                break;
+            }
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            if ply % 20 == 0 {
+                compare(&game);
+            }
+            let uci = &legal[seed as usize % legal.len()];
+            let bytes = apply_contract(&game.fen(), uci).unwrap();
+            game.play_uci(uci).unwrap();
+            assert_eq!(bytes, game.compact_board().to_bytes());
+        }
+    }
+}

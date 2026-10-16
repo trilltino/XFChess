@@ -159,16 +159,15 @@ fn all_plans() -> &'static [Vec<AmbientStep>] {
 }
 
 fn compute_plan(pgn: &str) -> Vec<AmbientStep> {
-    use nimzovich_engine::{do_move, new_game_no_tt, parse_pgn, san_to_move};
+    use xfchess_rules::{do_move_with_promo, new_game, parse_pgn, san_to_move};
     let Ok(parsed) = parse_pgn(pgn) else {
         return Vec::new();
     };
-    // No search ever runs on this Game (just replaying a fixed decorative
-    // PGN), so skip the multi-GB transposition table `new_game` allocates.
-    let mut game = new_game_no_tt();
+    // Menu animation replays chess rules without starting Stockfish.
+    let mut game = new_game();
     let mut steps = Vec::with_capacity(parsed.moves.len());
     for san in &parsed.moves {
-        let Ok((s, d, _promo)) = san_to_move(&mut game, san) else {
+        let Ok((s, d, promo)) = san_to_move(&mut game, san) else {
             break;
         };
         let (su, du) = (s as usize, d as usize);
@@ -201,7 +200,9 @@ fn compute_plan(pgn: &str) -> Vec<AmbientStep> {
             ep_capture,
             castle_rook,
         });
-        do_move(&mut game, s, d, true);
+        if do_move_with_promo(&mut game, s, d, promo).is_err() {
+            break;
+        }
     }
     steps
 }
@@ -330,7 +331,7 @@ mod tests {
     #[test]
     fn all_famous_games_parse_completely() {
         for g in super::super::famous_games::FAMOUS_GAMES {
-            let parsed = nimzovich_engine::parse_pgn(g.pgn).expect("pgn should parse");
+            let parsed = xfchess_rules::parse_pgn(g.pgn).expect("pgn should parse");
             let plan = compute_plan(g.pgn);
             assert_eq!(
                 plan.len(),

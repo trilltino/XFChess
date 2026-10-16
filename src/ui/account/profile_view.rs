@@ -140,7 +140,7 @@ pub fn poll_profile_history(
         match rx.try_recv() {
             Ok(Ok(pgn_text)) => {
                 view.pgn_fetching = false;
-                match nimzovich_engine::parse_pgn(&pgn_text) {
+                match xfchess_rules::parse_pgn(&pgn_text) {
                     Ok(pgn) => {
                         commands.insert_resource(crate::game::replay::ParsedPgnGameResource {
                             inner: pgn,

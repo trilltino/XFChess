@@ -9,8 +9,8 @@ uses its MagicBlock routing configuration, not an arbitrary base fallback.
 
 Check the configured provider's status/usage and a same-cluster fallback.
 Do not assume a subscription tier or mainnet/devnet from this guide.
-Check [RPC probes](../../crates/cu_benchmark/docs/rpc.md) and
-[pricing](../../crates/cu_benchmark/docs/pricing.md) for measurement.
+Check [RPC probes](../../tools/cu_benchmark/docs/rpc.md) and
+[pricing](../../tools/cu_benchmark/docs/pricing.md) for measurement.
 
 For throttling, reduce load and inspect billed method/traffic usage before
 changing a plan. If rotating a provider credential, update the protected

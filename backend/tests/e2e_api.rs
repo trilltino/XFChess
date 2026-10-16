@@ -44,7 +44,7 @@ async fn cu_benchmark_runs_100_games_through_backend() {
         axum::serve(listener, router).await.unwrap();
     });
     let mut config: Value = serde_json::from_str(include_str!(
-        "../../crates/cu_benchmark/scenarios/backend.json"
+        "../../tools/cu_benchmark/scenarios/backend.json"
     ))
     .unwrap();
     config["backend_url"] = json!(base);
@@ -82,8 +82,9 @@ async fn cu_benchmark_runs_100_games_through_backend() {
     scenario.validate().unwrap();
     let observed = runner::execute(&scenario, false).await.unwrap();
     let report = report::build(&scenario, observed).unwrap();
-    let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../tmp/cu_benchmark-backend-e2e.json");
+    let output = std::env::temp_dir()
+        .join("xfchess")
+        .join("cu_benchmark-backend-e2e.json");
     std::fs::create_dir_all(output.parent().unwrap()).unwrap();
     std::fs::write(&output, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
     let stage = &report.stages[0];

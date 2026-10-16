@@ -497,7 +497,7 @@ fn section_state(
 }
 
 fn assemble_pgn_from_moves(moves: &[MoveRecord]) -> String {
-    use nimzovich_engine::{PgnAssembler, PgnResult};
+    use xfchess_rules::{PgnAssembler, PgnResult};
     let mut assembler = PgnAssembler::new();
     assembler.tag("Event", "XFChess PVP").tag("Site", "XFChess");
     for mv in moves {

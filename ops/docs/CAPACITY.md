@@ -12,11 +12,11 @@ There is no sustained-QPS claim in this guide.
 | Anti-cheat | Bounded analysis workers | CPU/RAM, backlog and time to verdict |
 | Peer/subscription delivery | Iroh/Braid and durable event log | Reconnect time, subscriptions, replay bytes and relay traffic |
 
-[cu_benchmark](../../crates/cu_benchmark/) separates offline estimates,
+[cu_benchmark](../../tools/cu_benchmark/) separates offline estimates,
 backend workflows, live chain measurement and RPC probes. Saved observations can
 be repriced; missing measurements/prices remain unknown. Start with
-[workloads](../../crates/cu_benchmark/docs/system.md) and
-[pricing](../../crates/cu_benchmark/docs/pricing.md). Separate rent, refundable
+[workloads](../../tools/cu_benchmark/docs/system.md) and
+[pricing](../../tools/cu_benchmark/docs/pricing.md). Separate rent, refundable
 balances, RPC/network usage and fixed VPS costs.
 
 Record commit, host resources, region, provider, cluster, workload, concurrency,

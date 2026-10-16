@@ -23,6 +23,7 @@ fn test_reset_game_resources_system() {
 
     let mut history = MoveHistory::default();
     history.add_move(MoveRecord {
+        promotion: None,
         piece_type: PieceType::Pawn,
         piece_color: PieceColor::White,
         from: (4, 1),

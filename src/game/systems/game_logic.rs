@@ -87,7 +87,15 @@ pub fn update_game_timer(
     ai_config: Res<crate::game::ai::resource::ChessAIResource>,
     game_mode: Res<crate::core::GameMode>,
     mut flag_timeout: MessageWriter<crate::game::events::FlagTimeoutEvent>,
+    ai_status: Option<Res<crate::game::ai::systems::AIEngineStatus>>,
 ) {
+    if ai_status
+        .as_ref()
+        .is_some_and(|status| status.error.is_some())
+    {
+        return;
+    }
+
     // Puzzles are untimed here; the server measures solve time itself.
     if !timer.is_running
         || !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check)
