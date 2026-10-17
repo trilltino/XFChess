@@ -35,6 +35,7 @@ the durable log and, for wagers, the authoritative account.
 | Backend restart | Accepted participants and persisted moves survive; subscriptions recover |
 | Duplicates, reordered delivery, lost acknowledgement | One application per move; resume never skips an unapplied move |
 | Wallet switch or second device | Previous identity cannot keep writing; superseded device loses its seat |
+| Host relays the opponent's moves | Each is recorded on chain with the opponent's signature, including after a resume and in the game-ending batch; a takeover device records only its own signed moves |
 | Cancel/join and terminal-action races | One legal outcome; no duplicate refund, payout or rating update |
 | Wallet rejection or RPC timeout | Cancel rejected work; reconcile unknown submissions before retry |
 | New match in the same process | No previous board, pending write, seat or cursor leaks into the next game |

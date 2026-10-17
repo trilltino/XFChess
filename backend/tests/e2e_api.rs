@@ -1485,7 +1485,7 @@ async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() {
     // participation, unavailable here, so the lease is taken via the store.)
     app.state
         .seat_leases
-        .claim(game_id, &host, "device-aaaa-0001", 1)
+        .claim(game_id, &host, "device-aaaa-0001", None, 1)
         .await
         .unwrap();
     let (mut m1, v1) = move_event(&host, "e2e4", FEN_E4, 1, "0");
@@ -1511,7 +1511,7 @@ async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() {
     let lease = app
         .state
         .seat_leases
-        .claim(game_id, &host, "device-bbbb-0002", 2)
+        .claim(game_id, &host, "device-bbbb-0002", None, 2)
         .await
         .unwrap();
     assert_eq!(lease.epoch, 2);
@@ -1553,6 +1553,17 @@ async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() {
         .send_auth("POST", "/game/77001/seat/claim", None, Some(&claim))
         .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // The move-signing key registered with a claim must be a real public key.
+    let bad_signer = json!({ "device_id": "device-cccc-0003", "move_signer": "not-a-key" });
+    let (s, _) = app
+        .send_auth(
+            "POST",
+            "/game/77001/seat/claim",
+            Some(&host_jwt),
+            Some(&bad_signer),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

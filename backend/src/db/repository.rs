@@ -331,6 +331,19 @@ impl GameRepository {
         Ok(moves)
     }
 
+    /// The UCI of move `move_number` (1-based ply) recorded for `game_id`.
+    pub async fn get_move_uci(&self, game_id: &str, move_number: i64) -> Result<Option<String>> {
+        let row = sqlx::query_as::<_, (String,)>(
+            "SELECT move_uci FROM moves WHERE game_id = ? AND move_number = ?",
+        )
+        .bind(game_id)
+        .bind(move_number)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|(uci,)| uci))
+    }
+
     pub async fn get_last_fen(&self, game_id: &str) -> Result<Option<String>> {
         let row = sqlx::query_as::<_, (Option<String>,)>(
             "SELECT fen_after FROM moves WHERE game_id = ? ORDER BY move_number DESC LIMIT 1",

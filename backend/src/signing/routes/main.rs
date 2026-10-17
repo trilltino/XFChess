@@ -177,6 +177,10 @@ pub struct RecordMoveReq {
     /// Writer's device id; checked against the caller's seat lease.
     #[serde(default)]
     pub device_id: Option<String>,
+    /// The mover's base58 signature over `braid_chess::move_auth::message`,
+    /// required when the caller is not the mover.
+    #[serde(default)]
+    pub mover_auth: Option<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -262,6 +266,10 @@ pub fn protected_routes() -> Router<AppState> {
 #[derive(Deserialize)]
 pub struct ClaimSeatReq {
     pub device_id: String,
+    /// This device's move-signing key (base58). Moves the other player relays
+    /// for this wallet must be signed with it.
+    #[serde(default)]
+    pub move_signer: Option<String>,
 }
 
 pub async fn claim_seat(
@@ -273,11 +281,24 @@ pub async fn claim_seat(
     if !crate::signing::storage::seat_lease::valid_device_id(&req.device_id) {
         return Err((StatusCode::BAD_REQUEST, "invalid device_id".to_string()));
     }
+    if req
+        .move_signer
+        .as_deref()
+        .is_some_and(|signer| Pubkey::from_str(signer).is_err())
+    {
+        return Err((StatusCode::BAD_REQUEST, "invalid move_signer".to_string()));
+    }
     require_game_participant(&state, game_id, &caller.0).await?;
     let now = chrono::Utc::now().timestamp();
     let lease = state
         .seat_leases
-        .claim(&game_id.to_string(), &caller.0, &req.device_id, now)
+        .claim(
+            &game_id.to_string(),
+            &caller.0,
+            &req.device_id,
+            req.move_signer.as_deref(),
+            now,
+        )
         .await
         .map_err(|e| {
             error!("[seat] claim failed for game {game_id}: {e}");
@@ -567,14 +588,92 @@ pub async fn session_status(
     }
 }
 
+/// A relayed move is recorded only with the mover's signature over it, made
+/// with the move-signing key their seat registered. The signature covers the
+/// previous recorded move, so the relayer cannot replay it at another ply or
+/// after a different move of its own. Without this the backend, which holds
+/// both players' session keys, would sign any legal move the opponent chose.
+async fn require_mover_authorization(
+    state: &AppState,
+    repo: &GameRepository,
+    req: &RecordMoveReq,
+    mover: &Pubkey,
+) -> Result<(), (StatusCode, String)> {
+    let game_id = req.game_id.to_string();
+    let forbidden = |reason: &str| {
+        let msg = format!(
+            "Relayed move {} for game {} rejected: {reason}",
+            req.move_uci, req.game_id
+        );
+        warn!("[VPS] {msg}");
+        (StatusCode::FORBIDDEN, msg)
+    };
+    let signer = state
+        .seat_leases
+        .move_signer(&game_id, &req.mover_wallet)
+        .await
+        .map_err(|e| {
+            error!("[VPS] move signer lookup failed for game {game_id}: {e}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "move signer lookup failed".to_string(),
+            )
+        })?
+        .and_then(|signer| Pubkey::from_str(&signer).ok())
+        .ok_or_else(|| forbidden("the mover's seat has no move signer"))?;
+    let auth = req
+        .mover_auth
+        .as_deref()
+        .ok_or_else(|| forbidden("no mover signature"))?;
+    let previous = match req.nonce.checked_sub(1) {
+        None => return Err(forbidden("nonce 0 is not a move")),
+        Some(0) => None,
+        Some(ply) => {
+            let ply = i64::try_from(ply).map_err(|_| forbidden("nonce out of range"))?;
+            let uci = repo.get_move_uci(&game_id, ply).await.map_err(|e| {
+                error!("[DB] previous move lookup failed for game {game_id}: {e}");
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "previous move lookup failed".to_string(),
+                )
+            })?;
+            // Moves are recorded in order, so a relay may run ahead of its
+            // predecessor; the client retries.
+            Some(uci.ok_or_else(|| {
+                (
+                    StatusCode::CONFLICT,
+                    format!("Move {} for game {} is not recorded yet", ply, req.game_id),
+                )
+            })?)
+        }
+    };
+    if !crate::signing::move_auth::is_authorized(
+        &signer,
+        auth,
+        req.game_id,
+        req.nonce,
+        &req.move_uci,
+        previous.as_deref(),
+    ) {
+        return Err(forbidden("the mover's signature does not match"));
+    }
+    info!(
+        "[VPS] relayed move {} for game {} authorised by {}",
+        req.move_uci, req.game_id, mover
+    );
+    Ok(())
+}
+
 pub async fn record_move(
     State(state): State<AppState>,
     caller: crate::signing::auth::RequireWallet,
     Json(req): Json<RecordMoveReq>,
 ) -> Result<Json<SigResp>, (StatusCode, String)> {
-    // A wallet JWT may relay either participant's moves only for games the caller
-    // participates in. Do not require caller == mover_wallet; the host relays both sides.
-    if caller.0 != req.mover_wallet {
+    // The host relays both players' moves, so the caller may differ from the
+    // mover. It must then be a participant, and the move must carry the mover's
+    // own signature (checked below, once the previous move is known).
+    let relayed = caller.0 != req.mover_wallet;
+    if relayed {
         require_game_participant(&state, req.game_id, &caller.0)
             .await
             .map_err(|(status, mut msg)| {
@@ -632,6 +731,9 @@ pub async fn record_move(
         let msg = format!("Bad move_uci '{}' for game {}", req.move_uci, req.game_id);
         (StatusCode::BAD_REQUEST, msg)
     })?;
+    if relayed {
+        require_mover_authorization(&state, &repo, &req, &mover_wallet).await?;
+    }
 
     let _outcome = game.play_uci(&req.move_uci).map_err(|e| {
         let msg = format!(
@@ -1836,6 +1938,7 @@ mod tests {
             nonce: 1,
             mover_wallet: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string(),
             device_id: None,
+            mover_auth: None,
         };
 
         let json = serde_json::to_string(&req);
@@ -2011,7 +2114,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_move_allows_a_genuine_participant_to_relay_the_other_players_move() {
+    async fn record_move_relays_only_moves_the_mover_signed() {
         use crate::infrastructure::{initialize_pools, run_migrations};
         use crate::signing::storage::tournament::TournamentStore;
         use crate::signing::SigningConfig;
@@ -2064,49 +2167,110 @@ mod tests {
         state
             .game_participants
             .seed_for_test(game_id, white_wallet, black_wallet);
+        state
+            .active_global_sessions
+            .lock()
+            .await
+            .insert(black_wallet, Keypair::new());
 
-        let req_body = RecordMoveReq {
-            game_id,
-            move_uci: "e2e4".to_string(),
-            next_fen: String::new(),
-            nonce: 1,
-            mover_wallet: black_wallet.to_string(),
-            device_id: None,
-        };
-
-        // White may relay black’s move; expect missing session (404), not failed authorization (403).
-        let result = record_move(
-            State(state.clone()),
-            crate::signing::auth::RequireWallet(white_wallet.to_string()),
-            Json(req_body.clone()),
+        // White's 1.e4 is recorded; white's client now relays black's reply.
+        let mut position = xfchess_rules::Game::default();
+        position.play_uci("e2e4").unwrap();
+        let repo = GameRepository::new(state.store.pool().clone());
+        repo.upsert_game(&game_id.to_string()).await.unwrap();
+        repo.add_move_simple(
+            &game_id.to_string(),
+            1,
+            "e2e4",
+            None,
+            Some(&position.compact_board().to_fen()),
+            &white_wallet.to_string(),
         )
-        .await;
-        let (status, _) = match result {
-            Err(e) => e,
-            Ok(_) => panic!("no session exists yet, so this must still fail"),
+        .await
+        .unwrap();
+
+        let black_device_key = Keypair::new();
+        let sign = |kp: &Keypair, previous: &str| {
+            kp.sign_message(&braid_chess::move_auth::message(
+                game_id,
+                2,
+                "e7e5",
+                Some(previous),
+            ))
+            .to_string()
         };
-        assert_ne!(
-            status,
-            StatusCode::FORBIDDEN,
-            "a genuine participant relaying the other player's move must not be 403'd"
+        let black_device = "device-black-0001";
+        let relay = |caller: Pubkey, mover: Pubkey, mover_auth: Option<String>| {
+            let state = state.clone();
+            async move {
+                let req = RecordMoveReq {
+                    game_id,
+                    move_uci: "e7e5".to_string(),
+                    next_fen: String::new(),
+                    nonce: 2,
+                    mover_wallet: mover.to_string(),
+                    // Black's seat is claimed below; black writes from that device.
+                    device_id: (caller == black_wallet).then(|| black_device.to_string()),
+                    mover_auth,
+                };
+                match record_move(
+                    State(state),
+                    crate::signing::auth::RequireWallet(caller.to_string()),
+                    Json(req),
+                )
+                .await
+                {
+                    Err((status, _)) => status,
+                    Ok(_) => StatusCode::OK,
+                }
+            }
+        };
+        let valid = sign(&black_device_key, "e2e4");
+
+        // Black has not registered a move signer yet.
+        assert_eq!(
+            relay(white_wallet, black_wallet, Some(valid.clone())).await,
+            StatusCode::FORBIDDEN
+        );
+        state
+            .seat_leases
+            .claim(
+                &game_id.to_string(),
+                &black_wallet.to_string(),
+                black_device,
+                Some(&black_device_key.pubkey().to_string()),
+                1,
+            )
+            .await
+            .unwrap();
+
+        for forged in [
+            None,
+            Some(sign(&Keypair::new(), "e2e4")),
+            // Signed in reply to a move white never recorded.
+            Some(sign(&black_device_key, "d2d4")),
+        ] {
+            assert_eq!(
+                relay(white_wallet, black_wallet, forged).await,
+                StatusCode::FORBIDDEN
+            );
+        }
+        // A wallet outside the game is refused even with a valid signature.
+        assert_eq!(
+            relay(stranger_wallet, black_wallet, Some(valid.clone())).await,
+            StatusCode::FORBIDDEN
         );
 
-        // A wallet with no relationship to this game at all must still be
-        // rejected — proves the check wasn't simply removed.
-        let result = record_move(
-            State(state.clone()),
-            crate::signing::auth::RequireWallet(stranger_wallet.to_string()),
-            Json(req_body),
-        )
-        .await;
-        let (status, _) = match result {
-            Err(e) => e,
-            Ok(_) => panic!("a non-participant must be rejected"),
-        };
+        // The signed move passes authorisation and fails later, at the
+        // unreachable test ER.
         assert_eq!(
-            status,
-            StatusCode::FORBIDDEN,
-            "a wallet with no on-chain relationship to the game must be 403'd"
+            relay(white_wallet, black_wallet, Some(valid)).await,
+            StatusCode::BAD_GATEWAY
+        );
+        // A player submitting their own move needs no signature.
+        assert_eq!(
+            relay(black_wallet, black_wallet, None).await,
+            StatusCode::BAD_GATEWAY
         );
     }
 
@@ -2195,6 +2359,7 @@ mod tests {
                 nonce: 1,
                 mover_wallet: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string(),
                 device_id: None,
+                mover_auth: None,
             };
             assert_eq!(req.move_uci, move_uci);
         }
@@ -2210,6 +2375,7 @@ mod tests {
             nonce: 0, // Using #[serde(default)]
             mover_wallet: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".to_string(),
             device_id: None,
+            mover_auth: None,
         };
         assert_eq!(req.nonce, 0);
     }
