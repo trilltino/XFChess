@@ -38,6 +38,8 @@ pub struct ResumePlan {
     pub chain_move_count: u16,
     /// Logged moves the chain has not recorded yet: (uci, fen_after).
     pub unrecorded: Vec<(String, String)>,
+    /// The last logged move; the next move's signed authorisation answers it.
+    pub last_move_uci: Option<String>,
     pub wager_lamports: u64,
     pub base_time_seconds: u64,
     pub increment_seconds: u16,
@@ -199,6 +201,7 @@ pub fn plan_resume(
             .iter()
             .map(|m| (m.uci.clone(), m.fen_after.clone()))
             .collect(),
+        last_move_uci: moves.last().map(|m| m.uci.clone()),
         wager_lamports: game.wager_amount,
         base_time_seconds: game.base_time_seconds,
         increment_seconds: game.increment_seconds,
@@ -417,6 +420,7 @@ fn apply_plan(
     t.online_session.next_move_number = plan.my_moves + 1;
     t.online_session.next_nonce = plan.my_moves as u64 + 1;
     t.online_session.last_published_move_version = plan.my_head.clone();
+    t.online_session.last_move_uci = plan.last_move_uci.clone();
 
     let net_game_id = numeric_game_id(&game_id.to_string());
     // Log replay on resubscribe must not re-apply moves the snapshot already has.
@@ -617,6 +621,7 @@ mod tests {
         assert_eq!(plan.applied_versions.len(), 3);
         assert_eq!(plan.chain_fen, E4E5);
         assert_eq!(plan.unrecorded, vec![("g1f3".to_string(), NF3.to_string())]);
+        assert_eq!(plan.last_move_uci.as_deref(), Some("g1f3"));
         assert_eq!((plan.base_time_seconds, plan.increment_seconds), (300, 2));
     }
 
@@ -627,6 +632,7 @@ mod tests {
         assert_eq!(plan.my_color, PieceColor::Black);
         assert_eq!((plan.my_moves, plan.opponent_moves), (1, 2));
         assert!(plan.unrecorded.is_empty());
+        assert_eq!(plan.last_move_uci.as_deref(), Some("g1f3"));
         assert_eq!(plan.chain_fen, NF3);
     }
 
@@ -636,6 +642,7 @@ mod tests {
         let plan = plan_resume(&game(w, b, GameStatus::Active, 0), 0, false, &b, &[]).unwrap();
         assert_eq!(plan.fen, START_FEN);
         assert_eq!(plan.my_head, "0");
+        assert_eq!(plan.last_move_uci, None);
     }
 
     #[test]

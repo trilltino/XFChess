@@ -14,6 +14,9 @@ pub struct OnlineGameSession {
     pub next_nonce: u64,
     pub wager_amount: f64,
     pub last_published_move_version: String,
+    /// The last move played by either side; a move's authorisation covers the
+    /// move it answers.
+    pub last_move_uci: Option<String>,
 }
 
 impl Default for OnlineGameSession {
@@ -26,6 +29,7 @@ impl Default for OnlineGameSession {
             next_nonce: 1,
             wager_amount: 0.0,
             last_published_move_version: "0".to_string(),
+            last_move_uci: None,
         }
     }
 }
@@ -48,6 +52,7 @@ impl OnlineGameSession {
         self.next_nonce = 1;
         self.wager_amount = 0.0;
         self.last_published_move_version = "0".to_string();
+        self.last_move_uci = None;
     }
 
     pub fn is_configured(&self) -> bool {
@@ -293,13 +298,6 @@ fn publish_local_move(
         return;
     }
     for event in move_events.read() {
-        if event.remote {
-            continue;
-        }
-        let game_id_u64 = numeric_game_id(&session.game_id);
-        let move_number = session.next_move_number;
-        let nonce = session.next_nonce;
-
         let from_file = (b'a' + event.from.0) as char;
         let from_rank = event.from.1 + 1;
         let to_file = (b'a' + event.to.0) as char;
@@ -315,6 +313,32 @@ fn publish_local_move(
             };
             uci.push(promo_char);
         }
+        if event.remote {
+            session.last_move_uci = Some(uci);
+            continue;
+        }
+        let game_id_u64 = numeric_game_id(&session.game_id);
+        let move_number = session.next_move_number;
+        let nonce = session.next_nonce;
+
+        // Lets the opponent relay this move to the backend on our behalf. It
+        // travels in the Braid log only: the gossip wire format is unchanged,
+        // so clients of different versions still decode each other's moves.
+        #[cfg(feature = "solana")]
+        let move_auth = solana_state
+            .as_ref()
+            .and_then(|state| state.wallet_pubkey)
+            .and_then(|wallet| {
+                crate::multiplayer::network::move_auth::sign_move(
+                    &wallet.to_string(),
+                    game_id_u64,
+                    &uci,
+                    &event.next_fen,
+                    session.last_move_uci.as_deref(),
+                )
+            });
+        #[cfg(not(feature = "solana"))]
+        let move_auth: Option<String> = None;
 
         // Causal chain fields.
         let parent_version = session.last_published_move_version.clone();
@@ -379,7 +403,8 @@ fn publish_local_move(
                 event.next_fen.clone(),
                 move_number,
                 node_b58.clone(),
-            ),
+            )
+            .with_auth(move_auth),
             new_version,
             braid.heads(),
         );
@@ -414,6 +439,7 @@ fn publish_local_move(
 
         session.next_move_number = session.next_move_number.saturating_add(1);
         session.next_nonce = session.next_nonce.saturating_add(1);
+        session.last_move_uci = Some(uci);
     }
 }
 
