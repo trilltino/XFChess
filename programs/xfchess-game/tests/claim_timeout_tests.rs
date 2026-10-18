@@ -7,8 +7,8 @@ use xfchess_game::errors::GameErrorCode;
 use xfchess_game::state::{Game, GameResult, GameStatus, GameType, MatchType};
 
 const GAME_ID: u64 = 90_001;
-// Nonzero base time selects the timed-game branch; inactivity uses the
-// fixed 90s window independently of that value.
+// A timed game may only be ended on time once the side to move's whole clock
+// (base time plus earned increments; no increment here) has run out.
 const BASE_TIME_SECONDS: u64 = 300;
 
 fn timed_active_game(
@@ -62,7 +62,7 @@ async fn claim_timeout_rejects_before_inactivity_window_elapses() {
         .unwrap()
         .unix_timestamp;
 
-    // Only 30s elapsed since the last move; the fixed timed-game inactivity
+    // Only 30s elapsed since the last move; even the minimum timed-game
     // window (`TIMED_GAME_INACTIVITY_WINDOW_SECONDS`) is 90s.
     let (game_key, game_data) = timed_active_game(white, black, 1, now - 30);
     ctx.set_account(&game_key, &AccountSharedData::from(game_data));
@@ -99,8 +99,8 @@ async fn claim_timeout_awards_white_when_black_flags() {
         .unwrap()
         .unix_timestamp;
 
-    // Even turn 2 expires black's clock. 200s exceeds the fixed 90s window.
-    let (game_key, game_data) = timed_active_game(white, black, 2, now - 200);
+    // Even turn 2 expires black's clock: 400s exceeds black's whole 300s clock.
+    let (game_key, game_data) = timed_active_game(white, black, 2, now - 400);
     ctx.set_account(&game_key, &AccountSharedData::from(game_data));
 
     let ix = claim_timeout_ix(GAME_ID, ctx.payer.pubkey());
@@ -144,5 +144,37 @@ async fn claim_timeout_cancels_zero_move_game_instead_of_awarding_black() {
         game.result,
         GameResult::None,
         "zero moves means no winner and no one-sided payout"
+    );
+}
+
+#[tokio::test]
+async fn claim_timeout_rejects_a_think_shorter_than_the_movers_clock() {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+
+    let mut ctx = start(vec![]).await;
+    let now = ctx
+        .banks_client
+        .get_sysvar::<Clock>()
+        .await
+        .unwrap()
+        .unix_timestamp;
+
+    // 200s on one move is legal in a 5-minute game; it must not be forfeitable.
+    let (game_key, game_data) = timed_active_game(white, black, 2, now - 200);
+    ctx.set_account(&game_key, &AccountSharedData::from(game_data));
+
+    let ix = claim_timeout_ix(GAME_ID, ctx.payer.pubkey());
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .expect_err("a player with time left on the clock must not lose on time");
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(GameErrorCode::TimeoutNotExpired)),
+        "expected TimeoutNotExpired, got {err:?}"
+    );
+    assert_eq!(
+        fetch_game(&mut ctx, GAME_ID).await.status,
+        GameStatus::Active
     );
 }

@@ -1,5 +1,6 @@
 pub mod error;
 pub mod message;
+pub mod move_auth;
 pub mod publisher;
 pub mod resource;
 pub mod subscriber;

@@ -13,6 +13,9 @@ const SEAT_RECHECK: Duration = Duration::from_secs(15);
 #[derive(Resource, Default)]
 pub struct SeatState {
     pub game_id: u64,
+    /// The wallet playing this seat; its device move-signing key is
+    /// registered with every claim.
+    wallet: Option<String>,
     pub epoch: i64,
     /// Another device holds this player's seat; this window is view-only.
     pub superseded: bool,
@@ -24,8 +27,15 @@ pub struct SeatState {
 impl SeatState {
     fn claim(&mut self, game_id: u64) {
         let (tx, rx) = oneshot::channel();
+        let wallet = self.wallet.clone();
         crate::core::net_task::spawn_detached("seat", move || {
-            let _ = tx.send(crate::multiplayer::vps_client::claim_seat(game_id));
+            let signer = wallet
+                .as_deref()
+                .map(crate::multiplayer::network::move_auth::signer_pubkey);
+            let _ = tx.send(crate::multiplayer::vps_client::claim_seat(
+                game_id,
+                signer.as_deref(),
+            ));
         });
         self.game_id = game_id;
         self.claim_rx = Some(rx);
@@ -41,6 +51,9 @@ pub fn lease_belongs_to_other_device(lease: Option<&SeatLease>, me: &str) -> boo
 fn claim_seat_on_game_start(
     mut started: MessageReader<crate::game::events::GameStartedEvent>,
     sync: Res<crate::multiplayer::solana::addon::SolanaGameSync>,
+    solana_state: Option<
+        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
     mut seat: ResMut<SeatState>,
 ) {
     for _ in started.read() {
@@ -49,6 +62,10 @@ fn claim_seat_on_game_start(
             continue;
         };
         seat.superseded = false;
+        seat.wallet = solana_state
+            .as_ref()
+            .and_then(|s| s.wallet_pubkey)
+            .map(|pk| pk.to_string());
         seat.claim(game_id);
     }
 }

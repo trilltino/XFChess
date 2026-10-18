@@ -141,7 +141,6 @@ fn find_event<T: AnchorDeserialize + Discriminator>(logs: &[String]) -> Option<T
     None
 }
 
-
 // Ignored tests require the real dispute authority key. Provision the
 // keyfile, then run cargo test -- --ignored.
 
@@ -403,5 +402,86 @@ async fn force_undelegate_after_timeout_rejects_spoofed_owner_program() {
         custom_code(&err),
         Some(6000 + xfchess_game::errors::GameErrorCode::InvalidOwnerProgram as u32),
         "wrong owner_program must be rejected before the CPI"
+    );
+}
+
+fn live_game_account(
+    white: Pubkey,
+    black: Pubkey,
+    updated_at: i64,
+) -> solana_sdk::account::Account {
+    use anchor_lang::Space;
+    use xfchess_game::state::{Game, GameResult, GameType, MatchType};
+    let game = Game {
+        game_id: GAME_ID,
+        white,
+        black,
+        status: GameStatus::Active,
+        last_move_timestamp: updated_at,
+        fees_advanced: 0,
+        fee_payer: white,
+        result: GameResult::None,
+        board_state: start_board(),
+        move_count: 10,
+        halfmove_clock: 0,
+        turn: 11,
+        created_at: updated_at,
+        updated_at,
+        wager_amount: 0,
+        wager_token: None,
+        game_type: GameType::PvP,
+        match_type: MatchType::Free,
+        country_fee: 0,
+        base_time_seconds: 300,
+        increment_seconds: 0,
+        bump: game_pda(GAME_ID).1,
+        is_delegated: true,
+        tournament_id: None,
+        nonce: 10,
+        draw_offered_by: None,
+    };
+    program_account(&game, 8 + Game::INIT_SPACE)
+}
+
+async fn request_on_game_idle_for(idle_secs: i64) -> solana_sdk::transaction::TransactionError {
+    use solana_sdk::{account::AccountSharedData, clock::Clock};
+    let mut ctx = start(vec![]).await;
+    let now = ctx
+        .banks_client
+        .get_sysvar::<Clock>()
+        .await
+        .unwrap()
+        .unix_timestamp;
+    let account = live_game_account(Pubkey::new_unique(), Pubkey::new_unique(), now - idle_secs);
+    ctx.set_account(&game_pda(GAME_ID).0, &AccountSharedData::from(account));
+
+    let payer = ctx.payer.pubkey();
+    let ix = request_force_undelegate_ix(
+        GAME_ID,
+        payer,
+        xfchess_game::ID,
+        ephemeral_rollups_sdk::id(),
+    );
+    send(&mut ctx, ix, &[]).await.unwrap_err()
+}
+
+#[tokio::test]
+async fn request_force_undelegate_rejects_a_live_game() {
+    let err = request_on_game_idle_for(30).await;
+    assert_eq!(
+        custom_code(&err),
+        Some(6000 + xfchess_game::errors::GameErrorCode::GameNotStuckDelegation as u32),
+        "a game the ER is still serving must not be pushed toward a wipe"
+    );
+}
+
+#[tokio::test]
+async fn request_force_undelegate_allows_a_game_idle_past_its_timeout() {
+    // Past the 300s clock: the guard passes and only the (unloaded)
+    // delegation program CPI fails.
+    let err = request_on_game_idle_for(301 + 60).await;
+    assert_ne!(
+        custom_code(&err),
+        Some(6000 + xfchess_game::errors::GameErrorCode::GameNotStuckDelegation as u32),
     );
 }

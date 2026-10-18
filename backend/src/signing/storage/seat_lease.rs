@@ -41,11 +41,15 @@ impl SeatLeaseStore {
 
     /// Take the seat for `device_id`. Re-claiming by the current holder keeps
     /// the epoch (idempotent); a different device increments it.
+    ///
+    /// `move_signer` replaces the seat's move-signing key, so a superseded
+    /// device's signatures stop authorising relayed moves.
     pub async fn claim(
         &self,
         game_id: &str,
         wallet: &str,
         device_id: &str,
+        move_signer: Option<&str>,
         now: i64,
     ) -> Result<SeatLease, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
@@ -62,16 +66,17 @@ impl SeatLeaseStore {
             None => 1,
         };
         sqlx::query(
-            "INSERT INTO game_seat_leases (game_id, wallet, device_id, epoch, updated_at) \
-             VALUES (?, ?, ?, ?, ?) ON CONFLICT(game_id, wallet) DO UPDATE SET \
+            "INSERT INTO game_seat_leases (game_id, wallet, device_id, epoch, updated_at, move_signer) \
+             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(game_id, wallet) DO UPDATE SET \
              device_id = excluded.device_id, epoch = excluded.epoch, \
-             updated_at = excluded.updated_at",
+             updated_at = excluded.updated_at, move_signer = excluded.move_signer",
         )
         .bind(game_id)
         .bind(wallet)
         .bind(device_id)
         .bind(epoch)
         .bind(now)
+        .bind(move_signer)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -90,6 +95,22 @@ impl SeatLeaseStore {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|(device_id, epoch)| SeatLease { device_id, epoch }))
+    }
+
+    /// The move-signing key registered by the device holding `wallet`'s seat.
+    pub async fn move_signer(
+        &self,
+        game_id: &str,
+        wallet: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(Option<String>,)> = sqlx::query_as(
+            "SELECT move_signer FROM game_seat_leases WHERE game_id = ? AND wallet = ?",
+        )
+        .bind(game_id)
+        .bind(wallet)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|(signer,)| signer))
     }
 
     /// Whether `device_id` may write for `wallet`'s seat in `game_id`.
@@ -127,14 +148,14 @@ mod tests {
             SeatCheck::Unclaimed
         );
 
-        let a = s.claim("7", "W", "device-aaaa", 1).await.unwrap();
+        let a = s.claim("7", "W", "device-aaaa", None, 1).await.unwrap();
         assert_eq!(a.epoch, 1);
         assert_eq!(
             s.check("7", "W", Some("device-aaaa")).await.unwrap(),
             SeatCheck::Holder
         );
 
-        let b = s.claim("7", "W", "device-bbbb", 2).await.unwrap();
+        let b = s.claim("7", "W", "device-bbbb", None, 2).await.unwrap();
         assert_eq!(b.epoch, 2);
         assert_eq!(
             s.check("7", "W", Some("device-bbbb")).await.unwrap(),
@@ -154,8 +175,14 @@ mod tests {
     #[tokio::test]
     async fn reclaim_by_holder_is_idempotent_and_seats_are_independent() {
         let s = store().await;
-        s.claim("7", "W", "device-aaaa", 1).await.unwrap();
-        assert_eq!(s.claim("7", "W", "device-aaaa", 2).await.unwrap().epoch, 1);
+        s.claim("7", "W", "device-aaaa", None, 1).await.unwrap();
+        assert_eq!(
+            s.claim("7", "W", "device-aaaa", None, 2)
+                .await
+                .unwrap()
+                .epoch,
+            1
+        );
         // The opponent's seat and other games are untouched.
         assert_eq!(
             s.check("7", "B", Some("device-aaaa")).await.unwrap(),
@@ -165,6 +192,30 @@ mod tests {
             s.check("8", "W", Some("device-aaaa")).await.unwrap(),
             SeatCheck::Unclaimed
         );
+    }
+
+    #[tokio::test]
+    async fn the_newest_claim_owns_the_move_signer() {
+        let s = store().await;
+        assert_eq!(s.move_signer("7", "W").await.unwrap(), None);
+        s.claim("7", "W", "device-aaaa", Some("KeyA"), 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            s.move_signer("7", "W").await.unwrap().as_deref(),
+            Some("KeyA")
+        );
+        // A takeover replaces the key, and a device without one clears it.
+        s.claim("7", "W", "device-bbbb", Some("KeyB"), 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            s.move_signer("7", "W").await.unwrap().as_deref(),
+            Some("KeyB")
+        );
+        s.claim("7", "W", "device-cccc", None, 3).await.unwrap();
+        assert_eq!(s.move_signer("7", "W").await.unwrap(), None);
+        assert_eq!(s.move_signer("7", "B").await.unwrap(), None);
     }
 
     #[test]

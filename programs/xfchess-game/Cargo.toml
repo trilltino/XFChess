@@ -113,6 +113,10 @@ path = "tests/instruction_layout_tests.rs"
 name = "cancel_time_check_tests"
 path = "tests/cancel_time_check_tests.rs"
 
+[[test]]
+name = "crank_time_check_tests"
+path = "tests/crank_time_check_tests.rs"
+
 # Forced-recovery path for a Game PDA stuck on an unreachable ER validator
 # (delegation_ix::force_recovery / governance_ix::recover_stuck_delegation).
 [[test]]
@@ -126,6 +130,10 @@ path = "tests/global_create_game_tests.rs"
 
 # complete_swiss_tournament: final standings sort + Completed transition once
 # all rounds are advanced — closes the gap flagged in advance_round.rs.
+[[test]]
+name = "tournament_access_tests"
+path = "tests/tournament_access_tests.rs"
+
 [[test]]
 name = "tournament_swiss_completion_tests"
 path = "tests/tournament_swiss_completion_tests.rs"
@@ -177,4 +185,10 @@ path = "tests/lifecycle_race_tests.rs"
 [[test]]
 name = "rules_compatibility"
 path = "tests/rules_compatibility.rs"
+required-features = ["move-validation"]
+
+# Differential legality check: host rules versus on-chain validation.
+[[test]]
+name = "chess_logic_differential"
+path = "tests/chess_logic_differential.rs"
 required-features = ["move-validation"]

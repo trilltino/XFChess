@@ -60,7 +60,10 @@ pub struct RegisterPlayer<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Result<()> {
+/// `_claimed_elo` is kept for instruction compatibility; eligibility and
+/// seeding use the rating on the player's own profile, which clients cannot
+/// choose.
+pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, _claimed_elo: u32) -> Result<()> {
     let tournament = &mut ctx.accounts.tournament;
     require!(
         tournament.tournament_id == tournament_id,
@@ -82,6 +85,10 @@ pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64, elo: u32) -> Re
             GameErrorCode::PrizeNotFunded
         );
     }
+    let elo = crate::elo::rating::display_rating(
+        &ctx.accounts.player_profile,
+        tournament.base_time_seconds,
+    );
     require!(
         tournament.elo_min <= elo && elo <= tournament.elo_max,
         GameErrorCode::EloOutOfRange

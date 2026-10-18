@@ -429,15 +429,20 @@ async fn complete_link(
     );
 
     // Retry transient RPC failures before falling back to off-chain-only persistence.
-    let rpc = solana::make_rpc(&state.solana_rpc_url);
-    let mut submit_result =
-        solana::sign_and_submit(&rpc, link_authority, std::slice::from_ref(&ix));
+    let submit = || {
+        solana::sign_and_submit_async(
+            state.solana_rpc_url.clone(),
+            state.link_authority.clone(),
+            vec![ix.clone()],
+        )
+    };
+    let mut submit_result = submit().await;
     for attempt in 1..=2 {
         if submit_result.is_ok() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(500 * attempt)).await;
-        submit_result = solana::sign_and_submit(&rpc, link_authority, std::slice::from_ref(&ix));
+        submit_result = submit().await;
     }
     let tx_sig = match submit_result {
         Ok(sig) => sig.to_string(),

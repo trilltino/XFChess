@@ -19,3 +19,11 @@ The current implementation adds backend and native-client routing facades. Backe
 - Client and backend code stop duplicating routing decisions.
 - Delegation state sync can use MagicBlock state as authority, with `Game::is_delegated` as a program mirror.
 - The crank scheduling facade can be upgraded separately from lifecycle semantics.
+
+## Update (2026-10)
+
+The backend no longer submits through the Magic Router. ER-layer instructions go
+directly to `ER_RPC_URL`, the validator named in the delegation record, because
+the router and the validator use different blockhash domains. The routing table
+is `backend/src/signing/solana/routing.rs`; `MAGIC_ROUTER_RPC_URL` is used only by
+`er_probe`.

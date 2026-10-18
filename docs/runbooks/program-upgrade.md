@@ -90,3 +90,30 @@ records results, advances each round, completes with the engine's places, distri
 prizes and closes the tournament.
 
 Then redeploy the backend (it holds the new orchestrator, reconciler and game provisioner).
+
+---
+
+## Audit fixes (recorded 2026-10-16, pending deployment)
+
+No account layout, discriminator, PDA seed, argument or account-list changes.
+Every change narrows or corrects behaviour, so existing callers keep working;
+the table notes where a caller relied on the old behaviour.
+
+| Instruction | Change | Compatibility |
+|---|---|---|
+| `claim_timeout`, `crank_time_check` | A timed game times out only after the side to move is idle longer than its largest possible clock (base + increment per move made, minimum 90s); previously a fixed 90s, which forfeited legal thinks in 5- and 10-minute games. Zero-move (90s) and untimed (24h) windows are unchanged. | Claims between 90s and the clock bound now fail `TimeoutNotExpired`. |
+| `crank_time_check` | Removed the `CrankTooLate` check, which compared a slot height with `unix_timestamp / 400` and rejected every run once the ER's slot height passed ~4.5M. | `CrankTooLate` stays in the error enum (codes unchanged) but is no longer returned. |
+| `record_move` | A move by the player a draw offer was made to clears `draw_offered_by`; the offer could previously be accepted moves later. | None. |
+| `undelegate_game` | While the game is not terminal, the signer must be `game.fee_payer`, `white` or `black` (`UnauthorizedAccess`). Each undelegation charges `UNDELEGATE_COST + ER_SESSION_FEE_LAMPORTS` to the pot. | The backend signs with the session key (`fee_payer`); cu_benchmark signs as white. |
+| `request_force_undelegate` | Refused (`GameNotStuckDelegation`) unless the committed `Game` is terminal or idle past its timeout window. | The backend only requests for games the ER cannot serve. |
+| `session_join_game` | The game must belong to the session's tournament and the tournament must be Active (`InvalidSession` / `InvalidTournamentStatus`). | No production caller (only unused cu_benchmark builders). |
+| `complete_swiss_tournament` | Every shard the tournament's capacity needs must be passed (`InvalidSwissPlaces`). | The backend passes `required_shards(max_players)`. |
+| `fund_sol_prize` | The operator must be the tournament authority (`NotTournamentAuthority`). | Backend, client and cu_benchmark fund as the authority. |
+| `register_player` | Eligibility and seeding use the profile's rating for the tournament's time control; the `elo` argument is ignored. | Clients sent a constant 1200 (Blinks sent 0), so ELO-gated events previously checked a made-up number. |
+| `finalize_game` | A wagered game whose escrow holds less than both stakes fails `InsufficientFunds` instead of closing the Game PDA without paying. | Unreachable through the program's own deposit paths. |
+
+Pre-flight on 2026-10-16 (local, not a deployment): `cargo build-sbf` with
+platform-tools v1.52 produced 1,343,168 bytes, sha256
+`96d8fc95d2a8ad5537b2e9271b983e9e47f423b6343d02ca6dca6fcc1fbe2ba9`; the program
+suite passed against it. Rebuild and re-record from the exact commit you ship.
+Check that the binary fits the deployed ProgramData before writing a buffer.

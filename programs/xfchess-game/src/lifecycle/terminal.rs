@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn timeout_accepts_just_past_the_fixed_90s_window_for_timed_games() {
+    fn timeout_accepts_just_past_the_minimum_window_for_short_timed_games() {
         let mut game = active_game();
         game.move_count = 1;
         game.updated_at = 100;
@@ -324,6 +324,32 @@ mod tests {
         .unwrap();
 
         assert_eq!(game.status, GameStatus::Finished);
+    }
+
+    #[test]
+    fn timeout_never_forfeits_a_player_with_clock_time_left() {
+        for claim in [finish_by_timeout_claim, finish_by_crank_claim] {
+            let mut game = active_game();
+            game.base_time_seconds = 600;
+            game.move_count = 20;
+            game.turn = 21;
+            game.updated_at = 1_000;
+
+            // 200s on one move is legal with a 10-minute clock.
+            assert!(!claim(&mut game, 1_200));
+            assert_eq!(game.status, GameStatus::Active);
+
+            assert!(claim(&mut game, 1_000 + 600 + 1));
+            assert_eq!(game.result, GameResult::Winner(game.black));
+        }
+    }
+
+    fn finish_by_timeout_claim(game: &mut Game, now: i64) -> bool {
+        finish_by_timeout(game, now).is_ok()
+    }
+
+    fn finish_by_crank_claim(game: &mut Game, now: i64) -> bool {
+        finish_by_timeout_if_expired(game, now).unwrap()
     }
 
     #[test]

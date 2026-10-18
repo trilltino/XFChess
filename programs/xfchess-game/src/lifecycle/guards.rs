@@ -1,5 +1,6 @@
 use crate::errors::GameErrorCode;
-use crate::state::{Game, GamePhase};
+use crate::lifecycle::clock::timeout_window_seconds;
+use crate::state::{Game, GamePhase, GameStatus};
 use anchor_lang::prelude::*;
 
 pub fn require_undelegated(game: &Game) -> Result<()> {
@@ -15,6 +16,18 @@ pub fn require_delegated(game: &Game) -> Result<()> {
     Ok(())
 }
 
+/// The forced-undelegation escape hatch is for an ER that has stopped serving
+/// a game, and its timeout path wipes the Game account. A request therefore
+/// needs the last committed state to show the ER failing: a terminal result
+/// that was never returned to base, or no move for longer than the window in
+/// which anyone could end the game on time. A live game cannot be targeted.
+pub fn require_stuck_delegation(game: &Game, now: i64) -> Result<()> {
+    let terminal = matches!(game.status, GameStatus::Finished | GameStatus::Cancelled);
+    let idle = now.saturating_sub(game.updated_at) > timeout_window_seconds(game);
+    require!(terminal || idle, GameErrorCode::GameNotStuckDelegation);
+    Ok(())
+}
+
 pub fn require_phase(game: &Game, expected: GamePhase) -> Result<()> {
     require!(
         game.phase()? == expected,
@@ -26,7 +39,7 @@ pub fn require_phase(game: &Game, expected: GamePhase) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{GameResult, GameStatus, GameType, MatchType};
+    use crate::state::{GameResult, GameType, MatchType};
 
     fn game(status: GameStatus, is_delegated: bool) -> Game {
         Game {
@@ -77,6 +90,24 @@ mod tests {
     #[test]
     fn require_delegated_fails_when_not_delegated() {
         assert!(require_delegated(&game(GameStatus::Active, false)).is_err());
+    }
+
+    #[test]
+    fn live_delegated_game_cannot_be_force_undelegated() {
+        let mut g = game(GameStatus::Active, true);
+        g.move_count = 10;
+        g.updated_at = 1_000;
+        assert!(require_stuck_delegation(&g, 1_010).is_err());
+        assert!(require_stuck_delegation(&g, 1_000 + 86_400 + 1).is_ok());
+    }
+
+    #[test]
+    fn unreturned_terminal_game_can_be_force_undelegated() {
+        for status in [GameStatus::Finished, GameStatus::Cancelled] {
+            let mut g = game(status, true);
+            g.updated_at = 1_000;
+            assert!(require_stuck_delegation(&g, 1_001).is_ok());
+        }
     }
 
     #[test]

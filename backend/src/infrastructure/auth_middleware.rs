@@ -20,12 +20,20 @@ pub fn current_admin_actor() -> String {
 }
 
 fn resolve_admin_actor(provided_key: &str) -> Result<String, StatusCode> {
+    // A missing header reads as "". An empty configured key would otherwise
+    // match it and open every admin route.
+    if provided_key.is_empty() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
     if let Ok(named) = env::var("ADMIN_API_KEYS") {
         let mut any_configured = false;
         for pair in named.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             let Some((name, key)) = pair.split_once(':') else {
                 continue;
             };
+            if key.is_empty() {
+                continue;
+            }
             any_configured = true;
             if constant_time_eq(provided_key, key) {
                 return Ok(name.to_string());
@@ -60,6 +68,10 @@ fn resolve_admin_actor(provided_key: &str) -> Result<String, StatusCode> {
         }
     };
 
+    if expected_key.is_empty() {
+        tracing::error!("[auth] ADMIN_API_KEY is set but empty");
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
     if constant_time_eq(provided_key, &expected_key) {
         Ok("legacy".to_string())
     } else {
@@ -271,6 +283,26 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         };
         assert_eq!(response.status(), expected);
+    }
+
+    #[test]
+    fn empty_configured_keys_never_authorize_a_missing_header() {
+        let _env = crate::test_env::lock();
+
+        std::env::remove_var("ADMIN_API_KEYS");
+        std::env::set_var("ADMIN_API_KEY", "");
+        assert!(resolve_admin_actor("").is_err());
+
+        std::env::set_var("ADMIN_API_KEYS", "ops:");
+        assert!(resolve_admin_actor("").is_err());
+
+        // An empty named key is ignored rather than treated as configured.
+        std::env::set_var("ADMIN_API_KEYS", "ops:,deploy:real-key");
+        assert!(resolve_admin_actor("").is_err());
+        assert_eq!(resolve_admin_actor("real-key"), Ok("deploy".to_string()));
+
+        std::env::remove_var("ADMIN_API_KEYS");
+        std::env::remove_var("ADMIN_API_KEY");
     }
 
     #[tokio::test]

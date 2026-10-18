@@ -81,9 +81,10 @@ jobs:
             libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
             libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev \
             libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
+      # Pinned with solana-program-test so the binary under test is reproducible.
       - name: Install Solana CLI (cargo build-sbf)
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.12/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       # Program-test suites load target/deploy/xfchess_game.so; build it before cargo test.
       - name: Build on-chain program (.so for solana-program-test)

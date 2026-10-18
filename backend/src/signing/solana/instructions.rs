@@ -395,6 +395,22 @@ pub fn cancel_time_check_ix(
     })
 }
 
+/// `claim_timeout(game_id)`: permissionless; the program decides whether the
+/// side to move has run out of time.
+pub fn claim_timeout_ix(program_id: &Pubkey, caller: &Pubkey, game_id: u64) -> Instruction {
+    let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
+    let mut data = anchor_discriminator("claim_timeout").to_vec();
+    data.extend_from_slice(&game_id.to_le_bytes());
+    Instruction {
+        program_id: *program_id,
+        accounts: vec![
+            AccountMeta::new(game_pda, false),
+            AccountMeta::new_readonly(*caller, true),
+        ],
+        data,
+    }
+}
+
 pub fn finalize_game_ix(
     program_id: &Pubkey,
     game_id: u64,
@@ -1412,6 +1428,34 @@ pub fn claim_prize_ix(program_id: &Pubkey, tournament_id: u64, claimant: &Pubkey
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claim_timeout_matches_the_program_account_order() {
+        let program_id = Pubkey::new_unique();
+        let caller = Pubkey::new_unique();
+        let ix = claim_timeout_ix(&program_id, &caller, 42);
+
+        let game = Pubkey::find_program_address(&[GAME_SEED, &42u64.to_le_bytes()], &program_id).0;
+        assert_eq!(ix.accounts.len(), 2);
+        assert_eq!(
+            (
+                ix.accounts[0].pubkey,
+                ix.accounts[0].is_writable,
+                ix.accounts[0].is_signer
+            ),
+            (game, true, false)
+        );
+        assert_eq!(
+            (
+                ix.accounts[1].pubkey,
+                ix.accounts[1].is_writable,
+                ix.accounts[1].is_signer
+            ),
+            (caller, false, true)
+        );
+        assert_eq!(&ix.data[..8], &anchor_discriminator("claim_timeout"));
+        assert_eq!(&ix.data[8..], &42u64.to_le_bytes());
+    }
 
     #[test]
     fn bracket_position_two_players() {

@@ -295,8 +295,13 @@ async fn link_confirm(
         bullet_rating * 100,
     );
 
-    let rpc = solana::make_rpc(&state.solana_rpc_url);
-    let tx_sig = match solana::sign_and_submit(&rpc, link_authority, &[ix]) {
+    let tx_sig = match solana::sign_and_submit_async(
+        state.solana_rpc_url.clone(),
+        state.link_authority.clone(),
+        vec![ix],
+    )
+    .await
+    {
         Ok(sig) => sig.to_string(),
         Err(e) => {
             error!(
@@ -460,8 +465,13 @@ async fn link_sync(
         bullet_rating * 100,
     );
 
-    let rpc = solana::make_rpc(&state.solana_rpc_url);
-    let tx_sig = match solana::sign_and_submit(&rpc, link_authority, &[ix]) {
+    let tx_sig = match solana::sign_and_submit_async(
+        state.solana_rpc_url.clone(),
+        state.link_authority.clone(),
+        vec![ix],
+    )
+    .await
+    {
         Ok(sig) => sig.to_string(),
         Err(e) => {
             error!(

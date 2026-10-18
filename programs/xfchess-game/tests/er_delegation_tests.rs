@@ -110,6 +110,73 @@ async fn undelegate_rejects_not_delegated_game_before_cpi() {
 }
 
 #[tokio::test]
+async fn undelegate_rejects_an_outsider_on_a_live_game() {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+
+    // The fixture's fee payer is white, so the transaction payer is an outsider.
+    let mut ctx = start(vec![game_account(
+        GAME_ID,
+        white,
+        black,
+        start_board(),
+        1,
+        0,
+        GameStatus::Active,
+    )])
+    .await;
+
+    let payer = ctx.payer.pubkey();
+    let ix = undelegate_ix(
+        GAME_ID,
+        payer,
+        Pubkey::from_str(MAGIC_CONTEXT).unwrap(),
+        Pubkey::from_str(MAGIC_PROGRAM).unwrap(),
+    );
+
+    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(xfchess_game::errors::GameErrorCode::UnauthorizedAccess)),
+        "an outsider must not pull a live game off the ER"
+    );
+}
+
+#[tokio::test]
+async fn undelegate_lets_anyone_return_a_finished_game() {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+
+    let mut ctx = start(vec![game_account(
+        GAME_ID,
+        white,
+        black,
+        start_board(),
+        1,
+        0,
+        GameStatus::Finished,
+    )])
+    .await;
+
+    let payer = ctx.payer.pubkey();
+    let ix = undelegate_ix(
+        GAME_ID,
+        payer,
+        Pubkey::from_str(MAGIC_CONTEXT).unwrap(),
+        Pubkey::from_str(MAGIC_PROGRAM).unwrap(),
+    );
+
+    // Without a MagicBlock validator the commit CPI fails; the point is that the
+    // authority check passes.
+    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    assert_ne!(
+        custom_code(&err),
+        Some(ec(xfchess_game::errors::GameErrorCode::UnauthorizedAccess)),
+        "settlement must never be blocked on who undelegates a finished game"
+    );
+}
+
+#[tokio::test]
 async fn process_undelegation_rejects_non_canonical_buffer() {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();

@@ -30,6 +30,14 @@ pub fn handler(ctx: Context<FundSolPrize>, tournament_id: u64, amount: u64) -> R
         tournament.tournament_id == tournament_id,
         GameErrorCode::UnauthorizedAccess
     );
+    // Funding is once-only, so any other signer could lock in a token prize
+    // first and block the real one; a cancellation also refunds the host, not
+    // the funder.
+    require_keys_eq!(
+        ctx.accounts.operator.key(),
+        tournament.authority,
+        GameErrorCode::NotTournamentAuthority
+    );
     require!(amount > 0, GameErrorCode::InvalidArgument);
     require!(
         tournament.status == TournamentStatus::Registration,

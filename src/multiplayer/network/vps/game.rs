@@ -12,6 +12,8 @@ struct RecordMoveReq<'a> {
     mover_wallet: &'a str,
     /// Seat-lease writer id (see `network::device_id`).
     device_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mover_auth: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -103,12 +105,15 @@ pub fn report_blur(
     Ok(())
 }
 
+/// `mover_auth` is the mover's signature (`network::move_auth`); the backend
+/// requires it when the caller is not the mover.
 pub fn record_move(
     game_id: u64,
     move_uci: &str,
     next_fen: &str,
     nonce: u64,
     mover_wallet: &str,
+    mover_auth: Option<&str>,
 ) -> Result<(String, String), String> {
     let response = client()?
         .post(format!("{}/move/record", vps_base()))
@@ -119,6 +124,7 @@ pub fn record_move(
             nonce,
             mover_wallet,
             device_id: crate::multiplayer::network::device_id::device_id(),
+            mover_auth,
         })
         .send()
         .map_err(|e| format!("vps record_move: {e}"))?;
@@ -350,11 +356,14 @@ pub struct SeatLease {
 }
 
 /// Claim this device's seat in `game_id`; the newest claim takes over.
-pub fn claim_seat(game_id: u64) -> Result<SeatLease, String> {
+/// `move_signer` registers the key this device signs its moves with
+/// (`network::move_auth`), so the opponent can relay them.
+pub fn claim_seat(game_id: u64, move_signer: Option<&str>) -> Result<SeatLease, String> {
     let response = client()?
         .post(format!("{}/game/{}/seat/claim", vps_base(), game_id))
         .json(&serde_json::json!({
-            "device_id": crate::multiplayer::network::device_id::device_id()
+            "device_id": crate::multiplayer::network::device_id::device_id(),
+            "move_signer": move_signer,
         }))
         .send()
         .map_err(|e| format!("claim_seat: {e}"))?;

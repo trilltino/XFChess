@@ -47,6 +47,30 @@ impl GameAccount {
     pub fn is_terminal(&self) -> bool {
         matches!(self.status, STATUS_SETTLED | STATUS_EXPIRED)
     }
+
+    /// Seconds without a move after which `claim_timeout` is worth submitting.
+    /// The program decides; this only schedules attempts. A timed game is never
+    /// claimed before the side to move's largest possible clock (base time plus
+    /// every increment it can have earned) has run out, so a slow but legal
+    /// think is never forfeited.
+    pub fn timeout_claimable_after_secs(&self) -> i64 {
+        const ZERO_MOVE_WINDOW_SECS: i64 = 90;
+        const MIN_TIMED_WINDOW_SECS: i64 = 90;
+        const UNTIMED_WINDOW_SECS: i64 = 86_400;
+        if self.move_count == 0 {
+            return ZERO_MOVE_WINDOW_SECS;
+        }
+        if self.base_time_seconds == 0 {
+            return UNTIMED_WINDOW_SECS;
+        }
+        let moves_by_side_to_move = u64::from(self.move_count / 2);
+        let max_clock = self.base_time_seconds.saturating_add(
+            u64::from(self.increment_seconds).saturating_mul(moves_by_side_to_move),
+        );
+        i64::try_from(max_clock)
+            .unwrap_or(i64::MAX)
+            .max(MIN_TIMED_WINDOW_SECS)
+    }
 }
 
 struct Reader<'a> {
@@ -254,6 +278,24 @@ mod tests {
             .u8(0) // draw_offered_by = None
             .out;
         (bytes, white, black, payer)
+    }
+
+    #[test]
+    fn timeout_is_never_claimable_while_the_mover_could_have_time() {
+        let (bytes, ..) = sample();
+        let mut g = parse(&bytes).expect("decode");
+        // 300s base, 2s increment, 9 plies: black to move has made 4 moves.
+        assert_eq!(g.timeout_claimable_after_secs(), 300 + 2 * 4);
+        g.move_count = 0;
+        assert_eq!(g.timeout_claimable_after_secs(), 90);
+        g.move_count = 9;
+        g.base_time_seconds = 0;
+        assert_eq!(g.timeout_claimable_after_secs(), 86_400);
+        g.base_time_seconds = 30;
+        g.increment_seconds = 0;
+        assert_eq!(g.timeout_claimable_after_secs(), 90);
+        g.base_time_seconds = u64::MAX;
+        assert_eq!(g.timeout_claimable_after_secs(), i64::MAX);
     }
 
     #[test]

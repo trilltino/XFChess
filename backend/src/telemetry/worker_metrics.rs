@@ -10,6 +10,8 @@ pub static SETTLEMENT_RPC_CALLS_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static SETTLEMENT_STALE_DELEGATED_GAUGE: AtomicU64 = AtomicU64::new(0);
 pub static SETTLEMENT_REDELEGATE_RETRIED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static SETTLEMENT_REDELEGATE_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
+pub static SETTLEMENT_TIMEOUT_CLAIMED_TOTAL: AtomicU64 = AtomicU64::new(0);
+pub static SETTLEMENT_TIMEOUT_CLAIM_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static FORCE_UNDELEGATED_AWAITING_RECOVERY_TOTAL: AtomicU64 = AtomicU64::new(0);
 pub static STUCK_DELEGATION_AUTO_RECOVERED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
@@ -93,6 +95,12 @@ pub fn render_prometheus() -> String {
          # HELP xfchess_settlement_redelegate_failed_total Auto-redelegate attempts that failed\n\
          # TYPE xfchess_settlement_redelegate_failed_total counter\n\
          xfchess_settlement_redelegate_failed_total {}\n\
+         # HELP xfchess_settlement_timeout_claimed_total Abandoned delegated games ended on time by the worker\n\
+         # TYPE xfchess_settlement_timeout_claimed_total counter\n\
+         xfchess_settlement_timeout_claimed_total {}\n\
+         # HELP xfchess_settlement_timeout_claim_failed_total Worker claim_timeout submissions that failed\n\
+         # TYPE xfchess_settlement_timeout_claim_failed_total counter\n\
+         xfchess_settlement_timeout_claim_failed_total {}\n\
          # HELP xfchess_force_undelegated_awaiting_recovery_total Games force-undelegated after ER-unavailability timeout whose automatic escrow recovery failed and still need the manual admin step\n\
          # TYPE xfchess_force_undelegated_awaiting_recovery_total counter\n\
          xfchess_force_undelegated_awaiting_recovery_total {}\n\
@@ -185,6 +193,8 @@ pub fn render_prometheus() -> String {
         c(&ER_LAST_PUSH_UNIX),
         c(&SETTLEMENT_REDELEGATE_RETRIED_TOTAL),
         c(&SETTLEMENT_REDELEGATE_FAILED_TOTAL),
+        c(&SETTLEMENT_TIMEOUT_CLAIMED_TOTAL),
+        c(&SETTLEMENT_TIMEOUT_CLAIM_FAILED_TOTAL),
         c(&FORCE_UNDELEGATED_AWAITING_RECOVERY_TOTAL),
         c(&STUCK_DELEGATION_AUTO_RECOVERED_TOTAL),
         c(&TIME_CHECK_SCHEDULED_TOTAL),
