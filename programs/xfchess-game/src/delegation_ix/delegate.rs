@@ -49,6 +49,11 @@ mod inner {
         let mut data = ctx.accounts.game.try_borrow_mut_data()?;
         let mut game_struct = Game::try_deserialize(&mut &data[..])?;
 
+        crate::lifecycle::guards::require_delegated(&game_struct)?;
+        crate::lifecycle::transitions::require_undelegation_authority(
+            &game_struct,
+            ctx.accounts.payer.key(),
+        )?;
         crate::lifecycle::transitions::mark_undelegated(&mut game_struct)?;
 
         let mut writer = &mut data[..];

@@ -4,7 +4,7 @@ use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
 use solana_program_test::ProgramTestBanksClientExt;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer};
-use xfchess_game::elo::glicko2::calculate_elo_update;
+use xfchess_game::elo::calculate_elo_update;
 use xfchess_game::state::{Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile};
 
 fn treasury_vault_pda() -> Pubkey {

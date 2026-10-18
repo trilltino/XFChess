@@ -64,6 +64,19 @@ pub fn handler(
         t.current_round >= t.total_rounds,
         GameErrorCode::SwissTournamentNotFinished
     );
+    // Places are checked against every standing; an omitted shard would hide
+    // players who outscore the submitted order.
+    let present = [
+        true,
+        ctx.accounts.tournament_players_shard_1.is_some(),
+        ctx.accounts.tournament_players_shard_2.is_some(),
+        ctx.accounts.tournament_players_shard_3.is_some(),
+    ];
+    let required = crate::tournament_ix::shards::required_shards(t.max_players) as usize;
+    require!(
+        present[..required].iter().all(|shard| *shard),
+        GameErrorCode::InvalidSwissPlaces
+    );
 
     let mut standings: Vec<SwissStanding> = ctx
         .accounts

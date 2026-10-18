@@ -363,7 +363,8 @@ async fn abandoned_cancel_is_refused_before_the_window() {
     assert_eq!(fetch_game(&mut ctx, id).await.status, GameStatus::Active);
 }
 
-/// Active, timed game: black to move (`turn` even) and idle past the window.
+/// Active, timed game: black to move (`turn` even) and idle longer than its
+/// whole 300s clock.
 async fn idle_active_table(game_id: u64) -> Table {
     let white = Keypair::new();
     let black = Keypair::new();
@@ -375,7 +376,7 @@ async fn idle_active_table(game_id: u64) -> Table {
         white: white.pubkey(),
         black: black.pubkey(),
         status: GameStatus::Active,
-        last_move_timestamp: t - 200,
+        last_move_timestamp: t - 400,
         fees_advanced: 0,
         fee_payer: white.pubkey(),
         result: GameResult::None,
@@ -383,8 +384,8 @@ async fn idle_active_table(game_id: u64) -> Table {
         move_count: 1,
         halfmove_clock: 0,
         turn: 2,
-        created_at: t - 300,
-        updated_at: t - 200,
+        created_at: t - 500,
+        updated_at: t - 400,
         wager_amount: 0,
         wager_token: None,
         game_type: GameType::PvP,

@@ -1,6 +1,6 @@
 use crate::common::escrow;
 use crate::constants::*;
-use crate::elo::glicko2::calculate_elo_update;
+use crate::elo::calculate_elo_update;
 use crate::elo::rating::{bucket_for_time_control, rating_field_mut};
 use crate::errors::GameErrorCode;
 use crate::game_ix::finalize::EndGame;
@@ -69,7 +69,10 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
     let escrow_balance = ctx.accounts.escrow_pda.lamports();
     let pot = escrow::pot(wager_amount)?;
 
-    if wager_amount > 0 && wager_token.is_none() && escrow_balance >= pot {
+    if wager_amount > 0 && wager_token.is_none() {
+        // Both stakes are deposited before a game can start. Settling without
+        // them would close the Game PDA, the only record of who is owed what.
+        require!(escrow_balance >= pot, GameErrorCode::InsufficientFunds);
         let sp = &ctx.accounts.system_program;
         let escrow = &ctx.accounts.escrow_pda;
         let mut remaining = pot;

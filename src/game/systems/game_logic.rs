@@ -61,6 +61,14 @@ pub fn update_game_phase(
         game_phase.0 = GamePhase::Stalemate;
         *game_over = GameOverState::Stalemate;
         info!("[GAME] ========== STALEMATE! ==========");
+    } else if engine.is_insufficient_material() {
+        // The program ends wagered games on these rules too; matching them keeps
+        // the board from playing on after the chain has recorded a draw.
+        *game_over = GameOverState::InsufficientMaterial;
+        info!("[GAME] Draw by insufficient material");
+    } else if engine.fifty_move_rule_reached() {
+        *game_over = GameOverState::FiftyMoveRule;
+        info!("[GAME] Draw by the fifty-move rule");
     } else if in_check {
         if previous_phase != GamePhase::Check {
             game_phase.0 = GamePhase::Check;
@@ -236,5 +244,57 @@ pub fn confirm_game_over_prompt(
         info!("[GAME] Game over acknowledged - transitioning to GameOver state");
         pending.active = false;
         next_state.set(crate::core::GameState::GameOver);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::components::HasMoved;
+    use crate::rendering::pieces::{Piece, PieceType};
+
+    fn evaluate(pieces: &[(PieceColor, PieceType, u8, u8)], halfmove_clock: u32) -> GameOverState {
+        let mut app = App::new();
+        let mut engine = ChessEngine::default();
+        engine.halfmove_clock = halfmove_clock;
+        app.insert_resource(engine);
+        app.init_resource::<CurrentGamePhase>();
+        app.init_resource::<GameOverState>();
+        app.init_resource::<crate::game::view_mode::ViewMode>();
+        for &(color, kind, x, y) in pieces {
+            app.world_mut().spawn((
+                Piece::new(color, kind, x, y),
+                HasMoved {
+                    moved: true,
+                    move_count: 1,
+                },
+            ));
+        }
+        app.add_systems(Update, update_game_phase);
+        app.update();
+        *app.world().resource::<GameOverState>()
+    }
+
+    #[test]
+    fn bare_kings_end_the_game_as_the_contract_does() {
+        let state = evaluate(
+            &[
+                (PieceColor::White, PieceType::King, 4, 2),
+                (PieceColor::Black, PieceType::King, 4, 5),
+            ],
+            0,
+        );
+        assert_eq!(state, GameOverState::InsufficientMaterial);
+    }
+
+    #[test]
+    fn hundred_quiet_halfmoves_end_the_game_as_the_contract_does() {
+        let pieces = [
+            (PieceColor::White, PieceType::King, 4, 2),
+            (PieceColor::White, PieceType::Rook, 0, 0),
+            (PieceColor::Black, PieceType::King, 4, 5),
+        ];
+        assert_eq!(evaluate(&pieces, 99), GameOverState::Playing);
+        assert_eq!(evaluate(&pieces, 100), GameOverState::FiftyMoveRule);
     }
 }

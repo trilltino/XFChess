@@ -12,6 +12,12 @@ The Solana program alone retains its pinned Nimzovich rules dependency, with
 default features and search disabled. Host applications depend on the program
 with its default features disabled, using only its interface and state types.
 
+Game endings follow the program: checkmate, stalemate, insufficient material
+as the contract defines it (`Game::is_insufficient_material`, narrower than
+Shakmaty's rule) and an automatic draw after 100 halfmoves without a capture or
+pawn move. Threefold repetition is not detected on chain, so the client does not
+end games on it either. `rules_compatibility` checks both rule sets agree.
+
 `libs/chess/xfchess-stockfish` owns each child process on a worker thread.
 It uses a 15-second startup deadline and a search deadline of the move budget
 plus five seconds. Failed or illegal responses discard the process and retry

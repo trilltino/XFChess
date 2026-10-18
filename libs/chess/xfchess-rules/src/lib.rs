@@ -13,6 +13,9 @@ pub const BISHOP_ID: i8 = 3;
 pub const ROOK_ID: i8 = 4;
 pub const QUEEN_ID: i8 = 5;
 pub const KING_ID: i8 = 6;
+/// Halfmoves without a capture or pawn move after which the contract ends the
+/// game as a draw (the fifty-move rule, applied automatically).
+pub const FIFTY_MOVE_HALFMOVES: u32 = 100;
 
 /// A small, cloneable rules position. Squares use a1=0 and h8=63.
 #[derive(Clone, Debug)]
@@ -59,6 +62,41 @@ impl Game {
     }
     pub fn is_stalemate(&self) -> bool {
         self.position.is_stalemate()
+    }
+    /// Insufficient material exactly as the contract defines it
+    /// (`nimzovich_engine::on_chain_moves::is_insufficient_material`): no pawns,
+    /// rooks or queens, and either at most one minor piece in total or one
+    /// bishop each on squares of the same colour. This is narrower than
+    /// shakmaty's rule on purpose, so a game ends here exactly when it ends
+    /// on chain.
+    pub fn is_insufficient_material(&self) -> bool {
+        let count = |id: i8| self.board.iter().filter(|&&piece| piece == id).count();
+        if [PAWN_ID, ROOK_ID, QUEEN_ID]
+            .iter()
+            .any(|&id| count(id) + count(-id) > 0)
+        {
+            return false;
+        }
+        let (white_knights, black_knights) = (count(KNIGHT_ID), count(-KNIGHT_ID));
+        let (white_bishops, black_bishops) = (count(BISHOP_ID), count(-BISHOP_ID));
+        if white_knights + black_knights + white_bishops + black_bishops <= 1 {
+            return true;
+        }
+        if white_knights == 0 && black_knights == 0 && white_bishops == 1 && black_bishops == 1 {
+            let square_colour = |id: i8| {
+                self.board
+                    .iter()
+                    .position(|&piece| piece == id)
+                    .map(|sq| (sq / 8 + sq % 8) & 1)
+            };
+            return square_colour(BISHOP_ID) == square_colour(-BISHOP_ID);
+        }
+        false
+    }
+    /// Halfmoves since the last capture or pawn move. The contract draws the
+    /// game once this reaches [`FIFTY_MOVE_HALFMOVES`].
+    pub fn halfmove_clock(&self) -> u32 {
+        self.position.halfmoves()
     }
     pub fn legal_moves(&self) -> Vec<String> {
         self.position
@@ -248,4 +286,35 @@ pub fn move_to_san(game: &Game, src: i8, dst: i8, promo: i8) -> Result<String, S
 }
 pub fn do_move_with_promo(game: &mut Game, src: i8, dst: i8, promo: i8) -> Result<(), String> {
     game.play_uci(&move_uci(src, dst, promo)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn insufficient(fen: &str) -> bool {
+        Game::from_fen(fen).unwrap().is_insufficient_material()
+    }
+
+    #[test]
+    fn insufficient_material_follows_the_contract_definition() {
+        assert!(insufficient("8/8/4k3/8/8/4K3/8/8 w - - 0 1"));
+        assert!(insufficient("8/8/4k3/8/8/4K3/8/5N2 w - - 0 1"));
+        // Same-coloured bishops (c1 and f8 are both dark).
+        assert!(insufficient("5b2/8/4k3/8/8/4K3/8/2B5 w - - 0 1"));
+        // Opposite-coloured bishops, two knights and two bishops can still mate.
+        assert!(!insufficient("2b5/8/4k3/8/8/4K3/8/2B5 w - - 0 1"));
+        assert!(!insufficient("8/8/4k3/8/8/4K3/8/1N3N2 w - - 0 1"));
+        assert!(!insufficient("8/8/4k3/8/8/4K3/8/2B2B2 w - - 0 1"));
+        assert!(!insufficient("8/8/4k3/8/8/4K3/4P3/8 w - - 0 1"));
+    }
+
+    #[test]
+    fn halfmove_clock_reads_the_position() {
+        let game = Game::from_fen("8/8/4k3/8/8/4K3/8/R7 w - - 99 80").unwrap();
+        assert_eq!(game.halfmove_clock(), 99);
+        let mut next = game.clone();
+        next.play_uci("a1a2").unwrap();
+        assert_eq!(next.halfmove_clock(), FIFTY_MOVE_HALFMOVES);
+    }
 }

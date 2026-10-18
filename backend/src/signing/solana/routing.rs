@@ -13,6 +13,7 @@ pub enum Instr {
     ScheduleTimeCheck,
     CancelTimeCheck,
     UndelegateGame,
+    ClaimTimeout,
     RequestForceUndelegate,
     ForceUndelegateAfterTimeout,
     RecoverStuckDelegation,
@@ -37,7 +38,8 @@ pub fn layer_of(instr: Instr) -> Layer {
         Instr::RecordMove
         | Instr::ScheduleTimeCheck
         | Instr::CancelTimeCheck
-        | Instr::UndelegateGame => Layer::Er,
+        | Instr::UndelegateGame
+        | Instr::ClaimTimeout => Layer::Er,
     }
 }
 
@@ -92,6 +94,7 @@ mod tests {
             Instr::ScheduleTimeCheck,
             Instr::CancelTimeCheck,
             Instr::UndelegateGame,
+            Instr::ClaimTimeout,
         ] {
             assert_eq!(layer_of(i), Layer::Er, "{i:?} should route to ER");
         }

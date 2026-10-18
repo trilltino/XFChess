@@ -118,6 +118,50 @@ pub fn sign_and_submit(
     send_and_poll(rpc, &tx, Duration::from_secs(30), "sign_and_submit")
 }
 
+/// [`sign_and_submit`] on the blocking pool. Async handlers must not run the
+/// blocking client inline: confirmation polling holds the thread for up to 30s.
+pub async fn sign_and_submit_async(
+    rpc_url: String,
+    signer: std::sync::Arc<Keypair>,
+    instructions: Vec<Instruction>,
+) -> Result<Signature> {
+    tokio::task::spawn_blocking(move || {
+        sign_and_submit(&super::rpc::make_rpc(&rpc_url), &signer, &instructions)
+    })
+    .await
+    .map_err(|e| anyhow!("submission task failed: {e}"))?
+}
+
+/// Like [`sign_and_submit`], but also returns the signature of the signed
+/// transaction. A confirmation timeout does not mean the transaction failed;
+/// callers that must not repeat or lose its effects can look the signature up
+/// with [`signature_landed`] before deciding what happened.
+pub fn sign_and_submit_tracked(
+    rpc: &RpcClient,
+    signer: &Keypair,
+    instructions: &[Instruction],
+) -> (Option<Signature>, Result<Signature>) {
+    let blockhash = match rpc.get_latest_blockhash() {
+        Ok(blockhash) => blockhash,
+        Err(e) => return (None, Err(anyhow!(e))),
+    };
+    let msg = Message::new(instructions, Some(&signer.pubkey()));
+    let tx = Transaction::new(&[signer], msg, blockhash);
+    let signature = tx.signatures.first().copied();
+    let result = send_and_poll(rpc, &tx, Duration::from_secs(30), "sign_and_submit");
+    (signature, result)
+}
+
+/// Whether `signature` executed successfully at `confirmed` commitment.
+/// `None` means the status is unknown (not found yet, or the RPC failed).
+pub fn signature_landed(rpc: &RpcClient, signature: &Signature) -> Option<bool> {
+    match rpc.get_signature_status_with_commitment(signature, CommitmentConfig::confirmed()) {
+        Ok(Some(Ok(()))) => Some(true),
+        Ok(Some(Err(_))) => Some(false),
+        Ok(None) | Err(_) => None,
+    }
+}
+
 const BLOCKHASH_RETRY_ATTEMPTS: u32 = 3;
 
 pub fn sign_and_submit_er(

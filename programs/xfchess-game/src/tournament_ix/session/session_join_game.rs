@@ -76,7 +76,7 @@ pub struct SessionJoinGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<SessionJoinGame>, _tournament_id: u64, _game_id: u64) -> Result<()> {
+pub fn handler(ctx: Context<SessionJoinGame>, tournament_id: u64, _game_id: u64) -> Result<()> {
     let delegation = &mut ctx.accounts.session_delegation;
     let game = &mut ctx.accounts.game;
     let player_key = ctx.accounts.player.key();
@@ -86,6 +86,15 @@ pub fn handler(ctx: Context<SessionJoinGame>, _tournament_id: u64, _game_id: u64
     require!(
         delegation.session_key == ctx.accounts.session_signer.key(),
         XfchessGameError::SessionNotAuthorized
+    );
+    // The session spends a vault the player funded for this tournament only.
+    require!(
+        game.tournament_id == Some(tournament_id),
+        GameErrorCode::InvalidSession
+    );
+    require!(
+        ctx.accounts.tournament.status == TournamentStatus::Active,
+        GameErrorCode::InvalidTournamentStatus
     );
 
     require!(

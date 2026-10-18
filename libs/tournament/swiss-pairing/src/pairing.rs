@@ -57,7 +57,7 @@ pub fn generate_pairings(
     ranked.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
-            .unwrap()
+            .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| b.rating.cmp(&a.rating))
             .then_with(|| a.id.cmp(&b.id))
     });

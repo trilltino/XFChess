@@ -26,15 +26,18 @@ CREATE TABLE IF NOT EXISTS casual_game_participants (
 );
 
 -- One writing device per (game, wallet); a new claim bumps the epoch and turns
--- the previous device view-only.
+-- the previous device view-only. move_signer is that device's move-signing
+-- key; a move the other player relays must carry its signature.
 CREATE TABLE IF NOT EXISTS game_seat_leases (
-    game_id    TEXT    NOT NULL,
-    wallet     TEXT    NOT NULL,
-    device_id  TEXT    NOT NULL,
-    epoch      INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
+    game_id     TEXT    NOT NULL,
+    wallet      TEXT    NOT NULL,
+    device_id   TEXT    NOT NULL,
+    epoch       INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    move_signer TEXT,
     PRIMARY KEY (game_id, wallet)
 );
+ALTER TABLE game_seat_leases ADD COLUMN move_signer TEXT;
 
 -- Lobby relay rooms (incl. JOIN_ACK mailboxes), restored on restart; the TTL
 -- sweep still expires them.

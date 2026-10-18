@@ -13,8 +13,8 @@ pub mod tx_guard;
 pub use debug::{debug_transaction, format_debug_info, parse_program_error, TransactionDebugInfo};
 pub use instructions::{
     advance_round_ix, advance_winner_ix, bracket_position, cancel_time_check_ix,
-    cancel_tournament_ix, claim_prize_ix, complete_swiss_tournament_ix, create_tournament_game_ix,
-    delegate_game_ix, distribute_tournament_prizes_ix, finalize_game_ix,
+    cancel_tournament_ix, claim_prize_ix, claim_timeout_ix, complete_swiss_tournament_ix,
+    create_tournament_game_ix, delegate_game_ix, distribute_tournament_prizes_ix, finalize_game_ix,
     force_undelegate_after_timeout_ix, fund_sol_prize_ix, global_record_move_ix,
     initialize_escrow_ix, initialize_match_ix, initialize_shards_ix, initialize_tournament_ix,
     leave_tournament_ix, link_external_elo_ix, record_move_ix, record_result_ix,
@@ -33,7 +33,8 @@ pub use transaction_fetch::{
     FetchedSolanaTransaction, TransactionBuildPolicy, MAX_SUPPORTED_TX_VERSION,
 };
 pub use transactions::{
-    cosign_and_submit_tx, fund_account, sign_and_submit, sign_and_submit_er, submit_signed_tx,
+    cosign_and_submit_tx, fund_account, sign_and_submit, sign_and_submit_async, sign_and_submit_er,
+    sign_and_submit_tracked, signature_landed, submit_signed_tx,
 };
 pub use tx_guard::validate_cosignable_tx;
 

@@ -180,6 +180,7 @@ pub fn emit_game_ended_event(
         GameOverState::BlackWonByAbandonment => (Some("black".to_string()), "abandonment"),
         GameOverState::Stalemate => (None, "stalemate"),
         GameOverState::InsufficientMaterial => (None, "insufficient_material"),
+        GameOverState::FiftyMoveRule => (None, "fifty_move_rule"),
         GameOverState::Aborted => (None, "aborted"),
         GameOverState::Playing => return,
     };

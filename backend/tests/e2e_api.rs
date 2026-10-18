@@ -1485,7 +1485,7 @@ async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() {
     // participation, unavailable here, so the lease is taken via the store.)
     app.state
         .seat_leases
-        .claim(game_id, &host, "device-aaaa-0001", 1)
+        .claim(game_id, &host, "device-aaaa-0001", None, 1)
         .await
         .unwrap();
     let (mut m1, v1) = move_event(&host, "e2e4", FEN_E4, 1, "0");
@@ -1511,7 +1511,7 @@ async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() {
     let lease = app
         .state
         .seat_leases
-        .claim(game_id, &host, "device-bbbb-0002", 2)
+        .claim(game_id, &host, "device-bbbb-0002", None, 2)
         .await
         .unwrap();
     assert_eq!(lease.epoch, 2);
@@ -1553,6 +1553,17 @@ async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() {
         .send_auth("POST", "/game/77001/seat/claim", None, Some(&claim))
         .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // The move-signing key registered with a claim must be a real public key.
+    let bad_signer = json!({ "device_id": "device-cccc-0003", "move_signer": "not-a-key" });
+    let (s, _) = app
+        .send_auth(
+            "POST",
+            "/game/77001/seat/claim",
+            Some(&host_jwt),
+            Some(&bad_signer),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -1674,4 +1685,84 @@ async fn puzzle_hint_makes_the_round_unrated() {
             .await
             .unwrap();
     assert_eq!(flags, [("hintW".into(), 0), ("ratedW".into(), 1)]);
+}
+
+/// Settlement bookkeeping records what the chain settled — never a caller's
+/// claimed winner — forwards tournament results and retires the session.
+// Multithread: rating lookups use the blocking Solana client.
+#[tokio::test(flavor = "multi_thread")]
+async fn settlement_bookkeeping_uses_the_chain_result() {
+    use backend::signing::solana::game_account::{GameAccount, RESULT_WINNER, STATUS_FINISHED};
+    use backend::signing::storage::tournament::GameOutcome;
+    use backend::signing::OrchestratorEvent;
+    use solana_sdk::pubkey::Pubkey;
+
+    let mut app = spawn_app().await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+    app.state.orchestrator_tx = Some(tx);
+
+    let game_id = 4_242;
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+    app.state.store.create(game_id, white).await.unwrap();
+    let snap = GameAccount {
+        game_id,
+        white,
+        black,
+        status: STATUS_FINISHED,
+        last_move_timestamp: 0,
+        fees_advanced: 0,
+        fee_payer: white,
+        result_tag: RESULT_WINNER,
+        winner: Some(black),
+        move_count: 40,
+        halfmove_clock: 0,
+        turn: 41,
+        created_at: 0,
+        updated_at: 0,
+        wager_amount: 0,
+        country_fee: 0,
+        base_time_seconds: 300,
+        increment_seconds: 0,
+        is_delegated: false,
+        tournament_id: Some(9),
+        nonce: 40,
+    };
+
+    backend::tasks::settlement_worker::record_settled_game(
+        &app.state,
+        game_id,
+        &snap,
+        Some("settlement-sig"),
+    )
+    .await;
+
+    let record = app
+        .repo()
+        .get_game(&game_id.to_string())
+        .await
+        .unwrap()
+        .expect("game recorded");
+    assert_eq!(record.status, "completed");
+    assert_eq!(record.winner.as_deref(), Some("black"));
+    assert_eq!(record.finalize_sig.as_deref(), Some("settlement-sig"));
+
+    match rx.try_recv().expect("tournament result forwarded") {
+        OrchestratorEvent::GameEnded {
+            tournament_id,
+            game_id: ended,
+            outcome,
+            ..
+        } => {
+            assert_eq!((tournament_id, ended), (9, game_id));
+            assert!(matches!(outcome, GameOutcome::BlackWin));
+        }
+        other => panic!("unexpected orchestrator event: {other:?}"),
+    }
+
+    let active = app.state.store.try_list_active_game_ids().await.unwrap();
+    assert!(
+        !active.contains(&game_id),
+        "the settled game's session is retired"
+    );
 }

@@ -456,7 +456,15 @@ impl SessionStore {
                 return None;
             }
         };
-        bytes.try_into().ok()
+        let bytes: [u8; 64] = bytes.try_into().ok()?;
+        // SessionEntry::keypair() relies on this check: a corrupt row must be
+        // skipped here, not abort the process (release builds abort on panic)
+        // every time a worker reads it.
+        if let Err(e) = Keypair::try_from(bytes.as_slice()) {
+            tracing::error!("Stored session keypair is malformed: {e}");
+            return None;
+        }
+        Some(bytes)
     }
 
     pub async fn get(&self, game_id: u64) -> Option<SessionEntry> {

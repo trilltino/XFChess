@@ -133,9 +133,13 @@ async fn register_identity(
     });
 
     let ix = crate::signing::solana::verify_profile_ix(&program_id, &admin_keypair.pubkey(), &pk);
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
-
-    match crate::signing::solana::sign_and_submit(&rpc, admin_keypair, &[ix]) {
+    match crate::signing::solana::sign_and_submit_async(
+        state.config.solana_rpc_url.clone(),
+        admin_keypair.clone(),
+        vec![ix],
+    )
+    .await
+    {
         Ok(sig) => tracing::info!("[Identity] On-chain verification tx confirmed: {}", sig),
         Err(e) => tracing::error!(
             "[Identity] Failed to submit verification tx on-chain: {}",

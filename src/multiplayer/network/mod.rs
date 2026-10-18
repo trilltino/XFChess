@@ -6,6 +6,7 @@ pub mod braid_transport;
 pub mod device_id;
 pub mod game_id_store;
 pub mod identity;
+pub mod move_auth;
 pub mod online_game_session;
 pub mod p2p;
 pub mod p2p_vps;

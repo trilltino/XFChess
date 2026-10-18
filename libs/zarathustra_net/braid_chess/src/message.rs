@@ -43,6 +43,10 @@ pub struct MovePayload {
     pub fen_after: String,
     pub move_number: u32,
     pub player: String,
+    /// The mover's base58 signature over [`crate::move_auth::message`] for
+    /// this move, so the other participant can relay it. Older clients omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<String>,
 }
 
 impl MovePayload {
@@ -64,7 +68,13 @@ impl MovePayload {
             fen_after: fen_after.into(),
             move_number,
             player: player.into(),
+            auth: None,
         }
+    }
+
+    pub fn with_auth(mut self, auth: Option<String>) -> Self {
+        self.auth = auth;
+        self
     }
 }
 

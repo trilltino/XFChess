@@ -15,6 +15,8 @@ pub enum GameOverState {
 
     InsufficientMaterial,
 
+    FiftyMoveRule,
+
     WhiteWonByTime,
 
     BlackWonByTime,
@@ -42,6 +44,7 @@ impl GameOverState {
             GameOverState::BlackWon => "Black wins by checkmate!",
             GameOverState::Stalemate => "Draw by stalemate",
             GameOverState::InsufficientMaterial => "Draw by insufficient material",
+            GameOverState::FiftyMoveRule => "Draw by the fifty-move rule",
             GameOverState::WhiteWonByTime => "White wins on time!",
             GameOverState::BlackWonByTime => "Black wins on time!",
             GameOverState::WhiteWonByResignation => "White wins by resignation!",
@@ -80,7 +83,9 @@ impl GameOverState {
     pub fn is_draw(&self) -> bool {
         matches!(
             self,
-            GameOverState::Stalemate | GameOverState::InsufficientMaterial
+            GameOverState::Stalemate
+                | GameOverState::InsufficientMaterial
+                | GameOverState::FiftyMoveRule
         )
     }
 
@@ -93,6 +98,7 @@ impl GameOverState {
             GameOverState::WhiteWonByTime | GameOverState::BlackWonByTime => "on timeout",
             GameOverState::Stalemate => "by stalemate",
             GameOverState::InsufficientMaterial => "insufficient material",
+            GameOverState::FiftyMoveRule => "fifty-move rule",
             GameOverState::Aborted => "White didn't move in time",
             GameOverState::WhiteWonByAbandonment | GameOverState::BlackWonByAbandonment => {
                 "opponent disconnected"
@@ -324,6 +330,7 @@ mod tests {
             GameOverState::BlackWon,
             GameOverState::Stalemate,
             GameOverState::InsufficientMaterial,
+            GameOverState::FiftyMoveRule,
             GameOverState::WhiteWonByTime,
             GameOverState::BlackWonByTime,
         ];
@@ -331,5 +338,13 @@ mod tests {
         for state in states {
             assert!(state.is_game_over(), "{:?} should be game over", state);
         }
+    }
+
+    #[test]
+    fn fifty_move_rule_is_a_draw_with_no_winner() {
+        let state = GameOverState::FiftyMoveRule;
+        assert!(state.is_draw());
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.message(), "Draw by the fifty-move rule");
     }
 }

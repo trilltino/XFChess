@@ -33,6 +33,23 @@ pub fn rating_field_mut(profile: &mut PlayerProfile, bucket: RatingBucket) -> &m
     field
 }
 
+/// A profile's display rating for a time control. A bucket the player has not
+/// played yet (0.0, or anything non-finite) counts as the initial rating, the
+/// same value `rating_field_mut` seeds on first use.
+pub fn display_rating(profile: &PlayerProfile, base_time_seconds: u64) -> u32 {
+    let rating = match bucket_for_time_control(base_time_seconds) {
+        RatingBucket::Bullet => profile.elo_bullet,
+        RatingBucket::Blitz => profile.elo_blitz,
+        RatingBucket::Rapid => profile.elo_rapid,
+        RatingBucket::Classical => profile.elo_rating,
+    };
+    if rating.is_finite() && rating > 0.0 {
+        centiscale_to_display(rating)
+    } else {
+        INITIAL_ELO
+    }
+}
+
 pub const RATING_SCALE: u32 = 100;
 pub const INITIAL_ELO: u32 = 1200;
 pub const INITIAL_ELO_CENTISCALE: u32 = INITIAL_ELO * RATING_SCALE;
@@ -134,6 +151,24 @@ mod tests {
             *rating_field_mut(&mut profile, RatingBucket::Classical),
             130000.0
         );
+    }
+
+    #[test]
+    fn display_rating_reads_the_time_control_bucket() {
+        let profile = PlayerProfile {
+            elo_rating: 180_000.0,
+            elo_blitz: 150_049.0,
+            ..Default::default()
+        };
+        assert_eq!(display_rating(&profile, 300), 1500);
+        assert_eq!(display_rating(&profile, 0), 1800);
+        // Unplayed buckets and corrupt values fall back to the initial rating.
+        assert_eq!(display_rating(&profile, 60), INITIAL_ELO);
+        let corrupt = PlayerProfile {
+            elo_rapid: f64::NAN,
+            ..Default::default()
+        };
+        assert_eq!(display_rating(&corrupt, 600), INITIAL_ELO);
     }
 
     #[test]

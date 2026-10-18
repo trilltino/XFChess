@@ -41,6 +41,19 @@ pub fn mark_delegated(game: &mut Game) -> Result<()> {
     Ok(())
 }
 
+/// Pulling a live game off the ER stalls both players and charges another
+/// undelegation and ER session fee to their pot, so only the game's fee payer
+/// or a player may do it. Once the game has a terminal status anyone may, so
+/// settlement can never be blocked.
+pub fn require_undelegation_authority(game: &Game, signer: Pubkey) -> Result<()> {
+    let terminal = matches!(game.status, GameStatus::Finished | GameStatus::Cancelled);
+    require!(
+        terminal || signer == game.fee_payer || signer == game.white || signer == game.black,
+        GameErrorCode::UnauthorizedAccess
+    );
+    Ok(())
+}
+
 pub fn mark_undelegated(game: &mut Game) -> Result<()> {
     require!(game.is_delegated, GameErrorCode::GameNotDelegated);
     game.fees_advanced = game
@@ -136,6 +149,23 @@ mod tests {
                 + UNDELEGATE_COST
                 + ER_SESSION_FEE_LAMPORTS
         );
+    }
+
+    #[test]
+    fn only_participants_or_fee_payer_undelegate_a_live_game() {
+        let g = game(GameStatus::Active, true);
+        assert!(require_undelegation_authority(&g, g.fee_payer).is_ok());
+        assert!(require_undelegation_authority(&g, g.white).is_ok());
+        assert!(require_undelegation_authority(&g, g.black).is_ok());
+        assert!(require_undelegation_authority(&g, Pubkey::new_unique()).is_err());
+    }
+
+    #[test]
+    fn anyone_undelegates_a_finished_or_cancelled_game() {
+        for status in [GameStatus::Finished, GameStatus::Cancelled] {
+            let g = game(status, true);
+            assert!(require_undelegation_authority(&g, Pubkey::new_unique()).is_ok());
+        }
     }
 
     #[test]
