@@ -169,6 +169,8 @@ impl Fixture {
                 tournament: tournament_pda(b"tournament"),
                 pass_binding: binding_pda(),
                 pass_mint: *mint,
+                pass_config: config_pda(mint),
+                registrar: registrar_pda(),
                 authority: self.authority.pubkey(),
                 system_program: solana_system_interface::program::ID,
             }
@@ -200,11 +202,23 @@ fn bridge_ix(mint: &Pubkey, player: &Pubkey, payer: &Pubkey) -> Instruction {
 }
 
 fn pass_initialize_ix(mint: &Pubkey, hook_authority: &Pubkey, payer: &Pubkey) -> Instruction {
+    pass_initialize_with(mint, hook_authority, payer, &registrar_pda(), (1_400, 1_600))
+}
+
+/// Initializes the pass for `mint` with any registrar and rating policy, as its hook authority
+/// can; the game must refuse to bind what it cannot trust.
+fn pass_initialize_with(
+    mint: &Pubkey,
+    hook_authority: &Pubkey,
+    payer: &Pubkey,
+    registrar: &Pubkey,
+    (min_elo, max_elo): (u32, u32),
+) -> Instruction {
     let mut data = PASS_INITIALIZE.to_vec();
     data.extend_from_slice(&ID.to_le_bytes());
-    data.extend_from_slice(registrar_pda().as_ref());
-    data.extend_from_slice(&1_400u32.to_le_bytes());
-    data.extend_from_slice(&1_600u32.to_le_bytes());
+    data.extend_from_slice(registrar.as_ref());
+    data.extend_from_slice(&min_elo.to_le_bytes());
+    data.extend_from_slice(&max_elo.to_le_bytes());
     data.extend_from_slice(&1_000u64.to_le_bytes());
     Instruction {
         program_id: XFCHESS_PASS_PROGRAM_ID,
@@ -745,4 +759,165 @@ async fn the_organizer_pauses_and_resumes_pass_transfers() {
         .await
         .expect("transfers resume");
     assert_eq!(token_balance(&mut ctx, player_account).await, 1);
+}
+
+#[tokio::test]
+async fn binding_refuses_a_real_pass_the_organizer_could_attest_through() {
+    let fixture = Fixture::new(&[1_500]);
+    let mut ctx = fixture.start().await;
+    let payer = ctx.payer.pubkey();
+
+    // The hook authority picks the registrar and policy when it initializes the pass, and neither
+    // can change afterwards, so the game has to look before it binds.
+    let cases = [
+        (
+            "the organizer's own key is the registrar",
+            Some((payer, (1_400, 1_600))),
+            GameErrorCode::PassRegistrarMismatch,
+        ),
+        (
+            "the policy starts above the tournament minimum",
+            Some((registrar_pda(), (1_450, 1_600))),
+            GameErrorCode::PassPolicyMismatch,
+        ),
+        (
+            "the policy ends below the tournament maximum",
+            Some((registrar_pda(), (1_400, 1_550))),
+            GameErrorCode::PassPolicyMismatch,
+        ),
+        ("the pass was never initialized", None, GameErrorCode::PassConfigInvalid),
+    ];
+    for (label, setup, expected) in cases {
+        let mint = create_hooked_mint(&mut ctx).await;
+        revoke_mint_authority(&mut ctx, &mint).await;
+        if let Some((registrar, range)) = setup {
+            send_all(
+                &mut ctx,
+                &[pass_initialize_with(&mint, &payer, &payer, &registrar, range)],
+                &[],
+            )
+            .await;
+        }
+        let error = common::send(&mut ctx, fixture.bind_ix(&mint), &[&fixture.authority])
+            .await
+            .expect_err(label);
+        assert_eq!(common::custom_code(&error), code(expected), "{label}");
+    }
+    assert!(ctx
+        .banks_client
+        .get_account(binding_pda())
+        .await
+        .expect("lookup")
+        .is_none());
+}
+
+fn register_ix(
+    fixture: &Fixture,
+    player: &Pubkey,
+    mint: &Pubkey,
+    pass_account: &Pubkey,
+) -> Instruction {
+    let mut accounts = xfchess_game::__client_accounts_register_player::RegisterPlayer {
+        tournament: tournament_pda(b"tournament"),
+        player_profile: common::profile_pda(player).0,
+        player: *player,
+        escrow_pda: tournament_pda(b"t_escrow"),
+        tournament_players_shard_0: shard_pda(),
+        tournament_players_shard_1: None,
+        tournament_players_shard_2: None,
+        tournament_players_shard_3: None,
+        host_treasury: fixture.tournament.host_treasury,
+        system_program: solana_system_interface::program::ID,
+        pass_binding: binding_pda(),
+        pass_mint: Some(*mint),
+        player_pass_account: Some(*pass_account),
+        token_program_2022: Some(TOKEN_2022),
+    }
+    .to_account_metas(None);
+    accounts.push(AccountMeta::new_readonly(record_pda(mint, player), false));
+    Instruction {
+        program_id: xfchess_game::ID,
+        accounts,
+        data: xfchess_game::instruction::RegisterPlayer { tournament_id: ID }.data(),
+    }
+}
+
+#[tokio::test]
+async fn only_a_pass_holder_the_game_attested_registers() {
+    let fixture = Fixture::new(&[1_500, 1_500]);
+    let mut ctx = fixture.start().await;
+    let payer = ctx.payer.insecure_clone();
+    let (attested, unattested) = (fixture.players[0].0.pubkey(), fixture.players[1].0.pubkey());
+
+    // One pass is minted straight to a wallet before the authority is revoked, so it never
+    // passes the hook; another waits with the organizer to be transferred.
+    let mint = create_hooked_mint(&mut ctx).await;
+    let treasury = create_token_account(&mut ctx, &mint, &payer.pubkey(), 1).await;
+    let unattested_account = create_token_account(&mut ctx, &mint, &unattested, 1).await;
+    let attested_account = create_token_account(&mut ctx, &mint, &attested, 0).await;
+    revoke_mint_authority(&mut ctx, &mint).await;
+    send_all(
+        &mut ctx,
+        &[pass_initialize_ix(&mint, &payer.pubkey(), &payer.pubkey())],
+        &[],
+    )
+    .await;
+    common::send(&mut ctx, fixture.bind_ix(&mint), &[&fixture.authority])
+        .await
+        .expect("bind");
+
+    assert_eq!(
+        bridge_error(
+            &mut ctx,
+            register_ix(&fixture, &unattested, &mint, &unattested_account),
+            &[&fixture.players[1].0],
+        )
+        .await,
+        code(GameErrorCode::PassEligibilityMissing),
+        "a pass minted to the wallet is not an attestation"
+    );
+    assert_eq!(token_balance(&mut ctx, unattested_account).await, 1);
+
+    common::send(&mut ctx, bridge_ix(&mint, &attested, &payer.pubkey()), &[])
+        .await
+        .expect("attest");
+    common::send(
+        &mut ctx,
+        transfer_pass_ix(&mint, &treasury, &attested_account, &payer.pubkey(), &attested),
+        &[],
+    )
+    .await
+    .expect("an attested player receives the pass");
+    common::send(
+        &mut ctx,
+        register_ix(&fixture, &attested, &mint, &attested_account),
+        &[&fixture.players[0].0],
+    )
+    .await
+    .expect("an attested holder registers");
+    assert_eq!(token_balance(&mut ctx, attested_account).await, 0, "the pass is burned");
+
+    // Revoking after the fact stops the unattested pass from being used either way.
+    common::send(&mut ctx, bridge_ix(&mint, &unattested, &payer.pubkey()), &[])
+        .await
+        .expect("attest the second player");
+    common::send(
+        &mut ctx,
+        revoke_ix(&mint, &unattested, &fixture.authority.pubkey()),
+        &[&fixture.authority],
+    )
+    .await
+    .expect("the organizer revokes");
+    ctx.last_blockhash = ctx.get_new_latest_blockhash().await.expect("blockhash");
+    assert_eq!(
+        bridge_error(
+            &mut ctx,
+            register_ix(&fixture, &unattested, &mint, &unattested_account),
+            &[&fixture.players[1].0],
+        )
+        .await,
+        code(GameErrorCode::PassEligibilityRevoked),
+        "revocation now blocks registration"
+    );
+    assert_eq!(token_balance(&mut ctx, unattested_account).await, 1);
 }

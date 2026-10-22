@@ -75,7 +75,6 @@ pub fn handler(ctx: Context<BindTournamentPass>, tournament_id: u64) -> Result<(
     pass_accounts::check_config(
         &config,
         &ctx.accounts.pass_mint.key(),
-        tournament_id,
         &ctx.accounts.registrar.key(),
         tournament.elo_min,
         tournament.elo_max,

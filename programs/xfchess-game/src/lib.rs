@@ -670,12 +670,15 @@ pub mod xfchess_game {
     }
 
     /// Registers the signer. The rating is read from the signer's `PlayerProfile`; when the
-    /// tournament has a pass binding, one pass is burned as the ticket.
+    /// tournament has a pass binding, one pass is burned as the ticket and the signer's unrevoked
+    /// pass eligibility record must be the first remaining account.
     pub fn register_player(ctx: Context<RegisterPlayer>, tournament_id: u64) -> Result<()> {
         crate::tournament_ix::registration::register::handler(ctx, tournament_id)
     }
 
-    /// Organizer-only: requires a tournament pass for every later registration.
+    /// Organizer-only: requires a tournament pass for every later registration. The pass must
+    /// already be initialized with this program's pass registrar and a rating policy that covers
+    /// the tournament's range.
     pub fn bind_tournament_pass(ctx: Context<BindTournamentPass>, tournament_id: u64) -> Result<()> {
         crate::tournament_ix::registration::bind_pass::handler(ctx, tournament_id)
     }
@@ -687,7 +690,8 @@ pub mod xfchess_game {
     }
 
     /// Organizer-only: revokes a player's pass eligibility through the registrar PDA, so the
-    /// pass can no longer be transferred to them. A revoked record is never refreshed.
+    /// pass can no longer be transferred to them, and a pass they already hold can no longer be
+    /// redeemed to register. A revoked record is never refreshed.
     pub fn revoke_pass_eligibility(ctx: Context<RevokePassEligibility>, tournament_id: u64) -> Result<()> {
         crate::tournament_ix::registration::revoke_pass_eligibility::handler(ctx, tournament_id)
     }

@@ -18,7 +18,6 @@ const RECORD_LEN: usize = 86;
 #[derive(Debug, PartialEq, Eq)]
 pub struct PassConfigView {
     pub mint: Pubkey,
-    pub tournament_id: u64,
     pub registrar: Pubkey,
     pub min_elo: u32,
     pub max_elo: u32,
@@ -45,12 +44,6 @@ fn u32_at(data: &[u8], offset: usize) -> Option<u32> {
     ))
 }
 
-fn u64_at(data: &[u8], offset: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(
-        data.get(offset..offset.checked_add(8)?)?.try_into().ok()?,
-    ))
-}
-
 pub fn parse_config(data: &[u8]) -> Option<PassConfigView> {
     if data.len() != CONFIG_LEN
         || data[..8] != CONFIG_DISCRIMINATOR
@@ -60,7 +53,6 @@ pub fn parse_config(data: &[u8]) -> Option<PassConfigView> {
     }
     Some(PassConfigView {
         mint: pubkey_at(data, 11)?,
-        tournament_id: u64_at(data, 43)?,
         registrar: pubkey_at(data, 51)?,
         min_elo: u32_at(data, 83)?,
         max_elo: u32_at(data, 87)?,
@@ -111,12 +103,11 @@ pub fn load_record(info: &AccountInfo) -> Result<Option<EligibilityView>> {
 pub fn check_config(
     config: &PassConfigView,
     mint: &Pubkey,
-    tournament_id: u64,
     registrar: &Pubkey,
     elo_min: u32,
     elo_max: u32,
 ) -> std::result::Result<(), GameErrorCode> {
-    if config.mint != *mint || config.tournament_id != tournament_id {
+    if config.mint != *mint {
         return Err(GameErrorCode::PassConfigInvalid);
     }
     if config.registrar != *registrar {
@@ -155,7 +146,6 @@ mod tests {
 
     fn config_bytes(
         mint: &Pubkey,
-        tournament_id: u64,
         registrar: &Pubkey,
         min_elo: u32,
         max_elo: u32,
@@ -163,7 +153,7 @@ mod tests {
         let mut data = CONFIG_DISCRIMINATOR.to_vec();
         data.extend_from_slice(&[CONFIG_VERSION, 255, 254]);
         data.extend_from_slice(mint.as_ref());
-        data.extend_from_slice(&tournament_id.to_le_bytes());
+        data.extend_from_slice(&9u64.to_le_bytes());
         data.extend_from_slice(registrar.as_ref());
         data.extend_from_slice(&min_elo.to_le_bytes());
         data.extend_from_slice(&max_elo.to_le_bytes());
@@ -186,19 +176,18 @@ mod tests {
     #[test]
     fn layouts_have_the_pass_programs_sizes() {
         let (mint, other) = (Pubkey::new_unique(), Pubkey::new_unique());
-        assert_eq!(config_bytes(&mint, 1, &other, 1, 2).len(), CONFIG_LEN);
+        assert_eq!(config_bytes(&mint, &other, 1, 2).len(), CONFIG_LEN);
         assert_eq!(record_bytes(&mint, &other, false).len(), RECORD_LEN);
     }
 
     #[test]
     fn config_fields_are_read_from_their_offsets() {
         let (mint, registrar) = (Pubkey::new_unique(), Pubkey::new_unique());
-        let data = config_bytes(&mint, 9, &registrar, 1_400, 1_700);
+        let data = config_bytes(&mint, &registrar, 1_400, 1_700);
         assert_eq!(
             parse_config(&data),
             Some(PassConfigView {
                 mint,
-                tournament_id: 9,
                 registrar,
                 min_elo: 1_400,
                 max_elo: 1_700,
@@ -209,7 +198,7 @@ mod tests {
     #[test]
     fn config_rejects_wrong_length_discriminator_and_version() {
         let (mint, registrar) = (Pubkey::new_unique(), Pubkey::new_unique());
-        let data = config_bytes(&mint, 9, &registrar, 1_400, 1_700);
+        let data = config_bytes(&mint, &registrar, 1_400, 1_700);
         assert!(parse_config(&data[..CONFIG_LEN - 1]).is_none());
         let mut longer = data.clone();
         longer.push(0);
@@ -226,7 +215,7 @@ mod tests {
     fn record_is_not_mistaken_for_a_config_or_the_reverse() {
         let (mint, player) = (Pubkey::new_unique(), Pubkey::new_unique());
         assert!(parse_config(&record_bytes(&mint, &player, false)).is_none());
-        assert!(parse_record(&config_bytes(&mint, 1, &player, 1, 2)).is_none());
+        assert!(parse_record(&config_bytes(&mint, &player, 1, 2)).is_none());
     }
 
     #[test]
@@ -246,34 +235,30 @@ mod tests {
     }
 
     #[test]
-    fn a_config_binds_only_for_this_mint_tournament_registrar_and_range() {
+    fn a_config_binds_only_for_this_mint_registrar_and_range() {
         let (mint, registrar) = (Pubkey::new_unique(), Pubkey::new_unique());
-        let Some(config) = parse_config(&config_bytes(&mint, 9, &registrar, 1_400, 1_700)) else {
+        let Some(config) = parse_config(&config_bytes(&mint, &registrar, 1_400, 1_700)) else {
             panic!("config bytes parse");
         };
-        let check = |mint: &Pubkey, id, registrar: &Pubkey, min, max| {
-            check_config(&config, mint, id, registrar, min, max)
+        let check = |mint: &Pubkey, registrar: &Pubkey, min, max| {
+            check_config(&config, mint, registrar, min, max)
         };
-        assert!(check(&mint, 9, &registrar, 1_400, 1_700).is_ok());
-        assert!(check(&mint, 9, &registrar, 1_500, 1_600).is_ok());
+        assert!(check(&mint, &registrar, 1_400, 1_700).is_ok());
+        assert!(check(&mint, &registrar, 1_500, 1_600).is_ok());
         assert!(matches!(
-            check(&Pubkey::new_unique(), 9, &registrar, 1_500, 1_600),
+            check(&Pubkey::new_unique(), &registrar, 1_500, 1_600),
             Err(GameErrorCode::PassConfigInvalid)
         ));
         assert!(matches!(
-            check(&mint, 10, &registrar, 1_500, 1_600),
-            Err(GameErrorCode::PassConfigInvalid)
-        ));
-        assert!(matches!(
-            check(&mint, 9, &Pubkey::new_unique(), 1_500, 1_600),
+            check(&mint, &Pubkey::new_unique(), 1_500, 1_600),
             Err(GameErrorCode::PassRegistrarMismatch)
         ));
         assert!(matches!(
-            check(&mint, 9, &registrar, 1_399, 1_600),
+            check(&mint, &registrar, 1_399, 1_600),
             Err(GameErrorCode::PassPolicyMismatch)
         ));
         assert!(matches!(
-            check(&mint, 9, &registrar, 1_500, 1_701),
+            check(&mint, &registrar, 1_500, 1_701),
             Err(GameErrorCode::PassPolicyMismatch)
         ));
     }

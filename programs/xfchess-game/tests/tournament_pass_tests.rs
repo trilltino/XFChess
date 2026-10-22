@@ -536,6 +536,7 @@ async fn the_organizer_binds_a_hooked_zero_decimal_token_2022_mint() {
     let mut ctx = fixture.start().await;
     let mint = create_mint(&mut ctx, Some(XFCHESS_PASS_PROGRAM_ID), 0).await;
     revoke_mint_authority(&mut ctx, &mint).await;
+    install_pass_config(&mut ctx, &PassConfig::valid(mint));
 
     common::send(
         &mut ctx,
@@ -646,22 +647,30 @@ async fn binding_needs_an_open_tournament_with_no_players_yet() {
     }
 }
 
-/// A bound tournament with `players[0]` holding two passes and `players[1]` holding none.
+/// A bound tournament. `players[0]` holds two passes and an eligibility record, `players[1]` holds
+/// no pass, `players[2]` holds a pass the organizer minted straight to the wallet, so the game
+/// never attested it, and `players[3]` holds a pass whose eligibility record was revoked.
 struct Bound {
     fixture: Fixture,
     ctx: ProgramTestContext,
     mint: Pubkey,
     holder_pass: Pubkey,
     empty_pass: Pubkey,
+    unattested_pass: Pubkey,
+    revoked_pass: Pubkey,
 }
 
 async fn bound() -> Bound {
-    let fixture = Fixture::new(vec![Player::new(1_500, 1_500), Player::new(1_500, 1_500)]);
+    let fixture = Fixture::new((0..4).map(|_| Player::new(1_500, 1_500)).collect());
     let mut ctx = fixture.start().await;
     let mint = create_mint(&mut ctx, Some(XFCHESS_PASS_PROGRAM_ID), 0).await;
     let holder_pass = create_token_account(&mut ctx, &mint, &fixture.players[0].key(), true, 2).await;
     let empty_pass = create_token_account(&mut ctx, &mint, &fixture.players[1].key(), true, 0).await;
+    let unattested_pass =
+        create_token_account(&mut ctx, &mint, &fixture.players[2].key(), true, 1).await;
+    let revoked_pass = create_token_account(&mut ctx, &mint, &fixture.players[3].key(), true, 1).await;
     revoke_mint_authority(&mut ctx, &mint).await;
+    install_pass_config(&mut ctx, &PassConfig::valid(mint));
     common::send(
         &mut ctx,
         fixture.bind_ix(&fixture.authority.pubkey(), &mint),
@@ -669,12 +678,16 @@ async fn bound() -> Bound {
     )
     .await
     .expect("bind");
+    install_pass_record(&mut ctx, &mint, &fixture.players[0].key(), false);
+    install_pass_record(&mut ctx, &mint, &fixture.players[3].key(), true);
     Bound {
         fixture,
         ctx,
         mint,
         holder_pass,
         empty_pass,
+        unattested_pass,
+        revoked_pass,
     }
 }
 
@@ -686,6 +699,7 @@ async fn a_bound_tournament_refuses_registration_without_a_valid_pass() {
         mint,
         holder_pass,
         empty_pass,
+        ..
     } = bound().await;
     let (holder, empty) = (&fixture.players[0], &fixture.players[1]);
     let other_mint = create_mint(&mut ctx, Some(XFCHESS_PASS_PROGRAM_ID), 0).await;
@@ -726,7 +740,7 @@ async fn a_bound_tournament_refuses_registration_without_a_valid_pass() {
         );
     }
     assert_eq!(token_balance(&mut ctx, holder_pass).await, 2);
-    assert_eq!(mint_supply(&mut ctx, mint).await, 2);
+    assert_eq!(mint_supply(&mut ctx, mint).await, 4);
     assert!(shard(&mut ctx).await.players.is_empty());
 }
 
@@ -749,7 +763,7 @@ async fn registering_burns_exactly_one_pass_and_cannot_be_repeated() {
     .await
     .expect("a pass holder registers");
     assert_eq!(token_balance(&mut ctx, holder_pass).await, 1);
-    assert_eq!(mint_supply(&mut ctx, mint).await, 1);
+    assert_eq!(mint_supply(&mut ctx, mint).await, 3);
     let registered = shard(&mut ctx).await;
     assert_eq!(registered.players, vec![holder.key()]);
     assert_eq!(registered.player_elos, vec![1_500]);
@@ -767,7 +781,7 @@ async fn registering_burns_exactly_one_pass_and_cannot_be_repeated() {
         code(GameErrorCode::AlreadyRegistered)
     );
     assert_eq!(token_balance(&mut ctx, holder_pass).await, 1);
-    assert_eq!(mint_supply(&mut ctx, mint).await, 1);
+    assert_eq!(mint_supply(&mut ctx, mint).await, 3);
 }
 
 #[tokio::test]
@@ -778,6 +792,7 @@ async fn a_pass_does_not_override_the_rating_range() {
     let mint = create_mint(&mut ctx, Some(XFCHESS_PASS_PROGRAM_ID), 0).await;
     let pass = create_token_account(&mut ctx, &mint, &fixture.players[0].key(), true, 1).await;
     revoke_mint_authority(&mut ctx, &mint).await;
+    install_pass_config(&mut ctx, &PassConfig::valid(mint));
     common::send(
         &mut ctx,
         fixture.bind_ix(&fixture.authority.pubkey(), &mint),
@@ -785,6 +800,7 @@ async fn a_pass_does_not_override_the_rating_range() {
     )
     .await
     .expect("bind");
+    install_pass_record(&mut ctx, &mint, &fixture.players[0].key(), false);
 
     let player = &fixture.players[0];
     assert_eq!(
@@ -849,4 +865,175 @@ async fn binding_needs_a_fixed_supply_no_larger_than_the_player_limit() {
         .await
         .expect("lookup")
         .is_none());
+}
+
+#[tokio::test]
+async fn binding_needs_a_pass_config_that_only_the_game_can_attest_to() {
+    let fixture = Fixture::new(vec![]);
+    let mut ctx = fixture.start().await;
+    let organizer = fixture.authority.pubkey();
+    let mint = create_mint(&mut ctx, Some(XFCHESS_PASS_PROGRAM_ID), 0).await;
+    revoke_mint_authority(&mut ctx, &mint).await;
+    let good = PassConfig::valid(mint);
+
+    // The first case installs nothing: the pass program was never initialized for this mint.
+    let cases = [
+        ("no config at all", None, GameErrorCode::PassConfigInvalid),
+        (
+            "a lookalike config owned by another program",
+            Some(good.account(Pubkey::new_unique())),
+            GameErrorCode::PassConfigInvalid,
+        ),
+        (
+            "a config of another mint",
+            Some(
+                PassConfig {
+                    mint: Pubkey::new_unique(),
+                    ..good
+                }
+                .account(XFCHESS_PASS_PROGRAM_ID),
+            ),
+            GameErrorCode::PassConfigInvalid,
+        ),
+        (
+            "a registrar the organizer controls",
+            Some(
+                PassConfig {
+                    registrar: Pubkey::new_unique(),
+                    ..good
+                }
+                .account(XFCHESS_PASS_PROGRAM_ID),
+            ),
+            GameErrorCode::PassRegistrarMismatch,
+        ),
+        (
+            "a policy that starts above the tournament minimum",
+            Some(PassConfig { min_elo: 1_401, ..good }.account(XFCHESS_PASS_PROGRAM_ID)),
+            GameErrorCode::PassPolicyMismatch,
+        ),
+        (
+            "a policy that ends below the tournament maximum",
+            Some(PassConfig { max_elo: 1_599, ..good }.account(XFCHESS_PASS_PROGRAM_ID)),
+            GameErrorCode::PassPolicyMismatch,
+        ),
+    ];
+    for (label, account, expected) in cases {
+        if let Some(account) = account {
+            ctx.set_account(&pass_config_pda(&mint), &account.into());
+        }
+        ctx.last_blockhash = ctx.get_new_latest_blockhash().await.expect("blockhash");
+        let error = common::send(
+            &mut ctx,
+            fixture.bind_ix(&organizer, &mint),
+            &[&fixture.authority],
+        )
+        .await
+        .expect_err(label);
+        assert_eq!(common::custom_code(&error), code(expected), "{label}");
+    }
+    assert!(ctx
+        .banks_client
+        .get_account(binding_pda().0)
+        .await
+        .expect("lookup")
+        .is_none());
+
+    // A policy wider than the tournament range is safe: the game still checks its own range.
+    let wider = PassConfig {
+        min_elo: 1_000,
+        max_elo: 2_000,
+        ..good
+    };
+    ctx.set_account(
+        &pass_config_pda(&mint),
+        &wider.account(XFCHESS_PASS_PROGRAM_ID).into(),
+    );
+    ctx.last_blockhash = ctx.get_new_latest_blockhash().await.expect("blockhash");
+    common::send(
+        &mut ctx,
+        fixture.bind_ix(&organizer, &mint),
+        &[&fixture.authority],
+    )
+    .await
+    .expect("a policy that covers the range binds");
+}
+
+#[tokio::test]
+async fn a_pass_without_a_current_eligibility_record_cannot_register() {
+    let Bound {
+        fixture,
+        mut ctx,
+        mint,
+        holder_pass,
+        unattested_pass,
+        revoked_pass,
+        ..
+    } = bound().await;
+    let (holder, unattested, revoked) = (
+        &fixture.players[0],
+        &fixture.players[2],
+        &fixture.players[3],
+    );
+    let supply = mint_supply(&mut ctx, mint).await;
+
+    // A pass minted straight to a wallet never went through the hook, so no record exists.
+    let missing = fixture.register_ix(&unattested.key(), Some((mint, unattested_pass)));
+    // A holder who omits the record account.
+    let mut omitted = fixture.register_ix(&holder.key(), Some((mint, holder_pass)));
+    omitted.accounts.pop();
+    // The revoked player naming the holder's valid record instead of their own.
+    let mut borrowed = fixture.register_ix(&revoked.key(), Some((mint, revoked_pass)));
+    if let Some(record) = borrowed.accounts.last_mut() {
+        record.pubkey = pass_record_pda(&mint, &holder.key());
+    }
+    let revoked_ix = fixture.register_ix(&revoked.key(), Some((mint, revoked_pass)));
+
+    let cases = [
+        ("no record was ever issued", missing, unattested, GameErrorCode::PassEligibilityMissing),
+        ("the record account is omitted", omitted, holder, GameErrorCode::PassEligibilityMissing),
+        ("another player's record is named", borrowed, revoked, GameErrorCode::PassEligibilityMissing),
+        ("the record is revoked", revoked_ix, revoked, GameErrorCode::PassEligibilityRevoked),
+    ];
+    for (label, instruction, player, expected) in cases {
+        ctx.last_blockhash = ctx.get_new_latest_blockhash().await.expect("blockhash");
+        assert_eq!(
+            registration_error(&mut ctx, instruction, player).await,
+            code(expected),
+            "{label}"
+        );
+    }
+    assert_eq!(token_balance(&mut ctx, unattested_pass).await, 1);
+    assert_eq!(token_balance(&mut ctx, revoked_pass).await, 1);
+    assert_eq!(mint_supply(&mut ctx, mint).await, supply, "no refused attempt burns a pass");
+    assert!(shard(&mut ctx).await.players.is_empty());
+
+    // A lookalike at the record's address that another program owns is not a record.
+    ctx.set_account(
+        &pass_record_pda(&mint, &unattested.key()),
+        &pass_record_account(&mint, &unattested.key(), false, Pubkey::new_unique()).into(),
+    );
+    ctx.last_blockhash = ctx.get_new_latest_blockhash().await.expect("blockhash");
+    assert_eq!(
+        registration_error(
+            &mut ctx,
+            fixture.register_ix(&unattested.key(), Some((mint, unattested_pass))),
+            unattested,
+        )
+        .await,
+        code(GameErrorCode::PassEligibilityMissing),
+        "a record owned by another program"
+    );
+
+    // Once the game attests the wallet, the same pass registers.
+    install_pass_record(&mut ctx, &mint, &unattested.key(), false);
+    ctx.last_blockhash = ctx.get_new_latest_blockhash().await.expect("blockhash");
+    common::send(
+        &mut ctx,
+        fixture.register_ix(&unattested.key(), Some((mint, unattested_pass))),
+        &[&unattested.keypair],
+    )
+    .await
+    .expect("an attested holder registers");
+    assert_eq!(token_balance(&mut ctx, unattested_pass).await, 0);
+    assert_eq!(shard(&mut ctx).await.players, vec![unattested.key()]);
 }

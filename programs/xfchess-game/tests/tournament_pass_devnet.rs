@@ -307,6 +307,8 @@ impl Tournaments {
                 tournament: self.tournament,
                 pass_binding: self.binding,
                 pass_mint: *mint,
+                pass_config: config_pda(mint),
+                registrar: game_pda(&[PASS_REGISTRAR_SEED]),
                 authority: *vps,
                 system_program: solana_system_interface::program::ID,
             }
@@ -659,7 +661,7 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
     assert_eq!(record_fields(&rpc, &mint, &registered.pubkey())?.0, 1_200, "the profile's rating");
     send(&rpc, "transfer a pass to player 1", &[transfer(0, &registered)?], &payer, &[])?;
     assert_eq!(token_balance(&rpc, &accounts[0].pubkey())?, 1);
-    let register = Instruction {
+    let mut register = Instruction {
         program_id: xfchess_game::ID,
         accounts: xfchess_game::__client_accounts_register_player::RegisterPlayer {
             tournament: main.tournament,
@@ -680,6 +682,10 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
         .to_account_metas(None),
         data: xfchess_game::instruction::RegisterPlayer { tournament_id: id }.data(),
     };
+    // The game reads the player's eligibility record to confirm the pass was attested.
+    register
+        .accounts
+        .push(AccountMeta::new_readonly(record_pda(&mint, &registered.pubkey()), false));
     send(&rpc, "player 1 registers, burning the pass", &[register], &registered, &[])?;
     assert_eq!(token_balance(&rpc, &accounts[0].pubkey())?, 0, "the pass is burned");
     let shard_state = TournamentPlayersShard::try_deserialize(&mut account_data(&rpc, &shard)?.as_slice())?;

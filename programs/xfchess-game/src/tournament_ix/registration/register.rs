@@ -235,7 +235,7 @@ fn redeem_pass<'info>(
     pass_mint: Option<&InterfaceAccount<'info, Mint>>,
     player_pass_account: Option<&InterfaceAccount<'info, TokenAccount>>,
     token_program: Option<&Program<'info, Token2022>>,
-    remaining_accounts: &[AccountInfo<'info>],
+    remaining_accounts: &[AccountInfo],
 ) -> Result<()> {
     let Some(binding) = load_pass_binding(pass_binding, tournament_id)? else {
         return Ok(());
