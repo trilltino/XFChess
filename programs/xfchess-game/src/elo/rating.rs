@@ -193,4 +193,65 @@ mod tests {
         assert_eq!(profile.elo_rapid, 333333.0);
         assert_eq!(profile.elo_rating, 444444.0);
     }
+
+    fn rated_profile() -> PlayerProfile {
+        PlayerProfile {
+            elo_bullet: 111_100.0,
+            elo_blitz: 222_200.0,
+            elo_rapid: 333_300.0,
+            elo_rating: 444_400.0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn display_rating_reads_the_bucket_of_the_time_control() {
+        let profile = rated_profile();
+        for (base_time_seconds, expected) in [
+            (60, 1_111),
+            (300, 2_222),
+            (900, 3_333),
+            (1_800, 4_444),
+            (0, 4_444),
+        ] {
+            assert_eq!(
+                display_rating(&profile, base_time_seconds),
+                expected,
+                "base time {base_time_seconds}"
+            );
+        }
+    }
+
+    #[test]
+    fn display_rating_rounds_to_the_nearest_elo() {
+        let profile = PlayerProfile {
+            elo_blitz: 150_049.0,
+            elo_rapid: 150_050.0,
+            ..Default::default()
+        };
+        assert_eq!(display_rating(&profile, 300), 1_500);
+        assert_eq!(display_rating(&profile, 900), 1_501);
+    }
+
+    #[test]
+    fn display_rating_treats_an_untouched_bucket_as_the_initial_rating() {
+        let profile = PlayerProfile::default();
+        for base_time_seconds in [0, 60, 300, 900, 1_800] {
+            assert_eq!(
+                display_rating(&profile, base_time_seconds),
+                INITIAL_ELO
+            );
+        }
+    }
+
+    #[test]
+    fn display_rating_counts_unusable_ratings_as_the_initial_rating() {
+        for stored in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            let profile = PlayerProfile {
+                elo_blitz: stored,
+                ..Default::default()
+            };
+            assert_eq!(display_rating(&profile, 300), INITIAL_ELO, "stored {stored}");
+        }
+    }
 }
