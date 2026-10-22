@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AcError {
+    #[error("invalid analysis input: {0}")]
+    InvalidInput(String),
     #[error("stockfish process error: {0}")]
     Stockfish(String),
     #[error("stockfish timed out after {0}ms")]

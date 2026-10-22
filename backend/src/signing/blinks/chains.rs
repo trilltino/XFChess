@@ -196,6 +196,7 @@ pub fn is_chain_complete(chain: &ActionChain) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
     fn test_create_registration_chain() {
@@ -220,29 +221,36 @@ mod tests {
     }
 
     #[test]
-    fn test_complete_step() {
+    fn test_complete_step() -> anyhow::Result<()> {
         let mut chain = create_registration_chain(1, "test_pubkey");
-        complete_step(&mut chain, 1).unwrap();
+        complete_step(&mut chain, 1)
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
         assert!(chain.steps[0].completed);
         assert_eq!(chain.current_step, 1);
+        Ok(())
     }
 
     #[test]
-    fn test_get_next_action() {
+    fn test_get_next_action() -> anyhow::Result<()> {
         let chain = create_registration_chain(1, "test_pubkey");
         let next = get_next_action(&chain);
         assert!(next.is_some());
-        assert_eq!(next.unwrap().step, 1);
+        assert_eq!(next.context("test setup failed")?.step, 1);
+        Ok(())
     }
 
     #[test]
-    fn test_is_chain_complete() {
+    fn test_is_chain_complete() -> anyhow::Result<()> {
         let mut chain = create_registration_chain(1, "test_pubkey");
         assert!(!is_chain_complete(&chain));
 
         for i in 1..=3 {
-            complete_step(&mut chain, i).unwrap();
+            complete_step(&mut chain, i)
+                .map_err(|error| anyhow::anyhow!("{error:?}"))
+                .context("test setup failed")?;
         }
         assert!(is_chain_complete(&chain));
+        Ok(())
     }
 }

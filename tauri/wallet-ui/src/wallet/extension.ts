@@ -1,7 +1,7 @@
 /** Adapt Phantom and Solflare providers to WalletSource. */
 import bs58 from 'bs58';
 import { Buffer } from 'buffer';
-import { deserializeTransaction, validateSignedTransaction, assertWalletAddress } from './transactions';
+import { deserializeTransaction, validateSignedTransaction, assertWalletAddress, serializeWalletTransaction } from './transactions';
 import type { WalletSource, WalletKind } from './types';
 import { detectSolanaTxCapabilities, WALLET_LABEL } from './types';
 import { withTimeout } from './bridge';
@@ -66,7 +66,7 @@ export async function connectExtension(kind: ExtensionKind): Promise<WalletSourc
       const original = Buffer.from(bytes).toString('base64');
       const signed = await withTimeout<ReturnType<typeof deserializeTransaction>>(
         provider.signTransaction(deserializeTransaction(bytes)), 60000, `${meta.label} signature`);
-      const result = signed.serialize();
+      const result = serializeWalletTransaction(signed);
       validateSignedTransaction(original, Buffer.from(result).toString('base64'), pubkey);
       return new Uint8Array(result);
     },

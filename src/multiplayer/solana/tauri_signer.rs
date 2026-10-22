@@ -25,7 +25,9 @@ pub fn open_profile_step() {
             return;
         }
         let url = format!("{}/api/open-profile-step", wallet_bridge_base_url());
-        match bridge_http_client().post(&url).send() {
+        match bridge_http_client()
+            .and_then(|client| client.post(&url).send().map_err(|error| error.to_string()))
+        {
             Ok(resp) if resp.status().is_success() => {}
             Ok(resp) => bevy::prelude::warn!(
                 "[open_profile_step] bridge at {url} responded {} — popup will not open",
@@ -42,7 +44,7 @@ pub fn open_profile_step() {
 }
 
 fn configure_wallet_bridge() -> Result<(), String> {
-    let client = bridge_http_client();
+    let client = bridge_http_client()?;
     let response = client
         .get(format!("{}/status", wallet_bridge_base_url()))
         .header("X-Game-Pid", std::process::id())
@@ -55,9 +57,7 @@ fn configure_wallet_bridge() -> Result<(), String> {
             .as_u64()
             .and_then(|pid| u32::try_from(pid).ok())
         {
-            unsafe {
-                let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(pid);
-            }
+            grant_wallet_foreground(pid);
         }
     }
     #[cfg(not(windows))]
@@ -69,6 +69,15 @@ fn configure_wallet_bridge() -> Result<(), String> {
         .and_then(|response| response.error_for_status())
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn grant_wallet_foreground(pid: u32) {
+    // SAFETY: this scalar PID grants foreground permission without transferring ownership.
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(pid);
+    }
 }
 
 fn tcp_port_range() -> std::ops::RangeInclusive<u16> {
@@ -109,18 +118,30 @@ pub fn open_wallet_browser() {
             bevy::prelude::warn!(%error, "Wallet bridge configuration failed");
             return;
         }
-        let client = bridge_http_client();
+        let client = match bridge_http_client() {
+            Ok(client) => client,
+            Err(error) => {
+                bevy::prelude::warn!(%error, "Wallet bridge client unavailable");
+                return;
+            }
+        };
         let _ = client
             .post(format!("{}/api/wallet/open", wallet_bridge_base_url()))
             .send();
     });
 }
 
-fn bridge_http_client() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .expect("wallet bridge HTTP client")
+fn bridge_http_client() -> Result<reqwest::blocking::Client, String> {
+    static CLIENT: std::sync::OnceLock<Result<reqwest::blocking::Client, String>> =
+        std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .map_err(|error| format!("Wallet bridge HTTP client: {error}"))
+        })
+        .clone()
 }
 
 fn wallet_signable_blockhash(rpc: &RpcClient) -> Result<solana_sdk::hash::Hash, String> {
@@ -134,6 +155,7 @@ pub fn sign_via_tauri_only(
     wallet_pubkey: Pubkey,
     instructions: &[Instruction],
     local_signers: &[&Keypair],
+    deferred_signers: &[Pubkey],
     label: &str,
 ) -> Result<Vec<u8>, String> {
     use std::time::Instant;
@@ -161,7 +183,7 @@ pub fn sign_via_tauri_only(
     let tx_bytes = bincode::serialize(&tx).map_err(|e| format!("serialize_tx: {}", e))?;
     simulate_before_signing(&rpc, &VersionedTransaction::from(tx))?;
     let step_start = Instant::now();
-    let signed = send_to_tauri_blocking(&tx_bytes, label)?;
+    let signed = send_to_tauri_with_deferred_signers(&tx_bytes, label, deferred_signers)?;
     info!(
         "[TAURI-SIGN] wallet bridge returned '{label}' in {:?} (total {:?})",
         step_start.elapsed(),
@@ -236,7 +258,7 @@ pub fn sign_and_send_b64_via_tauri(
 }
 
 pub fn sign_message_via_tauri(message: &str, label: &str) -> Result<Vec<u8>, String> {
-    let status: serde_json::Value = bridge_http_client()
+    let status: serde_json::Value = bridge_http_client()?
         .get(format!("{}/status", wallet_bridge_base_url()))
         .send()
         .and_then(|response| response.error_for_status())
@@ -269,12 +291,30 @@ fn simulate_before_signing(rpc: &RpcClient, tx: &VersionedTransaction) -> Result
         )
         .map_err(|e| format!("Transaction simulation: {e}"))?;
     if let Some(error) = response.value.err {
-        return Err(format!("Transaction simulation failed: {error}"));
+        let logs = response.value.logs.unwrap_or_default();
+        bevy::prelude::warn!(
+            ?error,
+            ?logs,
+            "Transaction simulation failed before wallet signing"
+        );
+        let detail = logs.iter().rev().find(|line| {
+            line.contains("insufficient lamports")
+                || line.starts_with("Program log: AnchorError")
+                || line.starts_with("Program log: Error")
+        });
+        return Err(match detail {
+            Some(detail) => format!("Transaction simulation failed: {error}. {detail}"),
+            None => format!("Transaction simulation failed: {error}"),
+        });
     }
     Ok(())
 }
 
-fn validate_signed_transaction(original: &[u8], signed: &[u8]) -> Result<(), String> {
+fn validate_signed_transaction(
+    original: &[u8],
+    signed: &[u8],
+    deferred_signers: &[Pubkey],
+) -> Result<(), String> {
     let original: VersionedTransaction = bincode::deserialize(original)
         .map_err(|e| format!("Invalid requested transaction: {e}"))?;
     let signed: VersionedTransaction =
@@ -283,8 +323,28 @@ fn validate_signed_transaction(original: &[u8], signed: &[u8]) -> Result<(), Str
         return Err("Wallet changed the requested transaction".into());
     }
     signed
-        .verify_and_hash_message()
-        .map_err(|e| format!("Invalid wallet signatures: {e}"))?;
+        .sanitize()
+        .map_err(|e| format!("Invalid wallet transaction: {e}"))?;
+    let message = signed.message.serialize();
+    let required = usize::from(signed.message.header().num_required_signatures);
+    if signed.signatures.len() != required {
+        return Err("Wallet returned the wrong number of signatures".into());
+    }
+    for (index, (signature, key)) in signed
+        .signatures
+        .iter()
+        .zip(signed.message.static_account_keys())
+        .enumerate()
+    {
+        // The wallet is always the fee payer. Only the explicitly named server
+        // session key may remain unsigned until /session/activate co-signs.
+        if index != 0 && *signature == Signature::default() && deferred_signers.contains(key) {
+            continue;
+        }
+        if !signature.verify(key.as_ref(), &message) {
+            return Err(format!("Invalid wallet signature for {key}"));
+        }
+    }
     if original.signatures.len() != signed.signatures.len()
         || original
             .signatures
@@ -300,8 +360,16 @@ fn validate_signed_transaction(original: &[u8], signed: &[u8]) -> Result<(), Str
 const MAX_RESP_LEN: u32 = 64 * 1024;
 
 fn send_to_tauri_blocking(tx_bytes: &[u8], label: &str) -> Result<Vec<u8>, String> {
+    send_to_tauri_with_deferred_signers(tx_bytes, label, &[])
+}
+
+fn send_to_tauri_with_deferred_signers(
+    tx_bytes: &[u8],
+    label: &str,
+    deferred_signers: &[Pubkey],
+) -> Result<Vec<u8>, String> {
     let signed = send_request_blocking(tx_bytes, label, false)?;
-    validate_signed_transaction(tx_bytes, &signed)?;
+    validate_signed_transaction(tx_bytes, &signed, deferred_signers)?;
     Ok(signed)
 }
 
@@ -431,7 +499,7 @@ fn submit_signed_to_rpc(rpc_url: &str, signed_bytes: &[u8]) -> Result<Signature,
 mod tests {
     use super::*;
 
-    fn transaction_pair() -> (Vec<u8>, Vec<u8>) {
+    fn transaction_pair() -> Result<(Vec<u8>, Vec<u8>), Box<dyn std::error::Error>> {
         let wallet = Keypair::new();
         let local = Keypair::new();
         let instruction = Instruction {
@@ -447,46 +515,86 @@ mod tests {
             &[instruction],
             &[],
             solana_sdk::hash::Hash::new_unique(),
-        )
-        .unwrap();
+        )?;
         let original = VersionedTransaction::try_new(
             VersionedMessage::V0(message.clone()),
             &[
                 &NullSigner::new(&wallet.pubkey()) as &dyn Signer,
                 &local as &dyn Signer,
             ],
-        )
-        .unwrap();
+        )?;
         let signed =
-            VersionedTransaction::try_new(VersionedMessage::V0(message), &[&wallet, &local])
-                .unwrap();
-        (
-            bincode::serialize(&original).unwrap(),
-            bincode::serialize(&signed).unwrap(),
-        )
+            VersionedTransaction::try_new(VersionedMessage::V0(message), &[&wallet, &local])?;
+        Ok((bincode::serialize(&original)?, bincode::serialize(&signed)?))
     }
 
     #[test]
-    fn accepts_the_requested_message_with_all_signatures() {
-        let (original, signed) = transaction_pair();
-        assert!(validate_signed_transaction(&original, &signed).is_ok());
+    fn accepts_the_requested_message_with_all_signatures() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let (original, signed) = transaction_pair()?;
+        assert!(validate_signed_transaction(&original, &signed, &[]).is_ok());
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_an_altered_transaction() {
-        let (original, signed) = transaction_pair();
-        let mut signed: VersionedTransaction = bincode::deserialize(&signed).unwrap();
+    fn rejects_an_altered_transaction() -> Result<(), Box<dyn std::error::Error>> {
+        let (original, signed) = transaction_pair()?;
+        let mut signed: VersionedTransaction = bincode::deserialize(&signed)?;
         if let VersionedMessage::V0(message) = &mut signed.message {
             message.recent_blockhash = solana_sdk::hash::Hash::new_unique();
         }
         assert!(
-            validate_signed_transaction(&original, &bincode::serialize(&signed).unwrap()).is_err()
+            validate_signed_transaction(&original, &bincode::serialize(&signed)?, &[]).is_err()
         );
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_an_unsigned_wallet_response() {
-        let (original, _) = transaction_pair();
-        assert!(validate_signed_transaction(&original, &original).is_err());
+    fn rejects_an_unsigned_wallet_response() -> Result<(), Box<dyn std::error::Error>> {
+        let (original, _) = transaction_pair()?;
+        assert!(validate_signed_transaction(&original, &original, &[]).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn defers_only_the_named_server_signer_and_still_requires_wallet_approval(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (original, signed) = transaction_pair()?;
+        let mut original: VersionedTransaction = bincode::deserialize(&original)?;
+        let mut signed: VersionedTransaction = bincode::deserialize(&signed)?;
+        let server = signed.message.static_account_keys()[1];
+        original.signatures[1] = Signature::default();
+        signed.signatures[1] = Signature::default();
+        let before = bincode::serialize(&original)?;
+        let after = bincode::serialize(&signed)?;
+        assert!(validate_signed_transaction(&before, &after, &[server]).is_ok());
+        assert!(validate_signed_transaction(&before, &after, &[]).is_err());
+        assert!(validate_signed_transaction(&before, &after, &[Pubkey::new_unique()]).is_err());
+        assert!(validate_signed_transaction(
+            &before,
+            &before,
+            &[server, signed.message.static_account_keys()[0]]
+        )
+        .is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn cannot_strip_an_existing_signature_even_if_that_signer_is_deferred(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (original, signed) = transaction_pair()?;
+        let mut signed: VersionedTransaction = bincode::deserialize(&signed)?;
+        let server = signed.message.static_account_keys()[1];
+        signed.signatures[1] = Signature::default();
+        assert!(
+            validate_signed_transaction(&original, &bincode::serialize(&signed)?, &[server])
+                .is_err()
+        );
+
+        Ok(())
     }
 }

@@ -35,7 +35,8 @@ pub struct SessionStatus {
 }
 
 pub fn create_session(game_id: u64, wallet_pubkey: &str) -> Result<(String, u64), String> {
-    let response = client_fast()?
+    // Session readiness includes a confirmed rent transfer, not just a DB insert.
+    let response = client()?
         .post(format!("{}/session/create", vps_base()))
         .json(&CreateSessionReq {
             game_id,
@@ -97,7 +98,6 @@ pub fn activate_session(game_id: u64, signed_tx_bytes: &[u8]) -> Result<String, 
     Ok(resp.sig)
 }
 
-
 pub fn session_status(game_id: u64) -> Result<SessionStatus, String> {
     let resp = client_fast()?
         .get(format!("{}/session/status/{game_id}", vps_base()))
@@ -130,7 +130,6 @@ pub fn abandon_session(game_id: u64) -> Result<(), String> {
     }
     Ok(())
 }
-
 
 pub fn verify_global_session(wallet_pubkey: &str) -> Result<Option<String>, String> {
     let resp = client_fast()?

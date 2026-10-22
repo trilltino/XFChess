@@ -43,7 +43,7 @@ impl Plugin for SolanaIntegrationPlugin {
                 .in_set(SessionSet::Wallet),
         );
         app.add_systems(
-            OnEnter(crate::core::states::MenuState::Main),
+            OnEnter(crate::core::state::MenuState::Main),
             verify_global_session_on_menu_enter,
         );
         // Opt in with XFCHESS_ENABLE_GLOBAL_SESSION_AUTOSETUP=1. Automatic setup may

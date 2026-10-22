@@ -1,6 +1,8 @@
 use crate::error::{BraidError, Result};
 use crate::protocol;
 use crate::types::Version;
+#[cfg(test)]
+use anyhow::Context as _;
 use http::header::{HeaderMap, HeaderValue};
 
 #[derive(Clone, Debug, Default)]
@@ -236,26 +238,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_braid_headers_to_map() {
+    fn test_braid_headers_to_map() -> anyhow::Result<()> {
         let headers = BraidHeaders::new()
             .with_version(Version::String("v1".to_string()))
             .with_subscribe();
 
-        let map = headers.to_header_map().unwrap();
+        let map = headers
+            .to_header_map()
+            .context("required operation value")?;
         assert!(map.contains_key("Version"));
         assert!(map.contains_key("Subscribe"));
+        Ok(())
     }
 
     #[test]
-    fn test_parse_version_header() {
-        let result = protocol::parse_version_header("\"v1\", \"v2\", \"v3\"").unwrap();
+    fn test_parse_version_header() -> anyhow::Result<()> {
+        let result = protocol::parse_version_header("\"v1\", \"v2\", \"v3\"")
+            .context("required operation value")?;
         assert_eq!(result.len(), 3);
+        Ok(())
     }
 
     #[test]
-    fn test_parse_content_range() {
-        let (unit, range) = protocol::parse_content_range("json .field").unwrap();
+    fn test_parse_content_range() -> anyhow::Result<()> {
+        let (unit, range) =
+            protocol::parse_content_range("json .field").context("required operation value")?;
         assert_eq!(unit, "json");
         assert_eq!(range, ".field");
+        Ok(())
     }
 }

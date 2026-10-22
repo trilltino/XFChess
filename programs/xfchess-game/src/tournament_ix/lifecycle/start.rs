@@ -109,7 +109,7 @@ pub fn handler(ctx: Context<StartTournament>, tournament_id: u64) -> Result<()> 
         );
 
         let mut seeded = collected;
-        seeded.sort_by(|a, b| b.1.cmp(&a.1));
+        seeded.sort_by_key(|entry| core::cmp::Reverse(entry.1));
 
         let mut shard_muts: Vec<&mut TournamentPlayersShard> =
             vec![&mut ctx.accounts.tournament_players_shard_0];

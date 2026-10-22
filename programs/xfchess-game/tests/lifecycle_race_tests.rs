@@ -1,7 +1,8 @@
 //! Test both serialized instruction orderings against the real program.
 //! The losing instruction must leave state and lamports unchanged.
 
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
@@ -66,15 +67,17 @@ fn join_ix(game_id: u64, player: Pubkey, white: Pubkey, fee_payer: Pubkey) -> In
     }
 }
 
-fn profile(authority: Pubkey) -> (Pubkey, solana_sdk::account::Account) {
-    let p = PlayerProfile {
-        authority,
-        ..Default::default()
-    };
-    (
-        profile_pda(&authority).0,
-        program_account(&p, 8 + PlayerProfile::INIT_SPACE),
-    )
+fn profile(authority: Pubkey) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let p = PlayerProfile {
+            authority,
+            ..Default::default()
+        };
+        (
+            profile_pda(&authority).0,
+            program_account(&p, 8 + PlayerProfile::INIT_SPACE)?,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -86,60 +89,70 @@ fn game(
     status: GameStatus,
     move_count: u16,
     updated_at: i64,
-) -> (Pubkey, solana_sdk::account::Account) {
-    let (pda, bump) = game_pda(game_id);
-    let g = Game {
-        game_id,
-        white,
-        black,
-        status,
-        last_move_timestamp: updated_at,
-        fees_advanced: 0,
-        fee_payer,
-        result: GameResult::None,
-        board_state: start_board(),
-        move_count,
-        halfmove_clock: 0,
-        turn: move_count + 1,
-        created_at: updated_at,
-        updated_at,
-        wager_amount: WAGER,
-        wager_token: None,
-        game_type: GameType::PvP,
-        match_type: MatchType::Free,
-        country_fee: 0,
-        base_time_seconds: 300,
-        increment_seconds: 0,
-        bump,
-        is_delegated: false,
-        tournament_id: None,
-        nonce: move_count as u64,
-        draw_offered_by: None,
-    };
-    (pda, program_account(&g, 8 + Game::INIT_SPACE))
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let (pda, bump) = game_pda(game_id);
+        let g = Game {
+            game_id,
+            white,
+            black,
+            status,
+            last_move_timestamp: updated_at,
+            fees_advanced: 0,
+            fee_payer,
+            result: GameResult::None,
+            board_state: start_board(),
+            move_count,
+            halfmove_clock: 0,
+            turn: move_count + 1,
+            created_at: updated_at,
+            updated_at,
+            wager_amount: WAGER,
+            wager_token: None,
+            game_type: GameType::PvP,
+            match_type: MatchType::Free,
+            country_fee: 0,
+            base_time_seconds: 300,
+            increment_seconds: 0,
+            bump,
+            is_delegated: false,
+            tournament_id: None,
+            nonce: move_count as u64,
+            draw_offered_by: None,
+        };
+        (pda, program_account(&g, 8 + Game::INIT_SPACE)?)
+    })
 }
 
-async fn now(ctx: &mut ProgramTestContext) -> i64 {
-    ctx.banks_client
-        .get_sysvar::<Clock>()
-        .await
-        .unwrap()
-        .unix_timestamp
+async fn now(ctx: &mut ProgramTestContext) -> anyhow::Result<i64> {
+    Ok({
+        ctx.banks_client
+            .get_sysvar::<Clock>()
+            .await
+            .context("required operation value")?
+            .unix_timestamp
+    })
 }
 
-async fn lamports(ctx: &mut ProgramTestContext, key: Pubkey) -> u64 {
-    ctx.banks_client
-        .get_account(key)
-        .await
-        .unwrap()
-        .map(|a| a.lamports)
-        .unwrap_or(0)
+async fn lamports(ctx: &mut ProgramTestContext, key: Pubkey) -> anyhow::Result<u64> {
+    Ok({
+        ctx.banks_client
+            .get_account(key)
+            .await
+            .context("required operation value")?
+            .map(|a| a.lamports)
+            .unwrap_or(0)
+    })
 }
 
 /// Advance to a fresh blockhash so a repeated identical instruction is a
 /// distinct transaction rather than a deduplicated signature.
-async fn next_blockhash(ctx: &mut ProgramTestContext) {
-    ctx.last_blockhash = ctx.get_new_latest_blockhash().await.unwrap();
+async fn next_blockhash(ctx: &mut ProgramTestContext) -> anyhow::Result<()> {
+    ctx.last_blockhash = ctx
+        .get_new_latest_blockhash()
+        .await
+        .context("required operation value")?;
+    Ok(())
 }
 
 struct Table {
@@ -150,41 +163,43 @@ struct Table {
 
 /// A wagered game created by `white`, waiting for `black`; escrow funded with
 /// white's stake. The test payer is the game's fee payer.
-async fn waiting_table(game_id: u64) -> Table {
-    let white = Keypair::new();
-    let black = Keypair::new();
-    let mut ctx = start(vec![
-        (white.pubkey(), system_account(PLAYER_FUNDS)),
-        (black.pubkey(), system_account(PLAYER_FUNDS)),
-        profile(white.pubkey()),
-        profile(black.pubkey()),
-        (escrow_pda(game_id), system_account(WAGER)),
-    ])
-    .await;
-    let t = now(&mut ctx).await;
-    let (key, data) = game(
-        game_id,
-        white.pubkey(),
-        Pubkey::default(),
-        ctx.payer.pubkey(),
-        GameStatus::WaitingForOpponent,
-        0,
-        t,
-    );
-    ctx.set_account(&key, &AccountSharedData::from(data));
-    Table { ctx, white, black }
+async fn waiting_table(game_id: u64) -> anyhow::Result<Table> {
+    Ok({
+        let white = Keypair::new();
+        let black = Keypair::new();
+        let mut ctx = start(vec![
+            (white.pubkey(), system_account(PLAYER_FUNDS)),
+            (black.pubkey(), system_account(PLAYER_FUNDS)),
+            profile(white.pubkey())?,
+            profile(black.pubkey())?,
+            (escrow_pda(game_id), system_account(WAGER)),
+        ])
+        .await;
+        let t = now(&mut ctx).await?;
+        let (key, data) = game(
+            game_id,
+            white.pubkey(),
+            Pubkey::default(),
+            ctx.payer.pubkey(),
+            GameStatus::WaitingForOpponent,
+            0,
+            t,
+        )?;
+        ctx.set_account(&key, &AccountSharedData::from(data));
+        Table { ctx, white, black }
+    })
 }
 
 #[tokio::test]
-async fn cancel_wins_the_race_then_join_fails_and_joiner_keeps_funds() {
+async fn cancel_wins_the_race_then_join_fails_and_joiner_keeps_funds() -> anyhow::Result<()> {
     let id = 70_001;
     let Table {
         mut ctx,
         white,
         black,
-    } = waiting_table(id).await;
-    let white_before = lamports(&mut ctx, white.pubkey()).await;
-    let black_before = lamports(&mut ctx, black.pubkey()).await;
+    } = waiting_table(id).await?;
+    let white_before = lamports(&mut ctx, white.pubkey()).await?;
+    let black_before = lamports(&mut ctx, black.pubkey()).await?;
 
     send(
         &mut ctx,
@@ -192,13 +207,16 @@ async fn cancel_wins_the_race_then_join_fails_and_joiner_keeps_funds() {
         &[&white],
     )
     .await
-    .expect("creator cancels an unjoined game");
-    assert_eq!(fetch_game(&mut ctx, id).await.status, GameStatus::Cancelled);
+    .context("creator cancels an unjoined game")?;
     assert_eq!(
-        lamports(&mut ctx, white.pubkey()).await,
+        fetch_game(&mut ctx, id).await?.status,
+        GameStatus::Cancelled
+    );
+    assert_eq!(
+        lamports(&mut ctx, white.pubkey()).await?,
         white_before + WAGER
     );
-    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await, 0);
+    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await?, 0);
 
     let payer = ctx.payer.pubkey();
     let err = send(
@@ -207,27 +225,33 @@ async fn cancel_wins_the_race_then_join_fails_and_joiner_keeps_funds() {
         &[&black],
     )
     .await
-    .expect_err("join after cancellation must fail");
+    .err()
+    .context("join after cancellation must fail")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::GameAlreadyFull)));
-    assert_eq!(fetch_game(&mut ctx, id).await.status, GameStatus::Cancelled);
     assert_eq!(
-        lamports(&mut ctx, black.pubkey()).await,
+        fetch_game(&mut ctx, id).await?.status,
+        GameStatus::Cancelled
+    );
+    assert_eq!(
+        lamports(&mut ctx, black.pubkey()).await?,
         black_before,
         "a rejected join moves no funds"
     );
-    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await, 0);
+    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await?, 0);
+    Ok(())
 }
 
 #[tokio::test]
-async fn join_wins_the_race_then_creator_cancel_refunds_both_and_names_no_winner() {
+async fn join_wins_the_race_then_creator_cancel_refunds_both_and_names_no_winner(
+) -> anyhow::Result<()> {
     let id = 70_002;
     let Table {
         mut ctx,
         white,
         black,
-    } = waiting_table(id).await;
-    let white_before = lamports(&mut ctx, white.pubkey()).await;
-    let black_before = lamports(&mut ctx, black.pubkey()).await;
+    } = waiting_table(id).await?;
+    let white_before = lamports(&mut ctx, white.pubkey()).await?;
+    let black_before = lamports(&mut ctx, black.pubkey()).await?;
 
     let payer = ctx.payer.pubkey();
     send(
@@ -236,8 +260,8 @@ async fn join_wins_the_race_then_creator_cancel_refunds_both_and_names_no_winner
         &[&black],
     )
     .await
-    .expect("join lands first");
-    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await, 2 * WAGER);
+    .context("join lands first")?;
+    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await?, 2 * WAGER);
 
     // The creator's cancel arrives second: before any move it is the
     // zero-move cancellation — both stakes back, no result.
@@ -247,38 +271,45 @@ async fn join_wins_the_race_then_creator_cancel_refunds_both_and_names_no_winner
         &[&white],
     )
     .await
-    .expect("zero-move cancellation after join");
-    let g = fetch_game(&mut ctx, id).await;
+    .context("zero-move cancellation after join")?;
+    let g = fetch_game(&mut ctx, id).await?;
     assert_eq!(g.status, GameStatus::Cancelled);
     assert_eq!(g.result, GameResult::None);
     assert_eq!(
-        lamports(&mut ctx, white.pubkey()).await,
+        lamports(&mut ctx, white.pubkey()).await?,
         white_before + WAGER
     );
-    assert_eq!(lamports(&mut ctx, black.pubkey()).await, black_before);
-    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await, 0);
+    assert_eq!(lamports(&mut ctx, black.pubkey()).await?, black_before);
+    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await?, 0);
+    Ok(())
 }
 
 #[tokio::test]
-async fn duplicate_cancellation_is_safe_and_pays_nothing_twice() {
+async fn duplicate_cancellation_is_safe_and_pays_nothing_twice() -> anyhow::Result<()> {
     let id = 70_003;
-    let Table { mut ctx, white, .. } = waiting_table(id).await;
+    let Table { mut ctx, white, .. } = waiting_table(id).await?;
     let cancel = cancel_ix(id, white.pubkey(), white.pubkey(), Pubkey::default());
-    send(&mut ctx, cancel.clone(), &[&white]).await.unwrap();
-    let after_first = lamports(&mut ctx, white.pubkey()).await;
+    send(&mut ctx, cancel.clone(), &[&white])
+        .await
+        .context("required operation value")?;
+    let after_first = lamports(&mut ctx, white.pubkey()).await?;
 
     // A retry after a lost acknowledgement.
-    next_blockhash(&mut ctx).await;
+    next_blockhash(&mut ctx).await?;
     send(&mut ctx, cancel, &[&white])
         .await
-        .expect("repeat cancellation is accepted (idempotent)");
-    assert_eq!(lamports(&mut ctx, white.pubkey()).await, after_first);
-    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await, 0);
-    assert_eq!(fetch_game(&mut ctx, id).await.status, GameStatus::Cancelled);
+        .context("repeat cancellation is accepted (idempotent)")?;
+    assert_eq!(lamports(&mut ctx, white.pubkey()).await?, after_first);
+    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await?, 0);
+    assert_eq!(
+        fetch_game(&mut ctx, id).await?.status,
+        GameStatus::Cancelled
+    );
+    Ok(())
 }
 
 #[tokio::test]
-async fn outsider_cannot_cancel_an_abandoned_active_game_but_a_player_can() {
+async fn outsider_cannot_cancel_an_abandoned_active_game_but_a_player_can() -> anyhow::Result<()> {
     let id = 70_004;
     let white = Keypair::new();
     let black = Keypair::new();
@@ -290,7 +321,7 @@ async fn outsider_cannot_cancel_an_abandoned_active_game_but_a_player_can() {
         (escrow_pda(id), system_account(2 * WAGER)),
     ])
     .await;
-    let t = now(&mut ctx).await;
+    let t = now(&mut ctx).await?;
     let payer = ctx.payer.pubkey();
     // Moves played, idle for over the 24h abandonment window.
     let (key, data) = game(
@@ -301,7 +332,7 @@ async fn outsider_cannot_cancel_an_abandoned_active_game_but_a_player_can() {
         GameStatus::Active,
         6,
         t - 3600 * 25,
-    );
+    )?;
     ctx.set_account(&key, &AccountSharedData::from(data));
 
     let err = send(
@@ -310,10 +341,11 @@ async fn outsider_cannot_cancel_an_abandoned_active_game_but_a_player_can() {
         &[&outsider],
     )
     .await
-    .expect_err("a non-player cannot cancel");
+    .err()
+    .context("a non-player cannot cancel")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::NotInGame)));
-    assert_eq!(fetch_game(&mut ctx, id).await.status, GameStatus::Active);
-    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await, 2 * WAGER);
+    assert_eq!(fetch_game(&mut ctx, id).await?.status, GameStatus::Active);
+    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await?, 2 * WAGER);
 
     send(
         &mut ctx,
@@ -321,13 +353,17 @@ async fn outsider_cannot_cancel_an_abandoned_active_game_but_a_player_can() {
         &[&black],
     )
     .await
-    .expect("a player may cancel the abandoned game");
-    assert_eq!(fetch_game(&mut ctx, id).await.status, GameStatus::Cancelled);
-    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await, 0);
+    .context("a player may cancel the abandoned game")?;
+    assert_eq!(
+        fetch_game(&mut ctx, id).await?.status,
+        GameStatus::Cancelled
+    );
+    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await?, 0);
+    Ok(())
 }
 
 #[tokio::test]
-async fn abandoned_cancel_is_refused_before_the_window() {
+async fn abandoned_cancel_is_refused_before_the_window() -> anyhow::Result<()> {
     let id = 70_005;
     let white = Keypair::new();
     let black = Keypair::new();
@@ -337,7 +373,7 @@ async fn abandoned_cancel_is_refused_before_the_window() {
         (escrow_pda(id), system_account(2 * WAGER)),
     ])
     .await;
-    let t = now(&mut ctx).await;
+    let t = now(&mut ctx).await?;
     let payer = ctx.payer.pubkey();
     let (key, data) = game(
         id,
@@ -347,7 +383,7 @@ async fn abandoned_cancel_is_refused_before_the_window() {
         GameStatus::Active,
         6,
         t - 600,
-    );
+    )?;
     ctx.set_account(&key, &AccountSharedData::from(data));
 
     // A disconnected-but-not-abandoned game cannot be cancelled out from
@@ -358,67 +394,71 @@ async fn abandoned_cancel_is_refused_before_the_window() {
         &[&white],
     )
     .await
-    .expect_err("cancellation before the abandonment window must fail");
+    .err()
+    .context("cancellation before the abandonment window must fail")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::GameNotExpired)));
-    assert_eq!(fetch_game(&mut ctx, id).await.status, GameStatus::Active);
+    assert_eq!(fetch_game(&mut ctx, id).await?.status, GameStatus::Active);
+    Ok(())
 }
 
 /// Active, timed game: black to move (`turn` even) and idle longer than its
 /// whole 300s clock.
-async fn idle_active_table(game_id: u64) -> Table {
-    let white = Keypair::new();
-    let black = Keypair::new();
-    let mut ctx = start(vec![]).await;
-    let t = now(&mut ctx).await;
-    let (pda, bump) = game_pda(game_id);
-    let g = Game {
-        game_id,
-        white: white.pubkey(),
-        black: black.pubkey(),
-        status: GameStatus::Active,
-        last_move_timestamp: t - 400,
-        fees_advanced: 0,
-        fee_payer: white.pubkey(),
-        result: GameResult::None,
-        board_state: start_board(),
-        move_count: 1,
-        halfmove_clock: 0,
-        turn: 2,
-        created_at: t - 500,
-        updated_at: t - 400,
-        wager_amount: 0,
-        wager_token: None,
-        game_type: GameType::PvP,
-        match_type: MatchType::Free,
-        country_fee: 0,
-        base_time_seconds: 300,
-        increment_seconds: 0,
-        bump,
-        is_delegated: false,
-        tournament_id: None,
-        nonce: 1,
-        draw_offered_by: None,
-    };
-    ctx.set_account(
-        &pda,
-        &AccountSharedData::from(program_account(&g, 8 + Game::INIT_SPACE)),
-    );
-    Table { ctx, white, black }
+async fn idle_active_table(game_id: u64) -> anyhow::Result<Table> {
+    Ok({
+        let white = Keypair::new();
+        let black = Keypair::new();
+        let mut ctx = start(vec![]).await;
+        let t = now(&mut ctx).await?;
+        let (pda, bump) = game_pda(game_id);
+        let g = Game {
+            game_id,
+            white: white.pubkey(),
+            black: black.pubkey(),
+            status: GameStatus::Active,
+            last_move_timestamp: t - 400,
+            fees_advanced: 0,
+            fee_payer: white.pubkey(),
+            result: GameResult::None,
+            board_state: start_board(),
+            move_count: 1,
+            halfmove_clock: 0,
+            turn: 2,
+            created_at: t - 500,
+            updated_at: t - 400,
+            wager_amount: 0,
+            wager_token: None,
+            game_type: GameType::PvP,
+            match_type: MatchType::Free,
+            country_fee: 0,
+            base_time_seconds: 300,
+            increment_seconds: 0,
+            bump,
+            is_delegated: false,
+            tournament_id: None,
+            nonce: 1,
+            draw_offered_by: None,
+        };
+        ctx.set_account(
+            &pda,
+            &AccountSharedData::from(program_account(&g, 8 + Game::INIT_SPACE)?),
+        );
+        Table { ctx, white, black }
+    })
 }
 
 #[tokio::test]
-async fn resignation_then_timeout_claim_keeps_the_single_result() {
+async fn resignation_then_timeout_claim_keeps_the_single_result() -> anyhow::Result<()> {
     let id = 70_006;
     let Table {
         mut ctx,
         white,
         black,
-    } = idle_active_table(id).await;
+    } = idle_active_table(id).await?;
 
     send(&mut ctx, resign_ix(id, white.pubkey()), &[&white])
         .await
-        .expect("white resigns");
-    let g = fetch_game(&mut ctx, id).await;
+        .context("white resigns")?;
+    let g = fetch_game(&mut ctx, id).await?;
     assert_eq!(g.status, GameStatus::Finished);
     assert_eq!(g.result, GameResult::Winner(black.pubkey()));
 
@@ -426,29 +466,31 @@ async fn resignation_then_timeout_claim_keeps_the_single_result() {
     let payer = ctx.payer.pubkey();
     let err = send(&mut ctx, claim_timeout_ix(id, payer), &[])
         .await
-        .expect_err("timeout after a terminal result must fail");
+        .err()
+        .context("timeout after a terminal result must fail")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::GameNotActive)));
     assert_eq!(
-        fetch_game(&mut ctx, id).await.result,
+        fetch_game(&mut ctx, id).await?.result,
         GameResult::Winner(black.pubkey())
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn timeout_then_resignation_keeps_the_single_result() {
+async fn timeout_then_resignation_keeps_the_single_result() -> anyhow::Result<()> {
     let id = 70_007;
     let Table {
         mut ctx,
         white,
         black,
-    } = idle_active_table(id).await;
+    } = idle_active_table(id).await?;
 
     let payer = ctx.payer.pubkey();
     send(&mut ctx, claim_timeout_ix(id, payer), &[])
         .await
-        .expect("black flagged");
+        .context("black flagged")?;
     assert_eq!(
-        fetch_game(&mut ctx, id).await.result,
+        fetch_game(&mut ctx, id).await?.result,
         GameResult::Winner(white.pubkey())
     );
 
@@ -456,26 +498,27 @@ async fn timeout_then_resignation_keeps_the_single_result() {
     assert!(send(&mut ctx, resign_ix(id, black.pubkey()), &[&black])
         .await
         .is_err());
-    let g = fetch_game(&mut ctx, id).await;
+    let g = fetch_game(&mut ctx, id).await?;
     assert_eq!(g.status, GameStatus::Finished);
     assert_eq!(g.result, GameResult::Winner(white.pubkey()));
+    Ok(())
 }
 
 #[tokio::test]
-async fn cancelled_game_cannot_be_resigned_or_timed_out() {
+async fn cancelled_game_cannot_be_resigned_or_timed_out() -> anyhow::Result<()> {
     let id = 70_008;
     let Table {
         mut ctx,
         white,
         black,
-    } = waiting_table(id).await;
+    } = waiting_table(id).await?;
     send(
         &mut ctx,
         cancel_ix(id, white.pubkey(), white.pubkey(), Pubkey::default()),
         &[&white],
     )
     .await
-    .unwrap();
+    .context("required operation value")?;
 
     assert!(send(&mut ctx, resign_ix(id, white.pubkey()), &[&white])
         .await
@@ -485,7 +528,8 @@ async fn cancelled_game_cannot_be_resigned_or_timed_out() {
         .await
         .is_err());
     let _ = black;
-    let g = fetch_game(&mut ctx, id).await;
+    let g = fetch_game(&mut ctx, id).await?;
     assert_eq!(g.status, GameStatus::Cancelled);
     assert_eq!(g.result, GameResult::None);
+    Ok(())
 }

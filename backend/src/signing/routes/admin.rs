@@ -1123,7 +1123,8 @@ async fn get_feepayer_balance(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     use solana_sdk::signer::Signer;
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url)
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let feepayer_pubkey = state.feepayer.next().pubkey();
     let balance = rpc
         .get_balance(&feepayer_pubkey)
@@ -1140,7 +1141,8 @@ async fn get_wallet_balances(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     use solana_sdk::signer::Signer;
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url)
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
 
     let get_bal = |pubkey: &solana_sdk::pubkey::Pubkey| -> Result<(u64, String), StatusCode> {
         let balance = rpc
@@ -1430,7 +1432,7 @@ async fn fund_tournament_prize(
     let submit_started = std::time::Instant::now();
     state.metrics.record_transaction_submitted("solana");
     let sig = tokio::task::spawn_blocking(move || {
-        let rpc = make_rpc(&rpc_url);
+        let rpc = make_rpc(&rpc_url)?;
         let ix = fund_sol_prize_ix(&program_id, id, &authority.pubkey(), amount);
         sign_and_submit(&rpc, &authority, &[ix])
     })

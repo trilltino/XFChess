@@ -1,3 +1,5 @@
+#[cfg(test)]
+use anyhow::Context as _;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
@@ -39,7 +41,10 @@ impl MockDiscoveryMap {
     }
 
     pub fn add_node(&self, id: EndpointId, data: EndpointData) {
-        self.peers.write().unwrap().insert(id, Arc::new(data));
+        self.peers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id, Arc::new(data));
     }
 }
 
@@ -66,12 +71,18 @@ impl AddressLookup for MockDiscoveryInstance {
         self.map
             .peers
             .write()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(self.id, Arc::new(data.clone()));
     }
 
     fn resolve(&self, endpoint_id: EndpointId) -> Option<BoxStream<Result<Item, Error>>> {
-        let data = self.map.peers.read().unwrap().get(&endpoint_id).cloned()?;
+        let data = self
+            .map
+            .peers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&endpoint_id)
+            .cloned()?;
         let info = EndpointInfo::from_parts(endpoint_id, data.as_ref().clone());
         let item = Item::new(info, "mock-braid", None);
         Some(n0_future::stream::once(Ok(item)).boxed())
@@ -83,15 +94,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_mock_discovery_map_new() {
+    fn test_mock_discovery_map_new() -> anyhow::Result<()> {
         let map = MockDiscoveryMap::new();
-        assert!(map.peers.read().unwrap().is_empty());
+        assert!(map
+            .peers
+            .read()
+            .map_err(|error| anyhow::anyhow!("discovery map lock poisoned: {error}"))?
+            .is_empty());
+        Ok(())
     }
 
     #[test]
-    fn test_mock_discovery_default() {
+    fn test_mock_discovery_default() -> anyhow::Result<()> {
         let map: MockDiscoveryMap = Default::default();
-        assert!(map.peers.read().unwrap().is_empty());
+        assert!(map
+            .peers
+            .read()
+            .map_err(|error| anyhow::anyhow!("discovery map lock poisoned: {error}"))?
+            .is_empty());
+        Ok(())
     }
 
     #[test]
@@ -111,19 +132,30 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_discovery_map_add_node() {
+    fn test_mock_discovery_map_add_node() -> anyhow::Result<()> {
         let map = MockDiscoveryMap::new();
-        let id = EndpointId::from_bytes(&[1u8; 32]).expect("valid test key");
+        let id = EndpointId::from_bytes(&[1u8; 32]).context("valid test key")?;
         let data = EndpointData::default();
 
         map.add_node(id, data);
 
-        assert_eq!(map.peers.read().unwrap().len(), 1);
-        assert!(map.peers.read().unwrap().contains_key(&id));
+        assert_eq!(
+            map.peers
+                .read()
+                .map_err(|error| anyhow::anyhow!("discovery map lock poisoned: {error}"))?
+                .len(),
+            1
+        );
+        assert!(map
+            .peers
+            .read()
+            .map_err(|error| anyhow::anyhow!("discovery map lock poisoned: {error}"))?
+            .contains_key(&id));
+        Ok(())
     }
 
     #[test]
-    fn test_mock_discovery_map_multiple_nodes() {
+    fn test_mock_discovery_map_multiple_nodes() -> anyhow::Result<()> {
         let map = MockDiscoveryMap::new();
 
         for i in 0..5 {
@@ -133,6 +165,13 @@ mod tests {
             map.add_node(id, data);
         }
 
-        assert_eq!(map.peers.read().unwrap().len(), 5);
+        assert_eq!(
+            map.peers
+                .read()
+                .map_err(|error| anyhow::anyhow!("discovery map lock poisoned: {error}"))?
+                .len(),
+            5
+        );
+        Ok(())
     }
 }

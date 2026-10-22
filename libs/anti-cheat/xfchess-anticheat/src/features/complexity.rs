@@ -2,10 +2,10 @@ use crate::config::AcConfig;
 use crate::types::Complexity;
 
 pub fn classify(top1_cp: i32, top2_cp: i32, cfg: &AcConfig) -> Complexity {
-    let delta = (top1_cp - top2_cp).abs();
-    if delta < cfg.forced_delta_cp {
+    let delta = (i64::from(top1_cp) - i64::from(top2_cp)).abs();
+    if delta < i64::from(cfg.forced_delta_cp) {
         Complexity::Forced
-    } else if delta < cfg.complex_delta_cp {
+    } else if delta < i64::from(cfg.complex_delta_cp) {
         Complexity::Simple
     } else {
         Complexity::Complex

@@ -87,6 +87,7 @@ pub fn export_json(report: &CostReport) -> serde_json::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[test]
     fn unknown_metadata_is_partial_and_skips_are_not_paid_transactions() {
@@ -108,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn includes_failed_fees_and_keeps_cashflow_separate() {
+    fn includes_failed_fees_and_keeps_cashflow_separate() -> anyhow::Result<()> {
         let entries: Vec<Measurement> = serde_json::from_value(serde_json::json!([
             {"group":"setup", "instruction":"failed", "layer":"solana",
              "cu_consumed":123, "cu_limit":200000, "cu_price_micro_lamports":10000,
@@ -119,7 +120,7 @@ mod tests {
              "fee_lamports":0, "success":true, "signature":"er",
              "fee_payer":"alice", "pre_balance_lamports":988000, "post_balance_lamports":1008000}
         ]))
-        .unwrap();
+        .context(concat!(file!(), ":", line!()))?;
         let log = MeasurementLog::from(entries);
         let report = generate_cost_report(&log, "test");
         assert_eq!(report.measured_transactions, 2);
@@ -128,5 +129,6 @@ mod tests {
         assert_eq!(report.er_transaction_fees_lamports, 0);
         assert_eq!(report.per_payer_net_outflow_lamports["alice"], -8000);
         assert_eq!(report.measured_cu, 40123);
+        Ok(())
     }
 }

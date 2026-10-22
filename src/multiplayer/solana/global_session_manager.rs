@@ -11,13 +11,11 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
-#[allow(deprecated)]
 use solana_system_interface::program as system_program;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 const SEED: &[u8] = b"global_session";
-
 
 pub fn find_global_session_pda(program_id: &Pubkey, player: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SEED, player.as_ref()], program_id)
@@ -93,7 +91,6 @@ pub fn check_global_session_can_afford_wager(
     Ok(())
 }
 
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GlobalSessionKeyData {
     pub session_pubkey: String,
@@ -121,7 +118,7 @@ impl GlobalSessionKeyManager {
         // Android requires app-writable session-key storage; the desktop temp-directory
         // fallback may be unwritable there.
         #[cfg(target_os = "android")]
-        let base = crate::core::paths::internal_data_dir()
+        let base = crate::core::android_paths::internal_data_dir()
             .unwrap_or_else(|| std::env::temp_dir().join("XFChess"));
         #[cfg(not(target_os = "android"))]
         let base = directories::ProjectDirs::from("com", "xfchess", "XFChess")
@@ -166,10 +163,9 @@ impl GlobalSessionKeyManager {
         let json = serde_json::to_string(&data).map_err(|e| format!("serialize: {e}"))?;
         let cipher =
             Aes256Gcm::new_from_slice(&self.encryption_key).map_err(|e| format!("cipher: {e}"))?;
-        #[allow(deprecated)]
-        let nonce = Nonce::from_slice(b"xfchess glob"); // 12 bytes
+        let nonce = Nonce::from(*b"xfchess glob"); // 12 bytes
         let encrypted = cipher
-            .encrypt(nonce, json.as_bytes())
+            .encrypt(&nonce, json.as_bytes())
             .map_err(|e| format!("encrypt: {e}"))?;
         let encoded = general_purpose::STANDARD.encode(encrypted);
         std::fs::create_dir_all(&self.data_dir).map_err(|e| format!("mkdir: {e}"))?;
@@ -189,10 +185,9 @@ impl GlobalSessionKeyManager {
             .map_err(|e| format!("base64: {e}"))?;
         let key = Self::derive_key(wallet);
         let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("cipher: {e}"))?;
-        #[allow(deprecated)]
-        let nonce = Nonce::from_slice(b"xfchess glob");
+        let nonce = Nonce::from(*b"xfchess glob");
         let decrypted = cipher
-            .decrypt(nonce, encrypted.as_ref())
+            .decrypt(&nonce, encrypted.as_ref())
             .map_err(|e| format!("decrypt: {e}"))?;
         let data: GlobalSessionKeyData =
             serde_json::from_slice(&decrypted).map_err(|e| format!("deserialize: {e}"))?;
@@ -221,7 +216,6 @@ impl GlobalSessionKeyManager {
         Ok(())
     }
 }
-
 
 fn anchor_discriminator(name: &str) -> [u8; 8] {
     use sha2::{Digest, Sha256};
@@ -410,7 +404,6 @@ pub fn build_first_time_auth_tx(
     let tx = Transaction::new_with_payer(&[authorize_ix], Some(player));
     (tx, session_pda)
 }
-
 
 fn push_option_i64(buf: &mut Vec<u8>, v: Option<i64>) {
     match v {

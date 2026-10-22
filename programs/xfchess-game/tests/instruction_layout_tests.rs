@@ -31,12 +31,12 @@ fn hand_built(discriminator: &[u8], host_treasury: &Pubkey) -> Vec<u8> {
 }
 
 #[test]
-fn initialize_tournament_deserializes_captured_devnet_bytes() {
+fn initialize_tournament_deserializes_captured_devnet_bytes() -> anyhow::Result<()> {
     let hex = "4bda5650317f9bbaffd5586a000000000a0000004532452043757020327040420f000000000002000100000000ffffffff0200581bb80b00000000000000000000000000000000000000000000000000a3ad5c77f852da8b757c967a26f5fa0b3757d5dce0a9ea9a53b060e4741a37680058020000000000000500";
     let bytes: Vec<u8> = (0..hex.len())
         .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-        .collect();
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
+        .collect::<Result<_, _>>()?;
     assert_eq!(bytes.len(), 123);
 
     use anchor_lang::Discriminator;
@@ -57,6 +57,7 @@ fn initialize_tournament_deserializes_captured_devnet_bytes() {
         }
         Err(e) => panic!("captured devnet bytes failed to deserialize: {e}"),
     }
+    Ok(())
 }
 
 #[test]

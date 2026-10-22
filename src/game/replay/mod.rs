@@ -103,7 +103,6 @@ pub fn setup_replay(
         pgn.inner.moves.len()
     );
 
-    // Reset replay state
     *replay = PgnReplayState::default();
 
     replay.fen_snapshots = match pgn.inner.snapshots() {
@@ -113,13 +112,23 @@ pub fn setup_replay(
             return;
         }
     };
-    *replay.engine =
-        xfchess_rules::Game::from_fen(&replay.fen_snapshots[0]).expect("validated PGN position");
+    let Some(fen) = replay.fen_snapshots.first() else {
+        warn!("[REPLAY] PGN contains no positions");
+        return;
+    };
+    let position = match xfchess_rules::Game::from_fen(fen) {
+        Ok(position) => position,
+        Err(error) => {
+            warn!("[REPLAY] Invalid initial position: {error}");
+            return;
+        }
+    };
+    if let Err(error) = engine.set_from_fen(fen) {
+        warn!("[REPLAY] Cannot initialize engine: {error}");
+        return;
+    }
+    *replay.engine = position;
 
-    // Sync the main ChessEngine to starting position
-    engine.set_from_fen(&replay.fen_snapshots[0]).ok();
-
-    // Mark board as needing spawn
     replay.board_ready = false;
     replay.position_dirty = true;
     pieces_spawned.spawned = false;

@@ -1,5 +1,5 @@
-use xfchess::game::resources::CapturedPieces;
-use xfchess::rendering::pieces::{PieceColor, PieceType};
+use xfchess_app::game::resources::CapturedPieces;
+use xfchess_app::rendering::pieces::{PieceColor, PieceType};
 
 #[test]
 fn example_captured_pieces_usage() {

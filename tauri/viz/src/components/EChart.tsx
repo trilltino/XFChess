@@ -1,20 +1,26 @@
 import { useEffect, useRef } from 'react';
-import * as echarts from 'echarts';
+import type { EChartsCoreOption } from 'echarts';
+import { init, use as registerCharts } from 'echarts/core';
+import { BarChart, GraphChart, LineChart } from 'echarts/charts';
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+
+registerCharts([BarChart, GraphChart, LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 /** Thin React wrapper that drives an ECharts instance via a ref. */
 export function EChart({
   option,
   height = 320,
 }: {
-  option: echarts.EChartsCoreOption;
+  option: EChartsCoreOption;
   height?: number | string;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const chart = useRef<echarts.ECharts | null>(null);
+  const chart = useRef<ReturnType<typeof init> | null>(null);
 
   useEffect(() => {
     if (!ref.current) return;
-    chart.current = echarts.init(ref.current, 'dark', { renderer: 'canvas' });
+    chart.current = init(ref.current, 'dark', { renderer: 'canvas' });
     const onResize = () => chart.current?.resize();
     window.addEventListener('resize', onResize);
     return () => {

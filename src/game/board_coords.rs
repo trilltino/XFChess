@@ -94,7 +94,6 @@ impl From<BoardPos> for (u8, u8) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,15 +108,17 @@ mod tests {
     }
 
     #[test]
-    fn uci_roundtrip() {
+    fn uci_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         for file in 0..8u8 {
             for rank in 0..8u8 {
                 let pos = BoardPos::new(file, rank);
                 let uci = pos.to_uci();
-                let parsed = BoardPos::from_uci(&uci).expect("valid UCI");
+                let parsed = BoardPos::from_uci(&uci).ok_or("missing test value")?;
                 assert_eq!(pos, parsed, "roundtrip failed for {uci}");
             }
         }
+
+        Ok(())
     }
 
     #[test]

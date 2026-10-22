@@ -240,15 +240,16 @@ pub fn lamports_to_money(lamports: u64, price_minor_units: u64) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     #[test]
-    fn monthly_fixed_cost_is_once_and_included_usage_is_applied_monthly() {
+    fn monthly_fixed_cost_is_once_and_included_usage_is_applied_monthly() -> anyhow::Result<()> {
         let pricing: Pricing = serde_json::from_value(serde_json::json!({
             "configured":true,"currency":"GBP","monthly_games":100,"billing_period_seconds":1000,
             "fixed":[{"name":"VPS","monthly_minor_units":2000}],
             "metered":[{"name":"RPC","metric":"rpc","quantity_per_unit":100,
                 "minor_units_per_unit":10,"included_monthly_quantity":500}]
         }))
-        .unwrap();
+        .context(concat!(file!(), ":", line!()))?;
         let metric = MetricSummary {
             complete: true,
             delta: Some(100.0),
@@ -262,32 +263,37 @@ mod tests {
             10,
             10_000,
         )
-        .unwrap();
+        .context(concat!(file!(), ":", line!()))?;
         assert_eq!(result.fixed_monthly_minor_units, Some(2000));
         assert_eq!(result.allocated_fixed_run_minor_units, Some(20));
         assert_eq!(result.metered[0].monthly_overage_minor_units, Some(230));
         assert_eq!(result.infrastructure_monthly_minor_units, Some(2230));
+        Ok(())
     }
     #[test]
-    fn unavailable_usage_and_zero_completions_do_not_become_zero_costs() {
+    fn unavailable_usage_and_zero_completions_do_not_become_zero_costs() -> anyhow::Result<()> {
         let pricing: Pricing = serde_json::from_value(serde_json::json!({"currency":"GBP","monthly_games":100,
-            "metered":[{"name":"RPC","metric":"rpc","quantity_per_unit":1,"minor_units_per_unit":1}]})).unwrap();
+            "metered":[{"name":"RPC","metric":"rpc","quantity_per_unit":1,"minor_units_per_unit":1}]})).context(concat!(file!(), ":", line!()))?;
         assert!(quote(&pricing, &BTreeMap::new(), 0, 1)
-            .unwrap()
+            .context(concat!(file!(), ":", line!()))?
             .infrastructure_monthly_minor_units
             .is_none());
-        assert_eq!(lamports_to_money(1, 6000).unwrap(), 1);
+        assert_eq!(
+            lamports_to_money(1, 6000).context(concat!(file!(), ":", line!()))?,
+            1
+        );
         assert!(lamports_to_money(u64::MAX, u64::MAX).is_err());
+        Ok(())
     }
 
     #[test]
-    fn currencies_need_an_explicit_rate_and_prepaid_credit_is_separate() {
+    fn currencies_need_an_explicit_rate_and_prepaid_credit_is_separate() -> anyhow::Result<()> {
         let mut pricing: Pricing = serde_json::from_value(serde_json::json!({
             "configured":true,"currency":"EUR","monthly_games":100,
             "fixed":[{"name":"VPS","monthly_minor_units":599}],
             "metered":[{"name":"Triton","currency":"USD","metric":"rpc","quantity_per_unit":1000000,"minor_units_per_unit":1000}],
             "prepaid":[{"provider":"Triton","currency":"USD","deposit_minor_units":12500,"validity_months":12}]
-        })).unwrap();
+        })).context(concat!(file!(), ":", line!()))?;
         let metrics = BTreeMap::from([(
             "rpc".into(),
             MetricSummary {
@@ -298,15 +304,18 @@ mod tests {
                 ..MetricSummary::default()
             },
         )]);
-        let result = quote(&pricing, &metrics, 100, 1000).unwrap();
+        let result =
+            quote(&pricing, &metrics, 100, 1000).context(concat!(file!(), ":", line!()))?;
         assert_eq!(result.infrastructure_monthly_minor_units, None);
         assert_eq!(result.metered[0].monthly_overage_minor_units, Some(1000));
         assert_eq!(result.metered[0].currency, "USD");
         pricing
             .exchange_rates_millionths
             .insert("USD".into(), 900_000);
-        let result = quote(&pricing, &metrics, 100, 1000).unwrap();
+        let result =
+            quote(&pricing, &metrics, 100, 1000).context(concat!(file!(), ":", line!()))?;
         assert_eq!(result.infrastructure_monthly_minor_units, Some(1499));
         assert_eq!(result.prepaid[0].deposit_minor_units, 12500);
+        Ok(())
     }
 }

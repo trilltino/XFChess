@@ -43,10 +43,15 @@ pub async fn join(
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("System time should be after UNIX_EPOCH")
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "System clock unavailable".to_string(),
+            )
+        })?
         .as_secs();
 
-    if now > req.timestamp && now - req.timestamp > 120 {
+    if req.timestamp > now.saturating_add(60) || now.saturating_sub(req.timestamp) > 120 {
         return Err((StatusCode::BAD_REQUEST, "Timestamp too old".to_string()));
     }
 

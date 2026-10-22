@@ -188,23 +188,21 @@ pub fn update_eval_bar(
             return;
         }
     }
-    let ticket = evaluations
-        .worker
-        .as_ref()
-        .unwrap()
-        .0
-        .search(SearchRequest {
-            game_id: 0,
-            position: EnginePosition::from_fen(fen.clone()),
-            movetime_ms: 100,
-            depth: None,
-            strength_elo: None,
-        });
+    let Some(worker) = evaluations.worker.as_ref() else {
+        return;
+    };
+    let ticket = worker.0.search(SearchRequest {
+        game_id: 0,
+        position: EnginePosition::from_fen(fen.clone()),
+        movetime_ms: 100,
+        depth: None,
+        strength_elo: None,
+    });
     evaluations.pending = Some((ply, fen, ticket));
 }
 
 pub fn sync_eval_bar_visibility(
-    settings: Res<crate::core::resources::GameSettings>,
+    settings: Res<crate::core::settings::GameSettings>,
     game_mode: Res<GameMode>,
     pgn: Option<Res<crate::game::replay::ParsedPgnGameResource>>,
     mut eval: ResMut<EvalBarState>,
@@ -225,7 +223,8 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
 
     #[test]
-    fn competitive_games_and_puzzles_clear_analysis_without_starting_stockfish() {
+    fn competitive_games_and_puzzles_clear_analysis_without_starting_stockfish(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         for mode in [GameMode::MultiplayerCompetitive, GameMode::Puzzle] {
             let mut world = World::new();
             world.insert_resource(mode);
@@ -244,7 +243,9 @@ mod tests {
                 scores: vec![Some(200)],
                 ..Default::default()
             });
-            world.run_system_once(update_eval_bar).unwrap();
+            world
+                .run_system_once(update_eval_bar)
+                .map_err(|error| format!("{error:?}"))?;
             let history = world.resource::<EvalHistory>();
             assert!(history.scores.is_empty());
             assert!(history.worker.is_none());
@@ -252,5 +253,7 @@ mod tests {
             assert!(!eval.visible);
             assert_eq!(eval.score, 0);
         }
+
+        Ok(())
     }
 }

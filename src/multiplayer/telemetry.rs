@@ -16,13 +16,12 @@ pub struct FocusTelemetryPlugin;
 
 impl Plugin for FocusTelemetryPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FocusTelemetry>()
-            .add_systems(
-                Update,
-                (track_window_focus, report_move_blur)
-                    .chain()
-                    .in_set(crate::core::schedule::SendSet::Session),
-            );
+        app.init_resource::<FocusTelemetry>().add_systems(
+            Update,
+            (track_window_focus, report_move_blur)
+                .chain()
+                .in_set(crate::core::schedule::SendSet::Session),
+        );
     }
 }
 

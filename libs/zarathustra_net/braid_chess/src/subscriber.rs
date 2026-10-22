@@ -28,7 +28,7 @@ impl DeliveryReceipt {
     pub fn acknowledge(mut self) -> braid_http::Result<()> {
         self.acknowledger
             .take()
-            .expect("receipt is consumed once")
+            .ok_or_else(|| braid_http::BraidError::Internal("receipt already consumed".into()))?
             .acknowledge(&self.versions)
     }
 }
@@ -70,7 +70,7 @@ impl ChessSubscriber {
             })?;
         let acknowledger = subscription
             .acknowledger()
-            .expect("manual acknowledgment configured");
+            .ok_or_else(|| BraidChessError::Http("manual acknowledgment is unavailable".into()))?;
         let (tx, rx) = async_channel::bounded(1);
         let handle = tokio::spawn(async move {
             loop {

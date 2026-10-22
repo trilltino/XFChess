@@ -255,9 +255,12 @@ impl Plugin for PiecePlugin {
         app.init_resource::<PiecesSpawned>();
         app.init_resource::<ResumeBoard>();
         app.add_systems(Startup, (load_piece_meshes, init_piece_picking_assets));
-        app.add_systems(Update, create_pieces
+        app.add_systems(
+            Update,
+            create_pieces
                 .after(crate::game::systems::camera::view_mode_toggle_input_system)
-                .in_set(crate::core::schedule::GameSystems::Input));
+                .in_set(crate::core::schedule::GameSystems::Input),
+        );
         app.add_systems(OnExit(GameState::InGame), reset_pieces_spawned);
         // Apply ViewMode on entry, mode changes, and piece spawning.
         app.add_systems(
@@ -267,7 +270,7 @@ impl Plugin for PiecePlugin {
         app.add_systems(
             Update,
             view_mode_rendering_toggle_system
-                .before(crate::rendering::board::board::board_view_mode_toggle_system)
+                .before(crate::rendering::board::spawn::board_view_mode_toggle_system)
                 .in_set(crate::core::schedule::GameSystems::Visual)
                 .run_if(
                     resource_changed::<crate::game::view_mode::ViewMode>

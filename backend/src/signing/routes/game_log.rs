@@ -23,12 +23,16 @@ const MAX_CHAT_LEN: usize = 500;
 
 const GENESIS_PARENT: &str = "0";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PutEventError {
+    #[error("parent version mismatch; expected {expected}")]
     ParentMismatch { expected: String },
+    #[error("event version already exists")]
     VersionConflict,
+    #[error("sender is not a game participant")]
     NotAParticipant,
-    Db(sqlx::Error),
+    #[error("game log storage failed: {0}")]
+    Db(#[source] sqlx::Error),
 }
 
 fn requires_participant_check(kind: &str) -> bool {
@@ -145,8 +149,7 @@ impl GameLogState {
             player_pubkey,
             "",
             message,
-            content_version,
-            content_parent,
+            (content_version, content_parent),
         )
         .await
     }
@@ -158,8 +161,7 @@ impl GameLogState {
         player_pubkey: &str,
         session_token: &str,
         message: &ChessMessage,
-        content_version: &str,
-        content_parent: &str,
+        (content_version, content_parent): (&str, &str),
     ) -> Result<i64, PutEventError> {
         let kind = kind_of(message);
 
@@ -552,7 +554,10 @@ async fn put_moves(
     ) {
         return StatusCode::UNPROCESSABLE_ENTITY.into_response();
     }
-    let bearer = bearer_wallet(&state, &headers).await;
+    let bearer = match bearer_wallet(&state, &headers).await {
+        Ok(wallet) => wallet,
+        Err(status) => return status.into_response(),
+    };
     put_event_handler(&state, &game_id, "moves", req, bearer).await
 }
 
@@ -600,17 +605,29 @@ fn is_db_locked(e: &sqlx::Error) -> bool {
 }
 
 /// Read optional non-revoked JWT identity here: casual public game logs bypass auth middleware.
-async fn bearer_wallet(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")?;
-    let claims = state.jwt.verify(token).ok()?;
-    if state.store.token_is_revoked(&claims.sub, claims.iat).await {
-        return None;
-    }
-    Some(claims.sub)
+async fn bearer_wallet(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<String>, StatusCode> {
+    let Some(token) = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+    else {
+        return Ok(None);
+    };
+    let Ok(claims) = state.jwt.verify(token) else {
+        return Ok(None);
+    };
+    let revoked = state
+        .store
+        .token_is_revoked(&claims.sub, claims.iat)
+        .await
+        .map_err(|error| {
+            tracing::error!("Revocation lookup failed: {error}");
+            StatusCode::SERVICE_UNAVAILABLE
+        })?;
+    Ok((!revoked).then_some(claims.sub))
 }
 
 /// Unclaimed seats allow legacy writes. Claimed seats require both the
@@ -684,8 +701,7 @@ async fn put_event_handler(
                 &req.sender_identity,
                 &req.session_token,
                 &req.message,
-                &req.content_version,
-                &req.content_parent,
+                (&req.content_version, &req.content_parent),
             )
             .await;
         match result {
@@ -705,7 +721,10 @@ async fn put_event_handler(
         }
     }
 
-    match outcome.expect("loop always sets outcome before exiting") {
+    let Some(outcome) = outcome else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    match outcome {
         Ok(seq) => {
             info!(
                 "[game-log] {} → {}/{} (kind={}, seq={})",
@@ -763,14 +782,19 @@ async fn auth_ok(state: &AppState, req: &GameEventReq) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use braid_chess::message::MovePayload;
 
-    pub(super) async fn migrated_pool() -> sqlx::SqlitePool {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::infrastructure::migrate_session_db(&pool)
-            .await
-            .unwrap();
-        pool
+    pub(super) async fn migrated_pool() -> anyhow::Result<sqlx::SqlitePool> {
+        Ok({
+            let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+                .await
+                .context("test setup failed")?;
+            crate::infrastructure::migrate_session_db(&pool)
+                .await
+                .context("test setup failed")?;
+            pool
+        })
     }
 
     pub(super) fn move_message(fen_after: &str, move_number: u32) -> ChessMessage {
@@ -784,20 +808,25 @@ mod tests {
 
     // ChessSubscriber sends Subscribe: true; it must receive a stream, not a snapshot.
     #[test]
-    fn wants_subscribe_recognizes_the_actual_client_header() {
+    fn wants_subscribe_recognizes_the_actual_client_header() -> anyhow::Result<()> {
         let mut headers = HeaderMap::new();
-        headers.insert("Subscribe", "true".parse().unwrap());
+        headers.insert("Subscribe", "true".parse().context("test setup failed")?);
         assert!(
             wants_subscribe(&headers),
             "Subscribe: true must count as a subscribe request"
         );
+        Ok(())
     }
 
     #[test]
-    fn wants_subscribe_still_recognizes_keep_alive() {
+    fn wants_subscribe_still_recognizes_keep_alive() -> anyhow::Result<()> {
         let mut headers = HeaderMap::new();
-        headers.insert("Subscribe", "keep-alive".parse().unwrap());
+        headers.insert(
+            "Subscribe",
+            "keep-alive".parse().context("test setup failed")?,
+        );
         assert!(wants_subscribe(&headers));
+        Ok(())
     }
 
     #[test]
@@ -807,8 +836,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn first_event_requires_genesis_parent() {
-        let pool = migrated_pool().await;
+    async fn first_event_requires_genesis_parent() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         let msg = move_message("fen1", 1);
@@ -818,20 +847,23 @@ mod tests {
         let err = state
             .put_event("g1", "moves", "alice", &msg, &v1, "not-genesis")
             .await
-            .unwrap_err();
+            .err()
+            .context("test setup failed")?;
         assert!(matches!(err, PutEventError::ParentMismatch { .. }));
 
         // Genesis parent is accepted and assigned seq 1.
         let seq = state
             .put_event("g1", "moves", "alice", &msg, &v1, GENESIS_PARENT)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(seq, 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn retry_after_lost_ack_reuses_original_sequence_even_after_head_moves() {
-        let state = GameLogState::new(migrated_pool().await, None);
+    async fn retry_after_lost_ack_reuses_original_sequence_even_after_head_moves(
+    ) -> anyhow::Result<()> {
+        let state = GameLogState::new(migrated_pool().await?, None);
         let first = move_message("fen1", 1);
         let v1 = braid_chess::version_hash("fen1", 1);
         let second = move_message("fen2", 2);
@@ -840,21 +872,21 @@ mod tests {
             state
                 .put_event("g1", "moves", "alice", &first, &v1, "0")
                 .await
-                .unwrap(),
+                .context("test setup failed")?,
             1
         );
         assert_eq!(
             state
                 .put_event("g1", "moves", "bob", &second, &v2, &v1)
                 .await
-                .unwrap(),
+                .context("test setup failed")?,
             2
         );
         assert_eq!(
             state
                 .put_event("g1", "moves", "alice", &first, &v1, "0")
                 .await
-                .unwrap(),
+                .context("test setup failed")?,
             1
         );
         assert_eq!(
@@ -862,7 +894,7 @@ mod tests {
                 .snapshot("g1", "moves")
                 .await
                 .as_array()
-                .unwrap()
+                .context("test setup failed")?
                 .len(),
             2
         );
@@ -873,11 +905,12 @@ mod tests {
                 .await,
             Err(PutEventError::VersionConflict)
         ));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn chain_must_reference_the_true_current_head() {
-        let pool = migrated_pool().await;
+    async fn chain_must_reference_the_true_current_head() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         let m1 = move_message("fen1", 1);
@@ -885,7 +918,7 @@ mod tests {
         state
             .put_event("g1", "moves", "alice", &m1, &v1, GENESIS_PARENT)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         // A second genesis parent is equivocation after the first move.
         let m2 = move_message("fen2", 2);
@@ -893,20 +926,22 @@ mod tests {
         let err = state
             .put_event("g1", "moves", "alice", &m2, &v2, GENESIS_PARENT)
             .await
-            .unwrap_err();
+            .err()
+            .context("test setup failed")?;
         assert!(matches!(err, PutEventError::ParentMismatch { expected } if expected == v1));
 
         // Correctly chained off v1 succeeds.
         let seq = state
             .put_event("g1", "moves", "alice", &m2, &v2, &v1)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(seq, 2);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn move_history_survives_a_simulated_restart() {
-        let pool = migrated_pool().await;
+    async fn move_history_survives_a_simulated_restart() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
 
         {
             let state = GameLogState::new(pool.clone(), None);
@@ -915,26 +950,27 @@ mod tests {
             state
                 .put_event("g1", "moves", "alice", &m1, &v1, GENESIS_PARENT)
                 .await
-                .unwrap();
+                .context("test setup failed")?;
             let m2 = move_message("fen2", 2);
             let v2 = braid_chess::version_hash("fen2", 2);
             state
                 .put_event("g1", "moves", "alice", &m2, &v2, &v1)
                 .await
-                .unwrap();
+                .context("test setup failed")?;
             // `state` (and its in-memory broadcast channels) dropped here —
             // only the SQLite rows remain.
         }
 
         let restarted = GameLogState::new(pool, None);
         let snapshot = restarted.snapshot("g1", "moves").await;
-        let entries = snapshot.as_array().expect("snapshot is a JSON array");
+        let entries = snapshot.as_array().context("snapshot is a JSON array")?;
         assert_eq!(entries.len(), 2, "both moves should survive the restart");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn chat_and_moves_streams_stay_separate() {
-        let pool = migrated_pool().await;
+    async fn chat_and_moves_streams_stay_separate() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         let m1 = move_message("fen1", 1);
@@ -942,7 +978,7 @@ mod tests {
         state
             .put_event("g1", "moves", "alice", &m1, &v1, GENESIS_PARENT)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         let chat = ChessMessage::Chat(braid_chess::message::ChatPayload {
             player: "alice".to_string(),
@@ -953,17 +989,27 @@ mod tests {
         state
             .put_event("g1", "chat", "alice", &chat, &vc, GENESIS_PARENT)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         let moves_snapshot = state.snapshot("g1", "moves").await;
         let chat_snapshot = state.snapshot("g1", "chat").await;
-        assert_eq!(moves_snapshot.as_array().unwrap().len(), 1);
-        assert_eq!(chat_snapshot.as_array().unwrap().len(), 1);
+        assert_eq!(
+            moves_snapshot
+                .as_array()
+                .context("test setup failed")?
+                .len(),
+            1
+        );
+        assert_eq!(
+            chat_snapshot.as_array().context("test setup failed")?.len(),
+            1
+        );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn every_broadcast_body_decodes_as_a_bare_chess_message() {
-        let pool = migrated_pool().await;
+    async fn every_broadcast_body_decodes_as_a_bare_chess_message() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         let mut rx = state.channel("g1", "moves").await.subscribe();
@@ -973,24 +1019,25 @@ mod tests {
         state
             .put_event("g1", "moves", "alice", &m1, &v1, GENESIS_PARENT)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
-        let update = rx.recv().await.expect("live update should arrive");
-        let decoded: ChessMessage =
-            serde_json::from_value(update.body).expect("body must decode as a bare ChessMessage");
+        let update = rx.recv().await.context("live update should arrive")?;
+        let decoded: ChessMessage = serde_json::from_value(update.body)
+            .context("body must decode as a bare ChessMessage")?;
         assert!(matches!(decoded, ChessMessage::Move(_)));
 
         // History replay produces the same shape.
         let history = state.load_history("g1", "moves").await;
         assert_eq!(history.len(), 1);
         let decoded_history: ChessMessage = serde_json::from_value(history[0].clone())
-            .expect("history entry must also decode as a bare ChessMessage");
+            .context("history entry must also decode as a bare ChessMessage")?;
         assert!(matches!(decoded_history, ChessMessage::Move(_)));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn non_participant_cannot_put_a_move() {
-        let pool = migrated_pool().await;
+    async fn non_participant_cannot_put_a_move() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         // Establish the roster: alice and bob register for g1 via SessionInfo.
@@ -1011,7 +1058,7 @@ mod tests {
                 GENESIS_PARENT,
             )
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         let bob_info = ChessMessage::SessionInfo {
             player_pubkey: "bob".to_string(),
@@ -1023,7 +1070,7 @@ mod tests {
         state
             .put_event("g1", "moves", "bob", &bob_info, &v_bob, &v_alice)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         // mallory has a real session (for some OTHER game — auth_ok would
         // already have accepted this request) but is not in g1's roster.
@@ -1032,23 +1079,25 @@ mod tests {
         let err = state
             .put_event("g1", "moves", "mallory", &forged, &vf, &v_bob)
             .await
-            .unwrap_err();
+            .err()
+            .context("test setup failed")?;
         assert!(matches!(err, PutEventError::NotAParticipant));
 
         // A real participant, correctly chained, still succeeds.
         let seq = state
             .put_event("g1", "moves", "alice", &forged, &vf, &v_bob)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(seq, 3);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn on_chain_verified_roster_beats_a_forged_first_claim() {
-        let pool = migrated_pool().await;
+    async fn on_chain_verified_roster_beats_a_forged_first_claim() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let rpc = std::sync::Arc::new(crate::signing::solana::rpc::make_rpc(
             "http://127.0.0.1:1", // never actually contacted — cache is pre-seeded
-        ));
+        )?);
         let participants = crate::signing::solana::game_participants::GameParticipantsCache::new(
             rpc,
             solana_sdk::pubkey::Pubkey::new_unique(),
@@ -1084,7 +1133,7 @@ mod tests {
                 GENESIS_PARENT,
             )
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         // Reject the forged claimant's move even though its SessionInfo arrived first.
         let forged_move = move_message("fen1", 1);
@@ -1099,7 +1148,8 @@ mod tests {
                 &v_mallory,
             )
             .await
-            .unwrap_err();
+            .err()
+            .context("test setup failed")?;
         assert!(matches!(err, PutEventError::NotAParticipant));
 
         // The real participant, arriving second, is correctly recognized
@@ -1121,7 +1171,7 @@ mod tests {
                 &v_mallory,
             )
             .await
-            .unwrap();
+            .context("test setup failed")?;
         let alice_move = move_message("fen2", 1);
         let va = braid_chess::version_hash("fen2", 1);
         let seq = state
@@ -1131,23 +1181,23 @@ mod tests {
                 &alice.to_string(),
                 &alice_session.to_string(),
                 &alice_move,
-                &va,
-                &v_alice,
+                (&va, &v_alice),
             )
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(seq, 3);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn casual_identity_check_beats_a_forged_first_claim() {
-        let pool = migrated_pool().await;
+    async fn casual_identity_check_beats_a_forged_first_claim() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         state
             .register_casual_identities("g1", "host-node-id", "joiner-node-id")
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         // An impostor races a legitimate participant to claim a roster slot.
         let forged = move_message("fen1", 1);
@@ -1162,29 +1212,31 @@ mod tests {
                 GENESIS_PARENT,
             )
             .await
-            .unwrap_err();
+            .err()
+            .context("test setup failed")?;
         assert!(matches!(err, PutEventError::NotAParticipant));
 
         // The real host, arriving second, is correctly recognized.
         let seq = state
             .put_event("g1", "moves", "host-node-id", &forged, &vf, GENESIS_PARENT)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(seq, 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn casual_participants_survive_restart_and_cannot_be_replaced() {
-        let pool = migrated_pool().await;
+    async fn casual_participants_survive_restart_and_cannot_be_replaced() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let original = GameLogState::new(pool.clone(), None);
         assert!(original
             .register_casual_identities("g1", "host", "joiner")
             .await
-            .unwrap());
+            .context("test setup failed")?);
         assert!(!original
             .register_casual_identities("g1", "host", "impostor")
             .await
-            .unwrap());
+            .context("test setup failed")?);
         drop(original);
 
         let restarted = GameLogState::new(pool, None);
@@ -1196,26 +1248,28 @@ mod tests {
             restarted.casual_identity_check("g1", "joiner").await,
             OnChainCheck::Verified
         ));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn unavailable_chain_participants_do_not_trust_first_claimant() {
-        let rpc = std::sync::Arc::new(crate::signing::solana::rpc::make_rpc("http://127.0.0.1:1"));
+    async fn unavailable_chain_participants_do_not_trust_first_claimant() -> anyhow::Result<()> {
+        let rpc = std::sync::Arc::new(crate::signing::solana::rpc::make_rpc("http://127.0.0.1:1")?);
         let participants = crate::signing::solana::game_participants::GameParticipantsCache::new(
             rpc,
             solana_sdk::pubkey::Pubkey::new_unique(),
         );
-        let state = GameLogState::new(migrated_pool().await, Some(participants));
+        let state = GameLogState::new(migrated_pool().await?, Some(participants));
         let claimant = solana_sdk::pubkey::Pubkey::new_unique().to_string();
         assert!(matches!(
             state.verify_claim("42", &claimant, None).await,
             OnChainCheck::Mismatch
         ));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn no_casual_identity_entry_falls_back_to_trust_first() {
-        let pool = migrated_pool().await;
+    async fn no_casual_identity_entry_falls_back_to_trust_first() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         let msg = move_message("fen1", 1);
@@ -1230,13 +1284,14 @@ mod tests {
                 GENESIS_PARENT,
             )
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(seq, 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn parent_mismatch_reports_the_head_to_re_chain_onto() {
-        let pool = migrated_pool().await;
+    async fn parent_mismatch_reports_the_head_to_re_chain_onto() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         // White's move lands first and becomes the stream head.
@@ -1245,7 +1300,7 @@ mod tests {
         state
             .put_event("g1", "moves", "white", &white, &v_white, GENESIS_PARENT)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         // Black chains from genesis without observing white’s version.
         let black = move_message("fen-black", 1);
@@ -1253,10 +1308,11 @@ mod tests {
         let err = state
             .put_event("g1", "moves", "black", &black, &v_black, GENESIS_PARENT)
             .await
-            .unwrap_err();
+            .err()
+            .context("test setup failed")?;
 
         let PutEventError::ParentMismatch { expected } = err else {
-            panic!("expected a parent mismatch");
+            anyhow::bail!("expected a parent mismatch");
         };
         assert_eq!(
             expected, v_white,
@@ -1268,13 +1324,14 @@ mod tests {
         let seq = state
             .put_event("g1", "moves", "black", &black, &v_black, &expected)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(seq, 2, "black's move must now be persisted");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn both_players_session_info_can_land_in_sequence() {
-        let pool = migrated_pool().await;
+    async fn both_players_session_info_can_land_in_sequence() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         let a = ChessMessage::SessionInfo {
@@ -1287,7 +1344,7 @@ mod tests {
         state
             .put_event("g1", "moves", "alice", &a, &v_a, GENESIS_PARENT)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         let b = ChessMessage::SessionInfo {
             player_pubkey: "bob".to_string(),
@@ -1300,7 +1357,7 @@ mod tests {
         state
             .put_event("g1", "moves", "bob", &b, &v_b, &v_a)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         // And the first real move chains off bob's — the whole point: the
         // stream is still writable after both SessionInfos.
@@ -1309,13 +1366,14 @@ mod tests {
         let seq = state
             .put_event("g1", "moves", "alice", &mv, &v_mv, &v_b)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(seq, 3);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn empty_roster_does_not_block_casual_games() {
-        let pool = migrated_pool().await;
+    async fn empty_roster_does_not_block_casual_games() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
         let state = GameLogState::new(pool, None);
 
         let msg = move_message("fen1", 1);
@@ -1330,7 +1388,8 @@ mod tests {
                 GENESIS_PARENT,
             )
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(seq, 1);
+        Ok(())
     }
 }

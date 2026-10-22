@@ -61,6 +61,21 @@ impl PresenceStore {
         self.inner.read().get(node_id).cloned()
     }
 
+    pub fn count_online(&self) -> usize {
+        let cutoff = Utc::now() - chrono::Duration::seconds(ONLINE_FRESHNESS_SECS);
+        self.inner
+            .read()
+            .values()
+            .filter(|p| p.updated_at > cutoff && p.status != PresenceStatus::Offline)
+            .count()
+    }
+
+    pub fn get_online(&self, node_id: &str) -> Option<Presence> {
+        let cutoff = Utc::now() - chrono::Duration::seconds(ONLINE_FRESHNESS_SECS);
+        self.get(node_id)
+            .filter(|p| p.updated_at > cutoff && p.status != PresenceStatus::Offline)
+    }
+
     pub fn set_offline(&self, node_id: &str) {
         if let Some(p) = self.inner.write().get_mut(node_id) {
             p.status = PresenceStatus::Offline;
@@ -150,5 +165,22 @@ mod tests {
         store.upsert(presence("gone", PresenceStatus::Offline, None));
         assert_eq!(store.count_in_game(), 0);
         assert_eq!(store.count_games_in_progress(), 0);
+    }
+
+    #[test]
+    fn targeted_presence_and_count_use_the_roster_expiry_rules() {
+        let store = PresenceStore::new();
+        store.upsert(presence("fresh", PresenceStatus::Online, None));
+        store.upsert(presence("playing", PresenceStatus::InGame, Some("g")));
+        store.upsert(presence("offline", PresenceStatus::Offline, None));
+        let mut stale = presence("stale", PresenceStatus::Online, None);
+        stale.updated_at -= chrono::Duration::seconds(ONLINE_FRESHNESS_SECS + 1);
+        store.upsert(stale);
+        assert_eq!(store.count_online(), 2);
+        assert_eq!(store.count_online(), store.get_all_online().len());
+        assert!(store.get_online("fresh").is_some());
+        for id in ["offline", "stale", "missing"] {
+            assert!(store.get_online(id).is_none());
+        }
     }
 }

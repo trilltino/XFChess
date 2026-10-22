@@ -224,32 +224,49 @@ impl QueueWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
-    async fn test_pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::infrastructure::migrate_session_db(&pool)
-            .await
-            .unwrap();
-        pool
+    async fn test_pool() -> anyhow::Result<SqlitePool> {
+        Ok({
+            let pool = SqlitePool::connect("sqlite::memory:")
+                .await
+                .context("test setup failed")?;
+            crate::infrastructure::migrate_session_db(&pool)
+                .await
+                .context("test setup failed")?;
+            pool
+        })
     }
 
     #[tokio::test]
-    async fn enqueue_and_claim_roundtrip() {
-        let pool = test_pool().await;
+    async fn enqueue_and_claim_roundtrip() -> anyhow::Result<()> {
+        let pool = test_pool().await?;
         let id = enqueue(&pool, "test.echo", &serde_json::json!({"x":1}), None)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert!(id.is_some());
 
-        let job = claim_next(&pool).await.unwrap().expect("job due");
+        let job = claim_next(&pool)
+            .await
+            .context("test setup failed")?
+            .context("job due")?;
         assert_eq!(job.kind, "test.echo");
-        mark_done(&pool, job.id).await.unwrap();
-        assert!(claim_next(&pool).await.unwrap().is_none(), "no more jobs");
+        mark_done(&pool, job.id)
+            .await
+            .context("test setup failed")?;
+        assert!(
+            claim_next(&pool)
+                .await
+                .context("test setup failed")?
+                .is_none(),
+            "no more jobs"
+        );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn dedupe_key_makes_enqueue_idempotent() {
-        let pool = test_pool().await;
+    async fn dedupe_key_makes_enqueue_idempotent() -> anyhow::Result<()> {
+        let pool = test_pool().await?;
         let first = enqueue(
             &pool,
             "test.mail",
@@ -257,7 +274,7 @@ mod tests {
             Some("mail:alice"),
         )
         .await
-        .unwrap();
+        .context("test setup failed")?;
         let second = enqueue(
             &pool,
             "test.mail",
@@ -265,43 +282,62 @@ mod tests {
             Some("mail:alice"),
         )
         .await
-        .unwrap();
+        .context("test setup failed")?;
         assert!(first.is_some());
         assert!(second.is_none(), "duplicate enqueue must be a no-op");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn failure_backs_off_then_dlqs() {
-        let pool = test_pool().await;
+    async fn failure_backs_off_then_dlqs() -> anyhow::Result<()> {
+        let pool = test_pool().await?;
         enqueue(&pool, "test.fail", &serde_json::json!({}), None)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         sqlx::query("UPDATE jobs SET max_attempts=2")
             .execute(&pool)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
-        let job = claim_next(&pool).await.unwrap().unwrap();
-        mark_failed(&pool, &job, "boom").await.unwrap();
+        let job = claim_next(&pool)
+            .await
+            .context("test setup failed")?
+            .context("test setup failed")?;
+        mark_failed(&pool, &job, "boom")
+            .await
+            .context("test setup failed")?;
         // Retry scheduled in the future → not claimable now.
-        assert!(claim_next(&pool).await.unwrap().is_none());
+        assert!(claim_next(&pool)
+            .await
+            .context("test setup failed")?
+            .is_none());
 
         // Make it due and fail again → DLQ.
         sqlx::query("UPDATE jobs SET run_at=0 WHERE status='pending'")
             .execute(&pool)
             .await
-            .unwrap();
-        let job = claim_next(&pool).await.unwrap().unwrap();
-        mark_failed(&pool, &job, "boom again").await.unwrap();
+            .context("test setup failed")?;
+        let job = claim_next(&pool)
+            .await
+            .context("test setup failed")?
+            .context("test setup failed")?;
+        mark_failed(&pool, &job, "boom again")
+            .await
+            .context("test setup failed")?;
 
-        assert_eq!(dead_count(&pool).await.unwrap(), 1, "job must land in DLQ");
+        assert_eq!(
+            dead_count(&pool).await.context("test setup failed")?,
+            1,
+            "job must land in DLQ"
+        );
+        Ok(())
     }
 
     #[test]
     fn backoff_grows_and_caps() {
         let a1 = backoff_secs(1);
         let a6 = backoff_secs(6);
-        assert!(a1 >= 24 && a1 <= 72, "attempt 1 ≈ 60s±jitter, got {a1}");
+        assert!((24..=72).contains(&a1), "attempt 1 ≈ 60s±jitter, got {a1}");
         assert!(a6 <= BACKOFF_CAP_SECS as i64 + 1, "capped, got {a6}");
     }
 }

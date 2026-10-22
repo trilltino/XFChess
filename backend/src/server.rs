@@ -25,7 +25,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // enable both backends, so automatic selection is ambiguous.
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
-        .expect("failed to install rustls default CryptoProvider");
+        .map_err(|_| anyhow::anyhow!("failed to install TLS crypto provider"))?;
 
     dotenv::dotenv().ok();
     let json_logs = std::env::var("LOG_FORMAT").is_ok_and(|v| v.eq_ignore_ascii_case("json"));
@@ -35,14 +35,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .flatten_event(true)
             .with_current_span(true)
             .with_env_filter(EnvFilter::from_default_env())
-            .init();
+            .with_writer(crate::telemetry::logging::RedactingStdout)
+            .try_init()
+            .map_err(|error| anyhow::anyhow!("Logging initialization failed: {error}"))?;
     } else {
         tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
-            .init();
+            .with_writer(crate::telemetry::logging::RedactingStdout)
+            .try_init()
+            .map_err(|error| anyhow::anyhow!("Logging initialization failed: {error}"))?;
     }
 
-    let config = SigningConfig::from_env();
+    let config = SigningConfig::from_env().map_err(anyhow::Error::msg)?;
 
     // ── Fail fast on bad/placeholder config (hard error under APP_ENV=production) ──
     if let Err(problems) = config.validate() {
@@ -69,7 +73,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     run_migrations(&pools).await?;
     info!("[signing-server] Database migrations completed");
 
-    let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+    let tournament_store = TournamentStore::new(pools.session_pool.clone()).await?;
     info!("[signing-server] Tournament store initialized");
 
     let mut state = AppState::new(
@@ -77,7 +81,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         pools.session_pool.clone(),
         pools.vault_pool.clone(),
         Arc::new(tournament_store.clone()),
-    );
+    )?;
     state.money_actions.init().await?;
     info!("[signing-server] Money action store initialized");
 
@@ -123,9 +127,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         info!("[signing-server] Braid hub → tournament gossip fan-out wired");
     }
 
-    let app = crate::infrastructure::build_app_router(state.clone());
-    info!("[signing-server] Application router built");
-
     // ── Spawn Braid-Iroh P2P node (ephemeral UDP port, no conflict with HTTP) ─
     info!("[signing-server] Spawning Braid-Iroh Node (ephemeral port)");
     let _braid_state =
@@ -133,10 +134,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .await
             .map_err(|e| anyhow::anyhow!("failed to spawn braid-iroh node: {}", e))?;
 
-    let (tournament_trigger, ac_queue) = spawn_background_tasks(state.clone(), config);
+    let (tournament_trigger, ac_queue) = spawn_background_tasks(state.clone(), config)?;
     state.tournament_trigger = Some(tournament_trigger);
     state.anticheat_queue = Some(ac_queue);
     info!("[signing-server] Background tasks spawned");
+
+    let app = crate::infrastructure::build_app_router(state.clone());
+    info!("[signing-server] Application router built");
 
     // Populate anticheat_queue before cloning state for workers; the snapshot
     // is fixed at construction and reingestion skips a missing queue.

@@ -1,4 +1,6 @@
 use crate::error::BraidChessError;
+#[cfg(test)]
+use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -92,11 +94,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn roundtrip_moves() {
+    fn roundtrip_moves() -> anyhow::Result<()> {
         let res = ChessResource::moves("ABCD42");
         assert_eq!(res.to_http_path(), "/game/ABCD42/moves");
-        let parsed = ChessResource::from_http_path("/game/ABCD42/moves").unwrap();
+        let parsed = ChessResource::from_http_path("/game/ABCD42/moves")
+            .context("required operation value")?;
         assert_eq!(res, parsed);
+        Ok(())
     }
 
     #[test]
@@ -114,17 +118,21 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_clock() {
+    fn roundtrip_clock() -> anyhow::Result<()> {
         let res = ChessResource::clock("XYZ99");
-        let parsed = ChessResource::from_http_path(&res.to_http_path()).unwrap();
+        let parsed = ChessResource::from_http_path(&res.to_http_path())
+            .context("required operation value")?;
         assert_eq!(res, parsed);
+        Ok(())
     }
 
     #[test]
-    fn roundtrip_chat() {
+    fn roundtrip_chat() -> anyhow::Result<()> {
         let res = ChessResource::chat("ABCD42");
-        let parsed = ChessResource::from_http_path("/game/ABCD42/chat").unwrap();
+        let parsed = ChessResource::from_http_path("/game/ABCD42/chat")
+            .context("required operation value")?;
         assert_eq!(res, parsed);
+        Ok(())
     }
 
     #[test]

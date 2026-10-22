@@ -1,7 +1,7 @@
 use crate::GameConfig;
 use bevy::prelude::*;
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct WagerState {
     pub game_id: Option<u64>,
     pub wager_amount: Option<f64>,
@@ -12,22 +12,6 @@ pub struct WagerState {
     pub country_fee: Option<f64>,
     pub elo_fee: Option<f64>,
     pub match_type: Option<String>,
-}
-
-impl Default for WagerState {
-    fn default() -> Self {
-        Self {
-            game_id: None,
-            wager_amount: None,
-            total_pot: None,
-            player_color: None,
-            game_pda: None,
-            is_loaded: false,
-            country_fee: None,
-            elo_fee: None,
-            match_type: None,
-        }
-    }
 }
 
 impl WagerState {
@@ -41,9 +25,9 @@ impl WagerState {
             player_color: config.player_color.map(|c| format!("{:?}", c)),
             game_pda: config.game_pda.clone(),
             is_loaded: config.wager_amount.is_some(),
-            country_fee: None, // Will be fetched from on-chain game account
-            elo_fee: None,     // Will be fetched from on-chain game account
-            match_type: None,  // Will be fetched from on-chain game account
+            country_fee: None,
+            elo_fee: None,
+            match_type: None,
         }
     }
 
@@ -62,7 +46,7 @@ impl WagerState {
     }
 
     pub fn has_wager(&self) -> bool {
-        self.wager_amount.map_or(false, |w| w > 0.0)
+        self.wager_amount.is_some_and(|amount| amount > 0.0)
     }
 }
 

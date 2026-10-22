@@ -89,11 +89,12 @@ impl CausalChainState {
             self.last_seq.get(agent_key),
             self.head_version.get(agent_key),
         ) {
-            (None, None) => self.resume_seeds.get(&agent_key.0).cloned().unwrap_or_default(),
-            (seq, head) => (
-                seq.copied().unwrap_or(0),
-                head.cloned().unwrap_or_default(),
-            ),
+            (None, None) => self
+                .resume_seeds
+                .get(&agent_key.0)
+                .cloned()
+                .unwrap_or_default(),
+            (seq, head) => (seq.copied().unwrap_or(0), head.cloned().unwrap_or_default()),
         }
     }
 }
@@ -300,7 +301,9 @@ mod resume_lane_tests {
 
         // Once the lane exists, it is authoritative over the seed.
         causal.last_seq.insert(opponent.clone(), 4);
-        causal.head_version.insert(opponent.clone(), "next".to_string());
+        causal
+            .head_version
+            .insert(opponent.clone(), "next".to_string());
         assert_eq!(causal.lane(&opponent), (4, "next".to_string()));
 
         // Seeds are per game.

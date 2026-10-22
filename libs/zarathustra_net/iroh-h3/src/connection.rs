@@ -1,10 +1,10 @@
 use crate::{
+    AcceptBi, AcceptUni, OpenBi, OpenUni, VarInt,
     error::convert_connection_error,
     streams::{BidiStream, RecvStream, SendStream},
-    AcceptBi, AcceptUni, OpenBi, OpenUni, VarInt,
 };
 use bytes::Buf;
-use futures::{ready, stream, Stream, StreamExt};
+use futures::{Stream, StreamExt, ready, stream};
 use h3::{
     error::Code,
     quic::{self, ConnectionErrorIncoming, StreamErrorIncoming},
@@ -54,11 +54,15 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::BidiStream, ConnectionErrorIncoming>> {
         let (send, recv) = ready!(self.incoming_bi.poll_next_unpin(cx))
-            .expect("self.incoming_bi BoxStream never returns None")
+            .ok_or_else(|| {
+                ConnectionErrorIncoming::InternalError(
+                    "incoming bidirectional streams ended".into(),
+                )
+            })?
             .map_err(convert_connection_error)?;
         Poll::Ready(Ok(Self::BidiStream {
-            send: Self::SendStream::new(send),
-            recv: Self::RecvStream::new(recv),
+            send: Self::SendStream::new(send).map_err(ConnectionErrorIncoming::InternalError)?,
+            recv: Self::RecvStream::new(recv).map_err(ConnectionErrorIncoming::InternalError)?,
         }))
     }
 
@@ -67,9 +71,13 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::RecvStream, ConnectionErrorIncoming>> {
         let recv = ready!(self.incoming_uni.poll_next_unpin(cx))
-            .expect("self.incoming_uni BoxStream never returns None")
+            .ok_or_else(|| {
+                ConnectionErrorIncoming::InternalError(
+                    "incoming unidirectional streams ended".into(),
+                )
+            })?
             .map_err(convert_connection_error)?;
-        Poll::Ready(Ok(Self::RecvStream::new(recv)))
+        Poll::Ready(Self::RecvStream::new(recv).map_err(ConnectionErrorIncoming::InternalError))
     }
 
     fn opener(&self) -> Self::OpenStreams {
@@ -98,13 +106,15 @@ where
             }))
         });
         let (send, recv) = ready!(bi.poll_next_unpin(cx))
-            .expect("BoxStream does not return None")
+            .ok_or_else(|| {
+                crate::error::internal_stream_error("outgoing bidirectional streams ended".into())
+            })?
             .map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error: convert_connection_error(e),
             })?;
         Poll::Ready(Ok(Self::BidiStream {
-            send: Self::SendStream::new(send),
-            recv: RecvStream::new(recv),
+            send: Self::SendStream::new(send).map_err(crate::error::internal_stream_error)?,
+            recv: RecvStream::new(recv).map_err(crate::error::internal_stream_error)?,
         }))
     }
 
@@ -119,18 +129,17 @@ where
         });
 
         let send = ready!(uni.poll_next_unpin(cx))
-            .expect("BoxStream does not return None")
+            .ok_or_else(|| {
+                crate::error::internal_stream_error("outgoing unidirectional streams ended".into())
+            })?
             .map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error: convert_connection_error(e),
             })?;
-        Poll::Ready(Ok(Self::SendStream::new(send)))
+        Poll::Ready(Self::SendStream::new(send).map_err(crate::error::internal_stream_error))
     }
 
     fn close(&mut self, code: Code, reason: &[u8]) {
-        self.conn.close(
-            VarInt::from_u64(code.value()).expect("error code VarInt"),
-            reason,
-        );
+        close_connection(&self.conn, code, reason);
     }
 }
 
@@ -159,13 +168,15 @@ where
         });
 
         let (send, recv) = ready!(bi.poll_next_unpin(cx))
-            .expect("BoxStream does not return None")
+            .ok_or_else(|| {
+                crate::error::internal_stream_error("outgoing bidirectional streams ended".into())
+            })?
             .map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error: convert_connection_error(e),
             })?;
         Poll::Ready(Ok(Self::BidiStream {
-            send: Self::SendStream::new(send),
-            recv: RecvStream::new(recv),
+            send: Self::SendStream::new(send).map_err(crate::error::internal_stream_error)?,
+            recv: RecvStream::new(recv).map_err(crate::error::internal_stream_error)?,
         }))
     }
 
@@ -180,18 +191,27 @@ where
         });
 
         let send = ready!(uni.poll_next_unpin(cx))
-            .expect("BoxStream does not return None")
+            .ok_or_else(|| {
+                crate::error::internal_stream_error("outgoing unidirectional streams ended".into())
+            })?
             .map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error: convert_connection_error(e),
             })?;
-        Poll::Ready(Ok(Self::SendStream::new(send)))
+        Poll::Ready(Self::SendStream::new(send).map_err(crate::error::internal_stream_error))
     }
 
     fn close(&mut self, code: Code, reason: &[u8]) {
-        self.conn.close(
-            VarInt::from_u64(code.value()).expect("error code VarInt"),
-            reason,
-        );
+        close_connection(&self.conn, code, reason);
+    }
+}
+
+fn close_connection(conn: &iroh::endpoint::Connection, code: Code, reason: &[u8]) {
+    match VarInt::from_u64(code.value()) {
+        Ok(code) => conn.close(code, reason),
+        Err(_) => conn.close(
+            VarInt::from_u32(0x102),
+            b"invalid HTTP/3 application error code",
+        ),
     }
 }
 

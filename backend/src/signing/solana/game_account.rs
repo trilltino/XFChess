@@ -208,6 +208,7 @@ pub fn parse(data: &[u8]) -> Option<GameAccount> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     struct Builder {
         out: Vec<u8>,
@@ -281,9 +282,9 @@ mod tests {
     }
 
     #[test]
-    fn timeout_is_never_claimable_while_the_mover_could_have_time() {
+    fn timeout_is_never_claimable_while_the_mover_could_have_time() -> anyhow::Result<()> {
         let (bytes, ..) = sample();
-        let mut g = parse(&bytes).expect("decode");
+        let mut g = parse(&bytes).context("decode")?;
         // 300s base, 2s increment, 9 plies: black to move has made 4 moves.
         assert_eq!(g.timeout_claimable_after_secs(), 300 + 2 * 4);
         g.move_count = 0;
@@ -296,12 +297,13 @@ mod tests {
         assert_eq!(g.timeout_claimable_after_secs(), 90);
         g.base_time_seconds = u64::MAX;
         assert_eq!(g.timeout_claimable_after_secs(), i64::MAX);
+        Ok(())
     }
 
     #[test]
-    fn decodes_every_field() {
+    fn decodes_every_field() -> anyhow::Result<()> {
         let (bytes, white, black, payer) = sample();
-        let g = parse(&bytes).expect("a well-formed account must decode");
+        let g = parse(&bytes).context("a well-formed account must decode")?;
 
         assert_eq!(g.game_id, 42);
         assert_eq!(g.white, white);
@@ -321,26 +323,28 @@ mod tests {
         assert!(g.is_delegated);
         assert_eq!(g.tournament_id, None);
         assert_eq!(g.nonce, 9);
+        Ok(())
     }
 
     #[test]
-    fn offsets_match_the_on_chain_layout() {
+    fn offsets_match_the_on_chain_layout() -> anyhow::Result<()> {
         const WAGER_ABS_OFFSET: usize = 8 + 212;
 
         let (mut bytes, ..) = sample();
         let marker: u64 = 0x1122_3344_5566_7788;
         bytes[WAGER_ABS_OFFSET..WAGER_ABS_OFFSET + 8].copy_from_slice(&marker.to_le_bytes());
 
-        let g = parse(&bytes).expect("decode");
+        let g = parse(&bytes).context("decode")?;
         assert_eq!(
             g.wager_amount, marker,
             "wager_amount must sit at 8 + 212, matching the program's pinned test and the \
              client's WAGER_OFFSET in src/multiplayer/solana/lobby.rs"
         );
+        Ok(())
     }
 
     #[test]
-    fn decodes_a_winner_and_a_tournament_id() {
+    fn decodes_a_winner_and_a_tournament_id() -> anyhow::Result<()> {
         let winner = Pubkey::new_unique();
         let white = Pubkey::new_unique();
         let bytes = Builder::new()
@@ -374,11 +378,12 @@ mod tests {
             .u8(0)
             .out;
 
-        let g = parse(&bytes).expect("decode");
+        let g = parse(&bytes).context("decode")?;
         assert_eq!(g.winner, Some(winner));
         assert_eq!(g.tournament_id, Some(88));
         assert_eq!(g.nonce, 30);
         assert!(g.is_finished());
+        Ok(())
     }
 
     #[test]

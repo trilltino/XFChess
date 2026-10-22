@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use anchor_lang::{AccountDeserialize, InstructionData, Space, ToAccountMetas};
 use common::*;
@@ -23,23 +24,25 @@ fn global_session_account(
     session_key: Pubkey,
     spending_limit: u64,
     max_wager: u64,
-) -> (Pubkey, solana_sdk::account::Account) {
-    let (pda, bump) = global_session_pda(&player);
-    let session = GlobalSessionDelegation {
-        player,
-        session_key,
-        expires_at: i64::MAX / 2,
-        spending_limit,
-        total_spent: 0,
-        max_wager,
-        games_remaining: 200,
-        enabled: true,
-        bump,
-    };
-    (
-        pda,
-        program_account(&session, 8 + GlobalSessionDelegation::INIT_SPACE),
-    )
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let (pda, bump) = global_session_pda(&player);
+        let session = GlobalSessionDelegation {
+            player,
+            session_key,
+            expires_at: i64::MAX / 2,
+            spending_limit,
+            total_spent: 0,
+            max_wager,
+            games_remaining: 200,
+            enabled: true,
+            bump,
+        };
+        (
+            pda,
+            program_account(&session, 8 + GlobalSessionDelegation::INIT_SPACE)?,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -80,7 +83,7 @@ fn global_create_game_ix(
 }
 
 #[tokio::test]
-async fn global_create_game_funds_rent_and_wager_from_session_vault() {
+async fn global_create_game_funds_rent_and_wager_from_session_vault() -> anyhow::Result<()> {
     let player = Pubkey::new_unique();
     let session_signer = Keypair::new();
     let wager_amount = 10_000_000u64; // 0.01 SOL — above MIN_WAGER_LAMPORTS
@@ -90,7 +93,7 @@ async fn global_create_game_funds_rent_and_wager_from_session_vault() {
         session_signer.pubkey(),
         5_000_000_000,
         1_000_000_000,
-    );
+    )?;
 
     let mut ctx = start(vec![(session_pda, session_account_data)]).await;
 
@@ -107,11 +110,11 @@ async fn global_create_game_funds_rent_and_wager_from_session_vault() {
         0,
     );
 
-    send(&mut ctx, ix, &[&session_signer])
-        .await
-        .expect("global_create_game should succeed when the session vault PDA funds rent + wager");
+    send(&mut ctx, ix, &[&session_signer]).await.context(
+        "global_create_game should succeed when the session vault PDA funds rent + wager",
+    )?;
 
-    let game = fetch_game(&mut ctx, game_id).await;
+    let game = fetch_game(&mut ctx, game_id).await?;
     assert_eq!(game.game_id, game_id);
     assert_eq!(game.white, player);
     assert_eq!(game.black, Pubkey::default());
@@ -123,22 +126,24 @@ async fn global_create_game_funds_rent_and_wager_from_session_vault() {
         .banks_client
         .get_balance(escrow_pda(game_id))
         .await
-        .unwrap();
+        .context("required operation value")?;
     assert_eq!(escrow_balance, wager_amount);
 
     let session_acc = ctx
         .banks_client
         .get_account(session_pda)
         .await
-        .unwrap()
-        .expect("session delegation account missing");
-    let session = GlobalSessionDelegation::try_deserialize(&mut &session_acc.data[..]).unwrap();
+        .context("required operation value")?
+        .context("session delegation account missing")?;
+    let session = GlobalSessionDelegation::try_deserialize(&mut &session_acc.data[..])
+        .context("required operation value")?;
     assert_eq!(session.total_spent, wager_amount);
     assert_eq!(session.games_remaining, 199);
+    Ok(())
 }
 
 #[tokio::test]
-async fn global_create_game_rejects_unreasonable_platform_fee() {
+async fn global_create_game_rejects_unreasonable_platform_fee() -> anyhow::Result<()> {
     let player = Pubkey::new_unique();
     let session_signer = Keypair::new();
     let wager_amount = 10_000_000u64;
@@ -148,7 +153,7 @@ async fn global_create_game_rejects_unreasonable_platform_fee() {
         session_signer.pubkey(),
         5_000_000_000,
         1_000_000_000,
-    );
+    )?;
 
     let mut ctx = start(vec![(session_pda, session_account_data)]).await;
 
@@ -168,17 +173,19 @@ async fn global_create_game_rejects_unreasonable_platform_fee() {
 
     let err = send(&mut ctx, ix, &[&session_signer])
         .await
-        .expect_err("an absurdly large platform_fee must be rejected");
+        .err()
+        .context("an absurdly large platform_fee must be rejected")?;
 
     assert_eq!(
         custom_code(&err),
         Some(ec(xfchess_game::errors::GameErrorCode::PlatformFeeTooLarge)),
         "expected PlatformFeeTooLarge, got {err:?}"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn global_create_game_rejects_an_underfunded_session_vault() {
+async fn global_create_game_rejects_an_underfunded_session_vault() -> anyhow::Result<()> {
     let player = Pubkey::new_unique();
     let session_signer = Keypair::new();
     let wager_amount = 10_000_000u64;
@@ -190,7 +197,7 @@ async fn global_create_game_rejects_an_underfunded_session_vault() {
         session_signer.pubkey(),
         5_000_000_000,
         1_000_000_000,
-    );
+    )?;
 
     // Enough to keep the delegation account itself rent-exempt, but nowhere
     // near enough to also fund the new Game PDA's rent plus the wager.
@@ -213,7 +220,8 @@ async fn global_create_game_rejects_an_underfunded_session_vault() {
 
     let err = send(&mut ctx, ix, &[&session_signer])
         .await
-        .expect_err("an underfunded session vault must be rejected up front");
+        .err()
+        .context("an underfunded session vault must be rejected up front")?;
 
     assert_eq!(
         custom_code(&err),
@@ -222,10 +230,11 @@ async fn global_create_game_rejects_an_underfunded_session_vault() {
         )),
         "expected GlobalSessionVaultUnderfunded, got {err:?}"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn global_create_game_accepts_a_vault_funded_exactly_enough() {
+async fn global_create_game_accepts_a_vault_funded_exactly_enough() -> anyhow::Result<()> {
     let player = Pubkey::new_unique();
     let session_signer = Keypair::new();
     let wager_amount = 10_000_000u64;
@@ -235,7 +244,7 @@ async fn global_create_game_accepts_a_vault_funded_exactly_enough() {
         session_signer.pubkey(),
         5_000_000_000,
         1_000_000_000,
-    );
+    )?;
 
     // Fund only the reserve, game rent, and wager to exercise the minimum vault balance.
     session_account_data.lamports = 20_000_000;
@@ -257,18 +266,19 @@ async fn global_create_game_accepts_a_vault_funded_exactly_enough() {
 
     send(&mut ctx, ix, &[&session_signer])
         .await
-        .expect("a vault holding rent + wager + rent-exemption must be accepted");
+        .context("a vault holding rent + wager + rent-exemption must be accepted")?;
 
     let escrow_balance = ctx
         .banks_client
         .get_balance(escrow_pda(game_id))
         .await
-        .unwrap();
+        .context("required operation value")?;
     assert_eq!(escrow_balance, wager_amount);
+    Ok(())
 }
 
 #[tokio::test]
-async fn global_create_game_works_for_a_free_zero_wager_game() {
+async fn global_create_game_works_for_a_free_zero_wager_game() -> anyhow::Result<()> {
     // The PDA vault must fund account rent even for a zero-wager game.
     let player = Pubkey::new_unique();
     let session_signer = Keypair::new();
@@ -278,7 +288,7 @@ async fn global_create_game_works_for_a_free_zero_wager_game() {
         session_signer.pubkey(),
         5_000_000_000,
         1_000_000_000,
-    );
+    )?;
 
     let mut ctx = start(vec![(session_pda, session_account_data)]).await;
 
@@ -297,65 +307,71 @@ async fn global_create_game_works_for_a_free_zero_wager_game() {
 
     send(&mut ctx, ix, &[&session_signer])
         .await
-        .expect("global_create_game should succeed for a zero-wager game");
+        .context("global_create_game should succeed for a zero-wager game")?;
 
-    let game = fetch_game(&mut ctx, game_id).await;
+    let game = fetch_game(&mut ctx, game_id).await?;
     assert_eq!(game.wager_amount, 0);
     assert_eq!(game.status, GameStatus::WaitingForOpponent);
+    Ok(())
 }
-
 
 fn player_profile_pda(player: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[b"profile", player.as_ref()], &xfchess_game::ID).0
 }
 
-fn player_profile_account(authority: Pubkey) -> (Pubkey, solana_sdk::account::Account) {
-    let pda = player_profile_pda(&authority);
-    let profile = PlayerProfile {
-        authority,
-        ..Default::default()
-    };
-    (
-        pda,
-        program_account(&profile, 8 + PlayerProfile::INIT_SPACE),
-    )
+fn player_profile_account(
+    authority: Pubkey,
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let pda = player_profile_pda(&authority);
+        let profile = PlayerProfile {
+            authority,
+            ..Default::default()
+        };
+        (
+            pda,
+            program_account(&profile, 8 + PlayerProfile::INIT_SPACE)?,
+        )
+    })
 }
 
 fn waiting_game_account(
     game_id: u64,
     white: Pubkey,
     wager_amount: u64,
-) -> (Pubkey, solana_sdk::account::Account) {
-    let (pda, bump) = game_pda(game_id);
-    let game = Game {
-        game_id,
-        white,
-        black: Pubkey::default(),
-        status: GameStatus::WaitingForOpponent,
-        last_move_timestamp: 0,
-        fees_advanced: 0,
-        fee_payer: white,
-        result: GameResult::None,
-        board_state: start_board(),
-        move_count: 0,
-        halfmove_clock: 0,
-        turn: 1,
-        created_at: 0,
-        updated_at: 0,
-        wager_amount,
-        wager_token: None,
-        game_type: GameType::PvP,
-        match_type: MatchType::Rated,
-        country_fee: 0,
-        base_time_seconds: 300,
-        increment_seconds: 0,
-        bump,
-        is_delegated: false,
-        tournament_id: None,
-        nonce: 0,
-        draw_offered_by: None,
-    };
-    (pda, program_account(&game, 8 + Game::INIT_SPACE))
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let (pda, bump) = game_pda(game_id);
+        let game = Game {
+            game_id,
+            white,
+            black: Pubkey::default(),
+            status: GameStatus::WaitingForOpponent,
+            last_move_timestamp: 0,
+            fees_advanced: 0,
+            fee_payer: white,
+            result: GameResult::None,
+            board_state: start_board(),
+            move_count: 0,
+            halfmove_clock: 0,
+            turn: 1,
+            created_at: 0,
+            updated_at: 0,
+            wager_amount,
+            wager_token: None,
+            game_type: GameType::PvP,
+            match_type: MatchType::Rated,
+            country_fee: 0,
+            base_time_seconds: 300,
+            increment_seconds: 0,
+            bump,
+            is_delegated: false,
+            tournament_id: None,
+            nonce: 0,
+            draw_offered_by: None,
+        };
+        (pda, program_account(&game, 8 + Game::INIT_SPACE)?)
+    })
 }
 
 fn global_join_game_ix(
@@ -385,7 +401,7 @@ fn global_join_game_ix(
 }
 
 #[tokio::test]
-async fn global_join_game_rejects_an_underfunded_session_vault() {
+async fn global_join_game_rejects_an_underfunded_session_vault() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let session_signer = Keypair::new();
@@ -394,12 +410,12 @@ async fn global_join_game_rejects_an_underfunded_session_vault() {
 
     // Generous caps again — only the balance check may reject this.
     let (session_pda, mut session_account_data) =
-        global_session_account(black, session_signer.pubkey(), 5_000_000_000, 1_000_000_000);
+        global_session_account(black, session_signer.pubkey(), 5_000_000_000, 1_000_000_000)?;
     session_account_data.lamports = 2_000_000;
 
-    let (game_pda_key, game_account_data) = waiting_game_account(game_id, white, wager_amount);
-    let (white_profile_pda, white_profile_data) = player_profile_account(white);
-    let (black_profile_pda, black_profile_data) = player_profile_account(black);
+    let (game_pda_key, game_account_data) = waiting_game_account(game_id, white, wager_amount)?;
+    let (white_profile_pda, white_profile_data) = player_profile_account(white)?;
+    let (black_profile_pda, black_profile_data) = player_profile_account(black)?;
 
     let mut ctx = start(vec![
         (session_pda, session_account_data),
@@ -412,7 +428,8 @@ async fn global_join_game_rejects_an_underfunded_session_vault() {
     let ix = global_join_game_ix(session_pda, session_signer.pubkey(), black, white, game_id);
     let err = send(&mut ctx, ix, &[&session_signer])
         .await
-        .expect_err("an underfunded joiner vault must be rejected up front");
+        .err()
+        .context("an underfunded joiner vault must be rejected up front")?;
 
     assert_eq!(
         custom_code(&err),
@@ -421,10 +438,11 @@ async fn global_join_game_rejects_an_underfunded_session_vault() {
         )),
         "expected GlobalSessionVaultUnderfunded, got {err:?}"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn global_join_game_funds_wager_from_session_vault() {
+async fn global_join_game_funds_wager_from_session_vault() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let session_signer = Keypair::new();
@@ -432,10 +450,10 @@ async fn global_join_game_funds_wager_from_session_vault() {
     let wager_amount = 20_000_000u64;
 
     let (session_pda, session_account_data) =
-        global_session_account(black, session_signer.pubkey(), 5_000_000_000, 1_000_000_000);
-    let (game_pda_key, game_account_data) = waiting_game_account(game_id, white, wager_amount);
-    let (white_profile_pda, white_profile_data) = player_profile_account(white);
-    let (black_profile_pda, black_profile_data) = player_profile_account(black);
+        global_session_account(black, session_signer.pubkey(), 5_000_000_000, 1_000_000_000)?;
+    let (game_pda_key, game_account_data) = waiting_game_account(game_id, white, wager_amount)?;
+    let (white_profile_pda, white_profile_data) = player_profile_account(white)?;
+    let (black_profile_pda, black_profile_data) = player_profile_account(black)?;
 
     let mut ctx = start(vec![
         (session_pda, session_account_data),
@@ -448,9 +466,9 @@ async fn global_join_game_funds_wager_from_session_vault() {
     let ix = global_join_game_ix(session_pda, session_signer.pubkey(), black, white, game_id);
     send(&mut ctx, ix, &[&session_signer])
         .await
-        .expect("global_join_game should succeed when the session vault PDA funds the wager");
+        .context("global_join_game should succeed when the session vault PDA funds the wager")?;
 
-    let game = fetch_game(&mut ctx, game_id).await;
+    let game = fetch_game(&mut ctx, game_id).await?;
     assert_eq!(game.black, black);
     assert_eq!(game.status, GameStatus::Active);
 
@@ -458,16 +476,18 @@ async fn global_join_game_funds_wager_from_session_vault() {
         .banks_client
         .get_balance(escrow_pda(game_id))
         .await
-        .unwrap();
+        .context("required operation value")?;
     assert_eq!(escrow_balance, wager_amount);
 
     let session_acc = ctx
         .banks_client
         .get_account(session_pda)
         .await
-        .unwrap()
-        .expect("session delegation account missing");
-    let session = GlobalSessionDelegation::try_deserialize(&mut &session_acc.data[..]).unwrap();
+        .context("required operation value")?
+        .context("session delegation account missing")?;
+    let session = GlobalSessionDelegation::try_deserialize(&mut &session_acc.data[..])
+        .context("required operation value")?;
     assert_eq!(session.total_spent, wager_amount);
     assert_eq!(session.games_remaining, 199);
+    Ok(())
 }

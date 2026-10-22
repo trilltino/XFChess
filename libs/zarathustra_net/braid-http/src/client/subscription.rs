@@ -1,5 +1,7 @@
 use crate::error::{BraidError, Result};
 use crate::types::Update;
+#[cfg(test)]
+use anyhow::Context as _;
 use futures::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -184,34 +186,54 @@ mod tests {
     }
 
     #[test]
-    fn heartbeats_header_parses_both_spellings() {
+    fn heartbeats_header_parses_both_spellings() -> anyhow::Result<()> {
         assert_eq!(
-            HeartbeatConfig::from_header("20").unwrap().interval,
+            HeartbeatConfig::from_header("20")
+                .context("required operation value")?
+                .interval,
             Duration::from_secs(20)
         );
         assert_eq!(
-            HeartbeatConfig::from_header("20s").unwrap().interval,
+            HeartbeatConfig::from_header("20s")
+                .context("required operation value")?
+                .interval,
             Duration::from_secs(20)
         );
         assert!(HeartbeatConfig::from_header("nonsense").is_none());
         assert!(HeartbeatConfig::from_header("0").is_none());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn updates_are_delivered_in_order_then_the_stream_ends() {
+    async fn updates_are_delivered_in_order_then_the_stream_ends() -> anyhow::Result<()> {
         let (tx, rx) = async_channel::unbounded();
         tx.send(Ok(Update::snapshot(Version::new("1"), "a")))
             .await
-            .unwrap();
+            .context("required operation value")?;
         tx.send(Ok(Update::snapshot(Version::new("2"), "b")))
             .await
-            .unwrap();
+            .context("required operation value")?;
         drop(tx);
 
         let mut sub = Subscription::new(rx);
-        assert_eq!(sub.next().await.unwrap().unwrap().body_str(), Some("a"));
-        assert_eq!(sub.next().await.unwrap().unwrap().body_str(), Some("b"));
+        assert_eq!(
+            sub.next()
+                .await
+                .context("required operation value")?
+                .context("required operation value")?
+                .body_str(),
+            Some("a")
+        );
+        assert_eq!(
+            sub.next()
+                .await
+                .context("required operation value")?
+                .context("required operation value")?
+                .body_str(),
+            Some("b")
+        );
         assert!(sub.next().await.is_none());
+        Ok(())
     }
 
     #[tokio::test(start_paused = true)]
@@ -225,7 +247,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_quiet_but_live_stream_never_times_out() {
+    async fn a_quiet_but_live_stream_never_times_out() -> anyhow::Result<()> {
         let (tx, rx) = async_channel::unbounded();
         let mut sub = Subscription::with_heartbeat(rx, HeartbeatConfig::from_secs(20.0));
 
@@ -233,12 +255,13 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(20)).await;
             tx.send(Ok(Update::snapshot(Version::new(i.to_string()), "x")))
                 .await
-                .unwrap();
+                .context("required operation value")?;
             assert!(
                 sub.next().await.is_some_and(|r| r.is_ok()),
                 "a stream with regular traffic must not time out (step {i})"
             );
         }
+        Ok(())
     }
 
     #[tokio::test]

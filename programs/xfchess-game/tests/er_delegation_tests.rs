@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use common::*;
 use solana_sdk::pubkey::Pubkey;
@@ -13,7 +14,7 @@ fn anchor_constraint_address() -> u32 {
 }
 
 #[tokio::test]
-async fn undelegate_rejects_spoofed_magic_context() {
+async fn undelegate_rejects_spoofed_magic_context() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
@@ -25,7 +26,7 @@ async fn undelegate_rejects_spoofed_magic_context() {
         1,
         0,
         GameStatus::Active,
-    )])
+    )?])
     .await;
 
     let payer = ctx.payer.pubkey();
@@ -33,19 +34,23 @@ async fn undelegate_rejects_spoofed_magic_context() {
         GAME_ID,
         payer,
         Pubkey::new_unique(), // spoofed magic_context
-        Pubkey::from_str(MAGIC_PROGRAM).unwrap(),
+        Pubkey::from_str(MAGIC_PROGRAM).context("required operation value")?,
     );
 
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(anchor_constraint_address()),
         "wrong magic_context must be rejected by the address constraint"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn undelegate_rejects_spoofed_magic_program() {
+async fn undelegate_rejects_spoofed_magic_program() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
@@ -57,27 +62,31 @@ async fn undelegate_rejects_spoofed_magic_program() {
         1,
         0,
         GameStatus::Active,
-    )])
+    )?])
     .await;
 
     let payer = ctx.payer.pubkey();
     let ix = undelegate_ix(
         GAME_ID,
         payer,
-        Pubkey::from_str(MAGIC_CONTEXT).unwrap(),
+        Pubkey::from_str(MAGIC_CONTEXT).context("required operation value")?,
         Pubkey::new_unique(), // spoofed magic_program
     );
 
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(anchor_constraint_address()),
         "wrong magic_program must be rejected by the address constraint"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn undelegate_rejects_not_delegated_game_before_cpi() {
+async fn undelegate_rejects_not_delegated_game_before_cpi() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
@@ -90,27 +99,31 @@ async fn undelegate_rejects_not_delegated_game_before_cpi() {
         0,
         GameStatus::Active,
         false,
-    )])
+    )?])
     .await;
 
     let payer = ctx.payer.pubkey();
     let ix = undelegate_ix(
         GAME_ID,
         payer,
-        Pubkey::from_str(MAGIC_CONTEXT).unwrap(),
-        Pubkey::from_str(MAGIC_PROGRAM).unwrap(),
+        Pubkey::from_str(MAGIC_CONTEXT).context("required operation value")?,
+        Pubkey::from_str(MAGIC_PROGRAM).context("required operation value")?,
     );
 
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(xfchess_game::errors::GameErrorCode::GameNotDelegated)),
         "non-delegated games must reject before MagicBlock CPI"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn undelegate_rejects_an_outsider_on_a_live_game() {
+async fn undelegate_rejects_an_outsider_on_a_live_game() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
@@ -123,27 +136,31 @@ async fn undelegate_rejects_an_outsider_on_a_live_game() {
         1,
         0,
         GameStatus::Active,
-    )])
+    )?])
     .await;
 
     let payer = ctx.payer.pubkey();
     let ix = undelegate_ix(
         GAME_ID,
         payer,
-        Pubkey::from_str(MAGIC_CONTEXT).unwrap(),
-        Pubkey::from_str(MAGIC_PROGRAM).unwrap(),
+        Pubkey::from_str(MAGIC_CONTEXT).context("required operation value")?,
+        Pubkey::from_str(MAGIC_PROGRAM).context("required operation value")?,
     );
 
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(xfchess_game::errors::GameErrorCode::UnauthorizedAccess)),
         "an outsider must not pull a live game off the ER"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn undelegate_lets_anyone_return_a_finished_game() {
+async fn undelegate_lets_anyone_return_a_finished_game() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
@@ -155,29 +172,33 @@ async fn undelegate_lets_anyone_return_a_finished_game() {
         1,
         0,
         GameStatus::Finished,
-    )])
+    )?])
     .await;
 
     let payer = ctx.payer.pubkey();
     let ix = undelegate_ix(
         GAME_ID,
         payer,
-        Pubkey::from_str(MAGIC_CONTEXT).unwrap(),
-        Pubkey::from_str(MAGIC_PROGRAM).unwrap(),
+        Pubkey::from_str(MAGIC_CONTEXT).context("required operation value")?,
+        Pubkey::from_str(MAGIC_PROGRAM).context("required operation value")?,
     );
 
     // Without a MagicBlock validator the commit CPI fails; the point is that the
     // authority check passes.
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_ne!(
         custom_code(&err),
         Some(ec(xfchess_game::errors::GameErrorCode::UnauthorizedAccess)),
         "settlement must never be blocked on who undelegates a finished game"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn process_undelegation_rejects_non_canonical_buffer() {
+async fn process_undelegation_rejects_non_canonical_buffer() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
@@ -195,7 +216,7 @@ async fn process_undelegation_rejects_non_canonical_buffer() {
             1,
             0,
             GameStatus::Active,
-        ),
+        )?,
         (
             spoofed_buffer,
             solana_sdk::account::Account {
@@ -224,7 +245,10 @@ async fn process_undelegation_rejects_non_canonical_buffer() {
         }
     }
 
-    let err = send(&mut ctx, ix, &[&spoofed_buffer_kp]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[&spoofed_buffer_kp])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         err,
         solana_sdk::transaction::TransactionError::InstructionError(
@@ -235,10 +259,11 @@ async fn process_undelegation_rejects_non_canonical_buffer() {
          with InvalidSeeds (ephemeral_rollups_sdk::cpi::undelegate_account's own check) — \
          GameErrorCode::InvalidUndelegationBuffer is unused dead code, not what actually fires"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn resign_mutates_only_game_even_when_delegated() {
+async fn resign_mutates_only_game_even_when_delegated() -> anyhow::Result<()> {
     let white = Keypair::new();
     let black = Pubkey::new_unique();
 
@@ -251,25 +276,28 @@ async fn resign_mutates_only_game_even_when_delegated() {
             1,
             0,
             GameStatus::Active,
-        ),
+        )?,
         (white.pubkey(), system_account(1_000_000)),
     ])
     .await;
 
     let ix = resign_ix(GAME_ID, white.pubkey());
-    send(&mut ctx, ix, &[&white]).await.unwrap();
+    send(&mut ctx, ix, &[&white])
+        .await
+        .context("required operation value")?;
 
-    let game = fetch_game(&mut ctx, GAME_ID).await;
+    let game = fetch_game(&mut ctx, GAME_ID).await?;
     assert_eq!(game.status, GameStatus::Finished);
     assert_eq!(game.result, GameResult::Winner(black));
     assert!(
         game.is_delegated,
         "terminal ER transition must not undelegate"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn claim_timeout_mutates_only_game_even_when_delegated() {
+async fn claim_timeout_mutates_only_game_even_when_delegated() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
@@ -281,13 +309,15 @@ async fn claim_timeout_mutates_only_game_even_when_delegated() {
         1,
         0,
         GameStatus::Active,
-    )])
+    )?])
     .await;
 
     let ix = claim_timeout_ix(GAME_ID, ctx.payer.pubkey());
-    send(&mut ctx, ix, &[]).await.unwrap();
+    send(&mut ctx, ix, &[])
+        .await
+        .context("required operation value")?;
 
-    let game = fetch_game(&mut ctx, GAME_ID).await;
+    let game = fetch_game(&mut ctx, GAME_ID).await?;
     assert_eq!(game.status, GameStatus::Cancelled);
     assert_eq!(
         game.result,
@@ -298,4 +328,5 @@ async fn claim_timeout_mutates_only_game_even_when_delegated() {
         game.is_delegated,
         "terminal ER transition must not undelegate"
     );
+    Ok(())
 }

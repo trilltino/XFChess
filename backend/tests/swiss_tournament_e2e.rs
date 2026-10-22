@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -58,68 +59,90 @@ impl TestApp {
         build_app_router(self.state.clone()).with_state(self.state.clone())
     }
 
-    async fn get(&self, uri: &str) -> (StatusCode, Value) {
-        let req = Request::builder()
-            .uri(uri)
-            .method("GET")
-            .body(Body::empty())
-            .unwrap();
-        self.send(req).await
+    async fn get(&self, uri: &str) -> anyhow::Result<(StatusCode, Value)> {
+        Ok({
+            let req = Request::builder()
+                .uri(uri)
+                .method("GET")
+                .body(Body::empty())
+                .context("test setup failed")?;
+            self.send(req).await?
+        })
     }
 
-    async fn post_json(&self, uri: &str, body: &Value) -> (StatusCode, Value) {
-        let req = Request::builder()
-            .uri(uri)
-            .method("POST")
-            .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_vec(body).unwrap()))
-            .unwrap();
-        self.send(req).await
+    async fn post_json(&self, uri: &str, body: &Value) -> anyhow::Result<(StatusCode, Value)> {
+        Ok({
+            let req = Request::builder()
+                .uri(uri)
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(body).context("test setup failed")?,
+                ))
+                .context("test setup failed")?;
+            self.send(req).await?
+        })
     }
 
-    async fn post_json_admin(&self, uri: &str, body: &Value) -> (StatusCode, Value) {
-        let req = Request::builder()
-            .uri(uri)
-            .method("POST")
-            .header("content-type", "application/json")
-            .header("X-API-Key", "dev")
-            .body(Body::from(serde_json::to_vec(body).unwrap()))
-            .unwrap();
-        self.send(req).await
+    async fn post_json_admin(
+        &self,
+        uri: &str,
+        body: &Value,
+    ) -> anyhow::Result<(StatusCode, Value)> {
+        Ok({
+            let req = Request::builder()
+                .uri(uri)
+                .method("POST")
+                .header("content-type", "application/json")
+                .header("X-API-Key", "dev")
+                .body(Body::from(
+                    serde_json::to_vec(body).context("test setup failed")?,
+                ))
+                .context("test setup failed")?;
+            self.send(req).await?
+        })
     }
 
-    async fn send(&self, req: Request<Body>) -> (StatusCode, Value) {
-        let resp = self.router().oneshot(req).await.unwrap();
-        let status = resp.status();
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-        (status, value)
+    async fn send(&self, req: Request<Body>) -> anyhow::Result<(StatusCode, Value)> {
+        Ok({
+            let resp = self
+                .router()
+                .oneshot(req)
+                .await
+                .context("test setup failed")?;
+            let status = resp.status();
+            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .context("test setup failed")?;
+            let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+            (status, value)
+        })
     }
 }
 
-async fn spawn_app() -> TestApp {
-    let pools = initialize_pools(&unique_db_url("session"), &unique_db_url("vault"))
-        .await
-        .expect("init pools");
-    run_migrations(&pools).await.expect("run migrations");
+async fn spawn_app() -> anyhow::Result<TestApp> {
+    Ok({
+        let pools = initialize_pools(&unique_db_url("session"), &unique_db_url("vault"))
+            .await
+            .context("init pools")?;
+        run_migrations(&pools).await.context("run migrations")?;
 
-    let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await?;
 
-    let state = AppState::new(
-        test_config(),
-        pools.session_pool.clone(),
-        pools.vault_pool.clone(),
-        Arc::new(tournament_store),
-    );
+        let state = AppState::new(
+            test_config(),
+            pools.session_pool.clone(),
+            pools.vault_pool.clone(),
+            Arc::new(tournament_store),
+        )?;
 
-    TestApp { state }
+        TestApp { state }
+    })
 }
 
 #[tokio::test]
-async fn swiss_tournament_full_lifecycle_via_http() {
-    let app = spawn_app().await;
+async fn swiss_tournament_full_lifecycle_via_http() -> anyhow::Result<()> {
+    let app = spawn_app().await?;
     let tournament_id = 9001_u64;
 
     let players: [(&str, u32); 8] = [
@@ -159,17 +182,23 @@ async fn swiss_tournament_full_lifecycle_via_http() {
             &format!("/admin/tournament/{tournament_id}/initialize-swiss"),
             &json!({}),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK, "initialize-swiss: {body}");
 
-    let (status, tournament) = app.get(&format!("/tournament/{tournament_id}")).await;
+    let (status, tournament) = app.get(&format!("/tournament/{tournament_id}")).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(tournament["status"], json!("Active"));
-    assert_eq!(tournament["players"].as_array().unwrap().len(), 8);
+    assert_eq!(
+        tournament["players"]
+            .as_array()
+            .context("test setup failed")?
+            .len(),
+        8
+    );
 
     let (status, round) = app
         .get(&format!("/tournament/{tournament_id}/current-round"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(round["round"], json!(1));
     assert_eq!(round["total_rounds"], json!(5));
@@ -179,7 +208,7 @@ async fn swiss_tournament_full_lifecycle_via_http() {
         .get(&format!(
             "/tournament/{tournament_id}/my-match?player=gm_wallet"
         ))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(my_match["found"], json!(true));
     assert_eq!(my_match["round"], json!(0), "0-based like bracket rounds");
@@ -188,9 +217,12 @@ async fn swiss_tournament_full_lifecycle_via_http() {
     // Round 1 pairings: 4 boards, no self-pairings.
     let (status, pairings_r1) = app
         .get(&format!("/tournament/{tournament_id}/pairings/1"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
-    let boards_r1 = pairings_r1["pairings"].as_array().unwrap().clone();
+    let boards_r1 = pairings_r1["pairings"]
+        .as_array()
+        .context("test setup failed")?
+        .clone();
     assert_eq!(boards_r1.len(), 4, "round 1: {pairings_r1}");
     for board in &boards_r1 {
         assert_ne!(board["white"], board["black"], "self-pairing: {board}");
@@ -200,13 +232,13 @@ async fn swiss_tournament_full_lifecycle_via_http() {
     let gm_pairing = boards_r1
         .iter()
         .find(|b| b["white"] == json!("gm_wallet") || b["black"] == json!("gm_wallet"))
-        .expect("GrandMaster should have a round 1 pairing");
-    let gm_board = gm_pairing["board"].as_u64().unwrap();
+        .context("GrandMaster should have a round 1 pairing")?;
+    let gm_board = gm_pairing["board"].as_u64().context("test setup failed")?;
     let gm_is_white = gm_pairing["white"] == json!("gm_wallet");
 
     // Give GrandMaster the sole round-1 win to avoid standings tiebreak ambiguity.
     for board in &boards_r1 {
-        let board_num = board["board"].as_u64().unwrap();
+        let board_num = board["board"].as_u64().context("test setup failed")?;
         let result = if board_num == gm_board {
             if gm_is_white {
                 "1-0"
@@ -221,7 +253,7 @@ async fn swiss_tournament_full_lifecycle_via_http() {
                 &format!("/admin/tournament/{tournament_id}/result"),
                 &json!({ "round": 1, "board": board_num, "result": result }),
             )
-            .await;
+            .await?;
         assert_eq!(
             status,
             StatusCode::OK,
@@ -232,15 +264,17 @@ async fn swiss_tournament_full_lifecycle_via_http() {
     // All 4 results recorded -> the service auto-starts round 2.
     let (status, round) = app
         .get(&format!("/tournament/{tournament_id}/current-round"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(round["round"], json!(2), "should auto-advance to round 2");
 
     let (status, pairings_r2) = app
         .get(&format!("/tournament/{tournament_id}/pairings/2"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
-    let boards_r2 = pairings_r2["pairings"].as_array().unwrap();
+    let boards_r2 = pairings_r2["pairings"]
+        .as_array()
+        .context("test setup failed")?;
     assert!(!boards_r2.is_empty(), "round 2 should have pairings");
     assert!(
         boards_r2.len() <= boards_r1.len(),
@@ -254,22 +288,24 @@ async fn swiss_tournament_full_lifecycle_via_http() {
     // descending by score, GrandMaster alone at the top.
     let (status, standings) = app
         .get(&format!("/tournament/{tournament_id}/standings"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
-    let standings = standings.as_array().unwrap();
+    let standings = standings.as_array().context("test setup failed")?;
     assert_eq!(standings.len(), 8);
     for pair in standings.windows(2) {
-        let a = pair[0]["score"].as_f64().unwrap();
-        let b = pair[1]["score"].as_f64().unwrap();
+        let a = pair[0]["score"].as_f64().context("test setup failed")?;
+        let b = pair[1]["score"].as_f64().context("test setup failed")?;
         assert!(a >= b, "standings should be sorted by score: {a} then {b}");
     }
     assert_eq!(standings[0]["player_id"], json!("gm_wallet"));
     assert_eq!(standings[0]["score"], json!(1.0));
+
+    Ok(())
 }
 
 #[tokio::test]
-async fn approve_prize_release_route_sets_the_flag() {
-    let app = spawn_app().await;
+async fn approve_prize_release_route_sets_the_flag() -> anyhow::Result<()> {
+    let app = spawn_app().await?;
     let tournament_id = 9100_u64;
 
     let record = TournamentRecord::new(tournament_id, "Big Prize Tournament", 0);
@@ -280,7 +316,7 @@ async fn approve_prize_release_route_sets_the_flag() {
         .tournament_store
         .get(tournament_id)
         .await
-        .expect("seeded tournament");
+        .context("seeded tournament")?;
     assert!(!fetched.prize_release_approved, "should start unapproved");
 
     // No X-API-Key → rejected before the handler runs, same as every other
@@ -290,14 +326,14 @@ async fn approve_prize_release_route_sets_the_flag() {
             &format!("/admin/tournament/{tournament_id}/approve-prize-release"),
             &json!({}),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(
         !app.state
             .tournament_store
             .get(tournament_id)
             .await
-            .unwrap()
+            .context("test setup failed")?
             .prize_release_approved,
         "unauthorized call must not have flipped the flag"
     );
@@ -308,14 +344,14 @@ async fn approve_prize_release_route_sets_the_flag() {
             &format!("/admin/tournament/{tournament_id}/approve-prize-release"),
             &json!({}),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(
         app.state
             .tournament_store
             .get(tournament_id)
             .await
-            .unwrap()
+            .context("test setup failed")?
             .prize_release_approved,
         "approved flag should now be set"
     );
@@ -323,8 +359,10 @@ async fn approve_prize_release_route_sets_the_flag() {
     // Unknown tournament → 404, not a silent success.
     let (status, _) = app
         .post_json_admin("/admin/tournament/999999/approve-prize-release", &json!({}))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::NOT_FOUND);
+
+    Ok(())
 }
 
 /// Mirrors what the settlement worker does when a tournament game settles on-chain:
@@ -336,7 +374,7 @@ async fn settle(
     white: &str,
     black: &str,
     outcome: GameOutcome,
-) {
+) -> anyhow::Result<()> {
     tx.send(OrchestratorEvent::GameEnded {
         tournament_id,
         game_id,
@@ -345,31 +383,38 @@ async fn settle(
         outcome,
     })
     .await
-    .unwrap();
+    .context("test setup failed")?;
+
+    Ok(())
 }
 
 /// Waits for the orchestrator (a separate task) to apply queued events.
-async fn wait_until<F: Fn(&TournamentRecord) -> bool>(
+async fn wait_until<F: Fn(&TournamentRecord) -> anyhow::Result<bool>>(
     app: &TestApp,
     id: u64,
     done: F,
-) -> TournamentRecord {
+) -> anyhow::Result<TournamentRecord> {
     for _ in 0..200 {
-        let t = app.state.tournament_store.get(id).await.unwrap();
-        if done(&t) {
-            return t;
+        let t = app
+            .state
+            .tournament_store
+            .get(id)
+            .await
+            .context("test setup failed")?;
+        if done(&t)? {
+            return Ok(t);
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    panic!("orchestrator did not reach the expected state");
+    anyhow::bail!("orchestrator did not reach the expected state")
 }
 
 #[tokio::test]
-async fn swiss_tournament_runs_end_to_end_from_settled_games() {
+async fn swiss_tournament_runs_end_to_end_from_settled_games() -> anyhow::Result<()> {
     use backend::signing::storage::tournament::TournamentStatus;
     use swiss_pairing::MatchResult;
 
-    let app = spawn_app().await;
+    let app = spawn_app().await?;
     let tournament_id = 9200_u64;
     let rounds = 3u8;
 
@@ -406,7 +451,7 @@ async fn swiss_tournament_runs_end_to_end_from_settled_games() {
             &format!("/admin/tournament/{tournament_id}/initialize-swiss"),
             &json!({}),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK, "initialize-swiss: {body}");
 
     // No chain config: this exercises the off-chain half of the orchestrator.
@@ -419,26 +464,33 @@ async fn swiss_tournament_runs_end_to_end_from_settled_games() {
     for round in 1..=rounds {
         let (_, pairings) = app
             .get(&format!("/tournament/{tournament_id}/pairings/{round}"))
-            .await;
-        let boards = pairings["pairings"].as_array().unwrap().clone();
+            .await?;
+        let boards = pairings["pairings"]
+            .as_array()
+            .context("test setup failed")?
+            .clone();
         assert_eq!(boards.len(), 3, "round {round}: {pairings}");
         assert_eq!(
-            pairings["byes"].as_array().unwrap().len(),
+            pairings["byes"]
+                .as_array()
+                .context("test setup failed")?
+                .len(),
             1,
             "round {round}"
         );
 
         // Every paired player is told to play their board's deterministic game.
         for b in &boards {
-            let board = b["board"].as_u64().unwrap() as u16;
-            let game_id = TournamentStore::swiss_game_id(tournament_id, round, board).unwrap();
+            let board = b["board"].as_u64().context("test setup failed")? as u16;
+            let game_id = TournamentStore::swiss_game_id(tournament_id, round, board)
+                .context("test setup failed")?;
             for (side, color) in [("white", "white"), ("black", "black")] {
-                let player = b[side].as_str().unwrap();
+                let player = b[side].as_str().context("test setup failed")?;
                 let (_, s) = app
                     .get(&format!(
                         "/tournament/{tournament_id}/my-status?player={player}"
                     ))
-                    .await;
+                    .await?;
                 assert_eq!(
                     s["state"],
                     json!("MatchReady"),
@@ -455,7 +507,7 @@ async fn swiss_tournament_runs_end_to_end_from_settled_games() {
                 &format!("/admin/tournament/{tournament_id}/advance-round"),
                 &json!({}),
             )
-            .await;
+            .await?;
         assert_eq!(
             status,
             StatusCode::CONFLICT,
@@ -464,36 +516,44 @@ async fn swiss_tournament_runs_end_to_end_from_settled_games() {
 
         // A game whose on-chain players don't match the pairing is ignored.
         let first = &boards[0];
-        let first_board = first["board"].as_u64().unwrap() as u16;
-        let first_game = TournamentStore::swiss_game_id(tournament_id, round, first_board).unwrap();
+        let first_board = first["board"].as_u64().context("test setup failed")? as u16;
+        let first_game = TournamentStore::swiss_game_id(tournament_id, round, first_board)
+            .context("test setup failed")?;
         settle(
             &tx,
             tournament_id,
             first_game,
-            first["black"].as_str().unwrap(),
-            first["white"].as_str().unwrap(),
+            first["black"].as_str().context("test setup failed")?,
+            first["white"].as_str().context("test setup failed")?,
             GameOutcome::WhiteWin,
         )
-        .await;
+        .await?;
 
         for (i, b) in boards.iter().enumerate() {
-            let board = b["board"].as_u64().unwrap() as u16;
+            let board = b["board"].as_u64().context("test setup failed")? as u16;
             let result = if i == 0 {
                 GameOutcome::WhiteWin
             } else {
                 GameOutcome::Draw
             };
-            let game_id = TournamentStore::swiss_game_id(tournament_id, round, board).unwrap();
-            let (white, black) = (b["white"].as_str().unwrap(), b["black"].as_str().unwrap());
-            settle(&tx, tournament_id, game_id, white, black, result).await;
+            let game_id = TournamentStore::swiss_game_id(tournament_id, round, board)
+                .context("test setup failed")?;
+            let (white, black) = (
+                b["white"].as_str().context("test setup failed")?,
+                b["black"].as_str().context("test setup failed")?,
+            );
+            settle(&tx, tournament_id, game_id, white, black, result).await?;
             // A settlement retry for the same game is harmless.
-            settle(&tx, tournament_id, game_id, white, black, result).await;
+            settle(&tx, tournament_id, game_id, white, black, result).await?;
 
             if round == rounds && i + 1 < boards.len() {
                 let t = wait_until(&app, tournament_id, |t| {
-                    t.swiss().unwrap().results.len() == (round as usize - 1) * 3 + i + 1
+                    Ok({
+                        t.swiss().context("test setup failed")?.results.len()
+                            == (round as usize - 1) * 3 + i + 1
+                    })
                 })
-                .await;
+                .await?;
                 assert_eq!(
                     t.status,
                     TournamentStatus::Active,
@@ -503,11 +563,13 @@ async fn swiss_tournament_runs_end_to_end_from_settled_games() {
         }
 
         let t = wait_until(&app, tournament_id, |t| {
-            let sd = t.swiss().unwrap();
-            sd.round_complete(round) && (sd.current_round > round || round == rounds)
+            Ok({
+                let sd = t.swiss().context("test setup failed")?;
+                sd.round_complete(round) && (sd.current_round > round || round == rounds)
+            })
         })
-        .await;
-        let sd = t.swiss().unwrap();
+        .await?;
+        let sd = t.swiss().context("test setup failed")?;
         assert_eq!(
             sd.results.len(),
             round as usize * 3,
@@ -517,7 +579,7 @@ async fn swiss_tournament_runs_end_to_end_from_settled_games() {
             .results
             .iter()
             .find(|(r, b, _)| *r == round && *b == first_board)
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(
             first_result.2,
             MatchResult::WhiteWin,
@@ -525,9 +587,14 @@ async fn swiss_tournament_runs_end_to_end_from_settled_games() {
         );
     }
 
-    let t = app.state.tournament_store.get(tournament_id).await.unwrap();
+    let t = app
+        .state
+        .tournament_store
+        .get(tournament_id)
+        .await
+        .context("test setup failed")?;
     assert_eq!(t.status, TournamentStatus::Completed);
-    let standings = &t.swiss().unwrap().standings;
+    let standings = &t.swiss().context("test setup failed")?.standings;
     assert_eq!(t.winner.as_deref(), Some(standings[0].player_id.as_str()));
     assert_eq!(
         t.seventh_place.as_deref(),
@@ -535,7 +602,7 @@ async fn swiss_tournament_runs_end_to_end_from_settled_games() {
     );
     let mut byes: Vec<String> = t
         .swiss()
-        .unwrap()
+        .context("test setup failed")?
         .rounds
         .iter()
         .flat_map(|r| r.byes.clone())
@@ -550,13 +617,15 @@ async fn swiss_tournament_runs_end_to_end_from_settled_games() {
             &format!("/admin/tournament/{tournament_id}/result"),
             &json!({ "round": rounds, "board": 1, "result": "0-1" }),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::CONFLICT);
+
+    Ok(())
 }
 
 #[tokio::test]
-async fn admin_views_show_swiss_boards_and_hide_private_fields() {
-    let app = spawn_app().await;
+async fn admin_views_show_swiss_boards_and_hide_private_fields() -> anyhow::Result<()> {
+    let app = spawn_app().await?;
     let tournament_id = 9300_u64;
     let mut record = TournamentRecord::with_config(
         tournament_id,
@@ -587,10 +656,10 @@ async fn admin_views_show_swiss_boards_and_hide_private_fields() {
             &format!("/admin/tournament/{tournament_id}/initialize-swiss"),
             &json!({}),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, detail) = app.get(&format!("/api/tournament/{tournament_id}")).await;
+    let (status, detail) = app.get(&format!("/api/tournament/{tournament_id}")).await?;
     assert_eq!(status, StatusCode::OK);
     assert!(detail.get("password_hash").is_none(), "{detail}");
     assert!(detail.get("node_ids").is_none(), "{detail}");
@@ -598,19 +667,19 @@ async fn admin_views_show_swiss_boards_and_hide_private_fields() {
 
     let (status, bracket) = app
         .get(&format!("/api/tournament/{tournament_id}/bracket"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         bracket["current_round"],
         json!(0),
         "0-based like bracket rounds"
     );
-    let matches = bracket["matches"].as_array().unwrap();
+    let matches = bracket["matches"].as_array().context("test setup failed")?;
     assert_eq!(matches.len(), 2, "{bracket}");
     for m in matches {
         assert_eq!(m["round"], json!(0));
         assert_eq!(m["status"], json!("Active"));
-        let board = m["board"].as_u64().unwrap() as u16;
+        let board = m["board"].as_u64().context("test setup failed")? as u16;
         assert_eq!(
             m["game_id"],
             json!(TournamentStore::swiss_game_id(tournament_id, 1, board))
@@ -618,31 +687,33 @@ async fn admin_views_show_swiss_boards_and_hide_private_fields() {
     }
 
     // A decided board shows as completed with its winner.
-    let board = matches[0]["board"].as_u64().unwrap();
+    let board = matches[0]["board"].as_u64().context("test setup failed")?;
     let white = matches[0]["player_white"].clone();
     let (status, _) = app
         .post_json_admin(
             &format!("/admin/tournament/{tournament_id}/result"),
             &json!({ "round": 1, "board": board, "result": "1-0" }),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
     let (_, bracket) = app
         .get(&format!("/api/tournament/{tournament_id}/bracket"))
-        .await;
+        .await?;
     let decided = bracket["matches"]
         .as_array()
-        .unwrap()
+        .context("test setup failed")?
         .iter()
         .find(|m| m["board"].as_u64() == Some(board))
-        .unwrap();
+        .context("test setup failed")?;
     assert_eq!(decided["status"], json!("Completed"));
     assert_eq!(decided["winner"], white);
+
+    Ok(())
 }
 
 #[tokio::test]
-async fn start_route_explains_partial_brackets_and_starts_swiss() {
-    let app = spawn_app().await;
+async fn start_route_explains_partial_brackets_and_starts_swiss() -> anyhow::Result<()> {
+    let app = spawn_app().await?;
 
     // A 4-player bracket with 3 registered cannot start on-chain: clear 409.
     let bracket_id = 9400_u64;
@@ -666,7 +737,7 @@ async fn start_route_explains_partial_brackets_and_starts_swiss() {
     seed_players(&app, bracket_id, [("a", 2000), ("b", 1900), ("c", 1800)]).await;
     let (status, _) = app
         .post_json_admin(&format!("/admin/tournament/{bracket_id}/start"), &json!({}))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::CONFLICT);
 
     // Swiss starts at its minimum through the same route.
@@ -696,41 +767,47 @@ async fn start_route_explains_partial_brackets_and_starts_swiss() {
     .await;
     let (status, body) = app
         .post_json_admin(&format!("/admin/tournament/{swiss_id}/start"), &json!({}))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK, "{body}");
     let (_, round) = app
         .get(&format!("/tournament/{swiss_id}/current-round"))
-        .await;
+        .await?;
     assert_eq!(round["round"], json!(1));
 
     // A started tournament cannot be started again.
     let (status, _) = app
         .post_json_admin(&format!("/admin/tournament/{swiss_id}/start"), &json!({}))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::CONFLICT);
+
+    Ok(())
 }
 
 /// Match `index` as the public bracket view shows it.
-async fn bracket_match(app: &TestApp, id: u64, index: usize) -> Value {
-    let (status, bracket) = app.get(&format!("/api/tournament/{id}/bracket")).await;
-    assert_eq!(status, StatusCode::OK);
-    bracket["matches"][index].clone()
+async fn bracket_match(app: &TestApp, id: u64, index: usize) -> anyhow::Result<Value> {
+    Ok({
+        let (status, bracket) = app.get(&format!("/api/tournament/{id}/bracket")).await?;
+        assert_eq!(status, StatusCode::OK);
+        bracket["matches"][index].clone()
+    })
 }
 
-async fn my_status(app: &TestApp, id: u64, player: &str) -> Value {
-    let (status, s) = app
-        .get(&format!("/tournament/{id}/my-status?player={player}"))
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    s
+async fn my_status(app: &TestApp, id: u64, player: &str) -> anyhow::Result<Value> {
+    Ok({
+        let (status, s) = app
+            .get(&format!("/tournament/{id}/my-status?player={player}"))
+            .await?;
+        assert_eq!(status, StatusCode::OK);
+        s
+    })
 }
 
 #[tokio::test]
-async fn bracket_runs_end_to_end_from_settled_games_replaying_draws() {
+async fn bracket_runs_end_to_end_from_settled_games_replaying_draws() -> anyhow::Result<()> {
     use backend::signing::elimination::MAX_REPLAYS;
     use backend::signing::storage::tournament::{ResultSource, TournamentStatus};
 
-    let app = spawn_app().await;
+    let app = spawn_app().await?;
     let tournament_id = 9500_u64;
     app.state
         .tournament_store
@@ -761,7 +838,8 @@ async fn bracket_runs_end_to_end_from_settled_games_replaying_draws() {
         .tournament_store
         .start_tournament(tournament_id)
         .await
-        .unwrap();
+        .map_err(|error| anyhow::anyhow!("{error:?}"))
+        .context("test setup failed")?;
     // No chain config: this exercises the off-chain half of the orchestrator.
     let tx = spawn_orchestrator(
         (*app.state.tournament_store).clone(),
@@ -770,35 +848,37 @@ async fn bracket_runs_end_to_end_from_settled_games_replaying_draws() {
     );
 
     // Round one plays the best seed against the worst.
-    let semi = bracket_match(&app, tournament_id, 0).await;
+    let semi = bracket_match(&app, tournament_id, 0).await?;
     assert_eq!(semi["player_white"], json!("a"), "{semi}");
     assert_eq!(semi["player_black"], json!("d"), "{semi}");
-    let first_game = semi["game_id"].as_u64().unwrap();
-    let s = my_status(&app, tournament_id, "a").await;
+    let first_game = semi["game_id"].as_u64().context("test setup failed")?;
+    let s = my_status(&app, tournament_id, "a").await?;
     assert_eq!(s["state"], json!("MatchReady"), "{s}");
     assert_eq!(s["match"]["game_id"], json!(first_game));
     assert_eq!(s["match"]["your_color"], json!("white"));
 
     // A drawn game is replayed under a new id with colours reversed.
-    settle(&tx, tournament_id, first_game, "a", "d", GameOutcome::Draw).await;
+    settle(&tx, tournament_id, first_game, "a", "d", GameOutcome::Draw).await?;
     wait_until(&app, tournament_id, |t| {
-        t.elimination().unwrap().matches[0].drawn_games == 1
+        Ok(t.elimination().context("test setup failed")?.matches[0].drawn_games == 1)
     })
-    .await;
-    let s = my_status(&app, tournament_id, "a").await;
+    .await?;
+    let s = my_status(&app, tournament_id, "a").await?;
     assert_eq!(s["state"], json!("MatchReady"), "{s}");
     assert_eq!(s["match"]["your_color"], json!("black"));
-    let replay = s["match"]["game_id"].as_u64().unwrap();
+    let replay = s["match"]["game_id"]
+        .as_u64()
+        .context("test setup failed")?;
     assert_ne!(replay, first_game);
 
     // A retried settlement of the drawn game changes nothing; the replay decides.
-    settle(&tx, tournament_id, first_game, "a", "d", GameOutcome::Draw).await;
-    settle(&tx, tournament_id, replay, "d", "a", GameOutcome::WhiteWin).await;
+    settle(&tx, tournament_id, first_game, "a", "d", GameOutcome::Draw).await?;
+    settle(&tx, tournament_id, replay, "d", "a", GameOutcome::WhiteWin).await?;
     let t = wait_until(&app, tournament_id, |t| {
-        t.elimination().unwrap().matches[0].is_decided()
+        Ok(t.elimination().context("test setup failed")?.matches[0].is_decided())
     })
-    .await;
-    let decided = &t.elimination().unwrap().matches[0];
+    .await?;
+    let decided = &t.elimination().context("test setup failed")?.matches[0];
     assert_eq!(decided.winner.as_deref(), Some("d"));
     assert_eq!(
         decided.drawn_games, 1,
@@ -806,20 +886,26 @@ async fn bracket_runs_end_to_end_from_settled_games_replaying_draws() {
     );
     assert_eq!(t.fourth_place.as_deref(), Some("a"));
     assert_eq!(
-        my_status(&app, tournament_id, "a").await["state"],
+        my_status(&app, tournament_id, "a").await?["state"],
         json!("Eliminated")
     );
 
     // Every game of the other semifinal drawn: the higher seed goes through.
     for game in 0..=MAX_REPLAYS {
-        let m = bracket_match(&app, tournament_id, 1).await;
+        let m = bracket_match(&app, tournament_id, 1).await?;
         let (white, black) = (
-            m["player_white"].as_str().unwrap().to_string(),
-            m["player_black"].as_str().unwrap().to_string(),
+            m["player_white"]
+                .as_str()
+                .context("test setup failed")?
+                .to_string(),
+            m["player_black"]
+                .as_str()
+                .context("test setup failed")?
+                .to_string(),
         );
         let expected_white = if game % 2 == 0 { "b" } else { "c" };
         assert_eq!(white, expected_white, "colours alternate: {m}");
-        let game_id = m["game_id"].as_u64().unwrap();
+        let game_id = m["game_id"].as_u64().context("test setup failed")?;
         settle(
             &tx,
             tournament_id,
@@ -828,32 +914,49 @@ async fn bracket_runs_end_to_end_from_settled_games_replaying_draws() {
             &black,
             GameOutcome::Draw,
         )
-        .await;
+        .await?;
         wait_until(&app, tournament_id, |t| {
-            t.elimination().unwrap().matches[1].drawn_games == game + 1
+            Ok(
+                {
+                    t.elimination().context("test setup failed")?.matches[1].drawn_games == game + 1
+                },
+            )
         })
-        .await;
+        .await?;
     }
-    let t = app.state.tournament_store.get(tournament_id).await.unwrap();
-    let tiebreak = &t.elimination().unwrap().matches[1];
+    let t = app
+        .state
+        .tournament_store
+        .get(tournament_id)
+        .await
+        .context("test setup failed")?;
+    let tiebreak = &t.elimination().context("test setup failed")?.matches[1];
     assert_eq!(tiebreak.winner.as_deref(), Some("b"));
     assert_eq!(tiebreak.result_source, Some(ResultSource::SeedTiebreak));
     assert_eq!(t.third_place.as_deref(), Some("c"));
 
     // The final: a game with the wrong players is ignored, the right one decides.
-    let final_match = bracket_match(&app, tournament_id, 2).await;
+    let final_match = bracket_match(&app, tournament_id, 2).await?;
     let (white, black) = (
-        final_match["player_white"].as_str().unwrap().to_string(),
-        final_match["player_black"].as_str().unwrap().to_string(),
+        final_match["player_white"]
+            .as_str()
+            .context("test setup failed")?
+            .to_string(),
+        final_match["player_black"]
+            .as_str()
+            .context("test setup failed")?
+            .to_string(),
     );
     assert_eq!(
         (white.as_str(), black.as_str()),
         ("d", "b"),
         "{final_match}"
     );
-    let final_game = final_match["game_id"].as_u64().unwrap();
+    let final_game = final_match["game_id"]
+        .as_u64()
+        .context("test setup failed")?;
     assert_eq!(
-        my_status(&app, tournament_id, "b").await["state"],
+        my_status(&app, tournament_id, "b").await?["state"],
         json!("MatchReady")
     );
     settle(
@@ -864,7 +967,7 @@ async fn bracket_runs_end_to_end_from_settled_games_replaying_draws() {
         &white,
         GameOutcome::WhiteWin,
     )
-    .await;
+    .await?;
     settle(
         &tx,
         tournament_id,
@@ -873,24 +976,24 @@ async fn bracket_runs_end_to_end_from_settled_games_replaying_draws() {
         &black,
         GameOutcome::BlackWin,
     )
-    .await;
+    .await?;
     let t = wait_until(&app, tournament_id, |t| {
-        t.status == TournamentStatus::Completed
+        Ok(t.status == TournamentStatus::Completed)
     })
-    .await;
+    .await?;
     assert_eq!(t.winner.as_deref(), Some("b"));
     assert_eq!(t.second_place.as_deref(), Some("d"));
     assert_eq!(
-        my_status(&app, tournament_id, "b").await["state"],
+        my_status(&app, tournament_id, "b").await?["state"],
         json!("Champion")
     );
 
     // Spectators see each match's deciding game, all finished.
     let (status, games) = app
         .get(&format!("/api/tournament/{tournament_id}/games"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
-    let games = games["games"].as_array().unwrap();
+    let games = games["games"].as_array().context("test setup failed")?;
     assert_eq!(games.len(), 3, "{games:?}");
     assert!(
         games.iter().all(|g| g["state"] == json!("finished")),
@@ -903,13 +1006,15 @@ async fn bracket_runs_end_to_end_from_settled_games_replaying_draws() {
             &format!("/admin/tournament/{tournament_id}/record-result"),
             &json!({ "match_index": 2, "winner": "d", "loser": "b" }),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::CONFLICT);
+
+    Ok(())
 }
 
 #[tokio::test]
-async fn admin_results_and_round_advances_follow_the_format() {
-    let app = spawn_app().await;
+async fn admin_results_and_round_advances_follow_the_format() -> anyhow::Result<()> {
+    let app = spawn_app().await?;
     let (bracket_id, swiss_id) = (9600_u64, 9601_u64);
     for (id, format) in [
         (bracket_id, TournamentFormat::SingleElimination),
@@ -943,13 +1048,14 @@ async fn admin_results_and_round_advances_follow_the_format() {
         .tournament_store
         .start_tournament(bracket_id)
         .await
-        .unwrap();
+        .map_err(|error| anyhow::anyhow!("{error:?}"))
+        .context("test setup failed")?;
     let (status, _) = app
         .post_json_admin(
             &format!("/admin/tournament/{swiss_id}/initialize-swiss"),
             &json!({}),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
 
     let result =
@@ -959,34 +1065,43 @@ async fn admin_results_and_round_advances_follow_the_format() {
     // Bracket results are checked against the match's seats.
     let (status, _) = app
         .post_json_admin(&record_result(bracket_id), &result("p0", "p1"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::BAD_REQUEST, "p1 is not in match 0");
     let (status, _) = app
         .post_json_admin(&record_result(bracket_id), &result("p3", "p0"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::OK);
     let (status, _) = app
         .post_json_admin(&record_result(bracket_id), &result("p0", "p3"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::CONFLICT, "match 0 is already decided");
-    let t = app.state.tournament_store.get(bracket_id).await.unwrap();
+    let t = app
+        .state
+        .tournament_store
+        .get(bracket_id)
+        .await
+        .context("test setup failed")?;
     assert_eq!(
-        t.elimination().unwrap().matches[2].player_white.as_deref(),
+        t.elimination().context("test setup failed")?.matches[2]
+            .player_white
+            .as_deref(),
         Some("p3")
     );
 
     // Swiss boards have their own result route; brackets have no rounds to advance.
     let (status, _) = app
         .post_json_admin(&record_result(swiss_id), &result("p0", "p3"))
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::CONFLICT);
     let (status, _) = app
         .post_json_admin(
             &format!("/admin/tournament/{bracket_id}/advance-round"),
             &json!({}),
         )
-        .await;
+        .await?;
     assert_eq!(status, StatusCode::CONFLICT);
+
+    Ok(())
 }
 
 /// Registers players directly in the store. `POST /tournament/{id}/join` requires a

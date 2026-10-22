@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use common::*;
 use solana_sdk::pubkey::Pubkey;
@@ -13,7 +14,7 @@ fn anchor_constraint_address() -> u32 {
 }
 
 #[tokio::test]
-async fn cancel_time_check_rejects_spoofed_magic_program() {
+async fn cancel_time_check_rejects_spoofed_magic_program() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
@@ -25,7 +26,7 @@ async fn cancel_time_check_rejects_spoofed_magic_program() {
         1,
         0,
         GameStatus::Active,
-    )])
+    )?])
     .await;
 
     let payer = ctx.payer.pubkey();
@@ -36,16 +37,20 @@ async fn cancel_time_check_rejects_spoofed_magic_program() {
         Pubkey::new_unique(), // spoofed magic_program
     );
 
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(anchor_constraint_address()),
-        "wrong magic_program must be rejected by the address constraint"
+        "wrong magic_program must be rejected by the address constraint: {err:?}"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn cancel_time_check_accepts_canonical_magic_program_account_shape() {
+async fn cancel_time_check_accepts_canonical_magic_program_account_shape() -> anyhow::Result<()> {
     // These tests reach CPI validation; a live MagicBlock validator is required
     // to exercise successful cancellation.
     let white = Pubkey::new_unique();
@@ -59,7 +64,7 @@ async fn cancel_time_check_accepts_canonical_magic_program_account_shape() {
         1,
         0,
         GameStatus::Active,
-    )])
+    )?])
     .await;
 
     let payer = ctx.payer.pubkey();
@@ -67,14 +72,18 @@ async fn cancel_time_check_accepts_canonical_magic_program_account_shape() {
         GAME_ID,
         payer,
         GAME_ID,
-        Pubkey::from_str(MAGIC_PROGRAM).unwrap(),
+        Pubkey::from_str(MAGIC_PROGRAM).context("required operation value")?,
     );
 
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_ne!(
         custom_code(&err),
         Some(anchor_constraint_address()),
         "canonical magic_program must pass account validation (failure past this \
          point is the expected CPI-into-unloaded-program error, not a constraint reject)"
     );
+    Ok(())
 }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-The XFChess backend is an Axum 0.8 HTTP server that sits between the game client and Solana. It builds (but never signs) Solana transactions, manages tournament state, relays P2P connections, and exposes a Prometheus metrics endpoint. It never holds private keys.
+The XFChess backend is an Axum HTTP server between the game client and Solana. It builds wallet-approved transactions, signs delegated session and maintenance transactions, manages tournaments, relays P2P connections, and exposes metrics. Player wallet secrets stay on the client; service and session keys are sensitive backend credentials.
 
 ## Binaries
 
@@ -47,7 +47,7 @@ src/
 
 ## Critical design points
 
-**Transaction signing model**: The backend builds unsigned Solana transactions and returns them serialised to the client. The client signs with their wallet and broadcasts. Never add private key handling here.
+**Transaction signing model**: Wallet-approved operations return unsigned transactions for the client to sign. Delegated moves and maintenance operations use validated session or service keys. Never accept player wallet secrets or expose backend keys in responses or logs. Persist session keys through the encrypted session store.
 
 **Tournament state**: `signing/storage/tournament.rs` is the source of truth for live tournament data, persisted to SQLite (`tournaments` table, JSON blob per record) — it survives server restarts. The same DB also holds user sessions, profiles, and historical data.
 

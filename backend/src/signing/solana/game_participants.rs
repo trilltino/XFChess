@@ -2,11 +2,12 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use super::{GAME_SEED, SESSION_DELEGATION_SEED};
+use parking_lot::Mutex;
 
 const PARTICIPANTS_CACHE_TTL: Duration = Duration::from_secs(300);
 
@@ -39,7 +40,7 @@ impl GameParticipantsCache {
 
     #[cfg(test)]
     pub fn seed_for_test(&self, game_id: u64, white: Pubkey, black: Pubkey) {
-        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.cache.lock();
         cache.insert(
             game_id,
             CachedParticipants {
@@ -54,7 +55,6 @@ impl GameParticipantsCache {
     pub fn seed_session_for_test(&self, game_id: u64, wallet: Pubkey, session_key: Pubkey) {
         self.session_keys
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
             .insert((game_id, wallet), session_key);
     }
 
@@ -65,13 +65,7 @@ impl GameParticipantsCache {
         claimed_session_key: &Pubkey,
     ) -> bool {
         #[cfg(test)]
-        if self
-            .session_keys
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&(game_id, *wallet))
-            == Some(claimed_session_key)
-        {
+        if self.session_keys.lock().get(&(game_id, *wallet)) == Some(claimed_session_key) {
             return true;
         }
 
@@ -87,7 +81,7 @@ impl GameParticipantsCache {
 
     pub async fn get(&self, game_id: u64) -> Option<(Pubkey, Pubkey)> {
         {
-            let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            let cache = self.cache.lock();
             if let Some(c) = cache.get(&game_id) {
                 if c.cached_at.elapsed() < PARTICIPANTS_CACHE_TTL {
                     return Some((c.white, c.black));
@@ -97,7 +91,13 @@ impl GameParticipantsCache {
 
         let (white, black) = fetch_game_participants(&self.rpc, &self.program_id, game_id).await?;
 
-        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.cache.lock();
+        if cache.len() >= 4096 {
+            cache.retain(|_, entry| entry.cached_at.elapsed() < PARTICIPANTS_CACHE_TTL);
+            if cache.len() >= 4096 {
+                cache.clear();
+            }
+        }
         cache.insert(
             game_id,
             CachedParticipants {
@@ -159,27 +159,32 @@ pub async fn is_session_key_authorized(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
-    fn seeded_cache() -> GameParticipantsCache {
-        let rpc = Arc::new(crate::signing::solana::rpc::make_rpc("http://127.0.0.1:1"));
-        GameParticipantsCache::new(rpc, Pubkey::new_unique())
+    fn seeded_cache() -> anyhow::Result<GameParticipantsCache> {
+        Ok({
+            let rpc = Arc::new(crate::signing::solana::rpc::make_rpc("http://127.0.0.1:1")?);
+            GameParticipantsCache::new(rpc, Pubkey::new_unique())
+        })
     }
 
     #[tokio::test]
-    async fn seeded_entry_is_returned_from_cache() {
-        let cache = seeded_cache();
+    async fn seeded_entry_is_returned_from_cache() -> anyhow::Result<()> {
+        let cache = seeded_cache()?;
         let white = Pubkey::new_unique();
         let black = Pubkey::new_unique();
         cache.seed_for_test(42, white, black);
 
-        let (got_white, got_black) = cache.get(42).await.expect("seeded entry must be found");
+        let (got_white, got_black) = cache.get(42).await.context("seeded entry must be found")?;
         assert_eq!(got_white, white);
         assert_eq!(got_black, black);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn unknown_game_with_unreachable_rpc_resolves_to_none() {
-        let cache = seeded_cache();
+    async fn unknown_game_with_unreachable_rpc_resolves_to_none() -> anyhow::Result<()> {
+        let cache = seeded_cache()?;
         assert!(cache.get(999).await.is_none());
+        Ok(())
     }
 }

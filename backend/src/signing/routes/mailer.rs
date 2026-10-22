@@ -6,7 +6,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use tracing::{error, info, warn};
 
-
 #[derive(Deserialize, Serialize, Default)]
 pub struct SignUpRequest {
     pub email: String,
@@ -31,7 +30,6 @@ pub struct MailJob {
     #[serde(default)]
     pub name: Option<String>,
 }
-
 
 pub enum EmailKind<'a> {
     Confirmation { name: &'a str },
@@ -91,7 +89,6 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-
 pub async fn send_email(to: &str, kind: EmailKind<'_>) -> Result<bool, String> {
     let api_key = match env::var("RESEND_API_KEY") {
         Ok(k) if !k.is_empty() => k,
@@ -133,7 +130,6 @@ pub async fn send_email(to: &str, kind: EmailKind<'_>) -> Result<bool, String> {
     }
 }
 
-
 fn append_jsonl(file: &str, value: &impl Serialize) {
     let path = PathBuf::from("data").join(file);
     if let Some(parent) = path.parent() {
@@ -173,7 +169,6 @@ fn valid_email(email: &str) -> bool {
             .unwrap_or(false)
 }
 
-
 async fn enqueue_email(
     pool: &sqlx::SqlitePool,
     template: &str,
@@ -211,7 +206,6 @@ pub async fn handle_email_job(job: crate::tasks::queue::Job) -> Result<(), Strin
     // No email key is a completed no-op in development; provider errors receive bounded retries.
     send_email(&mail.email, kind).await.map(|_| ())
 }
-
 
 pub async fn send_confirmation(
     State(app): State<crate::signing::AppState>,

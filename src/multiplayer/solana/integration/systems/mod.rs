@@ -54,17 +54,23 @@ pub fn initialize_solana_integration(
                     *retry_secs = 2.0;
                 } else if trimmed == "hot-wallet-dummy" {
                     info!("[WALLET] Defaulting to local hot wallet as requested by Tauri.");
-                    if let Some(keypair) = load_or_create_hot_wallet() {
-                        let pubkey = keypair.pubkey();
-                        info!("[WALLET] Hot wallet initialized. Pubkey: {}", pubkey);
-                        solana_state.wallet_pubkey = Some(pubkey);
-                        solana_state.rpc_client = Some(RpcClient::new_with_commitment(
-                            DEVNET_RPC_URL.to_string(),
-                            CommitmentConfig::confirmed(),
-                        ));
-                        if let Some(ref mut w) = solana_wallet {
-                            w.pubkey = Some(pubkey);
-                            w.keypair = Some(Arc::new(keypair));
+                    match load_or_create_hot_wallet() {
+                        Ok(keypair) => {
+                            let pubkey = keypair.pubkey();
+                            info!("[WALLET] Hot wallet initialized. Pubkey: {}", pubkey);
+                            solana_state.wallet_pubkey = Some(pubkey);
+                            solana_state.rpc_client = Some(RpcClient::new_with_commitment(
+                                DEVNET_RPC_URL.to_string(),
+                                CommitmentConfig::confirmed(),
+                            ));
+                            if let Some(ref mut w) = solana_wallet {
+                                w.pubkey = Some(pubkey);
+                                w.keypair = Some(Arc::new(keypair));
+                            }
+                        }
+                        Err(error) => {
+                            error!("[WALLET] {error}");
+                            *retry_secs = 3.0;
                         }
                     }
                 } else {

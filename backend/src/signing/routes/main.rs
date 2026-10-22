@@ -240,6 +240,7 @@ pub fn routes() -> Router<AppState> {
         .route("/games/active/{wallet}", get(active_game_for_wallet))
         .route("/session/status/{game_id}", get(session_status))
         .route("/game/{game_id}/nonce", get(get_move_nonce))
+        .route("/game/{game_id}/er-endpoint", get(game_er_endpoint))
         .route("/player/{pubkey}", get(get_player_profile))
         .route("/stats", get(get_stats))
 }
@@ -253,11 +254,43 @@ pub fn protected_routes() -> Router<AppState> {
         .route("/game/delegate", post(delegate_game))
         .route("/game/undelegate", post(undelegate_game))
         .route("/game/finalize", post(finalize_game))
+        .route("/game/{game_id}/recover", post(recover_game))
         // Telemetry and result updates mutate player evidence; both require identity.
         .route("/telemetry/blur", post(report_blur_telemetry))
         .route("/ratings/update", post(update_free_rated_result))
         .route("/game/{game_id}/seat", get(get_seat))
         .route("/game/{game_id}/seat/claim", post(claim_seat))
+}
+
+async fn recover_game(
+    State(state): State<AppState>,
+    caller: crate::signing::auth::RequireWallet,
+    Path(game_id): Path<u64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Fresh PDA validation in the worker protects against stale membership data;
+    // this guard prevents arbitrary callers from spending recovery sponsor fees.
+    require_game_participant(&state, game_id, &caller.0).await?;
+    let wallet: Pubkey = caller.0.parse().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid wallet address".to_string(),
+        )
+    })?;
+    let message =
+        crate::tasks::settlement_worker::recover_game(&std::sync::Arc::new(state), game_id, wallet)
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+    Ok(Json(serde_json::json!({ "message": message })))
+}
+
+async fn game_er_endpoint(
+    State(state): State<AppState>,
+    Path(game_id): Path<u64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let rpc = solana::routing::er_rpc_for_game(&state.config, game_id)
+        .await
+        .map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?;
+    Ok(Json(serde_json::json!({ "er_endpoint": rpc.url() })))
 }
 
 // Only authenticated on-chain participants may claim their own seat.
@@ -370,6 +403,7 @@ pub async fn create_session(
 ) -> Result<Json<CreateSessionResp>, (StatusCode, String)> {
     // Opening a session requires a wallet JWT for the named wallet.
     caller.require_is(&req.wallet_pubkey)?;
+    let _funding_lock = er_game_lock(&state, req.game_id).await;
 
     // Session funding spends fee-payer lamports for caller-chosen game IDs;
     // check both budgets before generating a keypair.
@@ -377,6 +411,15 @@ pub async fn create_session(
 
     let wallet = Pubkey::from_str(&req.wallet_pubkey)
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid wallet_pubkey".to_string()))?;
+    // Reject before persisting another pending key when rates are unavailable.
+    let platform_fee_lamports = state
+        .rate_cache
+        .gbp_to_lamports(crate::signing::routes::rates::PLATFORM_FEE_GBP)
+        .await
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "SOL/GBP rate unavailable".to_string(),
+        ))?;
     let session_pubkey = state.store.create(req.game_id, wallet).await.map_err(|e| {
         error!(
             "[VPS] Failed to create session for game {}: {}",
@@ -387,15 +430,6 @@ pub async fn create_session(
             "could not create session".to_string(),
         )
     })?;
-    // Reject an empty rate cache; treating missing rates as zero would make the game free.
-    let platform_fee_lamports = state
-        .rate_cache
-        .gbp_to_lamports(crate::signing::routes::rates::PLATFORM_FEE_GBP)
-        .await
-        .ok_or((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "SOL/GBP rate unavailable".to_string(),
-        ))?;
     let treasury_vault =
         Pubkey::find_program_address(&[solana::TREASURY_VAULT_SEED], &state.program_id).0;
     info!(
@@ -404,21 +438,41 @@ pub async fn create_session(
         req.game_id, platform_fee_lamports, treasury_vault
     );
 
-    // Start idempotent rent funding while the wallet prompt is open. Activation
-    // still funds and confirms if needed; run synchronous RPC on the blocking pool.
-    if let Ok(fee_payer) = Keypair::try_from(state.feepayer.next().to_bytes().as_slice()) {
-        let rpc_url = state.config.solana_rpc_url.clone();
-        let dest = session_pubkey;
-        let game_id = req.game_id;
-        tokio::task::spawn_blocking(move || {
-            let rpc = solana::make_rpc(&rpc_url);
-            if let Err(e) = solana::fund_account(&rpc, &fee_payer, &dest, SESSION_FUND_LAMPORTS) {
-                warn!(
-                    "[VPS] eager session-key pre-fund for game {game_id} failed (activate will retry): {e}"
-                );
-            }
-        });
-    }
+    // The client simulates create/join before opening its wallet. Both use this
+    // key as the account-rent payer, so returning an unfunded key races that
+    // simulation (System Program Custom(1)), even for a zero-stake game.
+    let fee_payer = state.feepayer.clone();
+    let rpc_url = state.config.solana_rpc_url.clone();
+    tokio::task::spawn_blocking(move || {
+        let rpc = solana::make_rpc(&rpc_url).map_err(|error| error.to_string())?;
+        solana::fund_account(
+            &rpc,
+            fee_payer.next(),
+            &session_pubkey,
+            SESSION_FUND_LAMPORTS,
+        )
+        .map_err(|e| {
+            let message =
+                solana::redact_urls_in(&format!("Session rent funding failed; retry hosting: {e}"));
+            warn!("[VPS] {message}");
+            message
+        })?;
+        let balance = rpc.get_balance(&session_pubkey).map_err(|e| {
+            solana::redact_urls_in(&format!("Could not confirm session rent funding: {e}"))
+        })?;
+        if balance < SESSION_FUND_LAMPORTS {
+            return Err("Session rent funding is not yet confirmed; retry hosting".to_string());
+        }
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("Session funding task failed: {e}"),
+        )
+    })?
+    .map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?;
 
     Ok(Json(CreateSessionResp {
         session_pubkey: session_pubkey.to_string(),
@@ -448,6 +502,8 @@ pub async fn activate_session(
 
     // The setup transaction fee payer must be the authenticated wallet.
     caller.require_is(&activating_wallet.to_string())?;
+    // Serialize funding and activation retries for this game with creation.
+    let _setup_lock = er_game_lock(&state, req.game_id).await;
 
     // Inspect before co-signing with a funded session key. Accept only create/join
     // plus authorize_session_key bundles referencing the claimed Game PDA.
@@ -495,14 +551,19 @@ pub async fn activate_session(
     }
 
     // Co-sign with the session key: create/join require both player and fee-payer signatures.
-    let entry = state.store.get(req.game_id).await.ok_or_else(|| {
-        let msg = format!(
-            "No session found for game {} — call /session/create first",
-            req.game_id
-        );
-        error!("[VPS] {msg}");
-        (StatusCode::NOT_FOUND, msg)
-    })?;
+    let entry = state
+        .store
+        .get(req.game_id)
+        .await
+        .map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?
+        .ok_or_else(|| {
+            let msg = format!(
+                "No session found for game {} — call /session/create first",
+                req.game_id
+            );
+            error!("[VPS] {msg}");
+            (StatusCode::NOT_FOUND, msg)
+        })?;
     let session_keypair = entry.keypair();
 
     // Fund the session key before setup because it pays account rent. Funding and
@@ -512,7 +573,7 @@ pub async fn activate_session(
     let game_id = req.game_id;
     let rpc_url = state.config.solana_rpc_url.clone();
     let submit = tokio::task::spawn_blocking(move || {
-        let rpc = solana::make_rpc(&rpc_url);
+        let rpc = solana::make_rpc(&rpc_url).map_err(|error| error.to_string())?;
         solana::fund_account(
             &rpc,
             feepayer.next(),
@@ -572,14 +633,22 @@ pub async fn session_status(
     Path(game_id): Path<u64>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    if let Some(entry) = state.store.get(game_id).await {
+    if let Some(entry) = state
+        .store
+        .get(game_id)
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+    {
         return Ok(Json(serde_json::json!({
             "active": entry.active,
             "session_pubkey": entry.session_pubkey().to_string(),
         })));
     }
     // Global-session games have no separate activation step or SessionStore row.
-    match resolve_game_signer(&state, game_id).await {
+    match resolve_game_signer(&state, game_id)
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+    {
         Some(kp) => Ok(Json(serde_json::json!({
             "active": true,
             "session_pubkey": kp.pubkey().to_string(),
@@ -708,6 +777,7 @@ pub async fn record_move(
             );
             error!("[VPS] {msg}");
             match e {
+                MoveSignerError::StorageUnavailable => (StatusCode::SERVICE_UNAVAILABLE, msg),
                 MoveSignerError::NoSession => (StatusCode::NOT_FOUND, msg),
                 MoveSignerError::SessionInactive => (StatusCode::PRECONDITION_FAILED, msg),
             }
@@ -735,7 +805,8 @@ pub async fn record_move(
         require_mover_authorization(&state, &repo, &req, &mover_wallet).await?;
     }
 
-    let _outcome = game.play_uci(&req.move_uci).map_err(|e| {
+    let san = game.san(&req.move_uci).ok();
+    game.play_uci(&req.move_uci).map_err(|e| {
         let msg = format!(
             "Move {} rejected by engine for game {}: {e:?}",
             req.move_uci, req.game_id
@@ -744,8 +815,11 @@ pub async fn record_move(
     })?;
 
     // Derive next FEN from the engine (discard client-provided next_fen)
-    let next_board = game.compact_board().to_bytes();
-    let derived_next_fen = game.compact_board().to_fen();
+    let board = game.compact_board();
+    let next_board = board.to_bytes();
+    let derived_next_fen = board
+        .to_fen()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
 
     let program_id = Pubkey::from_str(&state.config.program_id).map_err(|e| {
         let msg = format!("Bad configured program_id: {e}");
@@ -770,24 +844,28 @@ pub async fn record_move(
             &program_id,
             &session_pk,
             &mover_wallet,
-            req.game_id,
-            mv_bytes,
-            next_board,
-            req.nonce,
-            Some(sig_bytes),
-            req.nonce.checked_sub(1),
+            crate::signing::solana::MoveInput {
+                game_id: req.game_id,
+                move_uci: mv_bytes,
+                next_board,
+                nonce: req.nonce,
+                signature: Some(sig_bytes),
+                parent_nonce: req.nonce.checked_sub(1),
+            },
         )
     } else {
         solana::record_move_ix(
             &program_id,
             &session_pk,
             &mover_wallet,
-            req.game_id,
-            mv_bytes,
-            next_board,
-            req.nonce,
-            Some(sig_bytes),
-            req.nonce.checked_sub(1),
+            crate::signing::solana::MoveInput {
+                game_id: req.game_id,
+                move_uci: mv_bytes,
+                next_board,
+                nonce: req.nonce,
+                signature: Some(sig_bytes),
+                parent_nonce: req.nonce.checked_sub(1),
+            },
         )
     }
     .map_err(|e| {
@@ -798,7 +876,9 @@ pub async fn record_move(
         error!("[VPS] {msg}");
         (StatusCode::INTERNAL_SERVER_ERROR, msg)
     })?;
-    let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::RecordMove);
+    let er_rpc = solana::routing::er_rpc_for_game(&state.config, req.game_id)
+        .await
+        .map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?;
     let er_url = er_rpc.url();
 
     // Serialize all ER writes for this game, including moves, cranks, and undelegation.
@@ -834,10 +914,6 @@ pub async fn record_move(
         error!("[DB] Failed to upsert game {}: {}", game_id_str, e);
     } else {
         let move_number = repo.get_next_move_number(&game_id_str).await.unwrap_or(1) as i32;
-
-        let san = generate_san(&repo, &game_id_str, &move_uci, move_number)
-            .await
-            .ok();
 
         if let Err(e) = repo
             .add_move_simple(
@@ -976,10 +1052,15 @@ pub async fn report_blur_telemetry(
     Json(req): Json<BlurTelemetryReq>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     // Only accept telemetry for games this server is actually relaying.
-    state.store.get(req.game_id).await.ok_or((
-        StatusCode::NOT_FOUND,
-        format!("no session for game {}", req.game_id),
-    ))?;
+    state
+        .store
+        .get(req.game_id)
+        .await
+        .map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            format!("no session for game {}", req.game_id),
+        ))?;
 
     if req.move_number == 0 {
         return Err((
@@ -1073,11 +1154,16 @@ pub async fn delegate_game(
     // the bookkeeping accounts' rent. Restrict it to the game's own players.
     require_game_participant(&state, req.game_id, &caller.0).await?;
 
-    let entry = state.store.get(req.game_id).await.ok_or_else(|| {
-        let msg = format!("No session found for game {}", req.game_id);
-        error!("[VPS] {msg}");
-        (StatusCode::NOT_FOUND, msg)
-    })?;
+    let entry = state
+        .store
+        .get(req.game_id)
+        .await
+        .map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?
+        .ok_or_else(|| {
+            let msg = format!("No session found for game {}", req.game_id);
+            error!("[VPS] {msg}");
+            (StatusCode::NOT_FOUND, msg)
+        })?;
     let program_id = Pubkey::from_str(&state.config.program_id).map_err(|e| {
         let msg = format!("Bad configured program_id: {e}");
         error!("[VPS] {msg}");
@@ -1104,7 +1190,7 @@ pub async fn delegate_game(
     let game_id = req.game_id;
     let submit_url = rpc_url.clone();
     let sig = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let rpc = solana::make_rpc(&submit_url);
+        let rpc = solana::make_rpc(&submit_url).map_err(|error| error.to_string())?;
         let payer = Keypair::try_from(payer_bytes.as_slice())
             .map_err(|e| format!("fee-payer keypair unusable: {e}"))?;
         let session_kp = Keypair::try_from(session_bytes.as_slice())
@@ -1141,6 +1227,7 @@ pub async fn delegate_game(
         req.game_id, state.config.magic_router_rpc_url, sig
     );
 
+    solana::routing::invalidate_er_for_game(&state.config, req.game_id);
     schedule_time_check_crank(&state, &rpc_url, &program_id, &session_kp, req.game_id).await;
 
     Ok(Json(SigResp {
@@ -1164,7 +1251,7 @@ pub(crate) async fn schedule_time_check_crank(
     // Construct the synchronous RPC client on the blocking pool during request handling.
     let read_url = base_rpc_url.to_string();
     let account = tokio::task::spawn_blocking(move || {
-        solana::make_rpc(&read_url).get_account_data(&game_pda)
+        solana::make_rpc(&read_url)?.get_account_data(&game_pda)
     })
     .await;
 
@@ -1221,7 +1308,13 @@ pub(crate) async fn schedule_time_check_crank(
         }
     };
 
-    let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::ScheduleTimeCheck);
+    let er_rpc = match solana::routing::er_rpc_for_game(&state.config, game_id).await {
+        Ok(rpc) => rpc,
+        Err(e) => {
+            warn!("[VPS] Cannot schedule time check for game {game_id}: {e}");
+            return;
+        }
+    };
 
     // Coordinate client delegation and settlement-worker redelegation with the same lock.
     let _er_lock = er_game_lock(state, game_id).await;
@@ -1251,7 +1344,10 @@ pub(crate) async fn schedule_time_check_crank(
     }
 }
 
-async fn er_game_lock(state: &AppState, game_id: u64) -> tokio::sync::OwnedMutexGuard<()> {
+pub(crate) async fn er_game_lock(
+    state: &AppState,
+    game_id: u64,
+) -> tokio::sync::OwnedMutexGuard<()> {
     let per_game = {
         let mut locks = state.er_write_locks.lock().await;
         locks
@@ -1265,9 +1361,9 @@ async fn er_game_lock(state: &AppState, game_id: u64) -> tokio::sync::OwnedMutex
 pub async fn resolve_game_signer(
     state: &AppState,
     game_id: u64,
-) -> Option<solana_sdk::signature::Keypair> {
-    if let Some(entry) = state.store.get(game_id).await {
-        return Some(entry.keypair());
+) -> anyhow::Result<Option<std::sync::Arc<Keypair>>> {
+    if let Some(entry) = state.store.get(game_id).await? {
+        return Ok(Some(entry.keypair()));
     }
 
     let game_pda = Pubkey::find_program_address(
@@ -1276,44 +1372,49 @@ pub async fn resolve_game_signer(
     )
     .0;
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
-    let data = tokio::task::spawn_blocking(move || rpc.get_account_data(&game_pda))
-        .await
-        .ok()?
-        .ok()?;
+    let data = tokio::task::spawn_blocking(move || rpc.get_account_data(&game_pda)).await??;
 
-    let fee_payer = solana::game_account::parse(&data)?.fee_payer;
+    let Some(game) = solana::game_account::parse(&data) else {
+        return Ok(None);
+    };
+    let fee_payer = game.fee_payer;
 
     let sessions = state.active_global_sessions.lock().await;
-    sessions
+    Ok(sessions
         .values()
         .find(|kp| kp.pubkey() == fee_payer)
-        .and_then(|kp| solana_sdk::signature::Keypair::try_from(kp.to_bytes().as_slice()).ok())
+        .map(|key| std::sync::Arc::new(key.insecure_clone())))
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum MoveSignerError {
+    #[error("move signing session not found")]
     NoSession,
+    #[error("move signing session is inactive")]
     SessionInactive,
+    #[error("move signing storage is unavailable")]
+    StorageUnavailable,
 }
 
 pub async fn resolve_move_signer(
     state: &AppState,
     game_id: u64,
     mover_wallet: Pubkey,
-) -> Result<(Keypair, bool /* is_global */), MoveSignerError> {
+) -> Result<(std::sync::Arc<Keypair>, bool /* is_global */), MoveSignerError> {
     {
         let sessions = state.active_global_sessions.lock().await;
         if let Some(kp) = sessions.get(&mover_wallet) {
             // Global sessions are usable at registration; there is no separate active flag.
             let owned = Keypair::try_from(kp.to_bytes().as_slice())
                 .map_err(|_| MoveSignerError::NoSession)?;
-            return Ok((owned, true));
+            return Ok((std::sync::Arc::new(owned), true));
         }
     }
     let entry = state
         .store
         .get(game_id)
         .await
+        .map_err(|_| MoveSignerError::StorageUnavailable)?
         .ok_or(MoveSignerError::NoSession)?;
     if !entry.active {
         return Err(MoveSignerError::SessionInactive);
@@ -1332,6 +1433,7 @@ pub async fn undelegate_game(
 
     let session_kp = resolve_game_signer(&state, req.game_id)
         .await
+        .map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?
         .ok_or_else(|| {
             let msg = format!("No session found for game {}", req.game_id);
             error!("[VPS] {msg}");
@@ -1348,7 +1450,9 @@ pub async fn undelegate_game(
             error!("[VPS] {msg}");
             (StatusCode::INTERNAL_SERVER_ERROR, msg)
         })?;
-    let er_rpc = solana::rpc_for(&state.config, solana::RoutedInstr::UndelegateGame);
+    let er_rpc = solana::routing::er_rpc_for_game(&state.config, req.game_id)
+        .await
+        .map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?;
     let er_url = er_rpc.url();
 
     // Hold the lock through crank cancellation to serialize all ER writes for this game.
@@ -1518,6 +1622,7 @@ pub async fn finalize_game(
 
     let session_kp = resolve_game_signer(&state, req.game_id)
         .await
+        .map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?
         .ok_or_else(|| {
             let msg = format!("No session found for game {}", req.game_id);
             error!("[VPS] {msg}");
@@ -1533,7 +1638,7 @@ pub async fn finalize_game(
     let snap = {
         let rpc_url = rpc_url.clone();
         tokio::task::spawn_blocking(move || {
-            read_game_snapshot(&solana::make_rpc(&rpc_url), &program_id, game_id)
+            read_game_snapshot(&solana::make_rpc(&rpc_url).ok()?, &program_id, game_id)
         })
         .await
         .map_err(|e| {
@@ -1559,7 +1664,7 @@ pub async fn finalize_game(
         &snap.fee_payer,
     );
     let sig = tokio::task::spawn_blocking(move || {
-        solana::sign_and_submit(&solana::make_rpc(&rpc_url), &session_kp, &[ix])
+        solana::sign_and_submit(&solana::make_rpc(&rpc_url)?, &session_kp, &[ix])
     })
     .await
     .map_err(|e| {
@@ -1732,30 +1837,6 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<Json<StatsResp>,
     }))
 }
 
-async fn generate_san(
-    repo: &GameRepository,
-    game_id: &str,
-    move_uci: &str,
-    move_number: i32,
-) -> anyhow::Result<String> {
-    // Get previous FEN: last move's fen_after, or start position
-    let prev_fen = if move_number <= 1 {
-        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()
-    } else {
-        let prev_moves = repo.get_moves(game_id).await?;
-        prev_moves
-            .iter()
-            .find(|m| m.move_number == move_number - 1)
-            .and_then(|m| m.fen_after.clone())
-            .unwrap_or_else(|| {
-                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string()
-            })
-    };
-
-    let game = xfchess_rules::Game::from_fen(&prev_fen).map_err(anyhow::Error::msg)?;
-    game.san(move_uci).map_err(anyhow::Error::msg)
-}
-
 pub async fn get_move_nonce(
     Path(game_id): Path<u64>,
     State(state): State<AppState>,
@@ -1836,17 +1917,17 @@ pub async fn update_free_rated_result(
     let black_username = repo.get_username(&req.black_pubkey).await.ok();
 
     if let Err(e) = repo
-        .complete_game(
-            &game_id_str,
-            Some(&req.white_pubkey),
-            Some(&req.black_pubkey),
-            white_username.as_deref(),
-            black_username.as_deref(),
+        .complete_game(crate::db::repository::CompletedGame {
+            game_id: &game_id_str,
+            player_white: Some(&req.white_pubkey),
+            player_black: Some(&req.black_pubkey),
+            white_username: white_username.as_deref(),
+            black_username: black_username.as_deref(),
             winner,
-            None,
-            "",
-            0.0,
-        )
+            final_fen: None,
+            finalize_sig: "",
+            stake_amount: 0.0,
+        })
         .await
     {
         error!(
@@ -1894,6 +1975,7 @@ pub async fn submit_dispute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use std::time::SystemTime;
 
     #[test]
@@ -1946,7 +2028,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_move_signer_picks_the_correct_players_session() {
+    async fn resolve_move_signer_picks_the_correct_players_session() -> anyhow::Result<()> {
         use crate::infrastructure::{initialize_pools, run_migrations};
         use crate::signing::storage::tournament::TournamentStore;
         use crate::signing::SigningConfig;
@@ -1962,9 +2044,9 @@ mod tests {
         };
         let pools = initialize_pools(&db_url("session"), &db_url("vault"))
             .await
-            .expect("init pools");
-        run_migrations(&pools).await.expect("run migrations");
-        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+            .context("init pools")?;
+        run_migrations(&pools).await.context("run migrations")?;
+        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await?;
 
         let config = SigningConfig {
             port: 0,
@@ -1992,7 +2074,7 @@ mod tests {
             pools.session_pool.clone(),
             pools.vault_pool.clone(),
             std::sync::Arc::new(tournament_store),
-        );
+        )?;
 
         let game_id = 999_999u64;
 
@@ -2013,18 +2095,18 @@ mod tests {
             .store
             .create(game_id, black_wallet)
             .await
-            .expect("create classic session");
+            .context("create classic session")?;
         state.store.activate(game_id).await;
 
         let (white_kp, white_is_global) = resolve_move_signer(&state, game_id, white_wallet)
             .await
-            .expect("white should resolve to its global session");
+            .context("white should resolve to its global session")?;
         assert!(white_is_global, "white registered a global session");
         assert_eq!(white_kp.pubkey(), white_global_pubkey);
 
         let (black_kp, black_is_global) = resolve_move_signer(&state, game_id, black_wallet)
             .await
-            .expect("black should resolve to the classic per-game session");
+            .context("black should resolve to the classic per-game session")?;
         assert!(!black_is_global, "black used the classic per-game flow");
         assert_eq!(black_kp.pubkey(), classic_session_pubkey);
 
@@ -2035,10 +2117,12 @@ mod tests {
             black_kp.pubkey(),
             "each player must resolve to their own session, not one shared/clobbered signer"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn settlement_deactivation_blocks_further_moves_even_with_a_live_session_on_file() {
+    async fn settlement_deactivation_blocks_further_moves_even_with_a_live_session_on_file(
+    ) -> anyhow::Result<()> {
         use crate::infrastructure::{initialize_pools, run_migrations};
         use crate::signing::storage::tournament::TournamentStore;
         use crate::signing::SigningConfig;
@@ -2052,9 +2136,9 @@ mod tests {
         };
         let pools = initialize_pools(&db_url("session"), &db_url("vault"))
             .await
-            .expect("init pools");
-        run_migrations(&pools).await.expect("run migrations");
-        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+            .context("init pools")?;
+        run_migrations(&pools).await.context("run migrations")?;
+        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await?;
 
         let config = SigningConfig {
             port: 0,
@@ -2082,7 +2166,7 @@ mod tests {
             pools.session_pool.clone(),
             pools.vault_pool.clone(),
             std::sync::Arc::new(tournament_store),
-        );
+        )?;
 
         let game_id = 555_555u64;
         let wallet = Keypair::new().pubkey();
@@ -2090,14 +2174,14 @@ mod tests {
             .store
             .create(game_id, wallet)
             .await
-            .expect("create session");
+            .context("create session")?;
         state.store.activate(game_id).await;
 
         // While live: the ER/event-log side of the system can get a move
         // authorized, same as any in-progress game.
         resolve_move_signer(&state, game_id, wallet)
             .await
-            .expect("an active session must resolve to a usable signer");
+            .context("an active session must resolve to a usable signer")?;
 
         // Settlement-worker reconciliation updates backend session bookkeeping only.
         state.store.deactivate(game_id).await;
@@ -2105,16 +2189,18 @@ mod tests {
         // Keep the reconciled session row but revoke its authority to record moves.
         let err = resolve_move_signer(&state, game_id, wallet)
             .await
-            .expect_err("a deactivated (finalized) game must refuse further moves");
+            .err()
+            .context("a deactivated (finalized) game must refuse further moves")?;
         assert_eq!(
             err,
             MoveSignerError::SessionInactive,
             "must reject via the SessionInactive path specifically, not just fail generically"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn record_move_relays_only_moves_the_mover_signed() {
+    async fn record_move_relays_only_moves_the_mover_signed() -> anyhow::Result<()> {
         use crate::infrastructure::{initialize_pools, run_migrations};
         use crate::signing::storage::tournament::TournamentStore;
         use crate::signing::SigningConfig;
@@ -2128,9 +2214,9 @@ mod tests {
         };
         let pools = initialize_pools(&db_url("session"), &db_url("vault"))
             .await
-            .expect("init pools");
-        run_migrations(&pools).await.expect("run migrations");
-        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+            .context("init pools")?;
+        run_migrations(&pools).await.context("run migrations")?;
+        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await?;
 
         let config = SigningConfig {
             port: 0,
@@ -2158,7 +2244,7 @@ mod tests {
             pools.session_pool.clone(),
             pools.vault_pool.clone(),
             std::sync::Arc::new(tournament_store),
-        );
+        )?;
 
         let game_id = 777_777u64;
         let white_wallet = Keypair::new().pubkey();
@@ -2175,19 +2261,29 @@ mod tests {
 
         // White's 1.e4 is recorded; white's client now relays black's reply.
         let mut position = xfchess_rules::Game::default();
-        position.play_uci("e2e4").unwrap();
+        position
+            .play_uci("e2e4")
+            .map_err(anyhow::Error::msg)
+            .context("test setup failed")?;
         let repo = GameRepository::new(state.store.pool().clone());
-        repo.upsert_game(&game_id.to_string()).await.unwrap();
+        repo.upsert_game(&game_id.to_string())
+            .await
+            .context("test setup failed")?;
         repo.add_move_simple(
             &game_id.to_string(),
             1,
             "e2e4",
             None,
-            Some(&position.compact_board().to_fen()),
+            Some(
+                &position
+                    .compact_board()
+                    .to_fen()
+                    .map_err(anyhow::Error::msg)?,
+            ),
             &white_wallet.to_string(),
         )
         .await
-        .unwrap();
+        .context("test setup failed")?;
 
         let black_device_key = Keypair::new();
         let sign = |kp: &Keypair, previous: &str| {
@@ -2242,7 +2338,7 @@ mod tests {
                 1,
             )
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         for forged in [
             None,
@@ -2261,17 +2357,18 @@ mod tests {
             StatusCode::FORBIDDEN
         );
 
-        // The signed move passes authorisation and fails later, at the
-        // unreachable test ER.
+        // The signed move passes authorisation, then fails validator discovery
+        // because the test router is unreachable.
         assert_eq!(
             relay(white_wallet, black_wallet, Some(valid)).await,
-            StatusCode::BAD_GATEWAY
+            StatusCode::SERVICE_UNAVAILABLE
         );
         // A player submitting their own move needs no signature.
         assert_eq!(
             relay(black_wallet, black_wallet, None).await,
-            StatusCode::BAD_GATEWAY
+            StatusCode::SERVICE_UNAVAILABLE
         );
+        Ok(())
     }
 
     #[test]
@@ -2402,11 +2499,12 @@ mod tests {
     }
 
     #[test]
-    fn test_timestamp_generation() {
+    fn test_timestamp_generation() -> anyhow::Result<()> {
         // Test that SystemTime can generate valid timestamps
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .expect("System time should be after UNIX_EPOCH");
+            .context("System time should be after UNIX_EPOCH")?;
         assert!(now.as_secs() > 0);
+        Ok(())
     }
 }

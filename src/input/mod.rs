@@ -12,7 +12,7 @@ pub mod pointer;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::core::states::InGameplay;
+use crate::core::state::InGameplay;
 use pointer::CursorStyle;
 
 pub struct InputPlugin;

@@ -1,6 +1,8 @@
 use crate::{
     Pairing, PairingConfig, PairingError, PairingResult, Scoregroup, SwissPlayer, SwissRound,
 };
+#[cfg(test)]
+use anyhow::Context as _;
 use std::collections::HashSet;
 use tracing::{debug, trace, warn};
 
@@ -10,11 +12,22 @@ pub fn generate_pairings(
     total_rounds: u8,
     config: &PairingConfig,
 ) -> PairingResult<SwissRound> {
-    if round > total_rounds {
+    if round == 0 || round > total_rounds {
         return Err(PairingError::InvalidRound {
             round,
             total_rounds,
         });
+    }
+    if players.len() > usize::from(u16::MAX)
+        || players.iter().any(|player| !player.score.is_finite())
+    {
+        return Err(PairingError::Internal(
+            "invalid player count or non-finite score".into(),
+        ));
+    }
+    let mut ids = HashSet::with_capacity(players.len());
+    if players.iter().any(|player| !ids.insert(player.id.as_str())) {
+        return Err(PairingError::Internal("duplicate player ID".into()));
     }
 
     // Filter out absent and withdrawn players before pairing
@@ -37,6 +50,18 @@ pub fn generate_pairings(
     let mut manual_pairings: Vec<Pairing> = Vec::new();
 
     for mo in &config.manual_overrides {
+        if mo.white == mo.black
+            || config.is_forbidden(&mo.white, &mo.black)
+            || overridden_ids.contains(&mo.white)
+            || overridden_ids.contains(&mo.black)
+            || !active.iter().any(|player| player.id == mo.white)
+            || !active.iter().any(|player| player.id == mo.black)
+        {
+            return Err(PairingError::NoValidPairing {
+                player1: mo.white.clone(),
+                player2: mo.black.clone(),
+            });
+        }
         manual_pairings.push(Pairing {
             white: mo.white.clone(),
             black: mo.black.clone(),
@@ -103,7 +128,7 @@ pub fn generate_pairings(
                 pool.retain(|p| p.id != bye.id);
                 byes.push(bye.id);
             } else {
-                let floater = select_down_floater(&pool);
+                let floater = select_down_floater(&pool)?;
                 pool.retain(|p| p.id != floater.id);
                 float_downs.push(floater.id.clone());
                 carried.push(floater);
@@ -195,7 +220,7 @@ fn group_by_score(players: &[SwissPlayer]) -> Vec<Scoregroup> {
             Some(score) => {
                 groups.push(Scoregroup {
                     score,
-                    players: current_group.clone(),
+                    players: std::mem::take(&mut current_group),
                 });
                 current_score = Some(player.score);
                 current_group.clear();
@@ -216,7 +241,7 @@ fn group_by_score(players: &[SwissPlayer]) -> Vec<Scoregroup> {
 }
 
 fn is_valid_pairing(p1: &str, p2: &str, p1_opponents: &[String], config: &PairingConfig) -> bool {
-    let already_played = p1_opponents.contains(&p2.to_string());
+    let already_played = p1_opponents.iter().any(|opponent| opponent == p2);
     let forbidden = config.is_forbidden(p1, p2);
     !already_played && !forbidden
 }
@@ -278,7 +303,7 @@ fn pair_scoregroup(
 
 /// Picks the player an odd scoregroup sends down: the lowest-ranked one that did not
 /// already float down last round, falling back to the lowest-ranked overall.
-fn select_down_floater(pool: &[SwissPlayer]) -> SwissPlayer {
+fn select_down_floater(pool: &[SwissPlayer]) -> PairingResult<SwissPlayer> {
     let mut ranked: Vec<&SwissPlayer> = pool.iter().collect();
     ranked.sort_by(|a, b| {
         b.score
@@ -293,7 +318,7 @@ fn select_down_floater(pool: &[SwissPlayer]) -> SwissPlayer {
         .find(|p| !p.floated_down_last_round())
         .or_else(|| ranked.last())
         .map(|p| (*p).clone())
-        .expect("select_down_floater called with an empty pool")
+        .ok_or_else(|| PairingError::Internal("cannot select a floater from an empty pool".into()))
 }
 
 fn select_bye_candidate(players: &[SwissPlayer]) -> PairingResult<SwissPlayer> {
@@ -345,19 +370,20 @@ fn apply_float_pairing(
     while remaining.len() >= 2 {
         let first = remaining.remove(0);
 
-        // Prefer a non-rematch, non-forbidden partner; fall back to first available.
-        let no_clean = remaining
+        let partner_idx = remaining
             .iter()
-            .all(|p| !is_valid_pairing(&first.id, &p.id, &first.opponents, config));
-        let partner_idx = if no_clean {
-            warn!("No valid opponent for {}, accepting rematch", first.id);
-            0
-        } else {
-            remaining
-                .iter()
-                .position(|p| is_valid_pairing(&first.id, &p.id, &first.opponents, config))
-                .unwrap_or(0)
-        };
+            .position(|player| is_valid_pairing(&first.id, &player.id, &first.opponents, config))
+            .or_else(|| {
+                remaining
+                    .iter()
+                    .position(|player| !config.is_forbidden(&first.id, &player.id))
+            })
+            .ok_or_else(|| {
+                PairingError::ScoregroupPairingFailed(format!(
+                    "no permitted opponent for {}",
+                    first.id
+                ))
+            })?;
 
         let partner = remaining.remove(partner_idx);
         pairings.push(Pairing {
@@ -407,7 +433,7 @@ fn assign_colors_dutch(
 }
 
 fn assign_board_numbers(pairings: Vec<Pairing>, players: &[SwissPlayer]) -> Vec<Pairing> {
-    let mut with_rating: Vec<(Pairing, u32)> = pairings
+    let mut with_rating: Vec<(Pairing, u64)> = pairings
         .into_iter()
         .map(|p| {
             let white_rating = find_player(players, &p.white)
@@ -416,11 +442,11 @@ fn assign_board_numbers(pairings: Vec<Pairing>, players: &[SwissPlayer]) -> Vec<
             let black_rating = find_player(players, &p.black)
                 .map(|bp| bp.rating)
                 .unwrap_or(0);
-            (p, white_rating + black_rating)
+            (p, u64::from(white_rating) + u64::from(black_rating))
         })
         .collect();
 
-    with_rating.sort_by(|a, b| b.1.cmp(&a.1));
+    with_rating.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
     with_rating
         .into_iter()
@@ -480,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_pairings_8_players() {
+    fn test_generate_pairings_8_players() -> anyhow::Result<()> {
         let players = vec![
             test_player("p1", 2000, 3.0),
             test_player("p2", 1900, 3.0),
@@ -492,17 +518,19 @@ mod tests {
             test_player("p8", 1300, 1.0),
         ];
 
-        let round = generate_pairings(1, &players, 5, &default_config()).unwrap();
+        let round = generate_pairings(1, &players, 5, &default_config())
+            .context("required operation value")?;
 
         assert_eq!(round.pairings.len(), 4);
         assert!(round.byes.is_empty());
 
         // Top players should be paired
         assert_eq!(round.pairings[0].board, 1); // Highest combined rating
+        Ok(())
     }
 
     #[test]
-    fn test_odd_players_get_bye() {
+    fn test_odd_players_get_bye() -> anyhow::Result<()> {
         let players = vec![
             test_player("p1", 2000, 3.0),
             test_player("p2", 1900, 3.0),
@@ -511,16 +539,18 @@ mod tests {
             test_player("p5", 1600, 1.0),
         ];
 
-        let round = generate_pairings(1, &players, 5, &default_config()).unwrap();
+        let round = generate_pairings(1, &players, 5, &default_config())
+            .context("required operation value")?;
 
         assert_eq!(round.pairings.len(), 2);
         assert_eq!(round.byes.len(), 1);
         // Lowest rated should get bye
         assert_eq!(round.byes[0], "p5");
+        Ok(())
     }
 
     #[test]
-    fn bye_rotation_prefers_player_with_no_prior_bye() {
+    fn bye_rotation_prefers_player_with_no_prior_bye() -> anyhow::Result<()> {
         let mut p4 = test_player("p4", 1700, 1.0);
         let mut p5 = test_player("p5", 1600, 1.0);
         p5.bye_rounds = vec![1]; // p5 already had a bye in round 1
@@ -535,17 +565,19 @@ mod tests {
             p5,
         ];
 
-        let round = generate_pairings(2, &players, 5, &default_config()).unwrap();
+        let round = generate_pairings(2, &players, 5, &default_config())
+            .context("required operation value")?;
 
         assert_eq!(round.byes.len(), 1);
         assert_ne!(
             round.byes[0], "p5",
             "p5 already had a bye; should not receive another"
         );
+        Ok(())
     }
 
     #[test]
-    fn rematch_is_avoided_by_swap_in_bottom_half() {
+    fn rematch_is_avoided_by_swap_in_bottom_half() -> anyhow::Result<()> {
         let mut p1 = test_player("p1", 2000, 1.0);
         let mut p3 = test_player("p3", 1800, 1.0);
         p1.opponents.push("p3".into());
@@ -558,7 +590,8 @@ mod tests {
             test_player("p4", 1700, 1.0),
         ];
 
-        let round = generate_pairings(2, &players, 5, &default_config()).unwrap();
+        let round = generate_pairings(2, &players, 5, &default_config())
+            .context("required operation value")?;
 
         assert_eq!(round.pairings.len(), 2);
         for p in &round.pairings {
@@ -566,10 +599,11 @@ mod tests {
                 (p.white == "p1" && p.black == "p3") || (p.white == "p3" && p.black == "p1");
             assert!(!rematch, "engine produced a rematch: {:?}", p);
         }
+        Ok(())
     }
 
     #[test]
-    fn forced_bye_emitted_when_no_valid_opponent_after_float() {
+    fn forced_bye_emitted_when_no_valid_opponent_after_float() -> anyhow::Result<()> {
         let mut p1 = test_player("p1", 2000, 0.0);
         let mut p2 = test_player("p2", 1900, 0.0);
         let mut p3 = test_player("p3", 1800, 0.0);
@@ -577,15 +611,17 @@ mod tests {
         p2.opponents = vec!["p1".into(), "p3".into()];
         p3.opponents = vec!["p1".into(), "p2".into()];
 
-        let round = generate_pairings(3, &[p1, p2, p3], 5, &default_config()).unwrap();
+        let round = generate_pairings(3, &[p1, p2, p3], 5, &default_config())
+            .context("required operation value")?;
 
         let total_accounted = round.pairings.len() * 2 + round.byes.len();
         assert_eq!(total_accounted, 3, "every player must be accounted for");
         assert!(!round.byes.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn absent_player_is_skipped_from_pairing() {
+    fn absent_player_is_skipped_from_pairing() -> anyhow::Result<()> {
         let mut absent = test_player("p5", 1600, 1.0);
         absent.absent = true;
 
@@ -597,7 +633,8 @@ mod tests {
             absent,
         ];
 
-        let round = generate_pairings(2, &players, 5, &default_config()).unwrap();
+        let round = generate_pairings(2, &players, 5, &default_config())
+            .context("required operation value")?;
 
         // p5 is absent; the 4 active players pair cleanly with no bye
         assert_eq!(round.pairings.len(), 2);
@@ -606,10 +643,11 @@ mod tests {
             assert_ne!(p.white, "p5");
             assert_ne!(p.black, "p5");
         }
+        Ok(())
     }
 
     #[test]
-    fn forbidden_pair_is_not_produced() {
+    fn forbidden_pair_is_not_produced() -> anyhow::Result<()> {
         let players = vec![
             test_player("p1", 2000, 1.0),
             test_player("p2", 1900, 1.0),
@@ -622,17 +660,19 @@ mod tests {
             manual_overrides: vec![],
         };
 
-        let round = generate_pairings(1, &players, 5, &config).unwrap();
+        let round =
+            generate_pairings(1, &players, 5, &config).context("required operation value")?;
 
         for p in &round.pairings {
             let forbidden =
                 (p.white == "p1" && p.black == "p2") || (p.white == "p2" && p.black == "p1");
             assert!(!forbidden, "forbidden pair was produced: {:?}", p);
         }
+        Ok(())
     }
 
     #[test]
-    fn manual_override_is_honored() {
+    fn manual_override_is_honored() -> anyhow::Result<()> {
         let players = vec![
             test_player("p1", 2000, 1.0),
             test_player("p2", 1900, 1.0),
@@ -648,12 +688,14 @@ mod tests {
             }],
         };
 
-        let round = generate_pairings(1, &players, 5, &config).unwrap();
+        let round =
+            generate_pairings(1, &players, 5, &config).context("required operation value")?;
 
         let forced = round
             .pairings
             .iter()
             .any(|p| (p.white == "p1" && p.black == "p4") || (p.white == "p4" && p.black == "p1"));
         assert!(forced, "manual override pairing not present");
+        Ok(())
     }
 }

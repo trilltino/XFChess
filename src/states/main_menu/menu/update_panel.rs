@@ -46,7 +46,7 @@ pub(super) fn render_updates_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext
                 egui::RichText::new(format!(
                     "Version {} is available. You have {}.",
                     release.version,
-                    updates::CURRENT_VERSION
+                    update_check::CURRENT_VERSION
                 ))
                 .size(11.0)
                 .color(egui::Color32::from_rgb(220, 235, 255)),
@@ -63,7 +63,7 @@ pub(super) fn render_updates_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext
             ui.label(
                 egui::RichText::new(format!(
                     "You are on the latest release: {}.",
-                    updates::CURRENT_VERSION
+                    update_check::CURRENT_VERSION
                 ))
                 .size(11.0)
                 .color(egui::Color32::from_rgb(170, 225, 180)),
@@ -147,7 +147,7 @@ pub(super) fn render_updates_panel(ui: &mut egui::Ui, cx: &mut MainMenuUIContext
         "Open docs/INSTALL.md in your browser.",
         W,
     ) {
-        updates::open_in_browser(updates::INSTALL_GUIDE_URL);
+        update_check::open_in_browser(update_check::INSTALL_GUIDE_URL);
     }
 }
 
@@ -175,7 +175,7 @@ pub(super) fn render_platform_download(
         None => (
             "Latest release page",
             String::new(),
-            updates::RELEASES_URL.to_string(),
+            update_check::RELEASES_URL.to_string(),
         ),
     };
 
@@ -230,7 +230,7 @@ pub(super) fn render_platform_download(
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     if response.clicked() {
-        updates::open_in_browser(&url);
+        update_check::open_in_browser(&url);
     }
 }
 

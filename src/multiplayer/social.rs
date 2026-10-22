@@ -4,8 +4,8 @@ use std::time::Instant;
 use tracing::info;
 
 use crate::multiplayer::network::vps::{
-    get_contacts, get_online, get_pending_requests, poll_social, update_presence, LobbyInvite,
-    SocialContact, SocialFriendRequest, SocialPresence,
+    get_contacts, get_node_presence, get_pending_requests, poll_social, update_presence,
+    LobbyInvite, SocialContact, SocialFriendRequest, SocialPresence,
 };
 use crate::multiplayer::types::NetworkEvent;
 
@@ -59,6 +59,7 @@ const OPPONENT_PRESENCE_TIMEOUT_SECS: i64 = 6;
 
 #[derive(Resource, Default)]
 pub struct OpponentLivenessState {
+    opponent_node_id: Option<String>,
     opponent_last_seen: Option<chrono::DateTime<chrono::Utc>>,
     since_last_poll: f32,
     fetch_rx: Option<Receiver<Option<chrono::DateTime<chrono::Utc>>>>,
@@ -282,15 +283,15 @@ fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlaye
 
     crate::core::net_task::spawn_detached("social", move || {
         // Heartbeat — best-effort; ignore failures.
-        let _ = update_presence(&SocialPresence {
+        let count = update_presence(&SocialPresence {
             node_id,
             pubkey,
             display_name: display,
             status: "online".to_string(),
             game_id: None,
             updated_at: chrono::Utc::now().to_rfc3339(),
-        });
-        let count = get_online().map(|v| v.len()).unwrap_or(0);
+        })
+        .unwrap_or(0);
         let _ = tx.send(count);
     });
 }
@@ -298,20 +299,28 @@ fn tick_presence_sync(friends: Res<FriendsState>, mut online: ResMut<OnlinePlaye
 fn check_opponent_presence(
     time: Res<Time>,
     mut liveness: ResMut<OpponentLivenessState>,
-    game_mode: Res<crate::core::states::GameMode>,
+    game_mode: Res<crate::core::state::GameMode>,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
 ) {
-    use crate::core::states::GameMode;
+    use crate::core::state::GameMode;
 
     let is_online = matches!(
         *game_mode,
         GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
     );
+    if !is_online {
+        *liveness = OpponentLivenessState::default();
+        return;
+    }
     let Some(opponent_node_id) = p2p_conn.as_ref().and_then(|c| c.peer_node_id.clone()) else {
+        *liveness = OpponentLivenessState::default();
         return;
     };
-    if !is_online {
-        return;
+    if liveness.opponent_node_id.as_ref() != Some(&opponent_node_id) {
+        *liveness = OpponentLivenessState {
+            opponent_node_id: Some(opponent_node_id.clone()),
+            ..default()
+        };
     }
 
     if let Some(rx) = &liveness.fetch_rx {
@@ -329,12 +338,14 @@ fn check_opponent_presence(
         let (tx, rx) = bounded(1);
         liveness.fetch_rx = Some(rx);
         crate::core::net_task::spawn_detached("social", move || {
-            let seen = get_online().ok().and_then(|list| {
-                list.into_iter()
-                    .find(|p| p.node_id == opponent_node_id)
-                    .and_then(|p| chrono::DateTime::parse_from_rfc3339(&p.updated_at).ok())
-                    .map(|dt| dt.with_timezone(&chrono::Utc))
-            });
+            let seen = get_node_presence(&opponent_node_id)
+                .ok()
+                .flatten()
+                .and_then(|p| {
+                    chrono::DateTime::parse_from_rfc3339(&p.updated_at)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                });
             let _ = tx.send(seen);
         });
     }

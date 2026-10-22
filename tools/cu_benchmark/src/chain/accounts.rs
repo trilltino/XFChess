@@ -66,23 +66,23 @@ impl<'a> BorshCursor<'a> {
     }
 
     fn u16(&mut self) -> anyhow::Result<u16> {
-        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
+        Ok(u16::from_le_bytes(self.take(2)?.try_into()?))
     }
 
     fn u32(&mut self) -> anyhow::Result<u32> {
-        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+        Ok(u32::from_le_bytes(self.take(4)?.try_into()?))
     }
 
     fn u64(&mut self) -> anyhow::Result<u64> {
-        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+        Ok(u64::from_le_bytes(self.take(8)?.try_into()?))
     }
 
     fn i64(&mut self) -> anyhow::Result<i64> {
-        Ok(i64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+        Ok(i64::from_le_bytes(self.take(8)?.try_into()?))
     }
 
     fn pubkey(&mut self) -> anyhow::Result<Pubkey> {
-        Ok(Pubkey::new_from_array(self.take(32)?.try_into().unwrap()))
+        Ok(Pubkey::new_from_array(self.take(32)?.try_into()?))
     }
 
     fn string(&mut self) -> anyhow::Result<()> {
@@ -158,9 +158,10 @@ pub fn fetch_tournament_places(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
     #[test]
-    fn profile_rating_follows_variable_length_country() {
+    fn profile_rating_follows_variable_length_country() -> anyhow::Result<()> {
         for country in ["", "GB"] {
             let mut data = Sha256::digest("account:PlayerProfile")[..8].to_vec();
             data.extend([0; 32]);
@@ -168,10 +169,14 @@ mod tests {
             data.extend(country.as_bytes());
             data.extend([0; 16]);
             data.extend(1400f64.to_le_bytes());
-            assert_eq!(profile_elo(&data).unwrap(), 1400.0);
+            assert_eq!(
+                profile_elo(&data).context(concat!(file!(), ":", line!()))?,
+                1400.0
+            );
             assert!(profile_elo(&data[..data.len() - 1]).is_err());
             data[0] ^= 1;
             assert!(profile_elo(&data).is_err());
         }
+        Ok(())
     }
 }

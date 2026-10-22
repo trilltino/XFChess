@@ -1,4 +1,5 @@
 use anchor_lang::{AccountSerialize, Discriminator, InstructionData, Space, ToAccountMetas};
+use anyhow::Context as _;
 use solana_program_test::{BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
@@ -40,19 +41,23 @@ fn system_account(lamports: u64) -> Account {
     }
 }
 
-fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> Account {
-    let mut data = Vec::with_capacity(space);
-    value.try_serialize(&mut data).unwrap();
-    if data.len() < space {
-        data.resize(space, 0);
-    }
-    Account {
-        lamports: 10_000_000,
-        data,
-        owner: xfchess_game::ID,
-        executable: false,
-        rent_epoch: 0,
-    }
+fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> anyhow::Result<Account> {
+    Ok({
+        let mut data = Vec::with_capacity(space);
+        value
+            .try_serialize(&mut data)
+            .context("required operation value")?;
+        if data.len() < space {
+            data.resize(space, 0);
+        }
+        Account {
+            lamports: 10_000_000,
+            data,
+            owner: xfchess_game::ID,
+            executable: false,
+            rent_epoch: 0,
+        }
+    })
 }
 
 async fn start(accounts: Vec<(Pubkey, Account)>) -> ProgramTestContext {
@@ -95,15 +100,16 @@ fn custom_code(err: &TransactionError) -> Option<u32> {
     }
 }
 
-async fn lamports_of(ctx: &mut ProgramTestContext, key: Pubkey) -> u64 {
-    ctx.banks_client
-        .get_account(key)
-        .await
-        .unwrap()
-        .map(|a| a.lamports)
-        .unwrap_or(0)
+async fn lamports_of(ctx: &mut ProgramTestContext, key: Pubkey) -> anyhow::Result<u64> {
+    Ok({
+        ctx.banks_client
+            .get_account(key)
+            .await
+            .context("required operation value")?
+            .map(|a| a.lamports)
+            .unwrap_or(0)
+    })
 }
-
 
 fn withdraw_ix(authority: Pubkey, destination: Pubkey, amount: u64) -> Instruction {
     let accounts = xfchess_game::__client_accounts_withdraw_treasury::WithdrawTreasury {
@@ -130,10 +136,10 @@ fn treasury_authority_keypair() -> Option<Keypair> {
 }
 
 #[tokio::test]
-async fn withdraw_treasury_happy_path() {
+async fn withdraw_treasury_happy_path() -> anyhow::Result<()> {
     let Some(authority) = treasury_authority_keypair() else {
         eprintln!("skip: keys/treasury_authority.json not present");
-        return;
+        return Ok(());
     };
     let vault = treasury_vault_pda().0;
     let dest = Keypair::new().pubkey();
@@ -145,24 +151,25 @@ async fn withdraw_treasury_happy_path() {
     ])
     .await;
 
-    let before = lamports_of(&mut ctx, dest).await;
+    let before = lamports_of(&mut ctx, dest).await?;
     send(
         &mut ctx,
         withdraw_ix(authority.pubkey(), dest, 400_000_000),
         &[&authority],
     )
     .await
-    .expect("withdraw should succeed");
+    .context("withdraw should succeed")?;
 
-    assert_eq!(lamports_of(&mut ctx, dest).await, before + 400_000_000);
-    assert_eq!(lamports_of(&mut ctx, vault).await, 600_000_000);
+    assert_eq!(lamports_of(&mut ctx, dest).await?, before + 400_000_000);
+    assert_eq!(lamports_of(&mut ctx, vault).await?, 600_000_000);
+    Ok(())
 }
 
 #[tokio::test]
-async fn withdraw_treasury_rent_floor_rejected() {
+async fn withdraw_treasury_rent_floor_rejected() -> anyhow::Result<()> {
     let Some(authority) = treasury_authority_keypair() else {
         eprintln!("skip: keys/treasury_authority.json not present");
-        return;
+        return Ok(());
     };
     let vault = treasury_vault_pda().0;
     let dest = Keypair::new().pubkey();
@@ -182,15 +189,17 @@ async fn withdraw_treasury_rent_floor_rejected() {
         &[&authority],
     )
     .await
-    .unwrap_err();
+    .err()
+    .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::InsufficientFunds))
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn withdraw_treasury_wrong_signer_rejected() {
+async fn withdraw_treasury_wrong_signer_rejected() -> anyhow::Result<()> {
     let vault = treasury_vault_pda().0;
     let attacker = Keypair::new();
     let dest = Keypair::new().pubkey();
@@ -208,19 +217,21 @@ async fn withdraw_treasury_wrong_signer_rejected() {
         &[&attacker],
     )
     .await
-    .unwrap_err();
+    .err()
+    .context("required operation value")?;
     // Anchor `address = …` violation maps to the mapped error code.
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::UnauthorizedAccess))
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn withdraw_treasury_zero_amount_rejected() {
+async fn withdraw_treasury_zero_amount_rejected() -> anyhow::Result<()> {
     let Some(authority) = treasury_authority_keypair() else {
         eprintln!("skip: keys/treasury_authority.json not present");
-        return;
+        return Ok(());
     };
     let vault = treasury_vault_pda().0;
     let dest = Keypair::new().pubkey();
@@ -238,10 +249,11 @@ async fn withdraw_treasury_zero_amount_rejected() {
         &[&authority],
     )
     .await
-    .unwrap_err();
+    .err()
+    .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidArgument)));
+    Ok(())
 }
-
 
 #[allow(clippy::too_many_arguments)]
 fn tournament(
@@ -324,27 +336,33 @@ fn close_ix(id: u64, authority: Pubkey) -> Instruction {
     }
 }
 
-fn close_accounts(id: u64, t: &Tournament, escrow_lamports: u64) -> Vec<(Pubkey, Account)> {
-    let escrow_account = Account {
-        lamports: escrow_lamports,
-        data: TournamentEscrow::DISCRIMINATOR.to_vec(),
-        owner: xfchess_game::ID,
-        executable: false,
-        rent_epoch: 0,
-    };
+fn close_accounts(
+    id: u64,
+    t: &Tournament,
+    escrow_lamports: u64,
+) -> anyhow::Result<Vec<(Pubkey, Account)>> {
+    Ok({
+        let escrow_account = Account {
+            lamports: escrow_lamports,
+            data: TournamentEscrow::DISCRIMINATOR.to_vec(),
+            owner: xfchess_game::ID,
+            executable: false,
+            rent_epoch: 0,
+        };
 
-    vec![
-        (
-            tournament_pda(id).0,
-            serialize_padded(t, 8 + Tournament::INIT_SPACE),
-        ),
-        (tournament_escrow_pda(id).0, escrow_account),
-        (treasury_vault_pda().0, system_account(1_000_000)),
-    ]
+        vec![
+            (
+                tournament_pda(id).0,
+                serialize_padded(t, 8 + Tournament::INIT_SPACE)?,
+            ),
+            (tournament_escrow_pda(id).0, escrow_account),
+            (treasury_vault_pda().0, system_account(1_000_000)),
+        ]
+    })
 }
 
 #[tokio::test]
-async fn close_tournament_blocked_while_active() {
+async fn close_tournament_blocked_while_active() -> anyhow::Result<()> {
     let id = 1;
     let authority = Keypair::new();
     let bump = tournament_pda(id).1;
@@ -358,19 +376,21 @@ async fn close_tournament_blocked_while_active() {
         1_000_000_000,
         bump,
     );
-    let mut ctx = start(close_accounts(id, &t, 1_000_000_000)).await;
+    let mut ctx = start(close_accounts(id, &t, 1_000_000_000)?).await;
 
     let err = send(&mut ctx, close_ix(id, authority.pubkey()), &[&authority])
         .await
-        .unwrap_err();
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::InvalidTournamentStatus))
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn close_tournament_blocked_with_unpaid_winner() {
+async fn close_tournament_blocked_with_unpaid_winner() -> anyhow::Result<()> {
     let id = 2;
     let authority = Keypair::new();
     let bump = tournament_pda(id).1;
@@ -385,19 +405,21 @@ async fn close_tournament_blocked_with_unpaid_winner() {
         1_000_000_000,
         bump,
     );
-    let mut ctx = start(close_accounts(id, &t, 1_000_000_000)).await;
+    let mut ctx = start(close_accounts(id, &t, 1_000_000_000)?).await;
 
     let err = send(&mut ctx, close_ix(id, authority.pubkey()), &[&authority])
         .await
-        .unwrap_err();
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::PrizesOutstanding))
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn close_tournament_succeeds_when_all_claimed() {
+async fn close_tournament_succeeds_when_all_claimed() -> anyhow::Result<()> {
     let id = 3;
     let authority = Keypair::new();
     let bump = tournament_pda(id).1;
@@ -416,16 +438,17 @@ async fn close_tournament_succeeds_when_all_claimed() {
     let escrow = tournament_escrow_pda(id).0;
     let vault = treasury_vault_pda().0;
     let escrow_lamports = 5_000_000u64; // leftover dust in escrow
-    let mut ctx = start(close_accounts(id, &t, escrow_lamports)).await;
+    let mut ctx = start(close_accounts(id, &t, escrow_lamports)?).await;
 
-    let vault_before = lamports_of(&mut ctx, vault).await;
+    let vault_before = lamports_of(&mut ctx, vault).await?;
     send(&mut ctx, close_ix(id, authority.pubkey()), &[&authority])
         .await
-        .expect("close should succeed once winners are paid");
+        .context("close should succeed once winners are paid")?;
 
     // Escrow fully swept (account reclaimed) and its full balance moved to vault.
-    let escrow_after = lamports_of(&mut ctx, escrow).await;
-    let vault_after = lamports_of(&mut ctx, vault).await;
+    let escrow_after = lamports_of(&mut ctx, escrow).await?;
+    let vault_after = lamports_of(&mut ctx, vault).await?;
     assert_eq!(escrow_after, 0, "escrow should be fully reclaimed");
     assert_eq!(vault_after - vault_before, escrow_lamports);
+    Ok(())
 }

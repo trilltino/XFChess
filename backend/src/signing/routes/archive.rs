@@ -6,9 +6,9 @@ use axum::{
     routing::get,
     Router,
 };
+use futures::StreamExt;
 use serde_json::json;
-use std::fs;
-use std::path::Path;
+use tokio::io::AsyncReadExt;
 
 // Must match tasks::archiver; production permits writes only under data/.
 const ARCHIVE_PATH: &str = "data/archive/games.xfg";
@@ -27,18 +27,27 @@ pub fn archive_routes() -> Router<AppState> {
 async fn get_archive_stats(
     State(_state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let games_size = fs::metadata(ARCHIVE_PATH).map(|m| m.len()).unwrap_or(0);
-    let wallets_size = fs::metadata(WALLET_INDEX_PATH)
-        .map(|m| m.len())
+    let games_size = tokio::fs::metadata(ARCHIVE_PATH)
+        .await
+        .map(|metadata| metadata.len())
         .unwrap_or(0);
-
-    let wallet_count = if Path::new(WALLET_INDEX_PATH).exists() {
-        fs::read_to_string(WALLET_INDEX_PATH)
-            .map(|c| c.lines().count())
-            .unwrap_or(0)
-    } else {
-        0
-    };
+    let wallets_size = tokio::fs::metadata(WALLET_INDEX_PATH)
+        .await
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let mut wallet_count = 0;
+    if let Ok(file) = tokio::fs::File::open(WALLET_INDEX_PATH).await {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let mut lines = BufReader::new(file).lines();
+        while lines
+            .next_line()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .is_some()
+        {
+            wallet_count += 1;
+        }
+    }
 
     Ok(Json(json!({
         "games_archive_size_bytes": games_size,
@@ -48,35 +57,48 @@ async fn get_archive_stats(
 }
 
 async fn download_games_archive() -> Result<Response, StatusCode> {
-    if !Path::new(ARCHIVE_PATH).exists() {
-        return Err(StatusCode::NOT_FOUND);
-    }
-
-    let content = fs::read(ARCHIVE_PATH).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Response::builder()
-        .header(header::CONTENT_TYPE, "application/octet-stream")
-        .header(
-            header::CONTENT_DISPOSITION,
-            "attachment; filename=\"games.xfg\"",
-        )
-        .body(axum::body::Body::from(content))
-        .unwrap())
+    download(
+        ARCHIVE_PATH,
+        "application/octet-stream",
+        "attachment; filename=\"games.xfg\"",
+    )
+    .await
 }
 
 async fn download_wallets_index() -> Result<Response, StatusCode> {
-    if !Path::new(WALLET_INDEX_PATH).exists() {
-        return Err(StatusCode::NOT_FOUND);
-    }
+    download(
+        WALLET_INDEX_PATH,
+        "text/plain",
+        "attachment; filename=\"wallets.idx\"",
+    )
+    .await
+}
 
-    let content = fs::read(WALLET_INDEX_PATH).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Response::builder()
-        .header(header::CONTENT_TYPE, "text/plain")
-        .header(
-            header::CONTENT_DISPOSITION,
-            "attachment; filename=\"wallets.idx\"",
-        )
-        .body(axum::body::Body::from(content))
-        .unwrap())
+async fn download(
+    path: &str,
+    content_type: &'static str,
+    disposition: &'static str,
+) -> Result<Response, StatusCode> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        })?;
+    let stream = async_stream::try_stream! {
+        loop {
+            let mut chunk = vec![0u8; 64 * 1024];
+            let count = file.read(&mut chunk).await?;
+            if count == 0 { break; }
+            chunk.truncate(count);
+            yield bytes::Bytes::from(chunk);
+        }
+    };
+    Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .body(axum::body::Body::from_stream(
+            stream.map(|chunk: Result<bytes::Bytes, std::io::Error>| chunk),
+        ))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }

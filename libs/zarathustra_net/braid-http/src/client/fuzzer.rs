@@ -69,7 +69,7 @@ fn fuzz_parser_with_mutated_messages(seed: u64) {
             2 => {
                 stream.remove(idx);
             }
-            _ => unreachable!(),
+            _ => continue,
         }
     }
 

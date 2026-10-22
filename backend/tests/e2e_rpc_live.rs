@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use backend::signing::solana::rpc::{fallback_rpc_url, make_rpc, read_with_failover, redact_url};
 use solana_sdk::signature::Signer;
 use std::str::FromStr;
@@ -17,72 +18,78 @@ fn skip_unless_configured(test_name: &str) -> bool {
 
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
-fn primary_rpc_reports_healthy() {
+fn primary_rpc_reports_healthy() -> anyhow::Result<()> {
     if skip_unless_configured("primary_rpc_reports_healthy") {
-        return;
+        return Ok(());
     }
     let url = backend::signing::solana::rpc::rpc_url_or_devnet();
     println!("[e2e_rpc_live] probing primary RPC: {}", redact_url(&url));
-    make_rpc(&url)
+    make_rpc(&url)?
         .get_health()
-        .expect("primary RPC should report healthy");
+        .context("primary RPC should report healthy")?;
+
+    Ok(())
 }
 
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
-fn deployed_program_account_is_reachable_via_failover() {
+fn deployed_program_account_is_reachable_via_failover() -> anyhow::Result<()> {
     if skip_unless_configured("deployed_program_account_is_reachable_via_failover") {
-        return;
+        return Ok(());
     }
     let program_id =
-        solana_sdk::pubkey::Pubkey::from_str(PROGRAM_ID).expect("valid program id constant");
+        solana_sdk::pubkey::Pubkey::from_str(PROGRAM_ID).context("valid program id constant")?;
 
     // Exercises the real primary/fallback path used in production, not just a
     // raw RpcClient call — this is what `read_with_failover` callers actually get.
     let account = read_with_failover(|rpc| rpc.get_account(&program_id))
-        .expect("program account should be readable through the real failover path");
+        .context("program account should be readable through the real failover path")?;
     assert!(
         account.executable,
         "program account must be marked executable on whatever cluster SOLANA_RPC_URL points at"
     );
+
+    Ok(())
 }
 
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
-fn fallback_url_is_independently_reachable() {
+fn fallback_url_is_independently_reachable() -> anyhow::Result<()> {
     if skip_unless_configured("fallback_url_is_independently_reachable") {
-        return;
+        return Ok(());
     }
     // Confirms the fallback endpoint is itself alive, so a real primary outage
     // would actually have somewhere to fail over to.
     let fb = fallback_rpc_url();
     println!("[e2e_rpc_live] probing fallback RPC: {}", redact_url(&fb));
-    make_rpc(&fb)
+    make_rpc(&fb)?
         .get_health()
-        .expect("fallback RPC should report healthy");
+        .context("fallback RPC should report healthy")?;
+
+    Ok(())
 }
 
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
-fn debug_transaction_reports_real_on_chain_outcome() {
+fn debug_transaction_reports_real_on_chain_outcome() -> anyhow::Result<()> {
     if skip_unless_configured("debug_transaction_reports_real_on_chain_outcome") {
-        return;
+        return Ok(());
     }
     // Pin a real finalized devnet program transaction; update it after a devnet reset.
     const KNOWN_GOOD_SIG: &str =
         "2riEGnPfQQcvWRdnSDnW1kNMLU5TtpYE1CktsrLz9gssbrNZ1VyjwSXQk55fwUqQPiN5NQprsLU2A2Yxgv9pVDQM";
 
     let url = backend::signing::solana::rpc::rpc_url_or_devnet();
-    let rpc = make_rpc(&url);
+    let rpc = make_rpc(&url)?;
     let sig = solana_sdk::signature::Signature::from_str(KNOWN_GOOD_SIG)
-        .expect("valid signature constant");
+        .context("valid signature constant")?;
 
     let info = tokio::runtime::Runtime::new()
-        .unwrap()
+        .context("test setup failed")?
         .block_on(backend::signing::solana::debug::debug_transaction(
             &rpc, &sig,
         ))
-        .expect("known-good signature should be found on-chain");
+        .context("known-good signature should be found on-chain")?;
 
     assert!(
         info.success,
@@ -98,29 +105,31 @@ fn debug_transaction_reports_real_on_chain_outcome() {
         "program_ids should include this backend's own program: {:?}",
         info.program_ids
     );
+
+    Ok(())
 }
 
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
-fn debug_transaction_reports_real_on_chain_failure() {
+fn debug_transaction_reports_real_on_chain_failure() -> anyhow::Result<()> {
     if skip_unless_configured("debug_transaction_reports_real_on_chain_failure") {
-        return;
+        return Ok(());
     }
     // Pin a finalized failed transaction to verify success detection. Re-pin after devnet resets.
     const KNOWN_FAILED_SIG: &str =
         "3tzUrvpK9ViBwc4fuHgLZ3fJGmiRjotF416dxrtgXEMYBfpiH4dukRk8G3jXMvzsBW72Gp8Y6JE9UeP3F9UWfNa2";
 
     let url = backend::signing::solana::rpc::rpc_url_or_devnet();
-    let rpc = make_rpc(&url);
+    let rpc = make_rpc(&url)?;
     let sig = solana_sdk::signature::Signature::from_str(KNOWN_FAILED_SIG)
-        .expect("valid signature constant");
+        .context("valid signature constant")?;
 
     let info = tokio::runtime::Runtime::new()
-        .unwrap()
+        .context("test setup failed")?
         .block_on(backend::signing::solana::debug::debug_transaction(
             &rpc, &sig,
         ))
-        .expect("known-failed signature should still be found on-chain");
+        .context("known-failed signature should still be found on-chain")?;
 
     assert!(
         !info.success,
@@ -130,57 +139,62 @@ fn debug_transaction_reports_real_on_chain_failure() {
         info.error.is_some(),
         "a failed transaction should carry a real error string"
     );
+
+    Ok(())
 }
 
 // Opt-in devnet profile-creation test using a throwaway signer and the
 // wallet UI wire format. Verify that sync-profile observes username_set.
 
-async fn spawn_live_app(rpc_url: &str) -> axum::Router {
-    use backend::infrastructure::{build_app_router, initialize_pools, run_migrations};
-    use backend::signing::storage::tournament::TournamentStore;
-    use backend::signing::{AppState, SigningConfig};
+async fn spawn_live_app(rpc_url: &str) -> anyhow::Result<axum::Router> {
+    Ok({
+        use backend::infrastructure::{build_app_router, initialize_pools, run_migrations};
+        use backend::signing::storage::tournament::TournamentStore;
+        use backend::signing::{AppState, SigningConfig};
 
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let db_url =
-        |tag: &str| format!("sqlite:file:xfchess_e2e_live_{tag}_{nanos}?mode=memory&cache=shared");
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let db_url = |tag: &str| {
+            format!("sqlite:file:xfchess_e2e_live_{tag}_{nanos}?mode=memory&cache=shared")
+        };
 
-    let pools = initialize_pools(&db_url("session"), &db_url("vault"))
-        .await
-        .expect("init pools");
-    run_migrations(&pools).await.expect("run migrations");
-    let tournament_store = TournamentStore::new(pools.session_pool.clone()).await;
+        let pools = initialize_pools(&db_url("session"), &db_url("vault"))
+            .await
+            .context("init pools")?;
+        run_migrations(&pools).await.context("run migrations")?;
+        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await?;
 
-    let config = SigningConfig {
-        port: 0,
-        solana_rpc_url: rpc_url.to_string(),
-        solana_mainnet_rpc_url: None,
-        er_rpc_url: rpc_url.to_string(),
-        magic_router_rpc_url: rpc_url.to_string(),
-        program_id: PROGRAM_ID.to_string(),
-        jwt_secret: "test-secret-not-for-production".into(),
-        identity_encryption_key: "0".repeat(64),
-        identity_salt: "0".repeat(64),
-        fee_payer_keys: vec![],
-        vps_authority_key: None,
-        kyc_authority_key: None,
-        link_authority_key: None,
-        treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
-        admin_token: Some("test-admin-token".into()),
-        tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
-        usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
-        lichess_client_id: String::new(),
-        allowed_origins: vec![],
-    };
-    let state = AppState::new(
-        config,
-        pools.session_pool.clone(),
-        pools.vault_pool.clone(),
-        std::sync::Arc::new(tournament_store),
-    );
-    build_app_router(state.clone()).with_state(state)
+        let config = SigningConfig {
+            port: 0,
+            solana_rpc_url: rpc_url.to_string(),
+            solana_mainnet_rpc_url: None,
+            er_rpc_url: rpc_url.to_string(),
+            magic_router_rpc_url: rpc_url.to_string(),
+            program_id: PROGRAM_ID.to_string(),
+            jwt_secret: "test-secret-not-for-production".into(),
+            identity_encryption_key: "0".repeat(64),
+            identity_salt: "0".repeat(64),
+            fee_payer_keys: vec![],
+            vps_authority_key: None,
+            kyc_authority_key: None,
+            link_authority_key: None,
+            treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
+            admin_token: Some("test-admin-token".into()),
+            tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
+            usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
+            lichess_client_id: String::new(),
+            allowed_origins: vec![],
+        };
+        let state = AppState::new(
+            config,
+            pools.session_pool.clone(),
+            pools.vault_pool.clone(),
+            std::sync::Arc::new(tournament_store),
+        )?;
+        build_app_router(state.clone()).with_state(state)
+    })
 }
 
 async fn live_send(
@@ -189,36 +203,46 @@ async fn live_send(
     uri: &str,
     bearer: Option<&str>,
     body: Option<&serde_json::Value>,
-) -> (axum::http::StatusCode, serde_json::Value) {
-    use tower::ServiceExt;
-    let mut b = axum::http::Request::builder().uri(uri).method(method);
-    if let Some(t) = bearer {
-        b = b.header("authorization", format!("Bearer {t}"));
-    }
-    let req = match body {
-        Some(v) if !v.is_null() => b
-            .header("content-type", "application/json")
-            .body(axum::body::Body::from(serde_json::to_vec(v).unwrap()))
-            .unwrap(),
-        _ => b.body(axum::body::Body::empty()).unwrap(),
-    };
-    let resp = router.clone().oneshot(req).await.unwrap();
-    let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
-    (status, value)
+) -> anyhow::Result<(axum::http::StatusCode, serde_json::Value)> {
+    Ok({
+        use tower::ServiceExt;
+        let mut b = axum::http::Request::builder().uri(uri).method(method);
+        if let Some(t) = bearer {
+            b = b.header("authorization", format!("Bearer {t}"));
+        }
+        let req = match body {
+            Some(v) if !v.is_null() => b
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(v).context("test setup failed")?,
+                ))
+                .context("test setup failed")?,
+            _ => b
+                .body(axum::body::Body::empty())
+                .context("test setup failed")?,
+        };
+        let resp = router
+            .clone()
+            .oneshot(req)
+            .await
+            .context("test setup failed")?;
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .context("test setup failed")?;
+        let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, value)
+    })
 }
 
 #[tokio::test]
 #[ignore = "hits a live RPC endpoint and spends real devnet SOL (airdrop) — opt in with --ignored"]
-async fn init_profile_flow_flips_onchain_username_set() {
+async fn init_profile_flow_flips_onchain_username_set() -> anyhow::Result<()> {
     if skip_unless_configured("init_profile_flow_flips_onchain_username_set") {
-        return;
+        return Ok(());
     }
-    let rpc_url = std::env::var("SOLANA_RPC_URL").expect("checked by skip_unless_configured");
-    let router = spawn_live_app(&rpc_url).await;
+    let rpc_url = std::env::var("SOLANA_RPC_URL").context("checked by skip_unless_configured")?;
+    let router = spawn_live_app(&rpc_url).await?;
 
     // Throwaway devnet identity — never reused outside this test.
     let kp = solana_sdk::signature::Keypair::new();
@@ -228,16 +252,16 @@ async fn init_profile_flow_flips_onchain_username_set() {
     let rpc = solana_client::rpc_client::RpcClient::new(rpc_url.clone());
     let airdrop_sig = rpc
         .request_airdrop(&kp.pubkey(), 1_000_000_000)
-        .expect("devnet airdrop request");
+        .context("devnet airdrop request")?;
     let blockhash = rpc
         .get_latest_blockhash()
-        .expect("blockhash for airdrop confirm");
+        .context("blockhash for airdrop confirm")?;
     rpc.confirm_transaction_with_spinner(
         &airdrop_sig,
         &blockhash,
         solana_commitment_config::CommitmentConfig::confirmed(),
     )
-    .expect("airdrop should confirm");
+    .context("airdrop should confirm")?;
 
     // SIWS login → JWT (same flow as e2e_api.rs's siws_login_then_logout_revokes_token).
     let (status, body) = live_send(
@@ -247,9 +271,9 @@ async fn init_profile_flow_flips_onchain_username_set() {
         None,
         Some(&serde_json::json!({ "wallet": wallet })),
     )
-    .await;
+    .await?;
     assert_eq!(status, axum::http::StatusCode::OK, "challenge: {body}");
-    let nonce = body["nonce"].as_str().expect("nonce").to_string();
+    let nonce = body["nonce"].as_str().context("nonce")?.to_string();
     let sig = kp
         .sign_message(format!("xfchess:siws:{nonce}").as_bytes())
         .to_string();
@@ -260,9 +284,9 @@ async fn init_profile_flow_flips_onchain_username_set() {
         None,
         Some(&serde_json::json!({ "wallet": wallet, "signature": sig, "nonce": nonce })),
     )
-    .await;
+    .await?;
     assert_eq!(status, axum::http::StatusCode::OK, "verify: {body}");
-    let token = body["token"].as_str().expect("token").to_string();
+    let token = body["token"].as_str().context("token")?.to_string();
 
     // Build the on-chain init_profile tx exactly as ProfileStep's
     // requireOnchain branch does (tauri/wallet-ui/src/App.tsx).
@@ -278,13 +302,13 @@ async fn init_profile_flow_flips_onchain_username_set() {
             "date_of_birth": date_of_birth,
         })),
     )
-    .await;
+    .await?;
     assert_eq!(
         status,
         axum::http::StatusCode::OK,
         "init-profile-tx: {body}"
     );
-    let tx_b64 = body["tx_b64"].as_str().expect("tx_b64").to_string();
+    let tx_b64 = body["tx_b64"].as_str().context("tx_b64")?.to_string();
 
     // Sign locally with the throwaway keypair — this is exactly what
     // provider.signTransaction(tx) does in the real wallet-ui flow.
@@ -292,13 +316,13 @@ async fn init_profile_flow_flips_onchain_username_set() {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD
             .decode(&tx_b64)
-            .expect("base64 decode tx")
+            .context("base64 decode tx")?
     };
     let mut tx: solana_sdk::transaction::Transaction =
-        bincode::deserialize(&tx_bytes).expect("deserialize tx");
+        bincode::deserialize(&tx_bytes).context("deserialize tx")?;
     let recent_blockhash = tx.message.recent_blockhash;
-    tx.try_sign(&[&kp], recent_blockhash).expect("sign tx");
-    let signed_bytes = bincode::serialize(&tx).expect("serialize signed tx");
+    tx.try_sign(&[&kp], recent_blockhash).context("sign tx")?;
+    let signed_bytes = bincode::serialize(&tx).context("serialize signed tx")?;
     let signed_b64 = {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode(&signed_bytes)
@@ -311,7 +335,7 @@ async fn init_profile_flow_flips_onchain_username_set() {
         None,
         Some(&serde_json::json!({ "tx_b64": signed_b64 })),
     )
-    .await;
+    .await?;
     assert_eq!(status, axum::http::StatusCode::OK, "broadcast-tx: {body}");
 
     // Poll sync-profile until the on-chain flip is visible (devnet confirmation lag).
@@ -324,7 +348,7 @@ async fn init_profile_flow_flips_onchain_username_set() {
             Some(&token),
             None,
         )
-        .await;
+        .await?;
         assert_eq!(status, axum::http::StatusCode::OK, "sync-profile: {body}");
         if body["username_set"] == true {
             username_set = true;
@@ -336,18 +360,20 @@ async fn init_profile_flow_flips_onchain_username_set() {
         username_set,
         "on-chain PlayerProfile.username_set should flip to true after broadcast-tx"
     );
+
+    Ok(())
 }
 
 // Opt-in devnet tournament creation and discovery test. Requires a funded
 // VPS_AUTHORITY_KEY for the real admin initialization transactions.
 #[tokio::test]
 #[ignore = "hits a live RPC endpoint and spends real devnet SOL (3 on-chain inits) — opt in with --ignored"]
-async fn admin_creates_tournament_and_game_client_can_see_it() {
+async fn admin_creates_tournament_and_game_client_can_see_it() -> anyhow::Result<()> {
     if skip_unless_configured("admin_creates_tournament_and_game_client_can_see_it") {
-        return;
+        return Ok(());
     }
-    let rpc_url = std::env::var("SOLANA_RPC_URL").expect("checked by skip_unless_configured");
-    let router = spawn_live_app(&rpc_url).await;
+    let rpc_url = std::env::var("SOLANA_RPC_URL").context("checked by skip_unless_configured")?;
+    let router = spawn_live_app(&rpc_url).await?;
 
     // Match the middleware’s debug API-key fallback while allowing environment overrides.
     let api_key = std::env::var("ADMIN_API_KEY").unwrap_or_else(|_| "dev".to_string());
@@ -374,17 +400,21 @@ async fn admin_creates_tournament_and_game_client_can_see_it() {
         .header("content-type", "application/json")
         .header("X-API-Key", &api_key)
         .body(axum::body::Body::from(
-            serde_json::to_vec(&create_body).unwrap(),
+            serde_json::to_vec(&create_body).context("test setup failed")?,
         ))
-        .unwrap();
+        .context("test setup failed")?;
     let resp = {
         use tower::ServiceExt;
-        router.clone().oneshot(req).await.unwrap()
+        router
+            .clone()
+            .oneshot(req)
+            .await
+            .context("test setup failed")?
     };
     let status = resp.status();
     let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .context("test setup failed")?;
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     assert_eq!(
         status,
@@ -394,15 +424,17 @@ async fn admin_creates_tournament_and_game_client_can_see_it() {
     assert_eq!(body["tournament_id"], tournament_id);
 
     // Verify the game client's discovery endpoint sees the newly created tournament.
-    let (status, body) = live_send(&router, "GET", "/tournaments", None, None).await;
+    let (status, body) = live_send(&router, "GET", "/tournaments", None, None).await?;
     assert_eq!(status, axum::http::StatusCode::OK, "tournaments: {body}");
     let listed = body
         .as_array()
-        .expect("tournaments list")
+        .context("tournaments list")?
         .iter()
         .any(|t| t["tournament_id"] == tournament_id);
     assert!(
         listed,
         "newly created tournament {tournament_id} should appear in GET /tournaments"
     );
+
+    Ok(())
 }

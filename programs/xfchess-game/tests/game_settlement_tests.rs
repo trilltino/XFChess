@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anyhow::Context as _;
 use xfchess_game::common::escrow;
 use xfchess_game::constants::CREATE_GAME_COST;
 use xfchess_game::game_ix::common::{init_game_fields, opponent_of, InitGameArgs};
@@ -37,13 +38,14 @@ fn blank_game() -> Game {
 }
 
 #[test]
-fn pot_is_wager_times_two_with_overflow_guard() {
-    assert_eq!(escrow::pot(50).unwrap(), 100);
+fn pot_is_wager_times_two_with_overflow_guard() -> anyhow::Result<()> {
+    assert_eq!(escrow::pot(50).context("required operation value")?, 100);
     assert!(escrow::pot(u64::MAX).is_err());
+    Ok(())
 }
 
 #[test]
-fn init_game_fields_sets_complete_waiting_state() {
+fn init_game_fields_sets_complete_waiting_state() -> anyhow::Result<()> {
     let mut game = blank_game();
     let white = Pubkey::new_unique();
     let payer = Pubkey::new_unique();
@@ -64,7 +66,7 @@ fn init_game_fields_sets_complete_waiting_state() {
         111,
         255,
     )
-    .unwrap();
+    .context("required operation value")?;
 
     assert_eq!(game.game_id, 42);
     assert_eq!(game.white, white);
@@ -77,6 +79,7 @@ fn init_game_fields_sets_complete_waiting_state() {
     assert_eq!(game.fee_payer, payer);
     assert_eq!(game.fees_advanced, CREATE_GAME_COST);
     assert_eq!(game.tournament_id, Some(9));
+    Ok(())
 }
 
 #[test]
@@ -93,10 +96,14 @@ fn move_apply_rejects_turn_and_nonce_mismatches() {
 }
 
 #[test]
-fn opponent_guard_returns_the_other_player() {
+fn opponent_guard_returns_the_other_player() -> anyhow::Result<()> {
     let mut game = blank_game();
     game.white = Pubkey::new_unique();
     game.black = Pubkey::new_unique();
-    assert_eq!(opponent_of(&game, game.white).unwrap(), game.black);
+    assert_eq!(
+        opponent_of(&game, game.white).context("required operation value")?,
+        game.black
+    );
     assert!(opponent_of(&game, Pubkey::new_unique()).is_err());
+    Ok(())
 }

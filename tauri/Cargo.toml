@@ -61,14 +61,9 @@ windows = { version = "0.61", features = [
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
-# default to small, optimized workspace release binaries
-[profile.release]
-panic = "abort"
-codegen-units = 1
-lto = true
-incremental = false
-opt-level = "s"
-strip = true
 
 [dev-dependencies]
 tokio-test = "0.4"
+
+[lints]
+workspace = true

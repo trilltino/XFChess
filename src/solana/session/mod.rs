@@ -158,19 +158,14 @@ impl GameSession {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SessionHealth {
+    #[default]
     Standalone,
     Connected,
     Expired,
     Invalid,
     LoadFailed,
-}
-
-impl Default for SessionHealth {
-    fn default() -> Self {
-        Self::Standalone
-    }
 }
 
 impl SessionHealth {
@@ -294,7 +289,9 @@ fn initialize_session(mut session_state: ResMut<SessionState>) {
             );
         }
         Err(SessionError::InvalidSigner(e)) => {
-            let msg = format!("Session signer is invalid. Reconnect your wallet from the launcher/web app. ({e})");
+            let msg = format!(
+                "Session signer is invalid. Reconnect your wallet from the launcher/web app. ({e})"
+            );
             warn!("{msg}");
             session_state.health = SessionHealth::Invalid;
             session_state.last_error = Some("Invalid session signer".to_string());
@@ -333,7 +330,7 @@ mod tests {
     use solana_sdk::signature::{Keypair, Signer};
 
     #[test]
-    fn test_session_json_roundtrip() {
+    fn test_session_json_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         let keypair = Keypair::new();
         let session = GameSession {
             wallet_pubkey: Pubkey::new_unique(),
@@ -345,12 +342,14 @@ mod tests {
             role: GameRole::Host,
         };
 
-        let json = serde_json::to_string(&session).unwrap();
-        let parsed = GameSession::from_json(&json).unwrap();
+        let json = serde_json::to_string(&session)?;
+        let parsed = GameSession::from_json(&json)?;
 
         assert_eq!(session.wallet_pubkey, parsed.wallet_pubkey);
         assert_eq!(session.session_signer, parsed.session_signer);
         assert_eq!(session.role, parsed.role);
+
+        Ok(())
     }
 
     #[test]
@@ -370,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_invalid_signer_secret() {
+    fn test_session_invalid_signer_secret() -> Result<(), Box<dyn std::error::Error>> {
         let keypair = Keypair::new();
         let mut session = GameSession {
             wallet_pubkey: Pubkey::new_unique(),
@@ -382,7 +381,7 @@ mod tests {
             role: GameRole::Joiner,
         };
 
-        let json = serde_json::to_string(&session).unwrap();
+        let json = serde_json::to_string(&session)?;
         assert!(matches!(
             GameSession::from_json(&json),
             Err(SessionError::InvalidSigner(_))
@@ -390,17 +389,19 @@ mod tests {
 
         let other = Keypair::new();
         session.session_signer_secret = other.to_bytes().to_vec();
-        let json = serde_json::to_string(&session).unwrap();
+        let json = serde_json::to_string(&session)?;
         assert!(matches!(
             GameSession::from_json(&json),
             Err(SessionError::InvalidSigner(_))
         ));
+
+        Ok(())
     }
 
     #[test]
-    fn test_find_temp_session_chooses_newest_valid() {
+    fn test_find_temp_session_chooses_newest_valid() -> Result<(), Box<dyn std::error::Error>> {
         let dir = unique_test_dir();
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir)?;
 
         let old_keypair = Keypair::new();
         let old = GameSession {
@@ -414,12 +415,11 @@ mod tests {
         };
         std::fs::write(
             dir.join("xfchess_session_old.json"),
-            serde_json::to_string(&old).unwrap(),
-        )
-        .unwrap();
+            serde_json::to_string(&old)?,
+        )?;
 
         std::thread::sleep(std::time::Duration::from_millis(10));
-        std::fs::write(dir.join("xfchess_session_bad.json"), "{").unwrap();
+        std::fs::write(dir.join("xfchess_session_bad.json"), "{")?;
 
         std::thread::sleep(std::time::Duration::from_millis(10));
         let new_keypair = Keypair::new();
@@ -434,14 +434,15 @@ mod tests {
         };
         std::fs::write(
             dir.join("xfchess_session_new.json"),
-            serde_json::to_string(&new).unwrap(),
-        )
-        .unwrap();
+            serde_json::to_string(&new)?,
+        )?;
 
-        let found = GameSession::find_temp_session_in(&dir).unwrap().unwrap();
+        let found = GameSession::find_temp_session_in(&dir)?.ok_or("expected persisted session")?;
         assert_eq!(found.game_id.as_deref(), Some("new"));
 
         let _ = std::fs::remove_dir_all(dir);
+
+        Ok(())
     }
 
     fn unique_test_dir() -> std::path::PathBuf {

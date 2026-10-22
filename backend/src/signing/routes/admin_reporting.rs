@@ -342,18 +342,25 @@ pub(super) async fn game_sessions(pool: &SqlitePool, game_id: &str) -> Result<Va
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     #[test]
-    fn date_windows_validate_and_use_exclusive_end() {
+    fn date_windows_validate_and_use_exclusive_end() -> anyhow::Result<()> {
         let mut q = FeeReportQuery {
             period: Some("week".into()),
             from: None,
             to: Some(1_000_000),
         };
-        assert_eq!(window(&q, 2_000_000).unwrap(), (395_200, 1_000_000));
+        assert_eq!(
+            window(&q, 2_000_000)
+                .map_err(|error| anyhow::anyhow!("{error:?}"))
+                .context("test setup failed")?,
+            (395_200, 1_000_000)
+        );
         q.from = Some(1_000_000);
         assert_eq!(window(&q, 2_000_000), Err(StatusCode::BAD_REQUEST));
         q.period = Some("typo".into());
         assert!(window(&q, 2_000_000).is_err());
+        Ok(())
     }
 
     #[test]
@@ -373,8 +380,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fee_totals_include_all_matching_rows_and_propagate_errors() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn fee_totals_include_all_matching_rows_and_propagate_errors() -> anyhow::Result<()> {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .context("test setup failed")?;
         let q = || FeeReportQuery {
             period: Some("all".into()),
             from: Some(10),
@@ -382,19 +391,23 @@ mod tests {
         };
         assert!(fee_report(&pool, q()).await.is_err());
         sqlx::query("CREATE TABLE games (fee_lamports INTEGER, stake_amount REAL, status TEXT, end_time INTEGER)")
-            .execute(&pool).await.unwrap();
+            .execute(&pool).await.context("test setup failed")?;
         sqlx::query(
             "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<250)
             INSERT INTO games SELECT 7, 0.5, 'completed', 10 FROM n",
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .context("test setup failed")?;
         sqlx::query("INSERT INTO games VALUES (999, 99, 'completed', 20), (999, 99, 'playing', 15), (999, 99, 'completed', 9)")
-            .execute(&pool).await.unwrap();
-        let report = fee_report(&pool, q()).await.unwrap();
+            .execute(&pool).await.context("test setup failed")?;
+        let report = fee_report(&pool, q())
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
         assert_eq!(report["game_count"], 250);
         assert_eq!(report["total_fee_lamports"], 1750);
         assert_eq!(report["total_wagered_sol"], 125.0);
+        Ok(())
     }
 }

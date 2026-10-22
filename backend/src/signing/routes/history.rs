@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
     routing::get,
@@ -65,14 +65,30 @@ pub async fn get_game_history_by_username(
     Ok(Json(serde_json::json!({ "games": games })))
 }
 
+#[derive(Default, serde::Deserialize)]
+pub struct MovesQuery {
+    pub after_move: Option<i32>,
+}
+
 pub async fn get_game_moves(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
+    Query(query): Query<MovesQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let pool = state.store.pool();
     let repo = GameRepository::new(pool);
 
     let now_ts = chrono::Utc::now().timestamp();
+    if let Some(after_move) = query.after_move {
+        let (moves, reset) = repo
+            .get_spectator_moves_after(&game_id, now_ts, after_move)
+            .await
+            .map_err(|e| {
+                error!("[history] DB cursor query failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        return Ok(Json(serde_json::json!({ "moves": moves, "reset": reset })));
+    }
     let moves = repo
         .get_moves_visible(&game_id, now_ts)
         .await

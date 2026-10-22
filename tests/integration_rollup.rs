@@ -1,9 +1,10 @@
 #![cfg(feature = "solana")]
 
-use xfchess::multiplayer::rollup::manager::{EphemeralRollupManager, GameStateStatus};
+use anyhow::Context;
+use xfchess_app::multiplayer::rollup::manager::{EphemeralRollupManager, GameStateStatus};
 
 #[test]
-fn test_10_moves_trigger_batch_ready() {
+fn test_10_moves_trigger_batch_ready() -> anyhow::Result<()> {
     let mut mgr = EphemeralRollupManager::new(1, true, "startpos".to_string());
     assert_eq!(mgr.max_batch_size, 10);
 
@@ -25,14 +26,15 @@ fn test_10_moves_trigger_batch_ready() {
         batch.is_some(),
         "prepare_batch_for_commit() must return Some"
     );
-    let (moves, fens) = batch.unwrap();
+    let (moves, fens) = batch.context(concat!(file!(), ":", line!()))?;
     assert_eq!(moves.len(), 10, "batch must contain all 10 moves");
     assert_eq!(fens.len(), 10, "batch must contain all 10 FENs");
     assert_eq!(mgr.status, GameStateStatus::Committing);
+    Ok(())
 }
 
 #[test]
-fn test_force_flush_on_game_end() {
+fn test_force_flush_on_game_end() -> anyhow::Result<()> {
     let mut mgr = EphemeralRollupManager::new(42, true, "startpos".to_string());
     mgr.add_local_move("e2e4".to_string(), "fen1".to_string());
     mgr.add_local_move("d2d4".to_string(), "fen2".to_string());
@@ -42,8 +44,9 @@ fn test_force_flush_on_game_end() {
         batch.is_some(),
         "force_flush() must drain partial move batch"
     );
-    let (moves, _) = batch.unwrap();
+    let (moves, _) = batch.context(concat!(file!(), ":", line!()))?;
     assert_eq!(moves.len(), 2);
+    Ok(())
 }
 
 #[test]
@@ -78,11 +81,12 @@ fn test_out_of_sync_rejects_moves() {
 }
 
 #[test]
-fn test_remote_move_accumulates_in_batch() {
+fn test_remote_move_accumulates_in_batch() -> anyhow::Result<()> {
     let mut mgr = EphemeralRollupManager::new(3, true, "startpos".to_string());
     mgr.add_remote_move("e7e5".to_string(), "fen_r1".to_string());
     mgr.add_remote_move("d7d5".to_string(), "fen_r2".to_string());
 
-    let batch_ref = mgr.pending_batch.as_ref().expect("batch should exist");
+    let batch_ref = mgr.pending_batch.as_ref().context("batch should exist")?;
     assert_eq!(batch_ref.moves.len(), 2);
+    Ok(())
 }

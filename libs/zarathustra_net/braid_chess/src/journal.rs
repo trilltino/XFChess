@@ -1,4 +1,6 @@
 use crate::ChessMessage;
+#[cfg(test)]
+use anyhow::Context as _;
 use braid_http::Version;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -165,19 +167,29 @@ mod tests {
     }
 
     #[test]
-    fn restart_preserves_order_versions_and_applied_checkpoint() {
-        let root = tempfile::tempdir().unwrap();
-        let journal = Journal::open(root.path(), "backend/game/device").unwrap();
-        journal.enqueue(write("one")).unwrap();
-        journal.enqueue(write("two")).unwrap();
-        journal.reparent("one", "opponent").unwrap();
-        journal.enqueue(write("one")).unwrap();
+    fn restart_preserves_order_versions_and_applied_checkpoint() -> anyhow::Result<()> {
+        let root = tempfile::tempdir().context("required operation value")?;
+        let journal = Journal::open(root.path(), "backend/game/device")
+            .context("required operation value")?;
+        journal
+            .enqueue(write("one"))
+            .context("required operation value")?;
+        journal
+            .enqueue(write("two"))
+            .context("required operation value")?;
+        journal
+            .reparent("one", "opponent")
+            .context("required operation value")?;
+        journal
+            .enqueue(write("one"))
+            .context("required operation value")?;
         journal
             .applied("moves", vec![Version::new("3")], Some("fen".into()))
-            .unwrap();
+            .context("required operation value")?;
         drop(journal);
-        let restored = Journal::open(root.path(), "backend/game/device").unwrap();
-        let pending = restored.pending().unwrap();
+        let restored = Journal::open(root.path(), "backend/game/device")
+            .context("required operation value")?;
+        let pending = restored.pending().context("required operation value")?;
         assert_eq!(
             pending
                 .iter()
@@ -187,34 +199,55 @@ mod tests {
         );
         assert_eq!(pending[0].parent, "opponent");
         assert_eq!(
-            restored.checkpoint("moves").unwrap().fen.as_deref(),
+            restored
+                .checkpoint("moves")
+                .context("required operation value")?
+                .fen
+                .as_deref(),
             Some("fen")
         );
-        restored.confirm_write("one").unwrap();
-        assert_eq!(restored.pending().unwrap()[0].version, "two");
+        restored
+            .confirm_write("one")
+            .context("required operation value")?;
+        assert_eq!(
+            restored.pending().context("required operation value")?[0].version,
+            "two"
+        );
         assert!(Journal::open(root.path(), "other/game/device")
-            .unwrap()
+            .context("required operation value")?
             .pending()
-            .unwrap()
+            .context("required operation value")?
             .is_empty());
+        Ok(())
     }
 
     #[test]
-    fn concurrent_handles_do_not_lose_pending_events_or_hide_corruption() {
-        let root = tempfile::tempdir().unwrap();
-        let journal = Journal::open(root.path(), "game").unwrap();
-        std::thread::scope(|scope| {
+    fn concurrent_handles_do_not_lose_pending_events_or_hide_corruption() -> anyhow::Result<()> {
+        let root = tempfile::tempdir().context("required operation value")?;
+        let journal = Journal::open(root.path(), "game").context("required operation value")?;
+        std::thread::scope(|scope| -> anyhow::Result<()> {
+            let mut jobs = Vec::new();
             for i in 0..8 {
                 let journal = journal.clone();
-                scope.spawn(move || journal.enqueue(write(&i.to_string())).unwrap());
+                jobs.push(scope.spawn(move || journal.enqueue(write(&i.to_string()))));
             }
-        });
-        assert_eq!(journal.pending().unwrap().len(), 8);
+            for job in jobs {
+                job.join()
+                    .map_err(|_| anyhow::anyhow!("journal writer panicked"))??;
+            }
+            Ok(())
+        })?;
+        assert_eq!(
+            journal.pending().context("required operation value")?.len(),
+            8
+        );
         let mut conflict = write("0");
         conflict.sender = "mallory".into();
         assert!(journal.enqueue(conflict).is_err());
-        std::fs::write(journal.directory.join("state.json"), "truncated").unwrap();
+        std::fs::write(journal.directory.join("state.json"), "truncated")
+            .context("required operation value")?;
         assert!(journal.pending().is_err());
         assert!(journal.enqueue(write("lost")).is_err());
+        Ok(())
     }
 }

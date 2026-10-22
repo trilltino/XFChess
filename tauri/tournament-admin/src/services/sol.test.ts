@@ -9,6 +9,11 @@ import {
 } from './sol';
 
 describe('solInputToLamports', () => {
+  it('rejects amounts that cannot be represented as exact whole lamports', () => {
+    expect(Number.isNaN(solInputToLamports('9007199.254741'))).toBe(true);
+    expect(Number.isNaN(usdInputToLamports('1', -1))).toBe(true);
+    expect(Number.isNaN(usdInputToLamports('1', Infinity))).toBe(true);
+  });
   it('converts a whole-SOL input', () => {
     expect(solInputToLamports('1')).toBe(LAMPORTS_PER_SOL);
     expect(solInputToLamports('0.5')).toBe(LAMPORTS_PER_SOL / 2);

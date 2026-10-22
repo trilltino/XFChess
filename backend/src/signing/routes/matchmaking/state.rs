@@ -88,53 +88,59 @@ impl SharedMatchmakingState {
 
 // Default builds isolated test state only; construct production matchmaking
 // with SharedMatchmakingState::new.
-impl Default for SharedMatchmakingState {
-    fn default() -> Self {
+impl SharedMatchmakingState {
+    #[cfg(test)]
+    pub fn test_state() -> anyhow::Result<Self> {
         let program_id = solana_sdk::pubkey::Pubkey::new_from_array([0u8; 32]);
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .expect("lazy sqlite pool construction should not fail");
-        Self::new(
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().connect_lazy("sqlite::memory:")?;
+        Ok(Self::new(
             Arc::new(crate::signing::EloCache::new(
                 "https://api.devnet.solana.com".to_string(),
                 std::time::Duration::from_secs(300),
                 program_id,
-            )),
+            )?),
             pool,
-        )
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
-    async fn migrated_pool() -> sqlx::SqlitePool {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::infrastructure::migrate_session_db(&pool)
-            .await
-            .unwrap();
-        pool
+    async fn migrated_pool() -> anyhow::Result<sqlx::SqlitePool> {
+        Ok({
+            let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+                .await
+                .context("test setup failed")?;
+            crate::infrastructure::migrate_session_db(&pool)
+                .await
+                .context("test setup failed")?;
+            pool
+        })
     }
 
-    fn state_with_pool(pool: sqlx::SqlitePool) -> SharedMatchmakingState {
-        let program_id = solana_sdk::pubkey::Pubkey::new_from_array([0u8; 32]);
-        SharedMatchmakingState::new(
-            Arc::new(crate::signing::EloCache::new(
-                "https://api.devnet.solana.com".to_string(),
-                std::time::Duration::from_secs(300),
-                program_id,
-            )),
-            pool,
-        )
+    fn state_with_pool(pool: sqlx::SqlitePool) -> anyhow::Result<SharedMatchmakingState> {
+        Ok({
+            let program_id = solana_sdk::pubkey::Pubkey::new_from_array([0u8; 32]);
+            SharedMatchmakingState::new(
+                Arc::new(crate::signing::EloCache::new(
+                    "https://api.devnet.solana.com".to_string(),
+                    std::time::Duration::from_secs(300),
+                    program_id,
+                )?),
+                pool,
+            )
+        })
     }
 
     #[tokio::test]
-    async fn queue_and_match_survive_a_simulated_restart() {
-        let pool = migrated_pool().await;
+    async fn queue_and_match_survive_a_simulated_restart() -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
 
         {
-            let state = state_with_pool(pool.clone());
+            let state = state_with_pool(pool.clone())?;
             sqlx::query(
                 "INSERT OR REPLACE INTO matchmaking_queue (pubkey, elo, joined_at) VALUES (?, ?, ?)",
             )
@@ -143,7 +149,7 @@ mod tests {
             .bind(1_000_i64)
             .execute(&state.pool)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
             sqlx::query(
                 "INSERT OR REPLACE INTO matchmaking_matches \
@@ -156,12 +162,12 @@ mod tests {
             .bind(1_000_i64)
             .execute(&state.pool)
             .await
-            .unwrap();
+            .context("test setup failed")?;
             // `state` (and its in-memory queue/matches) is dropped here,
             // simulating the process exiting — only the SQLite rows remain.
         }
 
-        let restarted = state_with_pool(pool);
+        let restarted = state_with_pool(pool)?;
         restarted.hydrate().await;
 
         let queue = restarted.queue.lock();
@@ -172,9 +178,10 @@ mod tests {
         let matches = restarted.matches.lock();
         let m = matches
             .get("player_b")
-            .expect("match should survive restart");
+            .context("match should survive restart")?;
         assert_eq!(m.game_id, 42);
         assert_eq!(m.opponent, "player_c");
         assert!(m.is_white);
+        Ok(())
     }
 }

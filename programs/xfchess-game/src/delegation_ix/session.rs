@@ -19,7 +19,10 @@ pub fn handler_authorize_session_key(
     session_delegation.game_id = game_id;
     session_delegation.player = player.key();
     session_delegation.session_key = session_pubkey;
-    session_delegation.expires_at = Clock::get()?.unix_timestamp + (2 * 60 * 60); // 2 hours from now
+    session_delegation.expires_at = Clock::get()?
+        .unix_timestamp
+        .checked_add(2 * 60 * 60)
+        .ok_or(crate::errors::GameErrorCode::ArithmeticOverflow)?;
     session_delegation.max_batch_len = 10;
     session_delegation.enabled = true;
     session_delegation.bump = ctx.bumps.session_delegation;

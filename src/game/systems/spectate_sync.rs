@@ -1,4 +1,4 @@
-use crate::core::states::GameMode;
+use crate::core::state::GameMode;
 use crate::engine::board_state::ChessEngine;
 use crate::game::events::NetworkMoveEvent;
 use crate::game::resources::MoveHistory;

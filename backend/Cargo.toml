@@ -146,3 +146,6 @@ tempfile = "3.8"
 tokio = { workspace = true }
 axum = { workspace = true }
 solana-sdk = { workspace = true }
+
+[lints]
+workspace = true

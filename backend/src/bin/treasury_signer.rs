@@ -18,7 +18,7 @@ fn usage() -> ! {
     std::process::exit(2);
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 2 || args.len() > 3 {
         usage();
@@ -77,15 +77,15 @@ fn main() {
     println!("  RPC:         {rpc_url}");
     println!("  Program:     {program_id}");
     print!("\nThis is irreversible. Type CONFIRM to proceed: ");
-    io::stdout().flush().ok();
+    io::stdout().flush()?;
     let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
+    io::stdin().read_line(&mut input)?;
     if input.trim() != "CONFIRM" {
         println!("Aborted — no transaction submitted.");
         std::process::exit(1);
     }
 
-    let rpc = make_rpc(&rpc_url);
+    let rpc = make_rpc(&rpc_url)?;
     let ix = withdraw_treasury_ix(&program_id, &authority.pubkey(), &destination, lamports);
     match sign_and_submit(&rpc, &authority, &[ix]) {
         Ok(sig) => {
@@ -96,4 +96,5 @@ fn main() {
             std::process::exit(1);
         }
     }
+    Ok(())
 }

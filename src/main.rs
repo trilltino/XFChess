@@ -2,10 +2,10 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use clap::Parser;
-use xfchess::{build_app, GameConfig, PlayerColor};
+use xfchess_app::{build_app, GameConfig, PlayerColor};
 
-fn main() {
-    xfchess::core::crash::setup_enhanced_panic_hook();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    xfchess_app::core::diagnostics::panic_hook::setup_panic_hook();
 
     // Check wallet mode (Tauri vs standalone)
     let wallet_mode = std::env::var("XFCHESS_WALLET_MODE").unwrap_or_default() == "tauri";
@@ -18,14 +18,14 @@ fn main() {
     #[cfg(feature = "solana")]
     println!(
         " [CONFIG] backend={} devnet_rpc={} program_id={}",
-        xfchess::multiplayer::network::vps::vps_base(),
-        *xfchess::multiplayer::solana::integration::state::DEVNET_RPC_URL,
-        xfchess::solana::instructions::PROGRAM_ID,
+        xfchess_app::multiplayer::network::vps::vps_base(),
+        *xfchess_app::multiplayer::solana::integration::state::DEVNET_RPC_URL,
+        xfchess_app::solana::instructions::PROGRAM_ID,
     );
     #[cfg(not(feature = "solana"))]
     println!(
         " [CONFIG] backend={}",
-        xfchess::multiplayer::network::vps::vps_base()
+        xfchess_app::multiplayer::network::vps::vps_base()
     );
     println!("   (override backend with SIGNING_SERVICE_URL or BACKEND_URL env vars)");
 
@@ -42,14 +42,14 @@ fn main() {
     // Handle CLI-only commands before launching game client
     if let Some(cmd) = &game_config.command {
         match cmd {
-            xfchess::Commands::Tournament { action: _action } => {
+            xfchess_app::Commands::Tournament { action: _action } => {
                 println!(" Tournament command detected - implementation pending...");
-                return;
+                return Ok(());
             }
-            xfchess::Commands::Debug { game_id } => {
+            xfchess_app::Commands::Debug { game_id } => {
                 println!(" Starting integrated debugger for game: {}", game_id);
                 // logic for integrated debug view could go here
-                return;
+                return Ok(());
             }
         }
     }
@@ -88,6 +88,7 @@ fn main() {
         println!();
     }
 
-    let mut app = build_app(game_config);
+    let mut app = build_app(game_config)?;
     app.run();
+    Ok(())
 }

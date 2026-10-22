@@ -49,9 +49,7 @@ pub fn register_money_action(req: RegisterMoneyActionReq) -> Result<MoneyActionR
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(format!(
-            "vps register_money_action: HTTP {status} - {body}"
-        ));
+        return Err(format!("vps register_money_action: HTTP {status} - {body}"));
     }
     resp.json()
         .map_err(|e| format!("vps register_money_action parse: {e}"))
@@ -79,7 +77,10 @@ pub fn fetch_money_actions_by_scope(
     };
 
     let resp = super::client_fast()?
-        .get(format!("{}/api/money-actions/by-scope{query}", super::vps_base()))
+        .get(format!(
+            "{}/api/money-actions/by-scope{query}",
+            super::vps_base()
+        ))
         .send()
         .map_err(|e| format!("vps fetch_money_actions_by_scope: {e}"))?;
 

@@ -380,29 +380,36 @@ mod tests {
     }
 
     #[test]
-    fn parses_bare_tournament_array() {
-        let body = serde_json::to_string(&serde_json::json!([tournament_json()])).unwrap();
-        let list = parse_tournament_list_body(&body).unwrap();
+    fn parses_bare_tournament_array() -> Result<(), Box<dyn std::error::Error>> {
+        let body = serde_json::to_string(&serde_json::json!([tournament_json()]))?;
+        let list = parse_tournament_list_body(&body)?;
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].status, "Registration");
+
+        Ok(())
     }
 
     #[test]
-    fn parses_wrapped_tournament_array() {
+    fn parses_wrapped_tournament_array() -> Result<(), Box<dyn std::error::Error>> {
         let body = serde_json::to_string(&serde_json::json!({
             "value": [tournament_json()],
             "Count": 1
-        }))
-        .unwrap();
-        let list = parse_tournament_list_body(&body).unwrap();
+        }))?;
+        let list = parse_tournament_list_body(&body)?;
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].tournament_id, 1789854523096);
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_unexpected_tournament_shape() {
-        let err = parse_tournament_list_body(r#"{"ok":true}"#).unwrap_err();
+    fn rejects_unexpected_tournament_shape() -> Result<(), Box<dyn std::error::Error>> {
+        let err = parse_tournament_list_body(r#"{"ok":true}"#)
+            .err()
+            .ok_or("expected an error")?;
         assert!(err.contains("expected array or wrapped array"));
+
+        Ok(())
     }
 }
 

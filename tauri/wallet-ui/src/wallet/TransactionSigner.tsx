@@ -5,11 +5,11 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useWallets, useSignTransaction, useSignMessage } from "@privy-io/react-auth/solana";
 import { PRIVY_ENABLED, SOLANA_CHAIN } from "../privy/config";
 import { API_BASE, SESSION_ID, apiGet, apiPost, withTimeout, logLifecycle, getConnectedProvider, ensureDevnet, isNetworkMismatchError, NETWORK_MISMATCH_MESSAGE } from "./bridge";
-import { assertWalletAddress, validateSignedTransaction, validateMessageSignature, deserializeTransaction } from "./transactions";
+import { assertWalletAddress, validateSignedTransaction, validateMessageSignature, deserializeTransaction, serializeWalletTransaction } from "./transactions";
 import { PrimaryBtn, ErrorMsg } from "./components";
 import { CARD_BG, PRIMARY_BORDER, PRIMARY, TEXT, TEXT_DIM } from "./theme";
 
-export function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
+export function TransactionSigner({ pubkey }: { pubkey: string }) {
   const [pendingTx, setPendingTx] = useState<string | null>(null);
   const [pendingLabel, setPendingLabel] = useState<string | null>(null);
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
@@ -49,10 +49,11 @@ export function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
   // Read provider identity from the bridge; stale localStorage could route signing to the wrong wallet.
   useEffect(() => {
     let cancelled = false;
+    setBridgeStatusLoaded(false);
     void withTimeout(apiGet<{ pubkey?: string; provider?: string | null }>("/status"), 5000, "Wallet session lookup")
       .then((status) => {
         if (cancelled) return;
-        if (status.pubkey && status.pubkey !== _pubkey) {
+        if (status.pubkey && status.pubkey !== pubkey) {
           setError("The wallet session changed. Close this window and reopen the signing request.");
           return;
         }
@@ -63,7 +64,7 @@ export function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         if (!cancelled) setError(e?.message || String(e));
       });
     return () => { cancelled = true; };
-  }, [_pubkey]);
+  }, [pubkey]);
 
   const cancelRequest = async (requestId: string, reason: string) => {
     const response = await fetch(`${API_BASE}/cancel`, {
@@ -79,8 +80,8 @@ export function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
 
   const resolveAndHide = async (requestId: string, signedB64: string) => {
     if (activeRequest.current !== requestId) throw new Error("This signing request has ended");
-    if (requestKind.current === "message") validateMessageSignature(txB64For(requestId), signedB64, _pubkey);
-    else validateSignedTransaction(txB64For(requestId), signedB64, _pubkey);
+    if (requestKind.current === "message") validateMessageSignature(txB64For(requestId), signedB64, pubkey);
+    else validateSignedTransaction(txB64For(requestId), signedB64, pubkey);
     const response = await fetch(API_BASE + "/resolved", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Session-Id": SESSION_ID },
@@ -108,7 +109,7 @@ export function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
     try {
       const wallet = privyWallets[0];
       if (!wallet?.address) throw new Error("No Privy wallet available to sign with");
-      assertWalletAddress(wallet.address, _pubkey);
+      assertWalletAddress(wallet.address, pubkey);
 
       if (requestKind.current === "message") {
         const { signature } = await withTimeout(privySignMessage({ message: Buffer.from(txB64, "base64"), wallet }), 60000, "Message signature");
@@ -166,7 +167,7 @@ export function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
           await withTimeout(provider.connect(), 30000, "Wallet connection");
         }
       }
-      assertWalletAddress(provider.publicKey?.toBase58?.() ?? provider.publicKey?.toString?.(), _pubkey);
+      assertWalletAddress(provider.publicKey?.toBase58?.() ?? provider.publicKey?.toString?.(), pubkey);
       if (requestKind.current === "message") {
         const { signature } = await withTimeout<{ signature: Uint8Array }>(provider.signMessage(Buffer.from(txB64, "base64")), 60000, "Message signature");
         await resolveAndHide(requestId, Buffer.from(signature).toString("base64"));
@@ -182,7 +183,7 @@ export function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         "Wallet signature",
       );
       logLifecycle("SIGNATURE_RECEIVED");
-      await resolveAndHide(requestId, Buffer.from(signed.serialize()).toString("base64"));
+      await resolveAndHide(requestId, Buffer.from(serializeWalletTransaction(signed)).toString("base64"));
       logLifecycle("TX_COMPLETE");
     } catch (e: any) {
       logLifecycle("FAILED", { message: e?.message || String(e) });
@@ -265,7 +266,7 @@ export function TransactionSigner({ pubkey: _pubkey }: { pubkey: string }) {
         </span>
       </div>
       <p style={{ fontSize: 11, color: TEXT_DIM, marginBottom: 12 }}>
-        Wallet: {_pubkey.slice(0, 6)}…{_pubkey.slice(-6)}
+        Wallet: {pubkey.slice(0, 6)}…{pubkey.slice(-6)}
       </p>
       <p style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 16 }}>
         {signing

@@ -68,8 +68,6 @@ pub(in super::super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                                 rejoin_id,
                                 wallet,
                                 rpc_url.clone(),
-                                crate::multiplayer::rollup::magicblock::MAGIC_BLOCK_ER_ENDPOINT
-                                    .to_string(),
                             );
                         }
                     }
@@ -93,22 +91,14 @@ pub(in super::super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                 "Could not check for an existing game. Try again when connected.",
             );
         }
-        render_stake_recovery(ui, ctx, &mut lobby);
-
         Layout::item_space(ui);
 
-        // Display USD when a live rate is available; otherwise show SOL.
+        // Report the actual chain denomination. A fiat conversion of devnet
+        // test SOL must not appear to be a spendable dollar wallet balance.
         let balance = lobby.cached_balance;
         let wallet_ready = lobby.cached_keypair_bytes.is_some();
         if wallet_ready {
-            let usd = ctx
-                .sol_usd_wager_rate
-                .as_ref()
-                .and_then(|rate| rate.usd_for_sol(balance));
-            let balance_text = match usd {
-                Some(usd) => format!("Wallet balance: ${:.2}", usd),
-                None => format!("Wallet balance: {:.4} SOL", balance),
-            };
+            let balance_text = format!("Wallet balance: {:.4} SOL", balance);
             ui.label(egui::RichText::new(balance_text).color(egui::Color32::GOLD));
         } else {
             ui.colored_label(egui::Color32::YELLOW, "Wallet not connected");
@@ -140,7 +130,6 @@ pub(in super::super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
             // hidden Create tab stay active.
             if !lobby.allow_create && lobby.mode == LobbyMode::Create {
                 lobby.mode = LobbyMode::Browse;
-                lobby.browse_last_fetch = None;
             }
 
             // Tab switcher
@@ -166,7 +155,9 @@ pub(in super::super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                 {
                     lobby.mode = LobbyMode::Browse;
                     lobby.status = LobbyStatus::Idle;
-                    lobby.browse_last_fetch = None; // trigger immediate refresh
+                    if let Some(vps) = ctx.p2p_vps_state.as_mut() {
+                        vps.last_poll = None;
+                    }
                 }
                 if ui
                     .selectable_label(lobby.mode == LobbyMode::Tournament, "Tournament")
@@ -216,7 +207,12 @@ pub(in super::super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                     global_session_unavailable_reason,
                     ctx.solana_session.as_deref(),
                 ),
-                LobbyMode::Browse => render_solana_browse_tab(ui, &mut lobby, usd_per_sol),
+                LobbyMode::Browse => render_solana_browse_tab(
+                    ui,
+                    &mut lobby,
+                    ctx.p2p_vps_state.as_deref_mut(),
+                    usd_per_sol,
+                ),
                 LobbyMode::Tournament => {
                     render_solana_tournament_tab(ui, &mut lobby, &mut ctx.spectate_events)
                 }
@@ -246,7 +242,7 @@ pub(in super::super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
             start_solana_braid_game(
                 &mut ctx.online_session,
                 &ctx.network_config,
-                ctx.network_state.as_ref().map(|r| &**r),
+                ctx.network_state.as_deref(),
                 ctx.p2p_state.as_deref_mut(),
                 game_id,
                 false,
@@ -445,7 +441,7 @@ pub(in super::super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                     start_solana_braid_game(
                         &mut ctx.online_session,
                         &ctx.network_config,
-                        ctx.network_state.as_ref().map(|r| &**r),
+                        ctx.network_state.as_deref(),
                         ctx.p2p_state.as_deref_mut(),
                         game_id,
                         true,
@@ -537,13 +533,13 @@ pub(in super::super) fn ui_solana_lobby(ui: &mut egui::Ui, ctx: &mut MainMenuUIC
                 }
             }
         }
+        render_stake_recovery(ui, ctx, &mut lobby);
     });
 
     ctx.solana_lobby = Some(lobby);
 }
 
-/// List on-chain recoverable stakes and games awaiting ER undelegation.
-/// Offer only cancel_game-compatible actions and refresh after cancellation.
+/// Keep recovery below the primary lobby flow, with one compact row per game.
 #[cfg(feature = "solana")]
 pub(super) fn render_stake_recovery(
     ui: &mut egui::Ui,
@@ -552,14 +548,15 @@ pub(super) fn render_stake_recovery(
 ) {
     use crate::multiplayer::solana::wager_recovery::RecoveryAction;
 
-    let busy = matches!(
-        lobby.status,
-        LobbyStatus::Pending
-            | LobbyStatus::Cancelling { .. }
-            | LobbyStatus::WaitingForOpponent { .. }
-            | LobbyStatus::OpponentJoined { .. }
-            | LobbyStatus::WaitingForHostStart { .. }
-    );
+    let busy = lobby.recovery_action_rx.is_some()
+        || matches!(
+            lobby.status,
+            LobbyStatus::Pending
+                | LobbyStatus::Cancelling { .. }
+                | LobbyStatus::WaitingForOpponent { .. }
+                | LobbyStatus::OpponentJoined { .. }
+                | LobbyStatus::WaitingForHostStart { .. }
+        );
     if lobby.recovery_rx.is_some() && lobby.recovery_scan.is_none() {
         ui.label(
             egui::RichText::new("Checking the chain for stakes you can recover...")
@@ -571,79 +568,156 @@ pub(super) fn render_stake_recovery(
     let Some(scan) = lobby.recovery_scan.clone() else {
         return;
     };
-    if scan.reclaimable.is_empty() && scan.in_play.is_empty() && scan.complete {
+    if scan.reclaimable.is_empty()
+        && scan.in_play.is_empty()
+        && scan.complete
+        && lobby.recovery_message.is_none()
+    {
         return;
     }
 
     ui.separator();
     let mut reclaim: Option<(u64, u64)> = None;
-    for wager in &scan.reclaimable {
-        let sol = wager.wager_lamports as f64 / 1_000_000_000.0;
-        let reason = match wager.action {
-            RecoveryAction::CancelUnjoined => "no opponent joined",
-            RecoveryAction::CancelBeforeFirstMove => "no move was played",
-            RecoveryAction::CancelAbandoned => "game abandoned for over 24 hours",
-            RecoveryAction::CompleteCancellation => "cancelled, refund not yet completed",
-            RecoveryAction::UndelegationRequired => continue,
-        };
-        ui.horizontal(|ui| {
-            ui.colored_label(
-                egui::Color32::from_rgb(255, 220, 50),
-                format!(
-                    "Game {}: {sol:.4} SOL stake recoverable ({reason}).",
-                    wager.game_id
-                ),
-            );
+    let mut settle = None;
+    let mut resume_game = None;
+    let count = scan.reclaimable.len() + scan.in_play.len();
+    egui::CollapsingHeader::new(format!("Unfinished games ({count})"))
+        .id_salt("stake_recovery")
+        .show(ui, |ui| {
+            ui.small("Stakes stay in escrow until a refund or settlement is confirmed.");
+            egui::ScrollArea::vertical()
+                .max_height(230.0)
+                .show(ui, |ui| {
+                    for wager in scan.reclaimable.iter().chain(&scan.in_play) {
+                        ui.push_id(wager.game_id, |ui| {
+                            let id = wager.game_id.to_string();
+                            let short = &id[id.len().saturating_sub(8)..];
+                            let sol = wager.wager_lamports as f64 / 1_000_000_000.0;
+                            let (state, action) = match wager.action {
+                                RecoveryAction::CancelUnjoined => ("No opponent joined", "Reclaim"),
+                                RecoveryAction::CancelBeforeFirstMove => {
+                                    ("No moves played", "Reclaim")
+                                }
+                                RecoveryAction::CancelAbandoned
+                                    if wager.cancellable_in_secs.is_some() =>
+                                {
+                                    ("Game still active", "Still active")
+                                }
+                                RecoveryAction::CancelAbandoned => ("Abandoned game", "Reclaim"),
+                                RecoveryAction::CompleteCancellation => {
+                                    ("Refund pending", "Reclaim")
+                                }
+                                RecoveryAction::CompleteSettlement => ("Payout pending", "Settle"),
+                                RecoveryAction::UndelegationRequired => {
+                                    ("Live game or settlement pending", "Check / settle")
+                                }
+                            };
+                            ui.horizontal_wrapped(|ui| {
+                                ui.strong(format!("#{short}")).on_hover_text(&id);
+                                ui.label(format!("Your stake: {sol:.5} SOL"));
+                                if (wager.action == RecoveryAction::UndelegationRequired
+                                    || wager.cancellable_in_secs.is_some())
+                                    && ui
+                                        .add_enabled(!busy, egui::Button::new("Resume").small())
+                                        .clicked()
+                                {
+                                    resume_game = Some(wager.game_id);
+                                }
+                                if ui
+                                    .add_enabled(
+                                        !busy && wager.cancellable_in_secs.is_none(),
+                                        egui::Button::new(action).small(),
+                                    )
+                                    .clicked()
+                                {
+                                    if matches!(
+                                        wager.action,
+                                        RecoveryAction::UndelegationRequired
+                                            | RecoveryAction::CompleteSettlement
+                                    ) {
+                                        settle = Some(wager.game_id);
+                                    } else {
+                                        reclaim = Some((wager.game_id, wager.wager_lamports));
+                                    }
+                                }
+                            });
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs() as i64)
+                                .unwrap_or(wager.updated_at);
+                            let hours = now.saturating_sub(wager.updated_at).max(0) / 3600;
+                            let age = if hours >= 24 {
+                                format!("{}d ago", hours / 24)
+                            } else {
+                                format!("{hours}h ago")
+                            };
+                            let activity = if wager.action == RecoveryAction::UndelegationRequired {
+                                "Last commit"
+                            } else {
+                                "Last activity"
+                            };
+                            ui.small(format!("{state} · {activity}: {age}"));
+                            ui.separator();
+                        });
+                    }
+                });
+            if !scan.complete {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 200, 100),
+                    "Chain check incomplete. Some games may be missing.",
+                );
+            }
             if ui
-                .add_enabled(!busy, egui::Button::new("Reclaim").small())
+                .add_enabled(
+                    lobby.recovery_rx.is_none(),
+                    egui::Button::new("Refresh").small(),
+                )
                 .clicked()
             {
-                reclaim = Some((wager.game_id, wager.wager_lamports));
+                lobby.rescan_recovery();
             }
         });
+    if lobby.recovery_action_rx.is_some() {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.small("Checking the live game and requesting settlement…");
+        });
     }
-    for wager in &scan.in_play {
-        let text = match (wager.action, wager.cancellable_in_secs) {
-            (RecoveryAction::UndelegationRequired, _) => format!(
-                "Game {}: stake held on the Ephemeral Rollup until the game is committed and settled.",
-                wager.game_id
-            ),
-            (_, Some(secs)) => format!(
-                "Game {}: stake held in an active game; it can be cancelled as abandoned in {}h if no one moves.",
-                wager.game_id,
-                (secs + 3599) / 3600
-            ),
-            _ => continue,
-        };
-        ui.label(
-            egui::RichText::new(text)
-                .size(12.0)
-                .color(egui::Color32::LIGHT_GRAY),
-        );
-    }
-    if !scan.complete {
-        ui.colored_label(
-            egui::Color32::from_rgb(255, 200, 100),
-            "Could not fully check the chain for held stakes. Some may not be listed.",
-        );
-        if !scan.errors.is_empty() {
-            warn!(
-                "[WAGER-RECOVERY] Incomplete scan: {}",
-                scan.errors.join("; ")
-            );
-            if let Some(rescan) = lobby.recovery_scan.as_mut() {
-                rescan.errors.clear();
+    if let Some(result) = &lobby.recovery_message {
+        match result {
+            Ok(message) => {
+                ui.small(message);
+            }
+            Err(message) => {
+                ui.colored_label(egui::Color32::from_rgb(255, 160, 120), message);
             }
         }
-        if ui.small_button("Check again").clicked() {
-            lobby.recovery_scan = None;
-            lobby.rescan_recovery();
-        }
     }
-    ui.separator();
 
     if let Some((game_id, wager_lamports)) = reclaim {
         begin_solana_lobby_cancel_for(ctx, lobby, game_id, wager_lamports);
+    }
+    if let Some(game_id) = settle {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        crate::core::net_task::spawn_detached("recover_game", move || {
+            let _ = tx.send(crate::multiplayer::network::vps::game::recover_game(
+                game_id,
+            ));
+        });
+        lobby.recovery_message = None;
+        lobby.recovery_action_rx = Some(rx);
+    }
+    if let Some(game_id) = resume_game {
+        if let (Some(resume), Some(wallet)) = (
+            ctx.resume.as_mut(),
+            ctx.solana_state
+                .as_ref()
+                .and_then(|state| state.wallet_pubkey),
+        ) {
+            // Resume verifies the live chain and replays history before entering.
+            lobby.rejoin_game_id = Some(game_id);
+            resume.request(game_id, wallet, lobby.cached_rpc_url.clone());
+        }
     }
 }
 

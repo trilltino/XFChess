@@ -39,10 +39,12 @@ impl Plugin for GameOverPopupPlugin {
                 .run_if(|gm: Res<crate::core::GameMode>| *gm == crate::core::GameMode::Spectator),
         );
 
-        app.add_systems(Update,
+        app.add_systems(
+            Update,
             apply_dispute_trigger
                 .in_set(crate::core::schedule::SessionSet::Delegation)
-                .run_if(resource_exists::<PendingDispute>));
+                .run_if(resource_exists::<PendingDispute>),
+        );
 
         #[cfg(feature = "solana")]
         app.add_systems(OnEnter(GameState::GameOver), fetch_game_payout_info);

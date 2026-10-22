@@ -479,7 +479,6 @@ pub(in super::super) fn render_p2p_waiting_screen(ui: &mut egui::Ui, ctx: &mut M
                         );
                     }
                 } else {
-                    let game_id = game_id;
                     crate::core::net_task::spawn_detached("screens", move || {
                         if let Err(e) =
                             crate::multiplayer::vps_client::p2p_leave_game(game_id.clone(), &node_id)

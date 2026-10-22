@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
-use crate::core::states::GameState;
+use crate::core::state::GameState;
 use crate::game::events::GameStartedEvent;
 use crate::multiplayer::network::p2p::{
     ConnectToPeerEvent, P2PConnectionState, P2PConnectionStatus,
@@ -21,7 +21,10 @@ pub struct PendingJoinerInfo {
 pub struct P2PVpsState {
     pub use_vps_relay: bool,
     pub last_poll: Option<std::time::Instant>,
+    list_request:
+        Option<crate::core::net_task::Pending<Result<Vec<vps_client::P2PGameListing>, String>>>,
     pub cached_games: Vec<VpsGameListing>,
+    pub cached_games_revision: u64,
     pub outgoing_queue: VecDeque<(String, String)>, // (game_id, message_json)
     pub poll_index: usize,
     pub response_tx: Sender<VpsResponse>,
@@ -53,13 +56,21 @@ fn tc_from_secs(base_secs: u32, inc: u16) -> crate::game::time_control::TimeCont
     }
 }
 
+impl P2PVpsState {
+    pub fn is_game_list_loading(&self) -> bool {
+        self.list_request.is_some()
+    }
+}
+
 impl Default for P2PVpsState {
     fn default() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
         Self {
             use_vps_relay: true,
             last_poll: None,
+            list_request: None,
             cached_games: Vec::new(),
+            cached_games_revision: 0,
             outgoing_queue: VecDeque::new(),
             poll_index: 0,
             response_tx: tx,
@@ -81,7 +92,7 @@ impl Default for P2PVpsState {
 }
 
 pub enum VpsResponse {
-    GameList(Vec<vps_client::P2PGameListing>),
+    GameList(Result<Vec<vps_client::P2PGameListing>, String>),
     JoinResult {
         game_id: String,
         host_node_id: Option<String>,
@@ -217,7 +228,7 @@ fn cleanup_p2p_lobby_on_game_over(
 }
 
 fn sync_vps_relay_settings(
-    settings: Res<crate::core::resources::GameSettings>,
+    settings: Res<crate::core::settings::GameSettings>,
     mut vps_state: ResMut<P2PVpsState>,
 ) {
     if settings.use_vps_relay != vps_state.use_vps_relay {
@@ -233,8 +244,55 @@ fn sync_vps_relay_settings(
     }
 }
 
-fn poll_vps_game_list(mut vps_state: ResMut<P2PVpsState>) {
-    if !vps_state.use_vps_relay {
+fn poll_vps_game_list(
+    mut vps_state: ResMut<P2PVpsState>,
+    menu: Option<Res<State<crate::core::state::MenuState>>>,
+    competitive: Option<Res<crate::states::main_menu::CompetitiveMenuState>>,
+    #[cfg(feature = "solana")] lobby: Option<
+        Res<crate::multiplayer::solana::lobby::SolanaLobbyState>,
+    >,
+    mut previous_browser: Local<Option<crate::core::state::MenuState>>,
+) {
+    use crate::core::state::MenuState;
+    if let Some(request) = &vps_state.list_request {
+        use crate::core::net_task::Poll;
+        match request.poll() {
+            Poll::Running => {}
+            Poll::Ready(games) => {
+                vps_state.list_request = None;
+                let _ = vps_state.response_tx.send(VpsResponse::GameList(games));
+            }
+            Poll::Lost => {
+                vps_state.list_request = None;
+                warn!("[P2P VPS] Game-list worker stopped without a result");
+            }
+        }
+    }
+    let menu = menu.as_ref().map(|s| *s.get());
+    let visible = menu.is_some()
+        && (matches!(
+            menu,
+            Some(MenuState::BraidLobby | MenuState::LobbySelection)
+        ) || competitive.as_ref().is_some_and(|c| c.show_spectator_popup)
+            || {
+                #[cfg(feature = "solana")]
+                {
+                    menu == Some(MenuState::SolanaLobby)
+                        && lobby.as_ref().is_some_and(|l| {
+                            l.mode == crate::multiplayer::solana::lobby::LobbyMode::Browse
+                        })
+                }
+                #[cfg(not(feature = "solana"))]
+                {
+                    false
+                }
+            });
+    let browser = menu.filter(|_| visible && vps_state.use_vps_relay);
+    if browser != *previous_browser {
+        vps_state.last_poll = None;
+        *previous_browser = browser;
+    }
+    if browser.is_none() || vps_state.list_request.is_some() {
         return;
     }
 
@@ -248,19 +306,10 @@ fn poll_vps_game_list(mut vps_state: ResMut<P2PVpsState>) {
     }
 
     vps_state.last_poll = Some(std::time::Instant::now());
-
-    let tx = vps_state.response_tx.clone();
-    crate::core::net_task::spawn_detached(
+    vps_state.list_request = Some(crate::core::net_task::Pending::spawn(
         "p2p-list-games",
-        move || match vps_client::p2p_list_games() {
-            Ok(games) => {
-                let _ = tx.send(VpsResponse::GameList(games));
-            }
-            Err(e) => {
-                let _ = tx.send(VpsResponse::Error(e));
-            }
-        },
-    );
+        vps_client::p2p_list_games,
+    ));
 }
 
 fn poll_for_joiner_messages(mut vps_state: ResMut<P2PVpsState>) {
@@ -389,6 +438,13 @@ fn handle_vps_responses(
     while let Ok(response) = vps_state.response_rx.try_recv() {
         match response {
             VpsResponse::GameList(games) => {
+                let games = match games {
+                    Ok(games) => games,
+                    Err(e) => {
+                        warn!("[P2P VPS] Game list failed: {e}");
+                        continue;
+                    }
+                };
                 vps_state.cached_games = games
                     .into_iter()
                     .map(|g| VpsGameListing {
@@ -408,6 +464,7 @@ fn handle_vps_responses(
                         is_private: g.is_private,
                     })
                     .collect();
+                vps_state.cached_games_revision = vps_state.cached_games_revision.wrapping_add(1);
                 trace!(
                     "[P2P VPS] Updated cached games: {} found",
                     vps_state.cached_games.len()
@@ -660,4 +717,51 @@ pub fn set_vps_relay_mode(vps_state: &mut P2PVpsState, enabled: bool) {
         "[P2P VPS] Relay mode: {}",
         if enabled { "enabled" } else { "disabled" }
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::state::MenuState;
+
+    #[test]
+    fn lobby_poll_stays_idle_outside_browsing_and_never_overlaps(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut app = App::new();
+        app.init_resource::<P2PVpsState>();
+        app.add_systems(Update, poll_vps_game_list);
+        // Gameplay has no MenuState resource.
+        app.update();
+        assert!(app.world().resource::<P2PVpsState>().list_request.is_none());
+        app.insert_resource(State::new(MenuState::Main));
+        app.update();
+        assert!(app.world().resource::<P2PVpsState>().list_request.is_none());
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        {
+            let mut state = app.world_mut().resource_mut::<P2PVpsState>();
+            state.list_request = Some(crate::core::net_task::Pending::spawn(
+                "test-lobby-poll",
+                move || {
+                    let _ = release_rx.recv();
+                    Ok(Vec::new())
+                },
+            ));
+            state.last_poll = Some(std::time::Instant::now());
+        }
+        app.insert_resource(State::new(MenuState::BraidLobby));
+        app.update();
+        let state = app.world().resource::<P2PVpsState>();
+        assert!(state.list_request.is_some());
+        assert!(
+            state.last_poll.is_none(),
+            "entering the lobby requests a fresh snapshot"
+        );
+        assert!(
+            state.response_rx.is_empty(),
+            "no overlapping background request"
+        );
+        release_tx.send(())?;
+
+        Ok(())
+    }
 }

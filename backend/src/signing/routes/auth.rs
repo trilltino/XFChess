@@ -13,6 +13,75 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
 
+static PASSWORD_WORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+
+async fn hash_password(password: String) -> Result<String, (StatusCode, String)> {
+    let permit = PASSWORD_WORK.acquire().await.map_err(|_| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Password service unavailable".into(),
+        )
+    })?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        use argon2::{
+            password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+            Argon2,
+        };
+        Argon2::default()
+            .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+            .map(|hash| hash.to_string())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Password service failed".into(),
+        )
+    })?
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Password service failed".into(),
+        )
+    })
+}
+
+async fn verify_password(password: String, hash: String) -> Result<(), (StatusCode, String)> {
+    let permit = PASSWORD_WORK.acquire().await.map_err(|_| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Password service unavailable".into(),
+        )
+    })?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        use argon2::{password_hash::PasswordHash, Argon2, PasswordVerifier};
+        let hash = PasswordHash::new(&hash).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Invalid stored password hash".to_string(),
+            )
+        })?;
+        Argon2::default()
+            .verify_password(password.as_bytes(), &hash)
+            .map_err(|_| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    "Invalid email or password".to_string(),
+                )
+            })
+    })
+    .await
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Password service failed".into(),
+        )
+    })?
+}
+
 const AUTH_SIG_MAX_AGE_SECS: u64 = 300; // 5 minutes
 const AUTH_SIG_FUTURE_SKEW_SECS: u64 = 60;
 
@@ -78,7 +147,18 @@ pub(crate) async fn authed_wallet(
         )
     })?;
 
-    if state.store.token_is_revoked(&claims.sub, claims.iat).await {
+    if state
+        .store
+        .token_is_revoked(&claims.sub, claims.iat)
+        .await
+        .map_err(|error| {
+            tracing::error!("Revocation lookup failed: {error}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Authentication temporarily unavailable".to_string(),
+            )
+        })?
+    {
         return Err((
             StatusCode::UNAUTHORIZED,
             "Token revoked — please log in again".to_string(),
@@ -130,7 +210,6 @@ pub fn auth_routes() -> Router<AppState> {
         .route("/siws-verify", post(siws_verify))
         .route("/privy-login", post(privy_login))
 }
-
 
 const SOCIAL_SIGNUP_HOURLY_CAP: i64 = 200;
 
@@ -291,14 +370,12 @@ async fn privy_login(
     }))
 }
 
-
 #[derive(Serialize)]
 pub struct AuthResp {
     pub token: String,
     pub username: String,
     pub wallet: String,
 }
-
 
 #[derive(Deserialize)]
 struct RegisterReq {
@@ -344,7 +421,6 @@ async fn register(
     }))
 }
 
-
 #[derive(Deserialize)]
 pub struct LoginReq {
     pub wallet: String,
@@ -376,7 +452,6 @@ async fn login(
     }))
 }
 
-
 #[derive(Deserialize)]
 struct RegisterEmailReq {
     email: String,
@@ -395,16 +470,7 @@ async fn register_email(
         return Err((StatusCode::CONFLICT, "Username already taken".to_string()));
     }
 
-    use argon2::{
-        password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
-        Argon2,
-    };
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-    let password_hash = argon2
-        .hash_password(req.password.as_bytes(), &salt)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .to_string();
+    let password_hash = hash_password(req.password).await?;
 
     state
         .store
@@ -445,17 +511,7 @@ async fn login_email(
         "This account does not have a password. Please login with wallet.".to_string(),
     ))?;
 
-    use argon2::{password_hash::PasswordHash, password_hash::PasswordVerifier, Argon2};
-    let parsed_hash = PasswordHash::new(&stored_hash)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Argon2::default()
-        .verify_password(req.password.as_bytes(), &parsed_hash)
-        .map_err(|_| {
-            (
-                StatusCode::UNAUTHORIZED,
-                "Invalid email or password".to_string(),
-            )
-        })?;
+    verify_password(req.password, stored_hash).await?;
 
     let identity = if !user.0.is_empty() {
         user.0.clone()
@@ -501,17 +557,7 @@ async fn link_wallet(
         StatusCode::BAD_REQUEST,
         "Account has no password".to_string(),
     ))?;
-    use argon2::{password_hash::PasswordHash, password_hash::PasswordVerifier, Argon2};
-    let parsed_hash = PasswordHash::new(&stored_hash)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Argon2::default()
-        .verify_password(req.password.as_bytes(), &parsed_hash)
-        .map_err(|_| {
-            (
-                StatusCode::UNAUTHORIZED,
-                "Invalid email or password".to_string(),
-            )
-        })?;
+    verify_password(req.password, stored_hash).await?;
 
     // Allow the first wallet link or an idempotent relink to the same wallet.
     // Changing an existing identity requires an explicit migration of its history.
@@ -533,7 +579,6 @@ async fn link_wallet(
     info!("[Auth] Linked wallet {} to email {}", req.wallet, req.email);
     Ok(Json(()))
 }
-
 
 #[derive(Serialize)]
 struct MeResp {
@@ -637,7 +682,6 @@ async fn me(
     }))
 }
 
-
 #[derive(Deserialize)]
 struct AddEmailReq {
     email: String,
@@ -669,7 +713,6 @@ async fn add_email(
     info!("[Auth] Added email {} to wallet {}", req.email, wallet);
     Ok(Json(serde_json::json!({ "ok": true })))
 }
-
 
 #[derive(borsh::BorshDeserialize)]
 struct ProfileOnChain {
@@ -803,7 +846,6 @@ async fn sync_profile(
     })))
 }
 
-
 #[derive(Deserialize)]
 struct InitProfileTxReq {
     username: String,
@@ -912,7 +954,6 @@ async fn init_profile_tx(
         profile_pda: profile_pda.to_string(),
     }))
 }
-
 
 #[derive(Serialize)]
 struct InitProfileSponsoredResp {
@@ -1062,7 +1103,6 @@ async fn init_profile_sponsored_tx(
     }))
 }
 
-
 #[derive(Deserialize)]
 struct BroadcastTxReq {
     tx_b64: String,
@@ -1111,7 +1151,6 @@ async fn broadcast_tx(
     }))
 }
 
-
 #[derive(Deserialize)]
 struct SetUsernameReq {
     username: String,
@@ -1159,7 +1198,6 @@ async fn set_username(
     Ok(Json(serde_json::json!({ "username": req.username })))
 }
 
-
 async fn logout(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -1175,7 +1213,6 @@ async fn logout(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-
 async fn check_username(
     State(state): State<AppState>,
     axum::extract::Path(username): axum::extract::Path<String>,
@@ -1184,22 +1221,19 @@ async fn check_username(
     Json(serde_json::json!({ "taken": taken }))
 }
 
-
 async fn check_wallet(
     State(state): State<AppState>,
     axum::extract::Path(wallet): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let user = state.store.find_user_by_wallet(&wallet).await;
-    let registered = user.is_some();
-    if registered {
+    if let Some(user) = user {
         Ok(Json(
-            serde_json::json!({ "registered": true, "username": user.unwrap().1 }),
+            serde_json::json!({ "registered": true, "username": user.1 }),
         ))
     } else {
         Err((StatusCode::NOT_FOUND, "Wallet not registered".to_string()))
     }
 }
-
 
 #[derive(Deserialize)]
 struct DeleteReq {
@@ -1365,19 +1399,37 @@ async fn siws_verify(
 
 #[cfg(test)]
 mod profile_decode_tests {
-    use super::ProfileOnChain;
+    use super::{hash_password, verify_password, ProfileOnChain, StatusCode};
+    use anyhow::Context as _;
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine as _;
     use borsh::BorshDeserialize;
 
     const REAL_PROFILE_B64: &str = "UuJjV6SCtVAsepYl9NwToT6BbL/CZ8gRg2700PZfdsZA9JatrWSSmQIAAABHQgIAAAABAAAAAAAAAAMAAAAAAAAAAEz9QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlriBagAAAAAAAAAAAAAAAIDUTj4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAHZhbAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
+    #[tokio::test]
+    async fn password_work_preserves_hash_and_rejection_behavior() -> anyhow::Result<()> {
+        let hash = hash_password("correct password".into())
+            .await
+            .map_err(|(_, message)| anyhow::anyhow!(message))?;
+        assert!(verify_password("correct password".into(), hash.clone())
+            .await
+            .is_ok());
+        assert!(matches!(
+            verify_password("wrong password".into(), hash).await,
+            Err((StatusCode::UNAUTHORIZED, _))
+        ));
+        Ok(())
+    }
+
     #[test]
-    fn decodes_a_real_padded_devnet_profile() {
-        let data = STANDARD.decode(REAL_PROFILE_B64).unwrap();
+    fn decodes_a_real_padded_devnet_profile() -> anyhow::Result<()> {
+        let data = STANDARD
+            .decode(REAL_PROFILE_B64)
+            .context("test setup failed")?;
         let mut rest = &data[8..];
         let profile = ProfileOnChain::deserialize(&mut rest)
-            .expect("real on-chain profile must decode past its zero padding");
+            .context("real on-chain profile must decode past its zero padding")?;
 
         assert_eq!(profile.username, "val");
         assert!(profile.username_set);
@@ -1391,5 +1443,6 @@ mod profile_decode_tests {
             "strict decoding must still reject the padding — if this ever \
              passes, Anchor stopped over-allocating and the guard is moot"
         );
+        Ok(())
     }
 }

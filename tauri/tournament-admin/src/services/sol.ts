@@ -1,10 +1,15 @@
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 
+export function safeLamports(value: number): number {
+  const rounded = Math.round(value);
+  return Number.isSafeInteger(rounded) && rounded >= 0 ? rounded : Number.NaN;
+}
+
 /** Parses a SOL-denominated input string into whole lamports. NaN/negative → 0. */
 export function solInputToLamports(raw: string): number {
   const sol = parseFloat(raw);
   if (!Number.isFinite(sol) || sol < 0) return 0;
-  return Math.round(sol * LAMPORTS_PER_SOL);
+  return safeLamports(sol * LAMPORTS_PER_SOL);
 }
 
 export function lamportsToSolInput(lamports: number): string {
@@ -21,7 +26,8 @@ export function lamportsToUsd(lamports: number, solUsdRate: number | null): numb
 export function usdInputToLamports(raw: string, solUsdRate: number | null): number {
   const usd = parseFloat(raw);
   if (!Number.isFinite(usd) || usd < 0 || !solUsdRate) return 0;
-  return Math.round((usd / solUsdRate) * LAMPORTS_PER_SOL);
+  if (!Number.isFinite(solUsdRate) || solUsdRate <= 0) return Number.NaN;
+  return safeLamports((usd / solUsdRate) * LAMPORTS_PER_SOL);
 }
 
 export function lamportsToUsdInput(lamports: number, solUsdRate: number | null): string {

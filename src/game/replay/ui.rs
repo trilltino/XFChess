@@ -184,7 +184,7 @@ pub fn replay_ui_system(
                             let scores = &eh.scores;
                             let n = scores.len();
                             let avail = ui.available_width();
-                            let bar_w = (avail / n as f32).max(2.0).min(12.0);
+                            let bar_w = (avail / n as f32).clamp(2.0, 12.0);
                             let total_w = bar_w * n as f32;
                             let height = 40.0;
                             let (rect, _) = ui.allocate_exact_size(

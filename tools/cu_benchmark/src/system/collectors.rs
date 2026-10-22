@@ -172,8 +172,13 @@ pub async fn sample(
                             error = Some("metric contains a nonfinite value".into());
                             continue;
                         }
-                        let identity =
-                            serde_json::to_string(&sample.labels).expect("string map serializes");
+                        let identity = match serde_json::to_string(&sample.labels) {
+                            Ok(identity) => identity,
+                            Err(_) => {
+                                error = Some("metric labels could not be serialized".into());
+                                continue;
+                            }
+                        };
                         if values.insert(identity, sample.value).is_some() {
                             error = Some("duplicate metric series".into());
                         }
@@ -311,6 +316,7 @@ fn summary(kind: MetricKind, samples: &[Sample]) -> MetricSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     fn point(ms: u64, values: &[(&str, f64)]) -> Sample {
         Sample {
             elapsed_ms: ms,
@@ -319,14 +325,15 @@ mod tests {
         }
     }
     #[test]
-    fn labels_spaces_escapes_and_timestamp() {
+    fn labels_spaces_escapes_and_timestamp() -> anyhow::Result<()> {
         let values = parse(
             "# TYPE calls counter\ncalls{route=\"POST /move,record\",path=\"C:\\\\foo\"} 12 123\n",
         )
-        .unwrap();
+        .context(concat!(file!(), ":", line!()))?;
         assert_eq!(values[0].labels["route"], "POST /move,record");
         assert_eq!(values[0].labels["path"], "C:\\foo");
         assert_eq!(values[0].value, 12.0);
+        Ok(())
     }
     #[test]
     fn counters_track_new_series_and_detect_individual_resets() {
@@ -342,7 +349,7 @@ mod tests {
         assert_eq!(result.delta, None);
     }
     #[test]
-    fn missing_metrics_are_unknown_and_cpu_uses_idle_delta() {
+    fn missing_metrics_are_unknown_and_cpu_uses_idle_delta() -> anyhow::Result<()> {
         assert!(!summary(MetricKind::Counter, &[point(0, &[]), point(1000, &[])]).complete);
         assert!(
             !summary(
@@ -361,6 +368,14 @@ mod tests {
                 &[(r#"{"mode":"idle"}"#, 100.7), (r#"{"mode":"user"}"#, 20.3)],
             ),
         ];
-        assert!((summary(MetricKind::CpuUtilization, &cpu).max.unwrap() - 0.3).abs() < 1e-9);
+        assert!(
+            (summary(MetricKind::CpuUtilization, &cpu)
+                .max
+                .context(concat!(file!(), ":", line!()))?
+                - 0.3)
+                .abs()
+                < 1e-9
+        );
+        Ok(())
     }
 }

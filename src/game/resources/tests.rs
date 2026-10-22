@@ -74,9 +74,7 @@ fn test_game_phase_default() {
 
 #[test]
 fn test_game_phase_transitions() {
-    let mut phase = CurrentGamePhase::default();
-
-    phase.0 = GamePhase::Setup;
+    let mut phase = CurrentGamePhase(GamePhase::Setup);
     assert_eq!(phase.0, GamePhase::Setup);
 
     phase.0 = GamePhase::Check;
@@ -101,7 +99,7 @@ fn test_move_history_default() {
 }
 
 #[test]
-fn test_move_history_add_move() {
+fn test_move_history_add_move() -> Result<(), Box<dyn std::error::Error>> {
     let mut history = MoveHistory::default();
 
     let move1 = MoveRecord {
@@ -121,13 +119,15 @@ fn test_move_history_add_move() {
 
     assert_eq!(history.len(), 1, "Should have 1 move");
 
-    let last = history.last_move().expect("Should have a last move");
+    let last = history.last_move().ok_or("missing test value")?;
     assert_eq!(last.from, (1, 4));
     assert_eq!(last.to, (3, 4));
+
+    Ok(())
 }
 
 #[test]
-fn test_move_history_multiple_moves() {
+fn test_move_history_multiple_moves() -> Result<(), Box<dyn std::error::Error>> {
     let mut history = MoveHistory::default();
 
     let move1 = MoveRecord {
@@ -175,13 +175,15 @@ fn test_move_history_multiple_moves() {
 
     assert_eq!(history.len(), 3, "Should have 3 moves");
 
-    let last = history.last_move().expect("Should have a last move");
+    let last = history.last_move().ok_or("missing test value")?;
     assert_eq!(last.from, (0, 1), "Last move should be the knight move");
     assert_eq!(last.to, (2, 2));
+
+    Ok(())
 }
 
 #[test]
-fn test_move_history_with_capture() {
+fn test_move_history_with_capture() -> Result<(), Box<dyn std::error::Error>> {
     let mut history = MoveHistory::default();
 
     let move_with_capture = MoveRecord {
@@ -199,12 +201,14 @@ fn test_move_history_with_capture() {
 
     history.add_move(move_with_capture);
 
-    let last = history.last_move().expect("Should have a last move");
+    let last = history.last_move().ok_or("missing test value")?;
     assert_eq!(
         last.captured,
         Some(crate::rendering::pieces::PieceType::Pawn),
         "Captured piece should be recorded"
     );
+
+    Ok(())
 }
 
 #[test]

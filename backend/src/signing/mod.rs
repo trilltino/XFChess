@@ -37,14 +37,14 @@ use tracing::warn;
 pub use crate::tasks::tournament_scheduler::TournamentTrigger;
 pub use auth::JwtIssuer;
 pub use config::SigningConfig;
+pub use elimination::EliminationService;
 pub use elo_cache::EloCache;
 pub use feepayer::FeepayerPool;
 pub use identity::IdentityVault;
+pub use orchestrator::OrchestratorEvent;
 pub use routes::matchmaking::SharedMatchmakingState;
 pub use social::{FriendManager, PresenceStore};
 pub use storage::{tournament::TournamentStore, SessionStore};
-pub use elimination::EliminationService;
-pub use orchestrator::OrchestratorEvent;
 pub use swiss::SwissService;
 pub use tournament_gossip::TournamentGossipService;
 pub use xfchess_anticheat::engine::job_queue::AnalysisQueue;
@@ -100,7 +100,6 @@ pub struct AppState {
 }
 
 // Compile-time check: AppState must be Clone + Send + Sync + 'static for axum::serve
-#[allow(dead_code)]
 const _: () = {
     fn assert_bounds<T: Clone + Send + Sync + 'static>() {}
     // If AppState violates any bound, this line will produce a clear error.
@@ -116,8 +115,10 @@ pub fn load_keypair_from_env_value(val: &str) -> Result<Keypair, String> {
         Keypair::try_from(bytes.as_slice())
             .map_err(|e| format!("keyfile '{val}' does not contain a valid ed25519 keypair: {e}"))
     } else {
-        // Malformed base58 panics; keyfile errors return Result.
-        Ok(Keypair::from_base58_string(val))
+        let bytes = bs58::decode(val)
+            .into_vec()
+            .map_err(|_| "Invalid base58 keypair".to_string())?;
+        Keypair::try_from(bytes.as_slice()).map_err(|_| "Invalid ed25519 keypair".to_string())
     }
 }
 
@@ -127,12 +128,12 @@ impl AppState {
         pool: sqlx::SqlitePool,
         vault_pool: sqlx::SqlitePool,
         tournament_store: Arc<TournamentStore>,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         // Initialize the encryption vault before the store so persisted session keys
         // are encrypted at rest.
         let identity_vault =
             identity::IdentityVault::new(&config.identity_encryption_key, &config.identity_salt)
-                .expect("Failed to initialize IdentityVault from env config");
+                .map_err(anyhow::Error::msg)?;
 
         let store = Arc::new(storage::SessionStore::new(
             pool.clone(),
@@ -141,19 +142,19 @@ impl AppState {
         let money_actions = Arc::new(storage::money_action::MoneyActionStore::new(pool.clone()));
         let feepayer = Arc::new(feepayer::FeepayerPool::from_base58_list(
             &config.fee_payer_keys,
-        ));
+            config.is_production(),
+        )?);
         let jwt = Arc::new(auth::JwtIssuer::new(&config.jwt_secret));
 
         let p2p_relay_store = p2p_relay::RelayStore::new(pool.clone());
         let p2p_relay = Arc::new(p2p_relay::create_relay_state(Some(p2p_relay_store.clone())));
 
-        let program_id =
-            Pubkey::from_str(&config.program_id).expect("Invalid program_id in config");
+        let program_id = Pubkey::from_str(&config.program_id)?;
         let elo_cache = Arc::new(EloCache::new(
             config.solana_rpc_url.clone(),
             std::time::Duration::from_secs(300),
             program_id,
-        ));
+        )?);
         // Share the ELO cache and persist matchmaking state in the session pool.
         let matchmaking =
             routes::matchmaking::SharedMatchmakingState::new(elo_cache.clone(), pool.clone());
@@ -161,22 +162,14 @@ impl AppState {
         // Accept JSON keyfiles or base58 keys. Malformed authority keys are fatal
         // in production; development may generate temporary keys.
         let is_production = config.is_production();
-        let resolve_authority = |name: &str, key: &Option<String>| -> Keypair {
+        let resolve_authority = |name: &str, key: &Option<String>| -> anyhow::Result<Keypair> {
             match key.as_deref().map(load_keypair_from_env_value) {
-                Some(Ok(kp)) => kp,
-                Some(Err(e)) if is_production => {
-                    panic!("[VPS] {name} is set but invalid in production, refusing to start: {e}")
-                }
-                Some(Err(e)) => {
-                    warn!("[VPS] {name} is set but invalid ({e}), using random fallback");
-                    Keypair::new()
-                }
-                None if is_production => {
-                    panic!("[VPS] {name} not provided in production — this should have been caught by SigningConfig::validate()")
-                }
+                Some(Ok(key)) => Ok(key),
+                Some(Err(error)) => Err(anyhow::anyhow!("Invalid {name}: {error}")),
+                None if is_production => Err(anyhow::anyhow!("{name} is required in production")),
                 None => {
                     warn!("[VPS] No {name} provided, using random fallback");
-                    Keypair::new()
+                    Ok(Keypair::new())
                 }
             }
         };
@@ -184,25 +177,18 @@ impl AppState {
         let vps_authority = Arc::new(resolve_authority(
             "vps_authority_key",
             &config.vps_authority_key,
-        ));
+        )?);
         let kyc_authority = Arc::new(resolve_authority(
             "kyc_authority_key",
             &config.kyc_authority_key,
-        ));
+        )?);
         let link_authority = Arc::new(resolve_authority(
             "link_authority_key",
             &config.link_authority_key,
-        ));
+        )?);
         // Not loaded via `resolve_authority` — no secret key involved. See
         // `treasury_authority_pubkey`'s field doc.
-        let treasury_authority_pubkey = Pubkey::from_str(&config.treasury_authority_pubkey)
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Invalid treasury_authority_pubkey in config ({}): {e} — \
-                     this should have been caught by SigningConfig::validate()",
-                    config.treasury_authority_pubkey
-                )
-            });
+        let treasury_authority_pubkey = Pubkey::from_str(&config.treasury_authority_pubkey)?;
 
         // Resolved authority pubkeys must match the program constants or privileged
         // instructions fail with UnauthorizedAccess.
@@ -216,9 +202,9 @@ impl AppState {
         );
 
         let braid_hub = Arc::new(ResourceHub::new());
-        let mut _swiss = swiss::SwissService::new((*tournament_store).clone());
-        _swiss.set_braid_hub(Arc::clone(&braid_hub));
-        let swiss_service = Arc::new(_swiss);
+        let mut swiss = swiss::SwissService::new((*tournament_store).clone());
+        swiss.set_braid_hub(Arc::clone(&braid_hub));
+        let swiss_service = Arc::new(swiss);
         let elimination_service = EliminationService::new((*tournament_store).clone());
 
         let tournament_gossip = Arc::new(TournamentGossipService::new(
@@ -226,10 +212,8 @@ impl AppState {
             None,
         ));
 
-        let tournament_fee_recipient = Pubkey::from_str(&config.tournament_fee_recipient)
-            .expect("Invalid tournament_fee_recipient in config");
-        let usdc_mint_pubkey =
-            Pubkey::from_str(&config.usdc_mint_pubkey).expect("Invalid usdc_mint_pubkey in config");
+        let tournament_fee_recipient = Pubkey::from_str(&config.tournament_fee_recipient)?;
+        let usdc_mint_pubkey = Pubkey::from_str(&config.usdc_mint_pubkey)?;
 
         // Refresh fee exchange rates in the background so payment requests do not wait on external feeds.
         let rate_cache = routes::rates::RateCache::default();
@@ -237,7 +221,7 @@ impl AppState {
         let metrics = Arc::new(crate::telemetry::metrics::Metrics::new());
 
         let solana_rpc_url = config.solana_rpc_url.clone();
-        let solana_rpc = Arc::new(solana::rpc::make_rpc(&solana_rpc_url));
+        let solana_rpc = Arc::new(solana::rpc::make_rpc(&solana_rpc_url)?);
         let game_participants =
             solana::game_participants::GameParticipantsCache::new(solana_rpc.clone(), program_id);
         let game_log = Arc::new(routes::game_log::GameLogState::new(
@@ -251,7 +235,7 @@ impl AppState {
         let invite_store = Arc::new(parking_lot::RwLock::new(HashMap::new()));
         social::routes::spawn_invite_store_sweep(invite_store.clone());
 
-        Self {
+        Ok(Self {
             config: Arc::new(config),
             store,
             money_actions,
@@ -291,7 +275,7 @@ impl AppState {
             presence,
             invite_store,
             siws_nonces: Arc::new(Mutex::new(HashMap::new())),
-        }
+        })
     }
 
     pub fn spawn_state_sweeps(state: AppState) {

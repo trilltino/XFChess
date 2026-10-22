@@ -34,7 +34,7 @@
             </intent-filter>
 
             <!-- The native library name must match System.loadLibrary and the android_main entrypoint. -->
-            <meta-data android:name="android.app.lib_name" android:value="xfchess" />
+            <meta-data android:name="android.app.lib_name" android:value="xfchess_app" />
         </activity>
     </application>
 

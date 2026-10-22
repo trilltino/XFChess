@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anyhow::Context as _;
 use xfchess_game::state::{
     get_default_prize_shares, PayoutType, Tournament, TournamentStatus, TournamentType,
 };
@@ -60,17 +61,21 @@ fn tournament(winner: Pubkey, prizes_claimed: u16) -> Tournament {
 }
 
 #[test]
-fn prize_ledger_tracks_place_bits_and_amounts() {
+fn prize_ledger_tracks_place_bits_and_amounts() -> anyhow::Result<()> {
     let winner = Pubkey::new_unique();
     let t = tournament(winner, 0);
 
     assert_eq!(ledger::find_place(&t, winner), Some((0, 10_000)));
-    assert_eq!(ledger::place_bit(0).unwrap(), 1);
-    assert_eq!(ledger::prize_amount(1_000_000, 6000).unwrap(), 600_000);
-    assert!(ledger::funded_place_unclaimed(&t, 0).unwrap());
+    assert_eq!(ledger::place_bit(0).context("required operation value")?, 1);
+    assert_eq!(
+        ledger::prize_amount(1_000_000, 6000).context("required operation value")?,
+        600_000
+    );
+    assert!(ledger::funded_place_unclaimed(&t, 0).context("required operation value")?);
 
     let t = tournament(winner, 1);
-    assert!(!ledger::funded_place_unclaimed(&t, 0).unwrap());
+    assert!(!ledger::funded_place_unclaimed(&t, 0).context("required operation value")?);
+    Ok(())
 }
 
 #[test]

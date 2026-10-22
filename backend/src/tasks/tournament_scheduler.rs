@@ -335,7 +335,7 @@ impl TournamentScheduler {
 
                 let program_id = Pubkey::from_str(&program_id_str)
                     .map_err(|e| format!("bad program_id: {e}"))?;
-                let rpc = make_rpc(&rpc_url);
+                let rpc = make_rpc(&rpc_url).map_err(|error| error.to_string())?;
 
                 let ix = start_tournament_ix(
                     &program_id,
@@ -636,7 +636,7 @@ pub fn spawn_prize_distributor(
 
                     let program_id = Pubkey::from_str(&program_id_str)
                         .map_err(|e| format!("bad program_id: {e}"))?;
-                    let rpc = make_rpc(&rpc_url);
+                    let rpc = make_rpc(&rpc_url).map_err(|error| error.to_string())?;
                     // The program pays every funded, unclaimed place in one
                     // instruction and rejects any other wallet list, so the list
                     // comes from the chain: places, shares and claimed bits.
@@ -762,6 +762,7 @@ mod tests {
     use crate::signing::storage::tournament::{
         EliminationState, FormatState, ResultSource, SwissStorageData, TournamentFormat,
     };
+    use anyhow::Context as _;
 
     #[test]
     fn a_bracket_starts_full_but_a_swiss_event_at_its_minimum() {
@@ -774,66 +775,78 @@ mod tests {
         assert_eq!(default_min_players(&t), 5);
     }
 
-    async fn anticheat_migrated_pool() -> sqlx::SqlitePool {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::infrastructure::migrate_session_db(&pool)
-            .await
-            .unwrap();
-        pool
+    async fn anticheat_migrated_pool() -> anyhow::Result<sqlx::SqlitePool> {
+        Ok({
+            let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+                .await
+                .context("test setup failed")?;
+            crate::infrastructure::migrate_session_db(&pool)
+                .await
+                .context("test setup failed")?;
+            pool
+        })
     }
 
-    fn tournament_with_one_match(game_id: u64, completed_at: Option<i64>) -> TournamentRecord {
-        let mut t = TournamentRecord::new(1, "t", 0);
-        t.completed_at = completed_at;
-        let mut bracket = EliminationState::draw(1, &["white".to_string(), "black".to_string()]);
-        bracket.matches[0].game_id = Some(game_id);
-        bracket
-            .decide(1, 0, "white", "black", ResultSource::OnChain)
-            .unwrap();
-        t.state = FormatState::Elimination(bracket);
-        t
+    fn tournament_with_one_match(
+        game_id: u64,
+        completed_at: Option<i64>,
+    ) -> anyhow::Result<TournamentRecord> {
+        Ok({
+            let mut t = TournamentRecord::new(1, "t", 0);
+            t.completed_at = completed_at;
+            let mut bracket =
+                EliminationState::draw(1, &["white".to_string(), "black".to_string()]);
+            bracket.matches[0].game_id = Some(game_id);
+            bracket
+                .decide(1, 0, "white", "black", ResultSource::OnChain)
+                .context("test setup failed")?;
+            t.state = FormatState::Elimination(bracket);
+            t
+        })
     }
 
     #[tokio::test]
-    async fn prize_gate_pays_unanalyzed_game_after_hold_window_expires() {
-        let pool = anticheat_migrated_pool().await;
+    async fn prize_gate_pays_unanalyzed_game_after_hold_window_expires() -> anyhow::Result<()> {
+        let pool = anticheat_migrated_pool().await?;
         let game_id = 555_u64;
 
         sqlx::query("INSERT INTO anticheat_queue (game_id) VALUES (?)")
             .bind(game_id.to_string())
             .execute(&pool)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         let now = chrono::Utc::now().timestamp();
-        let t = tournament_with_one_match(game_id, Some(now - PRIZE_HOLD_WINDOW_SECS - 10));
+        let t = tournament_with_one_match(game_id, Some(now - PRIZE_HOLD_WINDOW_SECS - 10))?;
 
         let gate = anticheat_gate(&pool, &t).await;
         assert!(
             matches!(gate, PrizeGate::Proceed { flagged } if flagged.is_empty()),
             "past the hold window, an unanalyzed game must pay out (Proceed), not Hold forever"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn prize_gate_holds_unanalyzed_game_within_hold_window() {
-        let pool = anticheat_migrated_pool().await;
+    async fn prize_gate_holds_unanalyzed_game_within_hold_window() -> anyhow::Result<()> {
+        let pool = anticheat_migrated_pool().await?;
         let game_id = 556_u64;
 
         sqlx::query("INSERT INTO anticheat_queue (game_id) VALUES (?)")
             .bind(game_id.to_string())
             .execute(&pool)
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         let now = chrono::Utc::now().timestamp();
-        let t = tournament_with_one_match(game_id, Some(now - 60)); // 1 minute ago
+        let t = tournament_with_one_match(game_id, Some(now - 60))?; // 1 minute ago
 
         let gate = anticheat_gate(&pool, &t).await;
         assert!(
             matches!(gate, PrizeGate::Hold),
             "inside the hold window, pending analysis must hold distribution"
         );
+        Ok(())
     }
 
     #[test]
@@ -887,8 +900,11 @@ mod tests {
     static PRIZE_THRESHOLD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
-    fn threshold_env_var_overrides_default() {
-        let _guard = PRIZE_THRESHOLD_ENV_LOCK.lock().unwrap();
+    fn threshold_env_var_overrides_default() -> anyhow::Result<()> {
+        let _guard = PRIZE_THRESHOLD_ENV_LOCK
+            .lock()
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
         std::env::set_var("PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS", "123");
         assert_eq!(prize_auto_release_threshold_lamports(), 123);
         std::env::remove_var("PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS");
@@ -896,11 +912,13 @@ mod tests {
             prize_auto_release_threshold_lamports(),
             DEFAULT_PRIZE_AUTO_RELEASE_THRESHOLD_LAMPORTS
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn flagged_verdict_is_invisible_outside_its_own_tournaments_gate_query() {
-        let pool = anticheat_migrated_pool().await;
+    async fn flagged_verdict_is_invisible_outside_its_own_tournaments_gate_query(
+    ) -> anyhow::Result<()> {
+        let pool = anticheat_migrated_pool().await?;
         let unrelated_game_id = "42";
 
         sqlx::query(
@@ -912,20 +930,21 @@ mod tests {
         .bind(unrelated_game_id)
         .execute(&pool)
         .await
-        .unwrap();
+        .context("test setup failed")?;
 
         // A different tournament whose matches never reference `unrelated_game_id`.
-        let t = tournament_with_one_match(999, Some(0));
+        let t = tournament_with_one_match(999, Some(0))?;
         let gate = anticheat_gate(&pool, &t).await;
         assert!(
             matches!(gate, PrizeGate::Proceed { flagged } if flagged.is_empty()),
             "a Flag verdict for a game outside this tournament's own matches must not surface here"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn prize_gate_checks_swiss_board_games_too() {
-        let pool = anticheat_migrated_pool().await;
+    async fn prize_gate_checks_swiss_board_games_too() -> anyhow::Result<()> {
+        let pool = anticheat_migrated_pool().await?;
         let mut sd = SwissStorageData::new(1);
         sd.current_round = 1;
         sd.rounds = vec![swiss_pairing::SwissRound {
@@ -942,7 +961,8 @@ mod tests {
         let mut t = TournamentRecord::new(3, "t", 0);
         t.state = FormatState::Swiss(sd);
         let board_game =
-            crate::signing::storage::tournament::TournamentStore::swiss_game_id(3, 1, 1).unwrap();
+            crate::signing::storage::tournament::TournamentStore::swiss_game_id(3, 1, 1)
+                .context("test setup failed")?;
         sqlx::query(
             "INSERT INTO anticheat_verdicts
              (game_id, white_pubkey, black_pubkey, white_verdict, black_verdict,
@@ -952,12 +972,13 @@ mod tests {
         .bind(board_game.to_string())
         .execute(&pool)
         .await
-        .unwrap();
+        .context("test setup failed")?;
 
         let gate = anticheat_gate(&pool, &t).await;
         assert!(
             matches!(gate, PrizeGate::Proceed { ref flagged } if flagged == &["cheater"]),
             "a flagged Swiss game must withhold that player's prize"
         );
+        Ok(())
     }
 }

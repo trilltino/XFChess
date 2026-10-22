@@ -97,11 +97,13 @@ impl RollupNetworkBridge {
     }
 
     pub fn reset_preserving_finalization(&mut self) {
-        let mut fresh = Self::default();
-        fresh.pending_finalization = self.pending_finalization.take();
-        fresh.finalization_rx = self.finalization_rx.take();
-        fresh.game_end_moves_flushing = self.game_end_moves_flushing;
-        fresh.game_end_flush_rx = self.game_end_flush_rx.take();
+        let fresh = Self {
+            pending_finalization: self.pending_finalization.take(),
+            finalization_rx: self.finalization_rx.take(),
+            game_end_moves_flushing: self.game_end_moves_flushing,
+            game_end_flush_rx: self.game_end_flush_rx.take(),
+            ..Default::default()
+        };
         *self = fresh;
     }
 }

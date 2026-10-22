@@ -2,6 +2,8 @@ use crate::{
     VarInt,
     error::{convert_read_error_to_stream_error, convert_write_error_to_stream_error},
 };
+#[cfg(test)]
+use anyhow::Context as _;
 use bytes::{Buf, Bytes};
 use futures::ready;
 use h3::quic::{self, ConnectionErrorIncoming, StreamErrorIncoming, StreamId, WriteBuf};
@@ -91,11 +93,16 @@ where
 /// A receive-only half of an Iroh QUIC stream, implementing the h3 `RecvStream` trait.
 pub struct RecvStream {
     stream: iroh::endpoint::RecvStream,
+    id: StreamId,
 }
 
 impl RecvStream {
-    pub(crate) fn new(stream: iroh::endpoint::RecvStream) -> Self {
-        Self { stream }
+    pub(crate) fn new(stream: iroh::endpoint::RecvStream) -> Result<Self, String> {
+        let value: u64 = stream.id().into();
+        let id = value
+            .try_into()
+            .map_err(|error| format!("invalid receive stream ID: {error}"))?;
+        Ok(Self { stream, id })
     }
 }
 
@@ -118,13 +125,13 @@ impl quic::RecvStream for RecvStream {
     }
 
     fn recv_id(&self) -> StreamId {
-        let num: u64 = self.stream.id().into();
-        num.try_into().expect("invalid stream id")
+        self.id
     }
 }
 /// A send-only half of an Iroh QUIC stream, implementing the h3 `SendStream` trait.
 pub struct SendStream<B: Buf> {
     stream: iroh::endpoint::SendStream,
+    id: StreamId,
     writing: Option<WriteBuf<B>>,
 }
 
@@ -132,11 +139,16 @@ impl<B> SendStream<B>
 where
     B: Buf,
 {
-    pub(crate) fn new(stream: iroh::endpoint::SendStream) -> SendStream<B> {
-        Self {
+    pub(crate) fn new(stream: iroh::endpoint::SendStream) -> Result<SendStream<B>, String> {
+        let value: u64 = stream.id().into();
+        let id = value
+            .try_into()
+            .map_err(|error| format!("invalid send stream ID: {error}"))?;
+        Ok(Self {
             stream,
+            id,
             writing: None,
-        }
+        })
     }
 }
 
@@ -187,8 +199,7 @@ where
     }
 
     fn send_id(&self) -> StreamId {
-        let num: u64 = self.stream.id().into();
-        num.try_into().expect("invalid stream id")
+        self.id
     }
 }
 
@@ -202,7 +213,9 @@ where
         buf: &mut D,
     ) -> Poll<Result<usize, StreamErrorIncoming>> {
         if self.writing.is_some() {
-            panic!("poll_send called while send stream is not ready");
+            return Poll::Ready(Err(crate::error::internal_stream_error(
+                "send stream is not ready".into(),
+            )));
         }
 
         let s = Pin::new(&mut self.stream);
@@ -225,50 +238,79 @@ mod tests {
     use iroh::{Endpoint, endpoint::presets};
 
     #[tokio::test]
-    async fn a_pending_zero_copy_read_can_be_identified_cancelled_and_resumed() {
+    async fn a_pending_zero_copy_read_can_be_identified_cancelled_and_resumed() -> anyhow::Result<()>
+    {
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             let server = Endpoint::builder(presets::Minimal)
                 .alpns(vec![b"test".to_vec()])
                 .bind()
                 .await
-                .unwrap();
-            let client = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+                .context("required operation value")?;
+            let client = Endpoint::builder(presets::Minimal)
+                .bind()
+                .await
+                .context("required operation value")?;
             let (client_conn, server_conn) =
                 tokio::join!(client.connect(server.addr(), b"test"), async {
-                    server.accept().await.unwrap().await
+                    Ok::<_, anyhow::Error>(
+                        server
+                            .accept()
+                            .await
+                            .context("required operation value")?
+                            .await?,
+                    )
                 });
-            let client_conn = client_conn.unwrap();
-            let server_conn = server_conn.unwrap();
-            let (mut send, _) = client_conn.open_bi().await.unwrap();
-            send.write_all(b"one").await.unwrap();
-            let (_, recv) = server_conn.accept_bi().await.unwrap();
-            let mut recv = RecvStream::new(recv);
+            let client_conn = client_conn.context("required operation value")?;
+            let server_conn = server_conn.context("required operation value")?;
+            let (mut send, _) = client_conn
+                .open_bi()
+                .await
+                .context("required operation value")?;
+            send.write_all(b"one")
+                .await
+                .context("required operation value")?;
+            let (_, recv) = server_conn
+                .accept_bi()
+                .await
+                .context("required operation value")?;
+            let mut recv = RecvStream::new(recv).map_err(anyhow::Error::msg)?;
             assert_eq!(
                 std::future::poll_fn(|cx| recv.poll_data(cx))
                     .await
-                    .unwrap()
-                    .unwrap(),
+                    .context("required operation value")?
+                    .context("required operation value")?,
                 b"one".as_slice()
             );
             let waker = futures::task::noop_waker();
             let mut cx = task::Context::from_waker(&waker);
             assert!(recv.poll_data(&mut cx).is_pending());
             let _id = recv.recv_id();
-            send.write_all(b"two").await.unwrap();
+            send.write_all(b"two")
+                .await
+                .context("required operation value")?;
             assert_eq!(
                 std::future::poll_fn(|cx| recv.poll_data(cx))
                     .await
-                    .unwrap()
-                    .unwrap(),
+                    .context("required operation value")?
+                    .context("required operation value")?,
                 b"two".as_slice()
             );
             assert!(recv.poll_data(&mut cx).is_pending());
             recv.stop_sending(42);
-            assert_eq!(send.stopped().await.unwrap().unwrap().into_inner(), 42);
+            assert_eq!(
+                send.stopped()
+                    .await
+                    .context("required operation value")?
+                    .context("required operation value")?
+                    .into_inner(),
+                42
+            );
             client.close().await;
             server.close().await;
+            Ok::<_, anyhow::Error>(())
         })
         .await
-        .expect("QUIC receive test stalled");
+        .context("QUIC receive test stalled")??;
+        Ok(())
     }
 }

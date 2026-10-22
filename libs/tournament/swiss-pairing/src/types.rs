@@ -53,18 +53,8 @@ impl SwissPlayer {
         matches!(self.last_float(), FloatStatus::Up)
     }
 
-    pub fn color_balance(&self) -> i8 {
-        let whites = self
-            .color_history
-            .iter()
-            .filter(|c| **c == Color::White)
-            .count() as i8;
-        let blacks = self
-            .color_history
-            .iter()
-            .filter(|c| **c == Color::Black)
-            .count() as i8;
-        blacks - whites
+    pub fn color_balance(&self) -> i64 {
+        crate::color::calculate_balance(&self.color_history)
     }
 
     pub fn had_same_color_twice(&self) -> bool {

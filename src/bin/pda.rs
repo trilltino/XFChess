@@ -4,14 +4,13 @@ use std::str::FromStr;
 
 const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let game_id: u64 = std::env::args()
         .nth(1)
-        .expect("Usage: pda <game_id>")
-        .parse()
-        .expect("game_id must be a u64");
+        .ok_or("Usage: pda <game_id>")?
+        .parse()?;
 
-    let program_id = Pubkey::from_str(PROGRAM_ID).unwrap();
+    let program_id = Pubkey::from_str(PROGRAM_ID)?;
     let id_bytes = game_id.to_le_bytes();
 
     let (game_pda, game_bump) = Pubkey::find_program_address(&[b"game", &id_bytes], &program_id);
@@ -45,4 +44,5 @@ fn main() {
     println!("MagicBlock Explorer:");
     println!("  https://explorer.magicblock.app/account/{}", game_pda);
     println!("  https://explorer.magicblock.app/account/{}", move_log_pda);
+    Ok(())
 }

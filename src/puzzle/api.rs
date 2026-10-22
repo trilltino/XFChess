@@ -295,15 +295,16 @@ mod tests {
     }
 
     #[test]
-    fn decodes_served_puzzle() {
+    fn decodes_served_puzzle() -> Result<(), Box<dyn std::error::Error>> {
         let p: PuzzleData = serde_json::from_str(
             r#"{"nonce":"n","id":"abc","fen":"8/8/8/8/8/8/8/8 w - - 0 1","setup_move":"e2e4",
                 "color":"black","rating":1500,"solution_len":2,"themes":["fork","short"],
                 "source":"lichess"}"#,
-        )
-        .unwrap();
+        )?;
         assert_eq!(p.themes, ["fork", "short"]);
         assert_eq!(p.source, "lichess");
         assert!(!p.exhausted);
+
+        Ok(())
     }
 }

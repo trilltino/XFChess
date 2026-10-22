@@ -8,7 +8,8 @@ use tracing::info;
 pub fn spawn_background_tasks(
     state: AppState,
     config: SigningConfig,
-) -> (tokio::sync::mpsc::Sender<TournamentTrigger>, AnalysisQueue) {
+) -> anyhow::Result<(tokio::sync::mpsc::Sender<TournamentTrigger>, AnalysisQueue)> {
+    let ac_queue = anticheat_worker::spawn_anticheat_workers(state.store.pool())?;
     let matchmaking_state = state.matchmaking.clone();
     tokio::spawn(async move {
         matchmaking::run_matchmaking_service(matchmaking_state).await;
@@ -47,8 +48,6 @@ pub fn spawn_background_tasks(
     });
     info!("[Tasks] Game archiver service spawned");
 
-    let ac_pool = state.store.pool();
-    let ac_queue = anticheat_worker::spawn_anticheat_workers(ac_pool);
     info!("[Tasks] Anti-cheat analysis workers spawned");
 
     crate::tasks::queue::QueueWorker::new()
@@ -60,7 +59,7 @@ pub fn spawn_background_tasks(
     info!("[Tasks] Durable job-queue worker spawned (email.send)");
 
     info!("[Tasks] All background tasks spawned successfully");
-    (trigger_tx, ac_queue)
+    Ok((trigger_tx, ac_queue))
 }
 
 #[cfg(test)]

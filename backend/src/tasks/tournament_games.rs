@@ -103,7 +103,7 @@ async fn provision(state: &AppState, game: &AssignedGame, max_players: u16) -> R
     let authority = state.vps_authority.clone();
     let (tournament_id, game_id) = (game.tournament_id, game.game_id);
     let created = tokio::task::spawn_blocking(move || {
-        let rpc = make_rpc(&rpc_url);
+        let rpc = make_rpc(&rpc_url).map_err(|error| error.to_string())?;
         let game_pda =
             Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
         if rpc.get_account(&game_pda).is_ok() {
@@ -155,6 +155,7 @@ mod tests {
     use crate::signing::storage::tournament::{
         EliminationState, FormatState, GameOutcome, SwissStorageData, TournamentStore,
     };
+    use anyhow::Context as _;
 
     fn active(state: FormatState) -> TournamentRecord {
         let mut t = TournamentRecord::new(5, "t", 0);
@@ -164,16 +165,16 @@ mod tests {
     }
 
     #[test]
-    fn bracket_games_are_the_seated_undecided_unprovisioned_matches() {
+    fn bracket_games_are_the_seated_undecided_unprovisioned_matches() -> anyhow::Result<()> {
         let seeds: Vec<String> = (0..4).map(|i| format!("P{i}")).collect();
         let mut bracket = EliminationState::draw(5, &seeds);
         let (first, second) = (
-            bracket.matches[0].game_id.unwrap(),
-            bracket.matches[1].game_id.unwrap(),
+            bracket.matches[0].game_id.context("test setup failed")?,
+            bracket.matches[1].game_id.context("test setup failed")?,
         );
         bracket
             .apply_game(5, first, "P0", "P3", GameOutcome::WhiteWin, &seeds)
-            .unwrap();
+            .context("test setup failed")?;
         let mut t = active(FormatState::Elimination(bracket));
         // Match 0 is decided; the final still waits for its second player.
         let ids: Vec<u64> = games_to_provision(&t).iter().map(|g| g.game_id).collect();
@@ -181,16 +182,17 @@ mod tests {
 
         t.provisioned_game_ids = vec![second];
         assert!(games_to_provision(&t).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn a_drawn_bracket_game_needs_its_replay_provisioned() {
+    fn a_drawn_bracket_game_needs_its_replay_provisioned() -> anyhow::Result<()> {
         let seeds: Vec<String> = vec!["A".into(), "B".into()];
         let mut bracket = EliminationState::draw(5, &seeds);
-        let first = bracket.matches[0].game_id.unwrap();
+        let first = bracket.matches[0].game_id.context("test setup failed")?;
         bracket
             .apply_game(5, first, "A", "B", GameOutcome::Draw, &seeds)
-            .unwrap();
+            .context("test setup failed")?;
         let mut t = active(FormatState::Elimination(bracket));
         t.provisioned_game_ids = vec![first];
         let games = games_to_provision(&t);
@@ -200,10 +202,11 @@ mod tests {
             (games[0].white.as_str(), games[0].black.as_str()),
             ("B", "A")
         );
+        Ok(())
     }
 
     #[test]
-    fn swiss_games_are_the_open_boards_of_the_latest_round() {
+    fn swiss_games_are_the_open_boards_of_the_latest_round() -> anyhow::Result<()> {
         let pairing = |board: u16| swiss_pairing::Pairing {
             white: format!("w{board}"),
             black: format!("b{board}"),
@@ -233,7 +236,7 @@ mod tests {
         assert_eq!(games.len(), 1);
         assert_eq!(
             games[0].game_id,
-            TournamentStore::swiss_game_id(5, 2, 2).unwrap()
+            TournamentStore::swiss_game_id(5, 2, 2).context("test setup failed")?
         );
         assert_eq!(
             (games[0].white.as_str(), games[0].black.as_str()),
@@ -242,5 +245,6 @@ mod tests {
 
         t.status = TournamentStatus::Completed;
         assert!(games_to_provision(&t).is_empty());
+        Ok(())
     }
 }

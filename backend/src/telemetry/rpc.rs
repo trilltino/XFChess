@@ -71,13 +71,14 @@ pub fn render_prometheus() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use std::sync::{
         atomic::{AtomicU32, Ordering},
         Arc,
     };
 
     #[tokio::test]
-    async fn sdk_retries_are_counted_without_exposing_credentials() {
+    async fn sdk_retries_are_counted_without_exposing_credentials() -> anyhow::Result<()> {
         let calls = Arc::new(AtomicU32::new(0));
         let observed = calls.clone();
         let app = axum::Router::new().route(
@@ -101,13 +102,18 @@ mod tests {
                 }
             }),
         );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let origin = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .context("test setup failed")?;
+        let origin = format!(
+            "http://{}",
+            listener.local_addr().context("test setup failed")?
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
         let client = crate::signing::solana::rpc::make_async_rpc(&format!(
             "{origin}/secret-token?api-key=private"
-        ));
-        assert_eq!(client.get_slot().await.unwrap(), 42);
+        ))?;
+        assert_eq!(client.get_slot().await.context("test setup failed")?, 42);
         assert_eq!(calls.load(Ordering::Relaxed), 2);
         let metrics = render_prometheus();
         assert!(metrics.contains(&format!(
@@ -118,5 +124,6 @@ mod tests {
         )));
         assert!(!metrics.contains("secret-token") && !metrics.contains("api-key"));
         server.abort();
+        Ok(())
     }
 }

@@ -172,4 +172,3 @@ fn sync_light_count(
         }
     }
 }
-

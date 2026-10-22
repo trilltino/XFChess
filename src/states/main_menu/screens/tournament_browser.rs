@@ -153,12 +153,14 @@ fn render_browser(
         return;
     }
 
-    egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-        for t in visible {
-            render_tournament_card(ui, ctx, t, wallet_pubkey.as_deref(), replay_request);
-            ui.add_space(4.0);
-        }
-    });
+    egui::ScrollArea::vertical()
+        .max_height(400.0)
+        .show(ui, |ui| {
+            for t in visible {
+                render_tournament_card(ui, ctx, t, wallet_pubkey.as_deref(), replay_request);
+                ui.add_space(4.0);
+            }
+        });
 }
 
 /// Refreshing / last-updated, a refresh button, and the last poll error.
@@ -225,13 +227,9 @@ fn render_filter_chips(ui: &mut egui::Ui, ctx: &mut MainMenuUIContext) {
         ] {
             let chip = value.map(str::to_string);
             let selected = current == chip;
-            let clicked = crate::ui::styles::StyledButton::chip(
-                ui,
-                label,
-                selected,
-                egui::vec2(58.0, 24.0),
-            )
-            .clicked();
+            let clicked =
+                crate::ui::styles::StyledButton::chip(ui, label, selected, egui::vec2(58.0, 24.0))
+                    .clicked();
             if clicked {
                 if let Some(tc) = ctx.tournament_client.as_deref_mut() {
                     tc.status_filter = chip;
@@ -427,7 +425,9 @@ fn render_card_summary(ui: &mut egui::Ui, t: &TournamentSummary) {
                 }
                 s if s.contains("active") => ("● Active", egui::Color32::from_rgb(255, 180, 0)),
                 s if s.contains("completed") => ("● Completed", egui::Color32::from_gray(140)),
-                s if s.contains("cancelled") => ("✕ Cancelled", egui::Color32::from_rgb(220, 80, 80)),
+                s if s.contains("cancelled") => {
+                    ("✕ Cancelled", egui::Color32::from_rgb(220, 80, 80))
+                }
                 _ => ("● Unknown", egui::Color32::GRAY),
             };
             ui.add_space(6.0);
@@ -990,12 +990,9 @@ fn render_register_button(
                 egui::Color32::from_rgb(220, 80, 80)
             };
             ui.label(
-                egui::RichText::new(format!(
-                    "Cost: {:.3} SOL  (bal: {:.3})",
-                    entry_sol, balance
-                ))
-                .size(10.0)
-                .color(bal_col),
+                egui::RichText::new(format!("Cost: {:.3} SOL  (bal: {:.3})", entry_sol, balance))
+                    .size(10.0)
+                    .color(bal_col),
             );
         }
     });
@@ -1023,14 +1020,14 @@ fn render_waiting_room(
 
     if t.max_players > 0 {
         let joined = tc.registered_players.len();
-        let fill = joined.min(t.max_players as usize) as f32 / t.max_players as f32;
+        let fill = joined.min(t.max_players) as f32 / t.max_players as f32;
         ui.add(
             egui::widgets::ProgressBar::new(fill)
                 .text(format!("{}/{} players", joined, t.max_players)),
         );
         ui.add_space(4.0);
     }
-    for idx in 0..t.max_players.min(8) as usize {
+    for idx in 0..t.max_players.min(8) {
         let (label, col) = match tc.registered_players.get(idx) {
             Some(name) => (name.as_str(), egui::Color32::from_rgb(200, 220, 200)),
             None => ("—", egui::Color32::from_gray(90)),
@@ -1123,10 +1120,9 @@ fn render_waiting_room(
             Some(player) => {
                 tc.leave_rx = Some(spawn_leave_tournament(t.tournament_id, player.to_string()));
                 tc.join_status = TournamentJoinStatus::Pending;
-                tc.money_flow =
-                    crate::multiplayer::solana::money_flow::MoneyFlowState::signing(
-                        "leave_tournament",
-                    );
+                tc.money_flow = crate::multiplayer::solana::money_flow::MoneyFlowState::signing(
+                    "leave_tournament",
+                );
                 tc.status_message = "Building leave transaction...".to_string();
             }
         }
@@ -1249,9 +1245,13 @@ fn render_password_prompt(
             .clicked()
         {
             let password = tc.password_input.clone();
-            tc.password_error =
-                begin_registration(tc, t.tournament_id, wallet.unwrap_or_default(), Some(password))
-                    .err();
+            tc.password_error = begin_registration(
+                tc,
+                t.tournament_id,
+                wallet.unwrap_or_default(),
+                Some(password),
+            )
+            .err();
         }
         if ui
             .button(
@@ -1353,7 +1353,6 @@ fn start_replay(ctx: &mut MainMenuUIContext, (game_id, white, black): ReplayRequ
     crate::core::net_task::spawn_detached("tournament-replay", move || {
         let _ = tx.send(crate::multiplayer::network::vps::fetch_game_pgn(game_id));
     });
-    ctx.pgn_replay_fetch.pending = Some(
-        crate::states::main_menu::tournament_replay::PendingPgnReplay { rx, white, black },
-    );
+    ctx.pgn_replay_fetch.pending =
+        Some(crate::states::main_menu::tournament_replay::PendingPgnReplay { rx, white, black });
 }

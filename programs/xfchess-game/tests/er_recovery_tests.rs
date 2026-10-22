@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use anchor_lang::{AnchorDeserialize, Discriminator, InstructionData, ToAccountMetas};
 use common::*;
@@ -146,10 +147,10 @@ fn find_event<T: AnchorDeserialize + Discriminator>(logs: &[String]) -> Option<T
 
 #[tokio::test]
 #[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
-async fn recover_stuck_delegation_splits_escrow_and_sweeps_game_rent() {
+async fn recover_stuck_delegation_splits_escrow_and_sweeps_game_rent() -> anyhow::Result<()> {
     let Some(authority) = dispute_authority_keypair() else {
         eprintln!("skip: keys/dispute_authority.json not present");
-        return;
+        return Ok(());
     };
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
@@ -164,34 +165,36 @@ async fn recover_stuck_delegation_splits_escrow_and_sweeps_game_rent() {
     .await;
 
     let ix = recover_stuck_delegation_ix(GAME_ID, white, black, authority.pubkey());
-    send(&mut ctx, ix, &[&authority]).await.unwrap();
+    send(&mut ctx, ix, &[&authority])
+        .await
+        .context("required operation value")?;
 
     let white_bal = ctx
         .banks_client
         .get_account(white)
         .await
-        .unwrap()
-        .unwrap()
+        .context("required operation value")?
+        .context("required operation value")?
         .lamports;
     let black_bal = ctx
         .banks_client
         .get_account(black)
         .await
-        .unwrap()
-        .unwrap()
+        .context("required operation value")?
+        .context("required operation value")?
         .lamports;
     let treasury_bal = ctx
         .banks_client
         .get_account(treasury_vault_pda().0)
         .await
-        .unwrap()
-        .unwrap()
+        .context("required operation value")?
+        .context("required operation value")?
         .lamports;
     let game_after = ctx
         .banks_client
         .get_account(game_pda(GAME_ID).0)
         .await
-        .unwrap();
+        .context("required operation value")?;
 
     assert_eq!(white_bal, 1_000_000_000, "white must get half the escrow");
     assert_eq!(black_bal, 1_000_000_000, "black must get half the escrow");
@@ -204,19 +207,20 @@ async fn recover_stuck_delegation_splits_escrow_and_sweeps_game_rent() {
         0,
         "the game PDA must be fully drained after recovery"
     );
+    Ok(())
 }
 
 #[tokio::test]
 #[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
-async fn recover_stuck_delegation_emits_audit_event() {
+async fn recover_stuck_delegation_emits_audit_event() -> anyhow::Result<()> {
     let Some(authority) = dispute_authority_keypair() else {
         eprintln!("skip: keys/dispute_authority.json not present");
-        return;
+        return Ok(());
     };
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
-    let mut ctx = start(vec![
+    let ctx = start(vec![
         (game_pda(GAME_ID).0, wiped_game_account()),
         (escrow_pda(GAME_ID).0, system_account(2_000_000_000)),
         (treasury_vault_pda().0, system_account(0)),
@@ -234,17 +238,17 @@ async fn recover_stuck_delegation_emits_audit_event() {
         .banks_client
         .process_transaction_with_metadata(tx)
         .await
-        .expect("transport-level failure");
+        .context("transport-level failure")?;
     result
         .result
-        .expect("recover_stuck_delegation should succeed");
+        .context("recover_stuck_delegation should succeed")?;
 
     let logs = result
         .metadata
-        .expect("metadata must be present")
+        .context("metadata must be present")?
         .log_messages;
     let event: StuckDelegationRecovered =
-        find_event(&logs).expect("StuckDelegationRecovered event must be emitted");
+        find_event(&logs).context("StuckDelegationRecovered event must be emitted")?;
 
     assert_eq!(event.game_id, GAME_ID);
     assert_eq!(event.dispute_authority, authority.pubkey());
@@ -252,14 +256,15 @@ async fn recover_stuck_delegation_emits_audit_event() {
     assert_eq!(event.black_authority, black);
     assert_eq!(event.white_share, 1_000_000_000);
     assert_eq!(event.black_share, 1_000_000_000);
+    Ok(())
 }
 
 #[tokio::test]
 #[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
-async fn recover_stuck_delegation_rejects_non_stuck_game() {
+async fn recover_stuck_delegation_rejects_non_stuck_game() -> anyhow::Result<()> {
     let Some(authority) = dispute_authority_keypair() else {
         eprintln!("skip: keys/dispute_authority.json not present");
-        return;
+        return Ok(());
     };
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
@@ -273,7 +278,7 @@ async fn recover_stuck_delegation_rejects_non_stuck_game() {
             1,
             0,
             GameStatus::Active,
-        ),
+        )?,
         (escrow_pda(GAME_ID).0, system_account(2_000_000_000)),
         (treasury_vault_pda().0, system_account(0)),
         (white, system_account(0)),
@@ -282,16 +287,20 @@ async fn recover_stuck_delegation_rejects_non_stuck_game() {
     .await;
 
     let ix = recover_stuck_delegation_ix(GAME_ID, white, black, authority.pubkey());
-    let err = send(&mut ctx, ix, &[&authority]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[&authority])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::GameNotStuckDelegation)),
         "a live, populated Game account must not be treated as force-recovered"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn recover_stuck_delegation_rejects_wrong_authority() {
+async fn recover_stuck_delegation_rejects_wrong_authority() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let impostor = Keypair::new();
@@ -306,19 +315,23 @@ async fn recover_stuck_delegation_rejects_wrong_authority() {
     .await;
 
     let ix = recover_stuck_delegation_ix(GAME_ID, white, black, impostor.pubkey());
-    let err = send(&mut ctx, ix, &[&impostor]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[&impostor])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::UnauthorizedDisputeResolution)),
         "only the platform dispute authority may trigger recovery"
     );
+    Ok(())
 }
 
 // Test owner_program and delegation_program address guards before CPI.
 // Successful recovery requires the live delegation program.
 
 #[tokio::test]
-async fn request_force_undelegate_rejects_spoofed_owner_program() {
+async fn request_force_undelegate_rejects_spoofed_owner_program() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let mut ctx = start(vec![game_account(
@@ -329,7 +342,7 @@ async fn request_force_undelegate_rejects_spoofed_owner_program() {
         1,
         0,
         GameStatus::Active,
-    )])
+    )?])
     .await;
 
     let payer = ctx.payer.pubkey();
@@ -339,16 +352,20 @@ async fn request_force_undelegate_rejects_spoofed_owner_program() {
         Pubkey::new_unique(), // spoofed owner_program
         ephemeral_rollups_sdk::id(),
     );
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(6000 + xfchess_game::errors::GameErrorCode::InvalidOwnerProgram as u32),
         "wrong owner_program must be rejected before the CPI"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn request_force_undelegate_rejects_spoofed_delegation_program() {
+async fn request_force_undelegate_rejects_spoofed_delegation_program() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let mut ctx = start(vec![game_account(
@@ -359,7 +376,7 @@ async fn request_force_undelegate_rejects_spoofed_delegation_program() {
         1,
         0,
         GameStatus::Active,
-    )])
+    )?])
     .await;
 
     let payer = ctx.payer.pubkey();
@@ -369,16 +386,20 @@ async fn request_force_undelegate_rejects_spoofed_delegation_program() {
         xfchess_game::ID,
         Pubkey::new_unique(), // spoofed delegation_program
     );
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(anchor_constraint_address()),
         "wrong delegation_program must be rejected by Anchor's address constraint"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn force_undelegate_after_timeout_rejects_spoofed_owner_program() {
+async fn force_undelegate_after_timeout_rejects_spoofed_owner_program() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let mut ctx = start(vec![game_account(
@@ -389,7 +410,7 @@ async fn force_undelegate_after_timeout_rejects_spoofed_owner_program() {
         1,
         0,
         GameStatus::Active,
-    )])
+    )?])
     .await;
 
     let ix = force_undelegate_after_timeout_ix(
@@ -397,91 +418,107 @@ async fn force_undelegate_after_timeout_rejects_spoofed_owner_program() {
         Pubkey::new_unique(), // spoofed owner_program
         ephemeral_rollups_sdk::id(),
     );
-    let err = send(&mut ctx, ix, &[]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(6000 + xfchess_game::errors::GameErrorCode::InvalidOwnerProgram as u32),
         "wrong owner_program must be rejected before the CPI"
     );
+    Ok(())
 }
 
 fn live_game_account(
     white: Pubkey,
     black: Pubkey,
     updated_at: i64,
-) -> solana_sdk::account::Account {
-    use anchor_lang::Space;
-    use xfchess_game::state::{Game, GameResult, GameType, MatchType};
-    let game = Game {
-        game_id: GAME_ID,
-        white,
-        black,
-        status: GameStatus::Active,
-        last_move_timestamp: updated_at,
-        fees_advanced: 0,
-        fee_payer: white,
-        result: GameResult::None,
-        board_state: start_board(),
-        move_count: 10,
-        halfmove_clock: 0,
-        turn: 11,
-        created_at: updated_at,
-        updated_at,
-        wager_amount: 0,
-        wager_token: None,
-        game_type: GameType::PvP,
-        match_type: MatchType::Free,
-        country_fee: 0,
-        base_time_seconds: 300,
-        increment_seconds: 0,
-        bump: game_pda(GAME_ID).1,
-        is_delegated: true,
-        tournament_id: None,
-        nonce: 10,
-        draw_offered_by: None,
-    };
-    program_account(&game, 8 + Game::INIT_SPACE)
+) -> anyhow::Result<solana_sdk::account::Account> {
+    Ok({
+        use anchor_lang::Space;
+        use xfchess_game::state::{Game, GameResult, GameType, MatchType};
+        let game = Game {
+            game_id: GAME_ID,
+            white,
+            black,
+            status: GameStatus::Active,
+            last_move_timestamp: updated_at,
+            fees_advanced: 0,
+            fee_payer: white,
+            result: GameResult::None,
+            board_state: start_board(),
+            move_count: 10,
+            halfmove_clock: 0,
+            turn: 11,
+            created_at: updated_at,
+            updated_at,
+            wager_amount: 0,
+            wager_token: None,
+            game_type: GameType::PvP,
+            match_type: MatchType::Free,
+            country_fee: 0,
+            base_time_seconds: 300,
+            increment_seconds: 0,
+            bump: game_pda(GAME_ID).1,
+            is_delegated: true,
+            tournament_id: None,
+            nonce: 10,
+            draw_offered_by: None,
+        };
+        program_account(&game, 8 + Game::INIT_SPACE)?
+    })
 }
 
-async fn request_on_game_idle_for(idle_secs: i64) -> solana_sdk::transaction::TransactionError {
-    use solana_sdk::{account::AccountSharedData, clock::Clock};
-    let mut ctx = start(vec![]).await;
-    let now = ctx
-        .banks_client
-        .get_sysvar::<Clock>()
-        .await
-        .unwrap()
-        .unix_timestamp;
-    let account = live_game_account(Pubkey::new_unique(), Pubkey::new_unique(), now - idle_secs);
-    ctx.set_account(&game_pda(GAME_ID).0, &AccountSharedData::from(account));
+async fn request_on_game_idle_for(
+    idle_secs: i64,
+) -> anyhow::Result<solana_sdk::transaction::TransactionError> {
+    Ok({
+        use solana_sdk::{account::AccountSharedData, clock::Clock};
+        let mut ctx = start(vec![]).await;
+        let now = ctx
+            .banks_client
+            .get_sysvar::<Clock>()
+            .await
+            .context("required operation value")?
+            .unix_timestamp;
+        let account =
+            live_game_account(Pubkey::new_unique(), Pubkey::new_unique(), now - idle_secs)?;
+        ctx.set_account(&game_pda(GAME_ID).0, &AccountSharedData::from(account));
 
-    let payer = ctx.payer.pubkey();
-    let ix = request_force_undelegate_ix(
-        GAME_ID,
-        payer,
-        xfchess_game::ID,
-        ephemeral_rollups_sdk::id(),
-    );
-    send(&mut ctx, ix, &[]).await.unwrap_err()
+        let payer = ctx.payer.pubkey();
+        let ix = request_force_undelegate_ix(
+            GAME_ID,
+            payer,
+            xfchess_game::ID,
+            ephemeral_rollups_sdk::id(),
+        );
+        send(&mut ctx, ix, &[])
+            .await
+            .err()
+            .context("required operation value")?
+    })
 }
 
 #[tokio::test]
-async fn request_force_undelegate_rejects_a_live_game() {
-    let err = request_on_game_idle_for(30).await;
+async fn request_force_undelegate_rejects_a_live_game() -> anyhow::Result<()> {
+    let err = request_on_game_idle_for(30).await?;
     assert_eq!(
         custom_code(&err),
         Some(6000 + xfchess_game::errors::GameErrorCode::GameNotStuckDelegation as u32),
         "a game the ER is still serving must not be pushed toward a wipe"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn request_force_undelegate_allows_a_game_idle_past_its_timeout() {
+async fn request_force_undelegate_allows_a_game_idle_past_its_timeout() -> anyhow::Result<()> {
     // Past the 300s clock: the guard passes and only the (unloaded)
     // delegation program CPI fails.
-    let err = request_on_game_idle_for(301 + 60).await;
+    let err = request_on_game_idle_for(301 + 60).await?;
     assert_ne!(
         custom_code(&err),
         Some(6000 + xfchess_game::errors::GameErrorCode::GameNotStuckDelegation as u32),
     );
+    Ok(())
 }

@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn test_game_phase_transitions() {
-        let phases = vec![
+        let phases = [
             GamePhase::Setup,
             GamePhase::Playing,
             GamePhase::Check,
@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn test_game_phase_clone() {
         let original = GamePhase::Check;
-        let cloned = original.clone();
+        let cloned = original;
         assert_eq!(original, cloned);
     }
 
@@ -140,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn test_move_record_capture() {
+    fn test_move_record_capture() -> Result<(), Box<dyn std::error::Error>> {
         let capture_move = MoveRecord {
             promotion: None,
             piece_type: PieceType::Queen,
@@ -155,8 +155,13 @@ mod tests {
         };
 
         assert!(capture_move.captured.is_some());
-        assert_eq!(capture_move.captured.unwrap(), PieceType::Rook);
+        assert_eq!(
+            capture_move.captured.ok_or("missing capture")?,
+            PieceType::Rook
+        );
         assert!(capture_move.is_check);
+
+        Ok(())
     }
 
     #[test]
@@ -231,7 +236,7 @@ mod tests {
             is_checkmate: false,
         };
 
-        let cloned = original.clone();
+        let cloned = original;
         assert_eq!(original.piece_type, cloned.piece_type);
         assert_eq!(original.from, cloned.from);
     }

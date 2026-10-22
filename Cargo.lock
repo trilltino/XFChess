@@ -3763,6 +3763,7 @@ dependencies = [
 name = "braid-http"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arbitrary",
  "async-channel",
  "async-stream",
@@ -3815,6 +3816,7 @@ dependencies = [
 name = "braid_chess"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-channel",
  "braid-http",
  "hex",
@@ -8264,6 +8266,7 @@ dependencies = [
 name = "iroh-h3"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytes",
  "futures",
  "h3",
@@ -8275,6 +8278,7 @@ dependencies = [
 name = "iroh-h3-axum"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
  "axum 0.8.9",
  "bytes",
  "futures-lite",
@@ -8293,6 +8297,7 @@ dependencies = [
 name = "iroh-h3-client"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
  "axum 0.8.9",
  "bytes",
  "dashmap 6.1.0",
@@ -11974,8 +11979,6 @@ dependencies = [
 [[package]]
 name = "proc-macro-error2"
 version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
 dependencies = [
  "proc-macro-error-attr2",
  "proc-macro2",
@@ -23648,12 +23651,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "xfchess-rules",
 ]
 
 [[package]]
 name = "xfchess-braid-server"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-stream",
  "axum 0.8.9",
  "axum-test",
@@ -23677,6 +23682,29 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "anyhow",
+ "base64 0.22.1",
+ "bincode",
+ "bytemuck",
+ "ephemeral-rollups-sdk",
+ "magicblock-magic-program-api 0.13.11",
+ "nimzovich_engine",
+ "solana-program 3.0.0",
+ "solana-program-test",
+ "solana-sdk 3.0.0",
+ "solana-security-txt",
+ "solana-system-interface 3.2.0",
+ "tokio",
+ "xfchess-rules",
+]
+
+[[package]]
+name = "xfchess-game-sbf"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "anyhow",
  "base64 0.22.1",
  "bincode",
  "bytemuck",
@@ -23696,6 +23724,7 @@ dependencies = [
 name = "xfchess-rules"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "pgn-reader",
  "shakmaty",
 ]
@@ -23704,6 +23733,7 @@ dependencies = [
 name = "xfchess-stockfish"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "crossbeam-channel",
  "xfchess-rules",
 ]

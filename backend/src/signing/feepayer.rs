@@ -3,18 +3,6 @@ use std::sync::Arc;
 
 use solana_sdk::signature::Keypair;
 
-fn load_keypair_from_file(path: &str) -> Option<Keypair> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| tracing::error!("[FeepayerPool] cannot read keypair file {path}: {e}"))
-        .ok()?;
-    let bytes: Vec<u8> = serde_json::from_str(&text)
-        .map_err(|e| tracing::error!("[FeepayerPool] invalid JSON in {path}: {e}"))
-        .ok()?;
-    Keypair::try_from(bytes.as_slice())
-        .map_err(|e| tracing::error!("[FeepayerPool] invalid keypair bytes in {path}: {e}"))
-        .ok()
-}
-
 #[derive(Clone)]
 pub struct FeepayerPool {
     keypairs: Arc<Vec<Keypair>>,
@@ -22,37 +10,24 @@ pub struct FeepayerPool {
 }
 
 impl FeepayerPool {
-    pub fn from_base58_list(keys: &[String]) -> Self {
-        let keypairs: Vec<Keypair> = keys
-            .iter()
-            .filter_map(|k| {
-                let k = k.trim();
-                if k.ends_with(".json")
-                    || k.starts_with('.')
-                    || k.starts_with('/')
-                    || k.contains('\\')
-                {
-                    load_keypair_from_file(k)
-                } else {
-                    let bytes = bs58::decode(k).into_vec().ok()?;
-                    Keypair::try_from(bytes.as_slice()).ok()
-                }
-            })
-            .collect();
-
-        let keypairs = if keypairs.is_empty() {
-            tracing::warn!(
-                "[FeepayerPool] No FEE_PAYER_KEYS set — using ephemeral keypair (dev only)"
-            );
-            vec![Keypair::new()]
-        } else {
+    pub fn from_base58_list(keys: &[String], production: bool) -> anyhow::Result<Self> {
+        let mut keypairs = Vec::with_capacity(keys.len());
+        for key in keys {
             keypairs
-        };
-
-        Self {
+                .push(super::load_keypair_from_env_value(key.trim()).map_err(anyhow::Error::msg)?);
+        }
+        if keypairs.is_empty() {
+            anyhow::ensure!(
+                !production,
+                "FEE_PAYER_KEYS must contain a usable production key"
+            );
+            tracing::warn!("No FEE_PAYER_KEYS configured; using a temporary development key");
+            keypairs.push(Keypair::new());
+        }
+        Ok(Self {
             keypairs: Arc::new(keypairs),
             counter: Arc::new(AtomicUsize::new(0)),
-        }
+        })
     }
 
     pub fn next(&self) -> &Keypair {
@@ -62,5 +37,18 @@ impl FeepayerPool {
 
     pub fn all(&self) -> &[Keypair] {
         &self.keypairs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_bad_keys_never_generate_replacement_credentials() {
+        assert!(FeepayerPool::from_base58_list(&["not base58!".into()], false).is_err());
+        assert!(FeepayerPool::from_base58_list(&["not base58!".into()], true).is_err());
+        assert!(FeepayerPool::from_base58_list(&[], true).is_err());
+        assert!(FeepayerPool::from_base58_list(&[], false).is_ok());
     }
 }

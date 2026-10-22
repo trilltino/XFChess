@@ -305,10 +305,10 @@ fn validate_tunnel_args(
 /// `http://localhost:<port>/tournament-admin/`, the only origin/path the admin
 /// capabilities attach to.
 #[cfg(feature = "tournament-admin")]
-fn admin_window_url(dev_override: Option<&str>, bridge_port: u16) -> tauri::Url {
+fn admin_window_url(dev_override: Option<&str>, bridge_port: u16) -> Result<tauri::Url, String> {
   let at_port = |port: u16| {
     tauri::Url::parse(&format!("http://localhost:{port}/tournament-admin/"))
-      .expect("static admin URL parses")
+      .map_err(|error| error.to_string())
   };
   let Some(dev) = dev_override.map(str::trim).filter(|d| !d.is_empty()) else {
     return at_port(bridge_port);
@@ -320,7 +320,7 @@ fn admin_window_url(dev_override: Option<&str>, bridge_port: u16) -> tauri::Url 
         && url.port().is_some() =>
     {
       tracing::warn!("[TournamentAdmin] DEV MODE — loading from {dev} (hot reload)");
-      at_port(url.port().expect("checked above"))
+      at_port(url.port().unwrap_or(bridge_port))
     }
     _ => {
       tracing::error!("[TournamentAdmin] XFCHESS_ADMIN_DEV_URL={dev} is not a loopback http URL with a port — ignoring");
@@ -345,7 +345,13 @@ pub(crate) fn open_tournament_admin(app: &tauri::AppHandle) {
   let _ = app.run_on_main_thread(move || {
     let app = app2;
     let dev_override = std::env::var("XFCHESS_ADMIN_DEV_URL").ok();
-    let admin_url = admin_window_url(dev_override.as_deref(), crate::http_port());
+    let admin_url = match admin_window_url(dev_override.as_deref(), crate::http_port()) {
+      Ok(url) => url,
+      Err(error) => {
+        tracing::error!(%error, "Cannot construct tournament admin URL");
+        return;
+      }
+    };
     if let Some(win) = app.get_webview_window("tournament-admin") {
       tracing::info!("[TournamentAdmin] focusing existing window");
       let _ = win.show();
@@ -406,13 +412,14 @@ mod tests {
   use super::{admin_window_url, is_admin_page, validate_tunnel_args};
 
   #[test]
-  fn panel_url_is_always_localhost_under_tournament_admin() {
+  fn panel_url_is_always_localhost_under_tournament_admin() -> Result<(), Box<dyn std::error::Error>>
+  {
     assert_eq!(
-      admin_window_url(None, 7455).as_str(),
+      admin_window_url(None, 7455)?.as_str(),
       "http://localhost:7455/tournament-admin/"
     );
     assert_eq!(
-      admin_window_url(Some("http://127.0.0.1:5176/"), 7454).as_str(),
+      admin_window_url(Some("http://127.0.0.1:5176/"), 7454)?.as_str(),
       "http://localhost:5176/tournament-admin/"
     );
     for rejected in [
@@ -421,22 +428,26 @@ mod tests {
       "file:///c:/x.html",
     ] {
       assert_eq!(
-        admin_window_url(Some(rejected), 7454).as_str(),
+        admin_window_url(Some(rejected), 7454)?.as_str(),
         "http://localhost:7454/tournament-admin/",
         "{rejected}"
       );
     }
+
+    Ok(())
   }
 
   #[test]
-  fn navigation_stays_on_the_panel() {
-    let panel = admin_window_url(None, 7454);
-    let ok = |s: &str| is_admin_page(&tauri::Url::parse(s).unwrap(), &panel);
+  fn navigation_stays_on_the_panel() -> Result<(), Box<dyn std::error::Error>> {
+    let panel = admin_window_url(None, 7454)?;
+    let ok = |s: &str| tauri::Url::parse(s).is_ok_and(|url| is_admin_page(&url, &panel));
     assert!(ok("http://localhost:7454/tournament-admin/"));
     assert!(ok("http://localhost:7454/tournament-admin/assets/index.js"));
     assert!(!ok("http://localhost:7454/wallet"));
     assert!(!ok("http://localhost:7455/tournament-admin/"));
     assert!(!ok("https://xfchess.com/tournament-admin/"));
+
+    Ok(())
   }
 
   #[test]

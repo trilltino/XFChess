@@ -128,7 +128,7 @@ pub fn cancel_game_on_chain(
         match sign_and_send_via_tauri(
             &rpc_url,
             wallet_pubkey,
-            &[ix.clone()],
+            std::slice::from_ref(&ix),
             &[],
             "Cancelling wagered game",
         ) {
@@ -211,10 +211,7 @@ pub fn spawn_cancel_lobby(
             );
         }
 
-        let result = match on_chain {
-            Ok(outcome) => Ok(outcome),
-            Err(error) => Err(error),
-        };
+        let result = on_chain;
         let _ = tx.send(result);
     });
 }

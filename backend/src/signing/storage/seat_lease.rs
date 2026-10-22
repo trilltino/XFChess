@@ -131,91 +131,136 @@ impl SeatLeaseStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
-    async fn store() -> SeatLeaseStore {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::infrastructure::migrate_session_db(&pool)
-            .await
-            .unwrap();
-        SeatLeaseStore::new(pool)
+    async fn store() -> anyhow::Result<SeatLeaseStore> {
+        Ok({
+            let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+                .await
+                .context("test setup failed")?;
+            crate::infrastructure::migrate_session_db(&pool)
+                .await
+                .context("test setup failed")?;
+            SeatLeaseStore::new(pool)
+        })
     }
 
     #[tokio::test]
-    async fn newest_device_takes_over_and_old_device_is_superseded() {
-        let s = store().await;
+    async fn newest_device_takes_over_and_old_device_is_superseded() -> anyhow::Result<()> {
+        let s = store().await?;
         assert_eq!(
-            s.check("7", "W", Some("device-aaaa")).await.unwrap(),
+            s.check("7", "W", Some("device-aaaa"))
+                .await
+                .context("test setup failed")?,
             SeatCheck::Unclaimed
         );
 
-        let a = s.claim("7", "W", "device-aaaa", None, 1).await.unwrap();
+        let a = s
+            .claim("7", "W", "device-aaaa", None, 1)
+            .await
+            .context("test setup failed")?;
         assert_eq!(a.epoch, 1);
         assert_eq!(
-            s.check("7", "W", Some("device-aaaa")).await.unwrap(),
+            s.check("7", "W", Some("device-aaaa"))
+                .await
+                .context("test setup failed")?,
             SeatCheck::Holder
         );
 
-        let b = s.claim("7", "W", "device-bbbb", None, 2).await.unwrap();
+        let b = s
+            .claim("7", "W", "device-bbbb", None, 2)
+            .await
+            .context("test setup failed")?;
         assert_eq!(b.epoch, 2);
         assert_eq!(
-            s.check("7", "W", Some("device-bbbb")).await.unwrap(),
+            s.check("7", "W", Some("device-bbbb"))
+                .await
+                .context("test setup failed")?,
             SeatCheck::Holder
         );
         assert_eq!(
-            s.check("7", "W", Some("device-aaaa")).await.unwrap(),
+            s.check("7", "W", Some("device-aaaa"))
+                .await
+                .context("test setup failed")?,
             SeatCheck::Superseded(b.clone())
         );
         // A claimed seat refuses writes that carry no device id at all.
         assert_eq!(
-            s.check("7", "W", None).await.unwrap(),
+            s.check("7", "W", None).await.context("test setup failed")?,
             SeatCheck::Superseded(b)
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn reclaim_by_holder_is_idempotent_and_seats_are_independent() {
-        let s = store().await;
-        s.claim("7", "W", "device-aaaa", None, 1).await.unwrap();
+    async fn reclaim_by_holder_is_idempotent_and_seats_are_independent() -> anyhow::Result<()> {
+        let s = store().await?;
+        s.claim("7", "W", "device-aaaa", None, 1)
+            .await
+            .context("test setup failed")?;
         assert_eq!(
             s.claim("7", "W", "device-aaaa", None, 2)
                 .await
-                .unwrap()
+                .context("test setup failed")?
                 .epoch,
             1
         );
         // The opponent's seat and other games are untouched.
         assert_eq!(
-            s.check("7", "B", Some("device-aaaa")).await.unwrap(),
+            s.check("7", "B", Some("device-aaaa"))
+                .await
+                .context("test setup failed")?,
             SeatCheck::Unclaimed
         );
         assert_eq!(
-            s.check("8", "W", Some("device-aaaa")).await.unwrap(),
+            s.check("8", "W", Some("device-aaaa"))
+                .await
+                .context("test setup failed")?,
             SeatCheck::Unclaimed
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn the_newest_claim_owns_the_move_signer() {
-        let s = store().await;
-        assert_eq!(s.move_signer("7", "W").await.unwrap(), None);
+    async fn the_newest_claim_owns_the_move_signer() -> anyhow::Result<()> {
+        let s = store().await?;
+        assert_eq!(
+            s.move_signer("7", "W").await.context("test setup failed")?,
+            None
+        );
         s.claim("7", "W", "device-aaaa", Some("KeyA"), 1)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(
-            s.move_signer("7", "W").await.unwrap().as_deref(),
+            s.move_signer("7", "W")
+                .await
+                .context("test setup failed")?
+                .as_deref(),
             Some("KeyA")
         );
         // A takeover replaces the key, and a device without one clears it.
         s.claim("7", "W", "device-bbbb", Some("KeyB"), 2)
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(
-            s.move_signer("7", "W").await.unwrap().as_deref(),
+            s.move_signer("7", "W")
+                .await
+                .context("test setup failed")?
+                .as_deref(),
             Some("KeyB")
         );
-        s.claim("7", "W", "device-cccc", None, 3).await.unwrap();
-        assert_eq!(s.move_signer("7", "W").await.unwrap(), None);
-        assert_eq!(s.move_signer("7", "B").await.unwrap(), None);
+        s.claim("7", "W", "device-cccc", None, 3)
+            .await
+            .context("test setup failed")?;
+        assert_eq!(
+            s.move_signer("7", "W").await.context("test setup failed")?,
+            None
+        );
+        assert_eq!(
+            s.move_signer("7", "B").await.context("test setup failed")?,
+            None
+        );
+        Ok(())
     }
 
     #[test]

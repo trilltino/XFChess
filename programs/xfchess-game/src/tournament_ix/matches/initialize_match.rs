@@ -26,6 +26,10 @@ pub struct InitializeMatch<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Matches the deployed Anchor instruction ABI"
+)]
 pub fn handler(
     ctx: Context<InitializeMatch>,
     tournament_id: u64,

@@ -184,7 +184,7 @@ pub(crate) fn resolve_player_names(
     } else {
         #[cfg(feature = "solana")]
         {
-            if let (Some(ref profile), Some(ref comp)) = (
+            if let (Some(profile), Some(comp)) = (
                 params.solana_profile.as_ref(),
                 params.competitive_match.as_ref(),
             ) {

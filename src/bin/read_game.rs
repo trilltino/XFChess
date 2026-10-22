@@ -1,176 +1,55 @@
 #![cfg(feature = "solana")]
-#![allow(dead_code)]
-use borsh::BorshDeserialize;
+use anchor_lang::AccountDeserialize;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
-use std::str::FromStr;
+use xfchess_game::state::Game;
+use xfchess_rules::CompactBoard;
 
-const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
-const RPC_URL: &str = "https://api.devnet.solana.com";
-const ER_RPC_URL: &str = "https://devnet-eu.magicblock.app/";
-const DELEGATION_PROGRAM: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
-
-#[derive(BorshDeserialize, Debug)]
-struct MoveLog {
-    pub game_id: u64,
-    pub moves: Vec<String>,
-    pub timestamps: Vec<i64>,
-    pub player_signatures: Vec<Vec<u8>>,
-    pub nonce: u64,
-}
-
-#[derive(BorshDeserialize, Debug)]
-struct Game {
-    pub game_id: u64,
-    pub white: Pubkey,
-    pub black: Pubkey,
-    pub status: u8, // GameStatus enum variant index
-    pub result: GameResult,
-    pub fen: String,
-    pub move_count: u16,
-    pub turn: u8,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub wager_amount: u64,
-    pub wager_token: Option<Pubkey>,
-    pub game_type: u8, // GameType enum variant index
-    pub bump: u8,
-}
-
-#[derive(BorshDeserialize, Debug)]
-enum GameResult {
-    None,
-    Winner(Pubkey),
-    Draw,
-}
-
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let game_id: u64 = std::env::args()
         .nth(1)
-        .expect("Usage: read_game <game_id>")
-        .parse()
-        .expect("game_id must be a u64");
-
-    let program_id = Pubkey::from_str(PROGRAM_ID).unwrap();
-    let id_bytes = game_id.to_le_bytes();
-
-    let game_pda = Pubkey::find_program_address(&[b"game", &id_bytes], &program_id).0;
-    let move_log_pda = Pubkey::find_program_address(&[b"move_log", &id_bytes], &program_id).0;
-
-    let rpc = RpcClient::new(RPC_URL.to_string());
-    let er_rpc = RpcClient::new(ER_RPC_URL.to_string());
-    let delegation_prog = Pubkey::from_str(DELEGATION_PROGRAM).unwrap();
-
-    println!("Game ID  : {}", game_id);
-    println!("game PDA : {}", game_pda);
-    println!("log PDA  : {}", move_log_pda);
-    println!();
-
-    match rpc.get_account(&game_pda) {
-        Ok(acc) => {
-            println!(
-                "game account: {} bytes, owner: {}",
-                acc.data.len(),
-                acc.owner
-            );
-            if acc.data.len() > 8 {
-                // skip 8-byte Anchor discriminator
-                match Game::deserialize(&mut &acc.data[8..]) {
-                    Ok(game) => {
-                        let status = [
-                            "WaitingForOpponent",
-                            "Active",
-                            "Inactive",
-                            "Disputed",
-                            "Cancelled",
-                            "Finished",
-                            "Expired",
-                        ]
-                        .get(game.status as usize)
-                        .unwrap_or(&"Unknown");
-                        let result = match &game.result {
-                            GameResult::None => "None".to_string(),
-                            GameResult::Winner(pk) => format!("Winner({})", pk),
-                            GameResult::Draw => "Draw".to_string(),
-                        };
-                        println!("  status     : {}", status);
-                        println!("  result     : {}", result);
-                        println!("  fen        : {}", game.fen);
-                        println!("  move_count : {}", game.move_count);
-                        println!("  turn       : {}", game.turn);
-                        println!("  white      : {}", game.white);
-                        println!("  black      : {}", game.black);
-                        println!("  wager      : {} lamports", game.wager_amount);
-                    }
-                    Err(e) => println!("  [decode error] {}", e),
-                }
-            } else {
-                println!("  [account has no data — not initialized or empty]");
-            }
+        .ok_or("Usage: read_game <game_id>")?
+        .parse()?;
+    let rpc_url =
+        std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".into());
+    let er_url =
+        std::env::var("ER_RPC_URL").unwrap_or_else(|_| "https://devnet.magicblock.app".into());
+    let (address, _) =
+        Pubkey::find_program_address(&[b"game", &game_id.to_le_bytes()], &xfchess_game::ID);
+    let rpc = RpcClient::new(rpc_url);
+    let (network, account) = match rpc.get_account(&address) {
+        Ok(account) => ("devnet", account),
+        Err(base_error) => {
+            let er = RpcClient::new(er_url);
+            let account = er.get_account(&address).map_err(|er_error| {
+                format!("Cannot fetch {address}: devnet: {base_error}; ER: {er_error}")
+            })?;
+            ("ER", account)
         }
-        Err(_) => {
-            print!("game account NOT FOUND on devnet");
-            // Check if it's still delegated (owned by delegation program on ER)
-            match er_rpc.get_account(&game_pda) {
-                Ok(acc) if acc.owner == delegation_prog => {
-                    println!(" — still delegated on ER (state not yet committed to L1)")
-                }
-                Ok(acc) => println!(" — found on ER, owner: {}", acc.owner),
-                Err(_) => println!(" — not found on ER either (undelegation may have failed)"),
-            }
-        }
+    };
+    let game = Game::try_deserialize(&mut account.data.as_slice())?;
+    if game.game_id != game_id {
+        return Err("Account game ID does not match the requested game".into());
     }
-
-    println!();
-
-    match rpc.get_account(&move_log_pda) {
-        Ok(acc) => {
-            println!(
-                "move_log (devnet): {} bytes, owner: {}",
-                acc.data.len(),
-                acc.owner
-            );
-            if acc.data.len() > 8 {
-                match MoveLog::deserialize(&mut &acc.data[8..]) {
-                    Ok(log) => {
-                        println!("  nonce : {}", log.nonce);
-                        println!("  moves : {}", log.moves.len());
-                        for (i, mv) in log.moves.iter().enumerate() {
-                            let ts = log.timestamps.get(i).copied().unwrap_or(0);
-                            println!("    [{}] {} (ts: {})", i + 1, mv, ts);
-                        }
-                    }
-                    Err(e) => println!("  [decode error] {}", e),
-                }
-            } else {
-                println!("  [account has no data]");
-            }
-        }
-        Err(_) => {
-            print!("move_log NOT FOUND on devnet");
-            match er_rpc.get_account(&move_log_pda) {
-                Ok(acc) => {
-                    println!(
-                        " — found on ER ({} bytes, owner: {})",
-                        acc.data.len(),
-                        acc.owner
-                    );
-                    if acc.data.len() > 8 {
-                        match MoveLog::deserialize(&mut &acc.data[8..]) {
-                            Ok(log) => {
-                                println!("  nonce : {}", log.nonce);
-                                println!("  moves : {}", log.moves.len());
-                                for (i, mv) in log.moves.iter().enumerate() {
-                                    let ts = log.timestamps.get(i).copied().unwrap_or(0);
-                                    println!("    [{}] {} (ts: {})", i + 1, mv, ts);
-                                }
-                            }
-                            Err(e) => println!("  [decode error] {}", e),
-                        }
-                    }
-                }
-                Err(_) => println!(" — not found on ER either"),
-            }
-        }
-    }
+    let board = CompactBoard {
+        squares: std::array::from_fn(|i| game.board_state[i] as i8),
+        castling: game.board_state[64],
+        ep_target: game.board_state[65] as i8,
+        side_to_move: game.board_state[66] as i8,
+    };
+    println!("Game ID    : {game_id}");
+    println!("Address    : {address}");
+    println!("Network    : {network}");
+    println!("Owner      : {}", account.owner);
+    println!("Status     : {:?}", game.status);
+    println!("Result     : {:?}", game.result);
+    println!("FEN        : {}", board.to_fen()?);
+    println!("Moves      : {}", game.move_count);
+    println!("Turn       : {}", game.turn);
+    println!("White      : {}", game.white);
+    println!("Black      : {}", game.black);
+    println!("Wager      : {} lamports", game.wager_amount);
+    println!("Delegated  : {}", game.is_delegated);
+    println!("Nonce      : {}", game.nonce);
+    Ok(())
 }

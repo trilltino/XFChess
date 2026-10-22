@@ -3,6 +3,48 @@ use serde::{Deserialize, Serialize};
 use super::client::{client, vps_base};
 use super::session::SigResp;
 
+pub fn game_er_endpoint(game_id: u64) -> Result<String, String> {
+    let response = client()?
+        .get(format!("{}/game/{game_id}/er-endpoint", vps_base()))
+        .send()
+        .map_err(|e| format!("Could not locate the live game: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Could not locate the live game ({}): {}",
+            response.status(),
+            response.text().unwrap_or_default()
+        ));
+    }
+    #[derive(Deserialize)]
+    struct Endpoint {
+        er_endpoint: String,
+    }
+    response
+        .json::<Endpoint>()
+        .map(|r| r.er_endpoint)
+        .map_err(|e| format!("Invalid game location: {e}"))
+}
+
+pub fn recover_game(game_id: u64) -> Result<String, String> {
+    let response = client()?
+        .post(format!("{}/game/{game_id}/recover", vps_base()))
+        .send()
+        .map_err(|e| format!("Could not request settlement: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("Settlement check failed ({status}): {body}"));
+    }
+    #[derive(Deserialize)]
+    struct RecoveryResponse {
+        message: String,
+    }
+    response
+        .json::<RecoveryResponse>()
+        .map(|r| r.message)
+        .map_err(|e| format!("Invalid settlement response: {e}"))
+}
+
 #[derive(Serialize)]
 struct RecordMoveReq<'a> {
     game_id: u64,
@@ -301,28 +343,39 @@ pub fn fetch_verified_participants(game_id: u64) -> Result<Option<(String, Strin
     Ok(Some((resp.white, resp.black)))
 }
 
-pub fn get_game_moves_for_spectator(game_id: &str) -> Result<Vec<String>, String> {
-    #[derive(Deserialize)]
-    struct MoveEntry {
-        move_uci: String,
-    }
-    #[derive(Deserialize)]
-    struct MovesResp {
-        moves: Vec<MoveEntry>,
-    }
+#[derive(Debug, Deserialize)]
+pub struct SpectatorMoveEntry {
+    pub move_number: usize,
+    pub move_uci: String,
+}
 
+#[derive(Debug, Deserialize)]
+pub struct SpectatorMovesResponse {
+    pub moves: Vec<SpectatorMoveEntry>,
+    #[serde(default)]
+    pub reset: bool,
+}
+
+pub fn get_game_moves_for_spectator(
+    game_id: &str,
+    after_move: usize,
+) -> Result<SpectatorMovesResponse, String> {
     let response = client()?
-        .get(format!("{}/games/moves/{}", vps_base(), game_id))
+        .get(format!(
+            "{}/games/moves/{}?after_move={}",
+            vps_base(),
+            game_id,
+            after_move
+        ))
         .send()
         .map_err(|e| format!("spectator get_moves: {e}"))?;
     if !response.status().is_success() {
         let status = response.status();
         return Err(format!("spectator get_moves: HTTP {status}"));
     }
-    let resp = response
-        .json::<MovesResp>()
-        .map_err(|e| format!("spectator get_moves parse: {e}"))?;
-    Ok(resp.moves.into_iter().map(|m| m.move_uci).collect())
+    response
+        .json::<SpectatorMovesResponse>()
+        .map_err(|e| format!("spectator get_moves parse: {e}"))
 }
 
 pub fn get_broadcast_delay(game_id: &str) -> Result<u64, String> {

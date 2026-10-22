@@ -403,18 +403,29 @@ mod tests {
     /// Returning to the menu re-runs setup on a camera that still carries its
     /// MenuCamera marker from the last visit; it must still be repositioned.
     #[test]
-    fn menu_camera_is_reset_on_every_visit() {
+    fn menu_camera_is_reset_on_every_visit() -> Result<(), Box<dyn std::error::Error>> {
         let mut world = World::new();
         let camera = world
-            .spawn((Camera3d::default(), Transform::from_xyz(9.0, 9.0, 9.0), MenuCamera))
+            .spawn((
+                Camera3d::default(),
+                Transform::from_xyz(9.0, 9.0, 9.0),
+                MenuCamera,
+            ))
             .id();
         world.insert_resource(crate::PersistentEguiCamera {
             entity: Some(camera),
         });
-        world.run_system_once(setup_menu_camera).unwrap();
+        world
+            .run_system_once(setup_menu_camera)
+            .map_err(|error| format!("{error:?}"))?;
         assert_eq!(
-            world.get::<Transform>(camera).unwrap().translation,
+            world
+                .get::<Transform>(camera)
+                .ok_or("camera transform missing")?
+                .translation,
             menu::BOARD_CAM
         );
+
+        Ok(())
     }
 }

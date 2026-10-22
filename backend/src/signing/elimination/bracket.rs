@@ -474,6 +474,7 @@ fn seed_rank(seeds: &[String], player: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     const ID: u64 = 7;
 
@@ -481,8 +482,8 @@ mod tests {
         (0..n).map(|i| format!("P{i}")).collect()
     }
 
-    fn game(bracket: &EliminationState, index: usize) -> u64 {
-        bracket.matches[index].game_id.expect("scheduled")
+    fn game(bracket: &EliminationState, index: usize) -> anyhow::Result<u64> {
+        bracket.matches[index].game_id.context("scheduled")
     }
 
     #[test]
@@ -533,18 +534,18 @@ mod tests {
     }
 
     #[test]
-    fn a_win_moves_the_winner_on_and_schedules_their_next_game() {
+    fn a_win_moves_the_winner_on_and_schedules_their_next_game() -> anyhow::Result<()> {
         let mut b = EliminationState::draw(ID, &seeds(4));
         let applied = b
             .apply_game(
                 ID,
-                game(&b, 0),
+                game(&b, 0)?,
                 "P0",
                 "P3",
                 GameOutcome::WhiteWin,
                 &seeds(4),
             )
-            .unwrap();
+            .context("test setup failed")?;
         assert!(
             matches!(applied, GameApplied::Decided(ref d) if d.winner == "P0" && d.loser == "P3")
         );
@@ -556,25 +557,26 @@ mod tests {
 
         b.apply_game(
             ID,
-            game(&b, 1),
+            game(&b, 1)?,
             "P1",
             "P2",
             GameOutcome::BlackWin,
             &seeds(4),
         )
-        .unwrap();
+        .context("test setup failed")?;
         assert_eq!(b.matches[2].player_black.as_deref(), Some("P2"));
         assert_eq!(b.matches[2].status, MatchStatus::Active);
         assert_eq!(b.current_round(), Some(1));
+        Ok(())
     }
 
     #[test]
-    fn a_drawn_game_is_replayed_with_colours_reversed() {
+    fn a_drawn_game_is_replayed_with_colours_reversed() -> anyhow::Result<()> {
         let mut b = EliminationState::draw(ID, &seeds(2));
-        let first = game(&b, 0);
+        let first = game(&b, 0)?;
         let applied = b
             .apply_game(ID, first, "P0", "P1", GameOutcome::Draw, &seeds(2))
-            .unwrap();
+            .context("test setup failed")?;
         let m = &b.matches[0];
         assert!(matches!(
             applied,
@@ -589,17 +591,21 @@ mod tests {
         );
         assert_ne!(m.game_id, Some(first), "a replay needs a fresh game");
         assert!(!m.is_decided());
-        assert_eq!(b.game_ids(), vec![first, m.game_id.unwrap()]);
+        assert_eq!(
+            b.game_ids(),
+            vec![first, m.game_id.context("test setup failed")?]
+        );
+        Ok(())
     }
 
     #[test]
-    fn after_two_drawn_replays_the_higher_seed_goes_through() {
+    fn after_two_drawn_replays_the_higher_seed_goes_through() -> anyhow::Result<()> {
         let mut b = EliminationState::draw(ID, &seeds(2));
         // Original game and two replays, all drawn; colours flip each time.
         for (white, black) in [("P0", "P1"), ("P1", "P0"), ("P0", "P1")] {
-            let id = game(&b, 0);
+            let id = game(&b, 0)?;
             b.apply_game(ID, id, white, black, GameOutcome::Draw, &seeds(2))
-                .unwrap();
+                .context("test setup failed")?;
         }
         let m = &b.matches[0];
         assert!(m.is_decided());
@@ -607,12 +613,13 @@ mod tests {
         assert_eq!(m.result_source, Some(ResultSource::SeedTiebreak));
         assert_eq!(m.drawn_games, 3);
         assert_eq!(b.game_ids().len(), 3, "each game listed once");
+        Ok(())
     }
 
     #[test]
-    fn games_with_the_wrong_players_or_ids_are_refused() {
+    fn games_with_the_wrong_players_or_ids_are_refused() -> anyhow::Result<()> {
         let mut b = EliminationState::draw(ID, &seeds(4));
-        let id = game(&b, 0);
+        let id = game(&b, 0)?;
         assert!(matches!(
             b.apply_game(ID, id, "P3", "P0", GameOutcome::WhiteWin, &seeds(4)),
             Err(EliminationError::PlayersMismatch { .. })
@@ -622,16 +629,17 @@ mod tests {
             Err(EliminationError::UnknownGame(999))
         );
         b.apply_game(ID, id, "P0", "P3", GameOutcome::WhiteWin, &seeds(4))
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(
             b.apply_game(ID, id, "P0", "P3", GameOutcome::WhiteWin, &seeds(4)),
             Err(EliminationError::UnknownGame(id)),
             "a settled game cannot decide its match twice"
         );
+        Ok(())
     }
 
     #[test]
-    fn decisions_need_the_match_players_and_an_undecided_match() {
+    fn decisions_need_the_match_players_and_an_undecided_match() -> anyhow::Result<()> {
         let mut b = EliminationState::draw(ID, &seeds(4));
         assert_eq!(
             b.decide(ID, 0, "P1", "P3", ResultSource::Oracle),
@@ -645,18 +653,22 @@ mod tests {
             b.decide(ID, 9, "P0", "P1", ResultSource::Oracle),
             Err(EliminationError::NoSuchMatch(9))
         );
-        b.decide(ID, 0, "P3", "P0", ResultSource::Forfeit).unwrap();
+        b.decide(ID, 0, "P3", "P0", ResultSource::Forfeit)
+            .context("test setup failed")?;
         assert_eq!(
             b.decide(ID, 0, "P3", "P0", ResultSource::Forfeit),
             Err(EliminationError::AlreadyDecided(0))
         );
+        Ok(())
     }
 
     #[test]
-    fn player_views_follow_the_bracket() {
+    fn player_views_follow_the_bracket() -> anyhow::Result<()> {
         let mut b = EliminationState::draw(ID, &seeds(4));
         let nodes = HashMap::new();
-        let seat = b.assignment_for("P3", &nodes).unwrap();
+        let seat = b
+            .assignment_for("P3", &nodes)
+            .context("test setup failed")?;
         assert_eq!(
             (
                 seat.round,
@@ -666,18 +678,20 @@ mod tests {
             (Some(0), "black", "P0")
         );
 
-        b.decide(ID, 0, "P0", "P3", ResultSource::OnChain).unwrap();
+        b.decide(ID, 0, "P0", "P3", ResultSource::OnChain)
+            .context("test setup failed")?;
         assert!(b.is_knocked_out("P3"));
         assert!(
             b.assignment_for("P0", &nodes).is_none(),
             "waiting for the other semifinal"
         );
-        let last = b.last_result_for("P0").unwrap();
+        let last = b.last_result_for("P0").context("test setup failed")?;
         assert!(last.won && last.opponent == "P3");
         assert_eq!(b.open_matches_in(0), 1);
         assert_eq!(
             b.unsynced().map(|m| m.match_index).collect::<Vec<_>>(),
             vec![0]
         );
+        Ok(())
     }
 }

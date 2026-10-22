@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
@@ -14,17 +15,19 @@ fn treasury_vault_pda() -> Pubkey {
 fn rated_profile_account(
     authority: Pubkey,
     elo_rating: f64,
-) -> (Pubkey, solana_sdk::account::Account) {
-    let pda = profile_pda(&authority).0;
-    let profile = PlayerProfile {
-        authority,
-        elo_rating,
-        ..Default::default()
-    };
-    (
-        pda,
-        program_account(&profile, 8 + PlayerProfile::INIT_SPACE),
-    )
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let pda = profile_pda(&authority).0;
+        let profile = PlayerProfile {
+            authority,
+            elo_rating,
+            ..Default::default()
+        };
+        (
+            pda,
+            program_account(&profile, 8 + PlayerProfile::INIT_SPACE)?,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -35,52 +38,56 @@ fn settlement_game_account(
     fee_payer: Pubkey,
     result: GameResult,
     match_type: MatchType,
-) -> (Pubkey, solana_sdk::account::Account) {
-    let (pda, bump) = game_pda(game_id);
-    let game = Game {
-        game_id,
-        white,
-        black,
-        status: GameStatus::Finished,
-        last_move_timestamp: 0,
-        fees_advanced: 0,
-        fee_payer,
-        result,
-        board_state: start_board(),
-        move_count: 10,
-        halfmove_clock: 0,
-        turn: 11,
-        created_at: 0,
-        updated_at: 0,
-        wager_amount: 0,
-        wager_token: None,
-        game_type: GameType::PvP,
-        match_type,
-        country_fee: 0,
-        // Use 1800s to select Classical Elo; other controls update different rating fields.
-        base_time_seconds: 1800,
-        increment_seconds: 0,
-        bump,
-        is_delegated: false,
-        tournament_id: None,
-        nonce: 0,
-        draw_offered_by: None,
-    };
-    (pda, program_account(&game, 8 + Game::INIT_SPACE))
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let (pda, bump) = game_pda(game_id);
+        let game = Game {
+            game_id,
+            white,
+            black,
+            status: GameStatus::Finished,
+            last_move_timestamp: 0,
+            fees_advanced: 0,
+            fee_payer,
+            result,
+            board_state: start_board(),
+            move_count: 10,
+            halfmove_clock: 0,
+            turn: 11,
+            created_at: 0,
+            updated_at: 0,
+            wager_amount: 0,
+            wager_token: None,
+            game_type: GameType::PvP,
+            match_type,
+            country_fee: 0,
+            // Use 1800s to select Classical Elo; other controls update different rating fields.
+            base_time_seconds: 1800,
+            increment_seconds: 0,
+            bump,
+            is_delegated: false,
+            tournament_id: None,
+            nonce: 0,
+            draw_offered_by: None,
+        };
+        (pda, program_account(&game, 8 + Game::INIT_SPACE)?)
+    })
 }
 
 async fn send_as_distinct_tx(
     ctx: &mut solana_program_test::ProgramTestContext,
     ix: Instruction,
     extra: &[&Keypair],
-) -> Result<(), solana_sdk::transaction::TransactionError> {
-    let blockhash = ctx
-        .banks_client
-        .get_new_latest_blockhash(&ctx.last_blockhash)
-        .await
-        .expect("failed to get a fresh blockhash");
-    ctx.last_blockhash = blockhash;
-    send(ctx, ix, extra).await
+) -> anyhow::Result<Result<(), solana_sdk::transaction::TransactionError>> {
+    Ok({
+        let blockhash = ctx
+            .banks_client
+            .get_new_latest_blockhash(&ctx.last_blockhash)
+            .await
+            .context("failed to get a fresh blockhash")?;
+        ctx.last_blockhash = blockhash;
+        send(ctx, ix, extra).await
+    })
 }
 
 fn escrow_pda(game_id: u64) -> Pubkey {
@@ -118,27 +125,29 @@ async fn start_with_profiles(
     black_elo: f64,
     result: GameResult,
     match_type: MatchType,
-) -> solana_program_test::ProgramTestContext {
-    let (game_pda_key, game_account_data) =
-        settlement_game_account(game_id, white, black, fee_payer, result, match_type);
-    let (white_profile_pda, white_profile_data) = rated_profile_account(white, white_elo);
-    let (black_profile_pda, black_profile_data) = rated_profile_account(black, black_elo);
+) -> anyhow::Result<solana_program_test::ProgramTestContext> {
+    Ok({
+        let (game_pda_key, game_account_data) =
+            settlement_game_account(game_id, white, black, fee_payer, result, match_type)?;
+        let (white_profile_pda, white_profile_data) = rated_profile_account(white, white_elo)?;
+        let (black_profile_pda, black_profile_data) = rated_profile_account(black, black_elo)?;
 
-    start(vec![
-        (game_pda_key, game_account_data),
-        (white_profile_pda, white_profile_data),
-        (black_profile_pda, black_profile_data),
-        (escrow_pda(game_id), system_account(0)),
-        (treasury_vault_pda(), system_account(1_000_000)),
-        (fee_payer, system_account(1_000_000)),
-        (white, system_account(1_000_000)),
-        (black, system_account(1_000_000)),
-    ])
-    .await
+        start(vec![
+            (game_pda_key, game_account_data),
+            (white_profile_pda, white_profile_data),
+            (black_profile_pda, black_profile_data),
+            (escrow_pda(game_id), system_account(0)),
+            (treasury_vault_pda(), system_account(1_000_000)),
+            (fee_payer, system_account(1_000_000)),
+            (white, system_account(1_000_000)),
+            (black, system_account(1_000_000)),
+        ])
+        .await
+    })
 }
 
 #[tokio::test]
-async fn finalize_game_applies_k32_elo_update_to_winner_and_loser() {
+async fn finalize_game_applies_k32_elo_update_to_winner_and_loser() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
@@ -156,17 +165,17 @@ async fn finalize_game_applies_k32_elo_update_to_winner_and_loser() {
         GameResult::Winner(white),
         MatchType::Rated,
     )
-    .await;
+    .await?;
 
     let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
     send(&mut ctx, ix, &[])
         .await
-        .expect("finalize_game should settle a Finished Rated game");
+        .context("finalize_game should settle a Finished Rated game")?;
 
     let (expected_white, expected_black) = calculate_elo_update(white_elo, black_elo, 1.0);
 
-    let white_profile = fetch_profile(&mut ctx, &white).await;
-    let black_profile = fetch_profile(&mut ctx, &black).await;
+    let white_profile = fetch_profile(&mut ctx, &white).await?;
+    let black_profile = fetch_profile(&mut ctx, &black).await?;
 
     assert!(
         (white_profile.elo_rating - expected_white).abs() < 1.0,
@@ -202,10 +211,11 @@ async fn finalize_game_applies_k32_elo_update_to_winner_and_loser() {
     assert_eq!(black_profile.ranked_games, 1);
     assert!(white_profile.last_played > 0);
     assert!(black_profile.last_played > 0);
+    Ok(())
 }
 
 #[tokio::test]
-async fn finalize_game_applies_elo_update_for_a_draw() {
+async fn finalize_game_applies_elo_update_for_a_draw() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
@@ -225,17 +235,17 @@ async fn finalize_game_applies_elo_update_for_a_draw() {
         GameResult::Draw,
         MatchType::Rated,
     )
-    .await;
+    .await?;
 
     let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
     send(&mut ctx, ix, &[])
         .await
-        .expect("finalize_game should settle a Finished Rated draw");
+        .context("finalize_game should settle a Finished Rated draw")?;
 
     let (expected_white, expected_black) = calculate_elo_update(white_elo, black_elo, 0.5);
 
-    let white_profile = fetch_profile(&mut ctx, &white).await;
-    let black_profile = fetch_profile(&mut ctx, &black).await;
+    let white_profile = fetch_profile(&mut ctx, &white).await?;
+    let black_profile = fetch_profile(&mut ctx, &black).await?;
 
     assert!((white_profile.elo_rating - expected_white).abs() < 1.0);
     assert!((black_profile.elo_rating - expected_black).abs() < 1.0);
@@ -254,10 +264,11 @@ async fn finalize_game_applies_elo_update_for_a_draw() {
     assert_eq!(white_profile.losses, 0);
     assert_eq!(white_profile.win_streak, 0);
     assert_eq!(black_profile.win_streak, 0);
+    Ok(())
 }
 
 #[tokio::test]
-async fn finalize_game_does_not_change_elo_for_a_free_match() {
+async fn finalize_game_does_not_change_elo_for_a_free_match() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
@@ -275,15 +286,15 @@ async fn finalize_game_does_not_change_elo_for_a_free_match() {
         GameResult::Winner(white),
         MatchType::Free,
     )
-    .await;
+    .await?;
 
     let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
     send(&mut ctx, ix, &[])
         .await
-        .expect("finalize_game should settle a Finished Free game");
+        .context("finalize_game should settle a Finished Free game")?;
 
-    let white_profile = fetch_profile(&mut ctx, &white).await;
-    let black_profile = fetch_profile(&mut ctx, &black).await;
+    let white_profile = fetch_profile(&mut ctx, &white).await?;
+    let black_profile = fetch_profile(&mut ctx, &black).await?;
 
     assert_eq!(
         white_profile.elo_rating, white_elo,
@@ -302,10 +313,11 @@ async fn finalize_game_does_not_change_elo_for_a_free_match() {
     assert_eq!(black_profile.losses, 1);
     assert_eq!(white_profile.games_played, 1);
     assert_eq!(black_profile.games_played, 1);
+    Ok(())
 }
 
 #[tokio::test]
-async fn finalize_game_cannot_be_replayed_to_double_apply_elo() {
+async fn finalize_game_cannot_be_replayed_to_double_apply_elo() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
@@ -323,27 +335,29 @@ async fn finalize_game_cannot_be_replayed_to_double_apply_elo() {
         GameResult::Winner(white),
         MatchType::Rated,
     )
-    .await;
+    .await?;
 
     let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
     send(&mut ctx, ix, &[])
         .await
-        .expect("first finalize must succeed");
+        .context("first finalize must succeed")?;
 
-    let after_first = fetch_profile(&mut ctx, &white).await;
+    let after_first = fetch_profile(&mut ctx, &white).await?;
     assert!(after_first.elo_rating > white_elo);
 
     // The Game account is closed now — replaying the exact same instruction
     // must fail (account no longer exists to load), not re-run settlement.
     let replay = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
     let err = send_as_distinct_tx(&mut ctx, replay, &[])
-        .await
-        .expect_err("a second finalize_game for the same game_id must fail");
+        .await?
+        .err()
+        .context("a second finalize_game for the same game_id must fail")?;
     let _ = err; // exact error shape (AccountNotInitialized) isn't the point; failure is.
 
-    let after_replay = fetch_profile(&mut ctx, &white).await;
+    let after_replay = fetch_profile(&mut ctx, &white).await?;
     assert_eq!(
         after_replay.elo_rating, after_first.elo_rating,
         "a rejected replay must not mutate elo_rating a second time"
     );
+    Ok(())
 }

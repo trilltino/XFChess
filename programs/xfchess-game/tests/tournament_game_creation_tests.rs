@@ -1,4 +1,5 @@
 use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
+use anyhow::Context as _;
 use solana_program_test::{
     BanksClientError, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
 };
@@ -33,19 +34,23 @@ fn shard_pda(id: u64, shard: u8) -> (Pubkey, u8) {
     )
 }
 
-fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> Account {
-    let mut data = Vec::with_capacity(space);
-    value.try_serialize(&mut data).unwrap();
-    if data.len() < space {
-        data.resize(space, 0);
-    }
-    Account {
-        lamports: 10_000_000,
-        data,
-        owner: xfchess_game::ID,
-        executable: false,
-        rent_epoch: 0,
-    }
+fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> anyhow::Result<Account> {
+    Ok({
+        let mut data = Vec::with_capacity(space);
+        value
+            .try_serialize(&mut data)
+            .context("required operation value")?;
+        if data.len() < space {
+            data.resize(space, 0);
+        }
+        Account {
+            lamports: 10_000_000,
+            data,
+            owner: xfchess_game::ID,
+            executable: false,
+            rent_epoch: 0,
+        }
+    })
 }
 
 fn tournament(authority: Pubkey, fee_payer: Pubkey, bump: u8, current_round: u8) -> Tournament {
@@ -158,22 +163,24 @@ async fn send(
     ctx: &mut ProgramTestContext,
     ix: Instruction,
     extra: &[&Keypair],
-) -> Result<(), TransactionError> {
-    let blockhash = ctx
-        .banks_client
-        .get_new_latest_blockhash(&ctx.last_blockhash)
-        .await
-        .expect("failed to get a fresh blockhash");
-    ctx.last_blockhash = blockhash;
-    let payer_pk = ctx.payer.pubkey();
-    let mut signers: Vec<&Keypair> = vec![&ctx.payer];
-    signers.extend_from_slice(extra);
-    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer_pk));
-    tx.sign(&signers, blockhash);
-    ctx.banks_client
-        .process_transaction(tx)
-        .await
-        .map_err(transaction_error)
+) -> anyhow::Result<Result<(), TransactionError>> {
+    Ok({
+        let blockhash = ctx
+            .banks_client
+            .get_new_latest_blockhash(&ctx.last_blockhash)
+            .await
+            .context("failed to get a fresh blockhash")?;
+        ctx.last_blockhash = blockhash;
+        let payer_pk = ctx.payer.pubkey();
+        let mut signers: Vec<&Keypair> = vec![&ctx.payer];
+        signers.extend_from_slice(extra);
+        let mut tx = Transaction::new_with_payer(&[ix], Some(&payer_pk));
+        tx.sign(&signers, blockhash);
+        ctx.banks_client
+            .process_transaction(tx)
+            .await
+            .map_err(transaction_error)
+    })
 }
 
 fn transaction_error(e: BanksClientError) -> TransactionError {
@@ -189,17 +196,6 @@ fn custom_code(err: &TransactionError) -> Option<u32> {
         TransactionError::InstructionError(_, InstructionError::Custom(c)) => Some(*c),
         _ => None,
     }
-}
-
-async fn fetch_tournament(ctx: &mut ProgramTestContext) -> Tournament {
-    use anchor_lang::AccountDeserialize;
-    let acc = ctx
-        .banks_client
-        .get_account(tournament_pda(TOURNAMENT_ID).0)
-        .await
-        .unwrap()
-        .expect("tournament account missing");
-    Tournament::try_deserialize(&mut &acc.data[..]).unwrap()
 }
 
 const GAME_ID: u64 = (TOURNAMENT_ID << 16) | (1 << 8) | 1;
@@ -262,55 +258,64 @@ struct Field {
     p4: Pubkey,
 }
 
-async fn setup() -> (ProgramTestContext, Field) {
-    let field = Field {
-        authority: Keypair::new(),
-        p1: Pubkey::new_unique(),
-        p2: Pubkey::new_unique(),
-        p3: Pubkey::new_unique(),
-        p4: Pubkey::new_unique(),
-    };
-    let (_, t_bump) = tournament_pda(TOURNAMENT_ID);
-    let mut ctx = start(vec![
-        (
-            tournament_pda(TOURNAMENT_ID).0,
-            serialize_padded(
-                &tournament(field.authority.pubkey(), field.p1, t_bump, 0),
-                8 + Tournament::INIT_SPACE,
+async fn setup() -> anyhow::Result<(ProgramTestContext, Field)> {
+    Ok({
+        let field = Field {
+            authority: Keypair::new(),
+            p1: Pubkey::new_unique(),
+            p2: Pubkey::new_unique(),
+            p3: Pubkey::new_unique(),
+            p4: Pubkey::new_unique(),
+        };
+        let (_, t_bump) = tournament_pda(TOURNAMENT_ID);
+        let mut ctx = start(vec![
+            (
+                tournament_pda(TOURNAMENT_ID).0,
+                serialize_padded(
+                    &tournament(field.authority.pubkey(), field.p1, t_bump, 0),
+                    8 + Tournament::INIT_SPACE,
+                )?,
             ),
-        ),
-        (
-            shard_pda(TOURNAMENT_ID, 0).0,
-            serialize_padded(
-                &shard0(field.p1, field.p2, field.p3, field.p4),
-                8 + TournamentPlayersShard::space_for(),
+            (
+                shard_pda(TOURNAMENT_ID, 0).0,
+                serialize_padded(
+                    &shard0(field.p1, field.p2, field.p3, field.p4),
+                    8 + TournamentPlayersShard::space_for(),
+                )?,
             ),
-        ),
-    ])
-    .await;
-    // The authority pays rent for the game and both session delegations.
-    let fund = solana_system_interface::instruction::transfer(
-        &ctx.payer.pubkey(),
-        &field.authority.pubkey(),
-        1_000_000_000,
-    );
-    send(&mut ctx, fund, &[]).await.unwrap();
-    (ctx, field)
+        ])
+        .await;
+        // The authority pays rent for the game and both session delegations.
+        let fund = solana_system_interface::instruction::transfer(
+            &ctx.payer.pubkey(),
+            &field.authority.pubkey(),
+            1_000_000_000,
+        );
+        send(&mut ctx, fund, &[])
+            .await?
+            .context("required operation value")?;
+        (ctx, field)
+    })
 }
 
-async fn fetch<T: anchor_lang::AccountDeserialize>(ctx: &mut ProgramTestContext, key: Pubkey) -> T {
-    let acc = ctx
-        .banks_client
-        .get_account(key)
-        .await
-        .unwrap()
-        .expect("account missing");
-    T::try_deserialize(&mut &acc.data[..]).unwrap()
+async fn fetch<T: anchor_lang::AccountDeserialize>(
+    ctx: &mut ProgramTestContext,
+    key: Pubkey,
+) -> anyhow::Result<T> {
+    Ok({
+        let acc = ctx
+            .banks_client
+            .get_account(key)
+            .await
+            .context("required operation value")?
+            .context("account missing")?;
+        T::try_deserialize(&mut &acc.data[..]).context("required operation value")?
+    })
 }
 
 #[tokio::test]
-async fn authority_seats_a_pairing_in_an_active_game_with_move_sessions() {
-    let (mut ctx, f) = setup().await;
+async fn authority_seats_a_pairing_in_an_active_game_with_move_sessions() -> anyhow::Result<()> {
+    let (mut ctx, f) = setup().await?;
     let session_key = Pubkey::new_unique();
 
     send(
@@ -318,10 +323,10 @@ async fn authority_seats_a_pairing_in_an_active_game_with_move_sessions() {
         create_tournament_game_ix(f.authority.pubkey(), f.p1, f.p3, session_key),
         &[&f.authority],
     )
-    .await
-    .expect("create_tournament_game should succeed");
+    .await?
+    .context("create_tournament_game should succeed")?;
 
-    let game: Game = fetch(&mut ctx, game_pda(GAME_ID)).await;
+    let game: Game = fetch(&mut ctx, game_pda(GAME_ID)).await?;
     assert_eq!(game.game_id, GAME_ID);
     assert_eq!((game.white, game.black), (f.p1, f.p3));
     assert_eq!(game.status, GameStatus::Active);
@@ -330,7 +335,7 @@ async fn authority_seats_a_pairing_in_an_active_game_with_move_sessions() {
     assert_eq!(game.fee_payer, session_key);
 
     for player in [f.p1, f.p3] {
-        let s: SessionDelegation = fetch(&mut ctx, session_pda(GAME_ID, player)).await;
+        let s: SessionDelegation = fetch(&mut ctx, session_pda(GAME_ID, player)).await?;
         assert_eq!(
             (s.game_id, s.player, s.session_key),
             (GAME_ID, player, session_key)
@@ -344,13 +349,14 @@ async fn authority_seats_a_pairing_in_an_active_game_with_move_sessions() {
         create_tournament_game_ix(f.authority.pubkey(), f.p2, f.p4, session_key),
         &[&f.authority],
     )
-    .await;
+    .await?;
     assert!(err.is_err());
+    Ok(())
 }
 
 #[tokio::test]
-async fn only_the_authority_may_create_and_only_for_registered_players() {
-    let (mut ctx, f) = setup().await;
+async fn only_the_authority_may_create_and_only_for_registered_players() -> anyhow::Result<()> {
+    let (mut ctx, f) = setup().await?;
     let session_key = Pubkey::new_unique();
 
     let outsider = Keypair::new();
@@ -359,14 +365,17 @@ async fn only_the_authority_may_create_and_only_for_registered_players() {
         &outsider.pubkey(),
         1_000_000_000,
     );
-    send(&mut ctx, fund, &[]).await.unwrap();
+    send(&mut ctx, fund, &[])
+        .await?
+        .context("required operation value")?;
     let err = send(
         &mut ctx,
         create_tournament_game_ix(outsider.pubkey(), f.p1, f.p2, session_key),
         &[&outsider],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::NotTournamentAuthority))
@@ -382,8 +391,9 @@ async fn only_the_authority_may_create_and_only_for_registered_players() {
         ),
         &[&f.authority],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::PlayerNotFound)));
     // Self-pairing is rejected (the two seats would share one session PDA).
     send(
@@ -391,6 +401,8 @@ async fn only_the_authority_may_create_and_only_for_registered_players() {
         create_tournament_game_ix(f.authority.pubkey(), f.p1, f.p1, session_key),
         &[&f.authority],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
+    Ok(())
 }
