@@ -32,6 +32,16 @@ pub const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
 pub const TOURNAMENT_ESCROW_SEED: &[u8] = b"t_escrow";
 pub const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 pub const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";
+pub const TOURNAMENT_PASS_BINDING_SEED: &[u8] = b"t_pass";
+/// Seed of this program's registrar PDA, the only signer the pass program accepts for eligibility.
+pub const PASS_REGISTRAR_SEED: &[u8] = b"pass_registrar";
+
+/// The `xfchess_pass` program that must hook every tournament pass mint.
+/// Devnet deployment: 4sFBJCjU3QvoWZCfxdHJcGBCPjToTy2BzNK23wmRPaw9. Rebuild with a different ID to move clusters.
+pub const XFCHESS_PASS_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
+    0x39, 0x72, 0x21, 0xbe, 0x93, 0x01, 0x2f, 0x4c, 0xa9, 0x31, 0xfb, 0xa0, 0x3c, 0xcf, 0xc7, 0x2f,
+    0xfb, 0x84, 0x50, 0x9d, 0x93, 0x78, 0x23, 0x78, 0x0d, 0x22, 0xdd, 0x42, 0xdb, 0xe6, 0xe5, 0xd8,
+]);
 
 // Gate authority keys by localnet/devnet/mainnet. Mainnet placeholders are
 // blocked by compile-time assertions until real keys are configured.
