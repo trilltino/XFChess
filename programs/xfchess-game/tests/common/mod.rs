@@ -384,3 +384,8 @@ pub async fn fetch_profile(
         PlayerProfile::try_deserialize(&mut &acc.data[..]).context("required operation value")?
     })
 }
+
+/// `program_account` for fixtures that cannot fail to serialize.
+pub fn program_account_value<T: AccountSerialize>(value: &T, space: usize) -> Account {
+    program_account(value, space).expect("serialize fixture account")
+}

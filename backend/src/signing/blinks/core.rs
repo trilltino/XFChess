@@ -416,6 +416,15 @@ fn build_register_player_instruction(
         optional_shard(shard_3),
         AccountMeta::new(*host_treasury, false),
         AccountMeta::new_readonly(solana_system_interface::program::id(), false),
+        // Pass accounts. The binding PDA is always required (empty and system-owned for a
+        // tournament without a pass); the three optional ones are passed as `None`.
+        AccountMeta::new_readonly(
+            Pubkey::find_program_address(&[b"t_pass", &tournament_id.to_le_bytes()], program_id).0,
+            false,
+        ),
+        AccountMeta::new_readonly(*program_id, false),
+        AccountMeta::new_readonly(*program_id, false),
+        AccountMeta::new_readonly(*program_id, false),
     ];
 
     Ok(Instruction {
