@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::core::states::{GameMode, GameState};
+use crate::core::state::{GameMode, GameState};
 use crate::engine::board_state::ChessEngine;
 use crate::game::events::NetworkMoveEvent;
 #[cfg(feature = "solana")]
@@ -68,7 +68,9 @@ pub struct SpectatorSession {
     pub live_cancel: Option<Arc<AtomicBool>>,
     pub playlist: Vec<SpectatorPlaylistEntry>,
     pub playlist_index: usize,
-    poll_result: Option<crossbeam_channel::Receiver<Vec<String>>>,
+    poll_result: Option<
+        crossbeam_channel::Receiver<crate::multiplayer::network::vps::game::SpectatorMovesResponse>,
+    >,
     in_flight: Option<(String, String)>,
 }
 
@@ -374,6 +376,8 @@ fn tick_spectator_poll(
     mut session: ResMut<SpectatorSession>,
     time: Res<Time>,
     tokio: Res<TokioRuntime>,
+    mut spectate_events: MessageWriter<SpectateViaLinkEvent>,
+    match_info: Option<Res<SpectatorMatchInfo>>,
 ) {
     let Some(game_id) = session.game_id.clone() else {
         return;
@@ -387,15 +391,27 @@ fn tick_spectator_poll(
 
     if let Some(rx) = session.poll_result.as_ref() {
         match rx.try_recv() {
-            Ok(all_moves) => {
+            Ok(response) => {
+                if response.reset {
+                    spectate_events.write(SpectateViaLinkEvent {
+                        game_id,
+                        tournament_id: session.tournament_id,
+                        details: match_info.as_ref().map(|m| m.0.clone()),
+                        playlist: session.playlist.clone(),
+                    });
+                    session.end_session();
+                    return;
+                }
                 let queued = session.applied_move_count
                     + session.pending_moves.len()
                     + usize::from(session.in_flight.is_some());
-                if all_moves.len() > queued {
-                    session
-                        .pending_moves
-                        .extend_from_slice(&all_moves[queued..]);
-                }
+                session.pending_moves.extend(
+                    response
+                        .moves
+                        .into_iter()
+                        .filter(|m| m.move_number > queued)
+                        .map(|m| m.move_uci),
+                );
                 session.poll_result = None;
             }
             Err(crossbeam_channel::TryRecvError::Empty) => return,
@@ -411,12 +427,18 @@ fn tick_spectator_poll(
     }
     session.poll_timer = SpectatorSession::POLL_INTERVAL;
 
-    let (tx, rx) = crossbeam_channel::bounded::<Vec<String>>(1);
+    let after_move = session.applied_move_count
+        + session.pending_moves.len()
+        + usize::from(session.in_flight.is_some());
+    let (tx, rx) = crossbeam_channel::bounded(1);
     session.poll_result = Some(rx);
     let game_id_clone = game_id;
     tokio.0.spawn(async move {
         let result = tokio::task::spawn_blocking(move || {
-            crate::multiplayer::network::vps::get_game_moves_for_spectator(&game_id_clone)
+            crate::multiplayer::network::vps::get_game_moves_for_spectator(
+                &game_id_clone,
+                after_move,
+            )
         })
         .await;
         if let Ok(Ok(moves)) = result {
@@ -438,7 +460,6 @@ fn dispatch_pending_spectator_moves(
     }
     if let Some(uci) = session.pending_moves.first().cloned() {
         if let Some((from, to, promotion)) = ChessEngine::parse_uci_move(&uci) {
-
             let version = format!(
                 "spectator:{}/{}",
                 session.game_id.as_deref().unwrap_or_default(),
@@ -613,10 +634,12 @@ mod session_tests {
     }
 
     #[test]
-    fn exhausted_live_feed_allows_polling_and_keeps_its_response_channel() {
+    fn exhausted_live_feed_allows_polling_and_keeps_its_response_channel(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut app = App::new();
+        app.add_message::<SpectateViaLinkEvent>();
         app.insert_resource(Time::<()>::default());
-        app.insert_resource(TokioRuntime(tokio::runtime::Runtime::new().unwrap()));
+        app.insert_resource(TokioRuntime(tokio::runtime::Runtime::new()?));
         let (tx, rx) = crossbeam_channel::bounded(1);
         let mut session = SpectatorSession::default();
         session.begin_session("1".into(), None);
@@ -635,16 +658,66 @@ mod session_tests {
             .resource::<SpectatorSession>()
             .poll_result
             .is_some());
-        tx.send(vec!["e2e4".into(), "e7e5".into(), "g1f3".into()])
-            .unwrap();
+        tx.send(
+            crate::multiplayer::network::vps::game::SpectatorMovesResponse {
+                reset: false,
+                moves: ["e2e4", "e7e5", "g1f3"]
+                    .into_iter()
+                    .enumerate()
+                    .map(
+                        |(i, uci)| crate::multiplayer::network::vps::game::SpectatorMoveEntry {
+                            move_number: i + 1,
+                            move_uci: uci.into(),
+                        },
+                    )
+                    .collect(),
+            },
+        )?;
         app.update();
         let session = app.world().resource::<SpectatorSession>();
         assert_eq!(session.pending_moves, ["e7e5", "g1f3"]);
         assert!(session.poll_result.is_none());
+
+        Ok(())
     }
 
     #[test]
-    fn spectator_counts_only_engine_accepted_moves() {
+    fn invalid_cursor_restarts_the_session_before_replaying_moves(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut app = App::new();
+        app.add_message::<SpectateViaLinkEvent>();
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(TokioRuntime(tokio::runtime::Runtime::new()?));
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let mut session = SpectatorSession::default();
+        session.begin_session("1".into(), Some(7));
+        session.applied_move_count = 20;
+        session.pending_moves.push("e2e4".into());
+        session.poll_result = Some(rx);
+        app.insert_resource(session);
+        tx.send(
+            crate::multiplayer::network::vps::game::SpectatorMovesResponse {
+                reset: true,
+                moves: vec![],
+            },
+        )?;
+        app.add_systems(Update, tick_spectator_poll);
+        app.update();
+        let session = app.world().resource::<SpectatorSession>();
+        assert!(session.game_id.is_none());
+        assert_eq!(session.applied_move_count, 0);
+        assert!(session.pending_moves.is_empty());
+        let events = app.world().resource::<Messages<SpectateViaLinkEvent>>();
+        let mut cursor = events.get_cursor();
+        let restart = cursor.read(events).next().ok_or("missing test value")?;
+        assert_eq!(restart.game_id, "1");
+        assert_eq!(restart.tournament_id, Some(7));
+
+        Ok(())
+    }
+
+    #[test]
+    fn spectator_counts_only_engine_accepted_moves() -> Result<(), Box<dyn std::error::Error>> {
         let mut app = App::new();
         app.insert_resource(GameMode::Spectator);
         let mut session = SpectatorSession::default();
@@ -669,7 +742,7 @@ mod session_tests {
             .resource::<SpectatorSession>()
             .in_flight
             .as_ref()
-            .unwrap()
+            .ok_or("move was not in flight")?
             .0
             .clone();
         app.world_mut()
@@ -701,12 +774,16 @@ mod session_tests {
             .resource::<SpectatorSession>()
             .in_flight
             .is_none());
+
+        Ok(())
     }
 
     #[test]
     fn switching_games_clears_the_previous_board_state() {
-        let mut s = SpectatorSession::default();
-        s.playlist = vec![entry("1"), entry("2")];
+        let mut s = SpectatorSession {
+            playlist: vec![entry("1"), entry("2")],
+            ..Default::default()
+        };
         s.begin_session("1".into(), Some(42));
 
         s.applied_move_count = 17;
@@ -761,8 +838,10 @@ mod session_tests {
 
     #[test]
     fn leaving_drops_the_tournament_context() {
-        let mut s = SpectatorSession::default();
-        s.playlist = vec![entry("1"), entry("2")];
+        let mut s = SpectatorSession {
+            playlist: vec![entry("1"), entry("2")],
+            ..Default::default()
+        };
         s.begin_session("1".into(), Some(7));
 
         s.leave();

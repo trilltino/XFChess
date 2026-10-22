@@ -26,7 +26,7 @@ pub use session::{PuzzleBoard, PuzzlePhase, PuzzleSession, StartPuzzle};
 
 use bevy::prelude::*;
 
-use crate::core::states::{GameMode, GameState, InGameplay};
+use crate::core::state::{GameMode, GameState, InGameplay};
 
 pub struct PuzzlePlugin;
 

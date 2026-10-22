@@ -155,6 +155,7 @@ impl EliminationService {
 mod tests {
     use super::*;
     use crate::signing::storage::tournament::TournamentFormat;
+    use anyhow::Context as _;
 
     fn started(n: usize) -> TournamentRecord {
         let mut t = TournamentRecord::new(5, "t", 0);
@@ -167,35 +168,42 @@ mod tests {
         t
     }
 
-    fn game(t: &TournamentRecord, index: usize) -> u64 {
-        t.elimination().unwrap().matches[index].game_id.unwrap()
+    fn game(t: &TournamentRecord, index: usize) -> anyhow::Result<u64> {
+        Ok({
+            t.elimination().context("test setup failed")?.matches[index]
+                .game_id
+                .context("test setup failed")?
+        })
     }
 
     #[test]
-    fn semifinals_place_third_and_fourth_and_the_final_completes() {
+    fn semifinals_place_third_and_fourth_and_the_final_completes() -> anyhow::Result<()> {
         let mut t = started(4);
-        let g = game(&t, 0);
-        record_game(&mut t, g, "P0", "P3", GameOutcome::WhiteWin).unwrap();
-        let g = game(&t, 1);
-        record_game(&mut t, g, "P1", "P2", GameOutcome::WhiteWin).unwrap();
+        let g = game(&t, 0)?;
+        record_game(&mut t, g, "P0", "P3", GameOutcome::WhiteWin).context("test setup failed")?;
+        let g = game(&t, 1)?;
+        record_game(&mut t, g, "P1", "P2", GameOutcome::WhiteWin).context("test setup failed")?;
         assert_eq!(t.fourth_place.as_deref(), Some("P3"));
         assert_eq!(t.third_place.as_deref(), Some("P2"));
         assert_eq!(t.status, TournamentStatus::Active);
 
-        let g = game(&t, 2);
-        record_game(&mut t, g, "P0", "P1", GameOutcome::BlackWin).unwrap();
+        let g = game(&t, 2)?;
+        record_game(&mut t, g, "P0", "P1", GameOutcome::BlackWin).context("test setup failed")?;
         assert_eq!(t.status, TournamentStatus::Completed);
         assert_eq!(t.winner.as_deref(), Some("P1"));
         assert_eq!(t.second_place.as_deref(), Some("P0"));
+        Ok(())
     }
 
     #[test]
-    fn a_two_player_event_has_no_semifinal_places() {
+    fn a_two_player_event_has_no_semifinal_places() -> anyhow::Result<()> {
         let mut t = started(2);
-        record_decision(&mut t, 0, "P1", "P0", ResultSource::Forfeit).unwrap();
+        record_decision(&mut t, 0, "P1", "P0", ResultSource::Forfeit)
+            .context("test setup failed")?;
         assert_eq!(t.status, TournamentStatus::Completed);
         assert_eq!(t.winner.as_deref(), Some("P1"));
         assert!(t.third_place.is_none() && t.fourth_place.is_none());
+        Ok(())
     }
 
     #[test]

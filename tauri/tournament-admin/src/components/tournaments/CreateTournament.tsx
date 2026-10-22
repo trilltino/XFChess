@@ -96,6 +96,7 @@ export default function CreateTournament({ onTournamentCreated, onCancel, initia
         if (form.min_players != null && (form.min_players < 2 || form.min_players > form.max_players)) return "Minimum players must be between 2 and the capacity.";
         return null;
       case 1:
+        if (![form.entry_fee_lamports, form.platform_fee_lamports ?? 0, prizeLamports].every(value => Number.isSafeInteger(value) && value >= 0)) return "Amounts must be finite whole lamports within the supported range.";
         if (prizeShareTotalBps(form.prize_shares) > 10000) return "Prize split exceeds 100%.";
         if (form.entry_fee_lamports > 0 && prizeLamports <= 0) return "Paid tournaments need a guaranteed prize — players cannot register until one is locked.";
         return null;

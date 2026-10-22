@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use axum::{Router, body::Body, response::IntoResponse, routing::post};
 use bytes::Bytes;
 #[path = "../../iroh-h3/tests/support/mod.rs"]
@@ -10,14 +11,17 @@ use support::MockDiscoveryMap;
 const ALPN: &[u8] = b"iroh+h3";
 
 #[tokio::test]
-async fn full_body_helpers() {
+async fn full_body_helpers() -> anyhow::Result<()> {
     let discovery = MockDiscoveryMap::new();
-    let endpoint_1 = discovery.spawn_endpoint().await;
-    let endpoint_2 = discovery.spawn_endpoint().await;
+    let endpoint_1 = discovery.spawn_endpoint().await?;
+    let endpoint_2 = discovery.spawn_endpoint().await?;
 
-    async fn echo_full(body: Body) -> impl IntoResponse {
-        let b = body.collect().await.unwrap();
-        b.to_bytes()
+    async fn echo_full(body: Body) -> Result<impl IntoResponse, axum::http::StatusCode> {
+        let body = body
+            .collect()
+            .await
+            .map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
+        Ok(body.to_bytes())
     }
 
     let app = Router::new().route("/echo", post(echo_full));
@@ -29,9 +33,13 @@ async fn full_body_helpers() {
     let uri = format!("iroh+h3://{}/echo", endpoint_1.id());
 
     let payload = Bytes::from_static(b"hello-bytes");
-    let request = client.post(&uri).bytes(payload.clone()).unwrap();
-    let response = request.send().await.unwrap();
+    let request = client
+        .post(&uri)
+        .bytes(payload.clone())
+        .context("required operation value")?;
+    let response = request.send().await.context("required operation value")?;
 
-    let got = response.bytes().await.unwrap();
+    let got = response.bytes().await.context("required operation value")?;
     assert_eq!(got, payload);
+    Ok(())
 }

@@ -401,13 +401,13 @@ fn castling_to_string(rights: &CastlingRights) -> String {
 
 fn board_to_piece_placement(board: &[i8; 64]) -> String {
     let piece_char = |id: i8| -> char {
-        let ch = match id.abs() {
-            PAWN_ID => 'p',
-            KNIGHT_ID => 'n',
-            BISHOP_ID => 'b',
-            ROOK_ID => 'r',
-            QUEEN_ID => 'q',
-            KING_ID => 'k',
+        let ch = match id.checked_abs() {
+            Some(PAWN_ID) => 'p',
+            Some(KNIGHT_ID) => 'n',
+            Some(BISHOP_ID) => 'b',
+            Some(ROOK_ID) => 'r',
+            Some(QUEEN_ID) => 'q',
+            Some(KING_ID) => 'k',
             _ => '?',
         };
         if id > 0 {
@@ -465,7 +465,7 @@ mod tests {
     const FOOLS_MATE_FEN: &str = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
 
     #[test]
-    fn side_to_move_matches_fen_field() {
+    fn side_to_move_matches_fen_field() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = ChessEngine::default();
         assert_eq!(
             engine.side_to_move(),
@@ -473,23 +473,23 @@ mod tests {
             "start pos is white"
         );
 
-        engine.set_from_fen(FOOLS_MATE_FEN).unwrap();
+        engine.set_from_fen(FOOLS_MATE_FEN)?;
         assert_eq!(
             engine.side_to_move(),
             PieceColor::White,
             "FEN says 'w' — white is to move and is the mated side"
         );
 
-        engine
-            .set_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1")
-            .unwrap();
+        engine.set_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1")?;
         assert_eq!(engine.side_to_move(), PieceColor::Black);
+
+        Ok(())
     }
 
     #[test]
-    fn fools_mate_attributes_checkmate_to_white() {
+    fn fools_mate_attributes_checkmate_to_white() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = ChessEngine::default();
-        engine.set_from_fen(FOOLS_MATE_FEN).unwrap();
+        engine.set_from_fen(FOOLS_MATE_FEN)?;
         engine.rebuild_legal_move_cache();
 
         assert!(engine.is_check(), "white king must be in check");
@@ -501,19 +501,22 @@ mod tests {
         // Mirrors `update_game_phase`'s branch exactly.
         let loser = engine.side_to_move();
         assert_eq!(loser, PieceColor::White, "white is checkmated, not black");
+
+        Ok(())
     }
 
     #[test]
-    fn black_mated_position_attributes_to_black() {
+    fn black_mated_position_attributes_to_black() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = ChessEngine::default();
         // 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6?? 4.Qxf7# — black to move, black mated.
         engine
-            .set_from_fen("r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4")
-            .unwrap();
+            .set_from_fen("r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4")?;
         engine.rebuild_legal_move_cache();
 
         assert!(engine.is_check(), "black king must be in check");
         assert!(!engine.has_legal_moves(), "black must be mated");
         assert_eq!(engine.side_to_move(), PieceColor::Black);
+
+        Ok(())
     }
 }

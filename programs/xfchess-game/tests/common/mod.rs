@@ -1,6 +1,5 @@
-#![allow(dead_code)]
-
 use anchor_lang::{AccountDeserialize, AccountSerialize, InstructionData, Space, ToAccountMetas};
+use anyhow::Context as _;
 use solana_program_test::{BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
@@ -54,30 +53,36 @@ pub fn board_from_fen(fen: &str) -> [u8; 68] {
     CompactBoard::from_fen(fen).to_bytes()
 }
 
-pub fn apply(board: &[u8; 68], mv: &[u8; 5]) -> [u8; 68] {
-    let mut g = CompactBoard::from_bytes(board).to_on_chain_game();
-    xfchess_game::chess_logic_on_chain::validate_and_apply(&mut g, mv)
-        .expect("test move must be legal");
-    g.to_compact_board().to_bytes()
+pub fn apply(board: &[u8; 68], mv: &[u8; 5]) -> anyhow::Result<[u8; 68]> {
+    Ok({
+        let mut g = CompactBoard::from_bytes(board).to_on_chain_game();
+        xfchess_game::chess_logic_on_chain::validate_and_apply(&mut g, mv)
+            .map_err(|_| anyhow::anyhow!("test move is not legal"))?;
+        g.to_compact_board().to_bytes()
+    })
 }
 
 pub fn ec(e: xfchess_game::errors::GameErrorCode) -> u32 {
     6000 + e as u32
 }
 
-pub fn program_account<T: AccountSerialize>(value: &T, space: usize) -> Account {
-    let mut data = Vec::with_capacity(space);
-    value.try_serialize(&mut data).unwrap();
-    if data.len() < space {
-        data.resize(space, 0);
-    }
-    Account {
-        lamports: 1_000_000_000,
-        data,
-        owner: xfchess_game::ID,
-        executable: false,
-        rent_epoch: 0,
-    }
+pub fn program_account<T: AccountSerialize>(value: &T, space: usize) -> anyhow::Result<Account> {
+    Ok({
+        let mut data = Vec::with_capacity(space);
+        value
+            .try_serialize(&mut data)
+            .context("required operation value")?;
+        if data.len() < space {
+            data.resize(space, 0);
+        }
+        Account {
+            lamports: 1_000_000_000,
+            data,
+            owner: xfchess_game::ID,
+            executable: false,
+            rent_epoch: 0,
+        }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -89,17 +94,19 @@ pub fn game_account(
     turn: u16,
     nonce: u64,
     status: GameStatus,
-) -> (Pubkey, Account) {
-    game_account_with_delegation(
-        game_id,
-        white,
-        black,
-        board_state,
-        turn,
-        nonce,
-        status,
-        true,
-    )
+) -> anyhow::Result<(Pubkey, Account)> {
+    Ok({
+        game_account_with_delegation(
+            game_id,
+            white,
+            black,
+            board_state,
+            turn,
+            nonce,
+            status,
+            true,
+        )?
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -112,37 +119,39 @@ pub fn game_account_with_delegation(
     nonce: u64,
     status: GameStatus,
     is_delegated: bool,
-) -> (Pubkey, Account) {
-    let (pda, bump) = game_pda(game_id);
-    let g = Game {
-        game_id,
-        white,
-        black,
-        status,
-        last_move_timestamp: 0,
-        fees_advanced: 0,
-        fee_payer: white,
-        result: GameResult::None,
-        board_state,
-        move_count: turn.saturating_sub(1),
-        halfmove_clock: 0,
-        turn,
-        created_at: 0,
-        updated_at: 0,
-        wager_amount: 0,
-        wager_token: None,
-        game_type: GameType::PvP,
-        match_type: MatchType::Free,
-        country_fee: 0,
-        base_time_seconds: 0,
-        increment_seconds: 0,
-        bump,
-        is_delegated,
-        tournament_id: None,
-        nonce,
-        draw_offered_by: None,
-    };
-    (pda, program_account(&g, 8 + Game::INIT_SPACE))
+) -> anyhow::Result<(Pubkey, Account)> {
+    Ok({
+        let (pda, bump) = game_pda(game_id);
+        let g = Game {
+            game_id,
+            white,
+            black,
+            status,
+            last_move_timestamp: 0,
+            fees_advanced: 0,
+            fee_payer: white,
+            result: GameResult::None,
+            board_state,
+            move_count: turn.saturating_sub(1),
+            halfmove_clock: 0,
+            turn,
+            created_at: 0,
+            updated_at: 0,
+            wager_amount: 0,
+            wager_token: None,
+            game_type: GameType::PvP,
+            match_type: MatchType::Free,
+            country_fee: 0,
+            base_time_seconds: 0,
+            increment_seconds: 0,
+            bump,
+            is_delegated,
+            tournament_id: None,
+            nonce,
+            draw_offered_by: None,
+        };
+        (pda, program_account(&g, 8 + Game::INIT_SPACE)?)
+    })
 }
 
 pub fn system_account(lamports: u64) -> Account {
@@ -161,18 +170,23 @@ pub fn session_account(
     session_key: Pubkey,
     expires_at: i64,
     enabled: bool,
-) -> (Pubkey, Account) {
-    let (pda, bump) = sd_pda(game_id, &player);
-    let sd = SessionDelegation {
-        game_id,
-        player,
-        session_key,
-        expires_at,
-        max_batch_len: 0,
-        enabled,
-        bump,
-    };
-    (pda, program_account(&sd, 8 + SessionDelegation::INIT_SPACE))
+) -> anyhow::Result<(Pubkey, Account)> {
+    Ok({
+        let (pda, bump) = sd_pda(game_id, &player);
+        let sd = SessionDelegation {
+            game_id,
+            player,
+            session_key,
+            expires_at,
+            max_batch_len: 0,
+            enabled,
+            bump,
+        };
+        (
+            pda,
+            program_account(&sd, 8 + SessionDelegation::INIT_SPACE)?,
+        )
+    })
 }
 
 pub async fn start(accounts: Vec<(Pubkey, Account)>) -> ProgramTestContext {
@@ -344,22 +358,29 @@ pub fn custom_code(err: &TransactionError) -> Option<u32> {
     }
 }
 
-pub async fn fetch_game(ctx: &mut ProgramTestContext, game_id: u64) -> Game {
-    let acc = ctx
-        .banks_client
-        .get_account(game_pda(game_id).0)
-        .await
-        .unwrap()
-        .expect("game account missing");
-    Game::try_deserialize(&mut &acc.data[..]).unwrap()
+pub async fn fetch_game(ctx: &mut ProgramTestContext, game_id: u64) -> anyhow::Result<Game> {
+    Ok({
+        let acc = ctx
+            .banks_client
+            .get_account(game_pda(game_id).0)
+            .await
+            .context("required operation value")?
+            .context("game account missing")?;
+        Game::try_deserialize(&mut &acc.data[..]).context("required operation value")?
+    })
 }
 
-pub async fn fetch_profile(ctx: &mut ProgramTestContext, player: &Pubkey) -> PlayerProfile {
-    let acc = ctx
-        .banks_client
-        .get_account(profile_pda(player).0)
-        .await
-        .unwrap()
-        .expect("profile account missing");
-    PlayerProfile::try_deserialize(&mut &acc.data[..]).unwrap()
+pub async fn fetch_profile(
+    ctx: &mut ProgramTestContext,
+    player: &Pubkey,
+) -> anyhow::Result<PlayerProfile> {
+    Ok({
+        let acc = ctx
+            .banks_client
+            .get_account(profile_pda(player).0)
+            .await
+            .context("required operation value")?
+            .context("profile account missing")?;
+        PlayerProfile::try_deserialize(&mut &acc.data[..]).context("required operation value")?
+    })
 }

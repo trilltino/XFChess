@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use braid_http::{protocol::format_update, BraidClient, BraidRequest, Patch, Update, Version};
 use std::{
     io::{BufRead, BufReader},
@@ -15,8 +16,8 @@ impl Drop for Node {
 
 #[tokio::test]
 #[ignore = "Requires Node.js and BRAID_JS_SOURCE pointing to an upstream braid-http checkout"]
-async fn javascript_and_rust_exchange_snapshots_and_range_patches() {
-    let source = std::env::var("BRAID_JS_SOURCE").expect("set BRAID_JS_SOURCE");
+async fn javascript_and_rust_exchange_snapshots_and_range_patches() -> anyhow::Result<()> {
+    let source = std::env::var("BRAID_JS_SOURCE").context("set BRAID_JS_SOURCE")?;
     let script = r#"
 const http = require('http'), path = require('path');
 global.window = {fetch: global.fetch};
@@ -49,31 +50,47 @@ server.listen(0, '127.0.0.1', () => console.log('http://127.0.0.1:' + server.add
             .args(["-e", script, &source])
             .stdout(Stdio::piped())
             .spawn()
-            .unwrap(),
+            .context("required operation value")?,
     );
     let mut url = String::new();
-    BufReader::new(node.0.stdout.take().unwrap())
+    BufReader::new(node.0.stdout.take().context("required operation value")?)
         .read_line(&mut url)
-        .unwrap();
+        .context("required operation value")?;
     let url = url.trim();
     assert!(url.starts_with("http://127.0.0.1:"));
-    let client = BraidClient::new().unwrap();
-    let mut subscription = client.subscribe(url, BraidRequest::new()).await.unwrap();
+    let client = BraidClient::new().context("required operation value")?;
+    let mut subscription = client
+        .subscribe(url, BraidRequest::new())
+        .await
+        .context("required operation value")?;
     let mut updates = Vec::new();
     while let Some(update) = tokio::time::timeout(Duration::from_secs(5), subscription.next())
         .await
-        .unwrap()
+        .context("required operation value")?
     {
-        updates.push(update.unwrap());
+        updates.push(update.context("required operation value")?);
     }
     assert_eq!(updates.len(), 3);
     assert!(updates.iter().all(|update| update.status == 200));
-    assert_eq!(updates[0].body.as_ref().unwrap().as_ref(), &[255, 254]);
-    let single = updates[1].patches.as_ref().unwrap();
+    assert_eq!(
+        updates[0]
+            .body
+            .as_ref()
+            .context("required operation value")?
+            .as_ref(),
+        &[255, 254]
+    );
+    let single = updates[1]
+        .patches
+        .as_ref()
+        .context("required operation value")?;
     assert_eq!(single[0].unit, "json");
     assert_eq!(single[0].range, ".fen");
     assert_eq!(single[0].content.as_ref(), b"\"ok\"");
-    let multi = updates[2].patches.as_ref().unwrap();
+    let multi = updates[2]
+        .patches
+        .as_ref()
+        .context("required operation value")?;
     assert_eq!(multi.len(), 2);
     assert_eq!(multi[0].content.as_ref(), &[0, 255]);
     assert_eq!(multi[1].content_str(), Some("\u{2603}"));
@@ -88,17 +105,17 @@ server.listen(0, '127.0.0.1', () => console.log('http://127.0.0.1:' + server.add
             ],
         ),
     ] {
-        let wire = format_update(&update).unwrap();
+        let wire = format_update(&update).context("required operation value")?;
         let response: serde_json::Value = client
             .client()
             .post(format!("{url}/parse"))
             .body(wire)
             .send()
             .await
-            .unwrap()
+            .context("required operation value")?
             .json()
             .await
-            .unwrap();
+            .context("required operation value")?;
         assert_eq!(
             response["version"][0].as_str(),
             Some(update.version[0].to_string().as_str())
@@ -111,4 +128,5 @@ server.listen(0, '127.0.0.1', () => console.log('http://127.0.0.1:' + server.add
             assert_eq!(response["patches"], serde_json::json!(expected));
         }
     }
+    Ok(())
 }

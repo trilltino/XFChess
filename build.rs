@@ -1,16 +1,17 @@
 use std::fs;
 use std::path::Path;
 
-fn main() {
-    stamp_version();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    stamp_version()?;
 
-    // Copy assets to target directory for Bevy to find them
-    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let out_dir = std::env::var("OUT_DIR")?;
     let out_dir = Path::new(&out_dir);
-    let target_dir = out_dir.ancestors().nth(3).unwrap(); // Go up to target/debug or target/release
+    let target_dir = out_dir
+        .ancestors()
+        .nth(3)
+        .ok_or("OUT_DIR does not contain a Cargo target directory")?;
     let assets_dest = target_dir.join("assets");
 
-    // Create assets directory if it doesn't exist
     let assets_src = Path::new("assets");
     if assets_src.exists() {
         println!("cargo:rerun-if-changed=assets");
@@ -18,13 +19,14 @@ fn main() {
             eprintln!("Warning: Failed to copy assets: {}", e);
         }
     }
+    Ok(())
 }
 
 /// The version the client reports and compares against GitHub releases: the
 /// release tag CI passes in, else the newest `v*` tag this checkout descends
 /// from (so local builds don't claim the never-bumped crate version), else the
 /// crate version.
-fn stamp_version() {
+fn stamp_version() -> Result<(), std::env::VarError> {
     println!("cargo:rerun-if-env-changed=XFCHESS_RELEASE_VERSION");
     // Re-stamp after a checkout or a new tag.
     for git_path in [".git/HEAD", ".git/refs/tags", ".git/packed-refs"] {
@@ -36,9 +38,13 @@ fn stamp_version() {
         .ok()
         .or_else(latest_release_tag)
         .map(|v| v.trim().trim_start_matches('v').to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| std::env::var("CARGO_PKG_VERSION").unwrap());
+        .filter(|v| !v.is_empty());
+    let version = match version {
+        Some(version) => version,
+        None => std::env::var("CARGO_PKG_VERSION")?,
+    };
     println!("cargo:rustc-env=XFCHESS_VERSION={}", version);
+    Ok(())
 }
 
 fn latest_release_tag() -> Option<String> {

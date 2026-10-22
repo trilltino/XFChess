@@ -51,13 +51,20 @@ pub fn initialize_braid_network(
 
     tokio_runtime.0.spawn(async move {
         info!("[NET] Starting Iroh node task...");
-        let (secret_key, raw_bytes) = load_or_generate_key();
+        let (secret_key, raw_bytes) = match load_or_generate_key() {
+            Ok(identity) => identity,
+            Err(error) => {
+                let _ = event_tx_clone.send(NetworkEvent::NetworkInitializationFailed(error));
+                return;
+            }
+        };
         // Derive node ID before consuming the key so we can set it as the
         // proxy's default_peer (browser spectators → local iroh node).
         let derived_node_id: EndpointId = secret_key.public();
 
         #[cfg(target_os = "android")]
-        let braid_data_dir = crate::core::paths::internal_data_dir().map(|d| d.join("braid"));
+        let braid_data_dir =
+            crate::core::android_paths::internal_data_dir().map(|d| d.join("braid"));
         #[cfg(not(target_os = "android"))]
         let braid_data_dir = dirs::data_local_dir()
             .map(|d| d.join("xfchess").join("braid"))
@@ -150,7 +157,13 @@ pub fn initialize_braid_network(
 
                 // Wire prefix: 0x02 = bincode SignedNetworkMessage; 0x01 = legacy JSON NetworkMessage.
                 let payload_bytes: Vec<u8> = if let Some(ref sk) = session_signing_key {
-                    let signed = SignedNetworkMessage::sign(msg, sk);
+                    let signed = match SignedNetworkMessage::sign(msg, sk) {
+                        Ok(signed) => signed,
+                        Err(error) => {
+                            error!(%error, "Cannot sign network message");
+                            continue;
+                        }
+                    };
                     match bincode::serialize(&signed) {
                         Ok(mut b) => {
                             let mut out = vec![0x02];
@@ -178,7 +191,7 @@ pub fn initialize_braid_network(
 
                 let version = Version::new(uuid::Uuid::new_v4().to_string());
                 let update = Update::snapshot(version, payload_bytes);
-                if let Err(e) = node_send.put(&topic, update).await {
+                if let Err(e) = node_send.put_raw(&topic, update).await {
                     error!(
                         "[NET] Broadcast FAILED: {} for game {} via gossip ({}): {}",
                         msg_kind,
@@ -413,46 +426,59 @@ pub(super) async fn process_gossip_stream(
     }
 }
 
-pub fn load_or_generate_key() -> (SecretKey, [u8; 32]) {
-    // Derive a stable key from the wallet pubkey when Tauri sets XFCHESS_WALLET_PUBKEY.
-    // Same wallet → same NodeID across every session.
-    if let Ok(pubkey_str) = std::env::var("XFCHESS_WALLET_PUBKEY") {
-        if !pubkey_str.is_empty() {
-            let hash = Sha256::digest(pubkey_str.as_bytes());
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&hash);
-            let sk = SecretKey::from_bytes(&arr);
-            info!("[NET] NodeID derived from wallet pubkey (stable)");
-            return (sk, arr);
-        }
-    }
-
-    // Fall back to XFCHESS_IDENTITY env file, then the persistent config-dir key.
+pub fn load_or_generate_key() -> Result<(SecretKey, [u8; 32]), String> {
     if let Ok(env_path) = std::env::var("XFCHESS_IDENTITY") {
         let key_file = PathBuf::from(env_path);
-        if let Ok(bytes) = std::fs::read(&key_file) {
-            if bytes.len() == 32 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                let sk = SecretKey::from_bytes(&arr);
-                return (sk, arr);
-            }
-        }
-        let sk = SecretKey::generate();
-        let bytes = sk.to_bytes();
-        let _ = std::fs::write(&key_file, bytes);
-        return (sk, bytes);
+        return identity_from_file(&key_file);
     }
 
-    // Stable persistent identity: survives restarts and wallet rotations.
-    let sk = crate::multiplayer::network::identity::load_or_create();
-    let bytes = sk.to_bytes();
-    (sk, bytes)
+    let key = crate::multiplayer::network::identity::load_or_create();
+    let bytes = key.to_bytes();
+    Ok((key, bytes))
+}
+
+fn identity_from_file(path: &std::path::Path) -> Result<(SecretKey, [u8; 32]), String> {
+    use std::io::Write;
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let seed: [u8; 32] = bytes.try_into().map_err(|_| {
+                format!("Identity {} must contain exactly 32 bytes", path.display())
+            })?;
+            Ok((SecretKey::from_bytes(&seed), seed))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let key = SecretKey::generate();
+            let bytes = key.to_bytes();
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .map_err(|error| format!("Cannot create identity {}: {error}", path.display()))?;
+            if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
+                return Err(format!("Cannot save identity {}: {error}", path.display()));
+            }
+            Ok((key, bytes))
+        }
+        Err(error) => Err(format!("Cannot read identity {}: {error}", path.display())),
+    }
 }
 
 #[cfg(test)]
 mod gossip_mesh_tests {
     use super::*;
+
+    #[test]
+    fn configured_identity_is_stable_and_corruption_is_not_overwritten(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!("xfchess-identity-{}", uuid::Uuid::new_v4()));
+        let (_, original) = identity_from_file(&path)?;
+        assert_eq!(identity_from_file(&path)?.1, original);
+        std::fs::write(&path, b"bad")?;
+        assert!(identity_from_file(&path).is_err());
+        assert_eq!(std::fs::read(&path)?, b"bad");
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
 
     #[test]
     fn fen_ply_rejects_invalid_turns_and_orders_positions() {
@@ -523,7 +549,8 @@ mod auth_tests {
     use super::*;
 
     #[test]
-    fn bind_identity_uses_verified_signer_not_claimed_agent_id() {
+    fn bind_identity_uses_verified_signer_not_claimed_agent_id(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let attacker_sk = [9u8; 32];
         let victim_id = vec![1u8; 32];
 
@@ -539,7 +566,7 @@ mod auth_tests {
             parent_version: "0".to_string(),
         };
 
-        let signed = SignedNetworkMessage::sign(msg, &attacker_sk);
+        let signed = SignedNetworkMessage::sign(msg, &attacker_sk)?;
         // The signature IS valid — for the attacker's own key.
         assert!(signed.verify());
         let attacker_pub = signed.session_pubkey.clone();
@@ -558,16 +585,20 @@ mod auth_tests {
             }
             _ => panic!("expected Move"),
         }
+
+        Ok(())
     }
 
     #[test]
-    fn bind_identity_leaves_non_move_untouched() {
+    fn bind_identity_leaves_non_move_untouched() -> Result<(), Box<dyn std::error::Error>> {
         let sk = [7u8; 32];
         let msg = NetworkMessage::ResyncRequest { game_id: 42 };
-        let signed = SignedNetworkMessage::sign(msg, &sk);
+        let signed = SignedNetworkMessage::sign(msg, &sk)?;
         assert!(matches!(
             bind_identity(signed),
             NetworkMessage::ResyncRequest { game_id: 42 }
         ));
+
+        Ok(())
     }
 }

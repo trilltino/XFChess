@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use xfchess::game::components::{HasMoved, SelectedPiece};
+use xfchess_app::game::components::{HasMoved, SelectedPiece};
 
 #[test]
 fn example_move_piece_system() {
@@ -66,9 +66,10 @@ fn example_can_castle_check() {
 
 #[test]
 fn example_record_move() {
-    let mut has_moved = HasMoved::default();
-
-    has_moved.moved = true;
+    let mut has_moved = HasMoved {
+        moved: true,
+        ..Default::default()
+    };
     has_moved.move_count += 1;
 
     assert!(has_moved.moved);

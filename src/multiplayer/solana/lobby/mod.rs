@@ -60,8 +60,9 @@ impl EloMatchPref {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum LobbyStatus {
+    #[default]
     Idle,
     Pending,
     Success(u64),
@@ -94,12 +95,6 @@ pub enum LobbyStatus {
         error: String,
     },
     Error(String),
-}
-
-impl Default for LobbyStatus {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 #[derive(Resource)]
@@ -140,11 +135,11 @@ pub struct SolanaLobbyState {
     pub recovery_rx:
         Option<oneshot::Receiver<crate::multiplayer::solana::wager_recovery::WagerScan>>,
     pub recovery_scan: Option<crate::multiplayer::solana::wager_recovery::WagerScan>,
+    pub recovery_action_rx: Option<oneshot::Receiver<Result<String, String>>>,
+    pub recovery_message: Option<Result<String, String>>,
+    pub recovery_refresh_at: Option<std::time::Instant>,
     pub browse_games: Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>,
-    pub browse_last_fetch: Option<std::time::Instant>,
-    pub browse_rx: Option<
-        crossbeam_channel::Receiver<Vec<crate::multiplayer::network::p2p_vps::VpsGameListing>>,
-    >,
+    browse_revision: Option<u64>,
     pub tournament_games: Vec<crate::multiplayer::network::vps::TournamentGameListing>,
     pub tournament_last_fetch: Option<std::time::Instant>,
     pub tournament_rx: Option<
@@ -189,9 +184,11 @@ impl Default for SolanaLobbyState {
             rejoin_lookup_error: None,
             recovery_rx: None,
             recovery_scan: None,
+            recovery_action_rx: None,
+            recovery_message: None,
+            recovery_refresh_at: None,
             browse_games: Vec::new(),
-            browse_last_fetch: None,
-            browse_rx: None,
+            browse_revision: None,
             tournament_games: Vec::new(),
             tournament_last_fetch: None,
             tournament_rx: None,

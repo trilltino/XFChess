@@ -1,4 +1,6 @@
 use anchor_lang::prelude::*;
+#[cfg(test)]
+use anyhow::Context as _;
 
 #[account]
 #[derive(InitSpace)]
@@ -107,18 +109,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wager_amount_offset_is_212() {
+    fn wager_amount_offset_is_212() -> anyhow::Result<()> {
         let mut g = game(GameStatus::WaitingForOpponent, false);
         g.wager_amount = 0;
-        let bytes = borsh::to_vec(&g).unwrap();
+        let bytes = borsh::to_vec(&g).context("required operation value")?;
         g.wager_amount = 0x1122334455667788;
-        let bytes2 = borsh::to_vec(&g).unwrap();
+        let bytes2 = borsh::to_vec(&g).context("required operation value")?;
         let diff_pos = bytes
             .iter()
             .zip(bytes2.iter())
             .position(|(a, b)| a != b)
-            .unwrap();
+            .context("required operation value")?;
         assert_eq!(diff_pos, 212);
+        Ok(())
     }
 
     fn game(status: GameStatus, is_delegated: bool) -> Game {
@@ -153,27 +156,38 @@ mod tests {
     }
 
     #[test]
-    fn derives_base_and_er_phases() {
+    fn derives_base_and_er_phases() -> anyhow::Result<()> {
         assert_eq!(
-            game(GameStatus::WaitingForOpponent, false).phase().unwrap(),
+            game(GameStatus::WaitingForOpponent, false)
+                .phase()
+                .context("required operation value")?,
             GamePhase::WaitingBase
         );
         assert_eq!(
-            game(GameStatus::Active, false).phase().unwrap(),
+            game(GameStatus::Active, false)
+                .phase()
+                .context("required operation value")?,
             GamePhase::ActiveBase
         );
         assert_eq!(
-            game(GameStatus::Active, true).phase().unwrap(),
+            game(GameStatus::Active, true)
+                .phase()
+                .context("required operation value")?,
             GamePhase::ActiveEr
         );
         assert_eq!(
-            game(GameStatus::Finished, true).phase().unwrap(),
+            game(GameStatus::Finished, true)
+                .phase()
+                .context("required operation value")?,
             GamePhase::FinishedEr
         );
         assert_eq!(
-            game(GameStatus::Finished, false).phase().unwrap(),
+            game(GameStatus::Finished, false)
+                .phase()
+                .context("required operation value")?,
             GamePhase::FinishedBase
         );
+        Ok(())
     }
 
     #[test]

@@ -175,6 +175,6 @@ impl RequestContext<'_> {
             };
             tokio::time::sleep(Duration::from_millis(pause)).await;
         }
-        unreachable!()
+        anyhow::bail!("request retry budget exhausted for {}", step.name)
     }
 }

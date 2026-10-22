@@ -12,6 +12,8 @@ const primaryButton = { padding: "8px 20px", borderRadius: "8px", backgroundColo
 export default function Settings() {
   const { authState } = useAuth();
   const [tokenMsg, setTokenMsg] = useState<string | null>(null);
+  const [candidate, setCandidate] = useState("");
+  const [tokenBusy, setTokenBusy] = useState(false);
   const [ops, setOps] = useState<OpsConfig>(getOpsConfig);
   const [opsMsg, setOpsMsg] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(
@@ -20,19 +22,34 @@ export default function Settings() {
   const [thresholdMsg, setThresholdMsg] = useState<string | null>(null);
 
   const handleRotateToken = async () => {
-    if (!window.confirm("Rotate the admin key? Every other panel using the old key will need the new one.")) return;
+    if (tokenBusy) return;
+    setTokenBusy(true);
     const r = await apiClient.rotateToken();
+    setTokenBusy(false);
     if (!r.ok) {
       setTokenMsg(`Error: ${r.error?.message}`);
       return;
     }
-    const newToken = r.data?.new_token as string;
-    apiClient.setCredentials(newToken, apiClient.getBaseUrl());
+    const newToken = r.data?.new_token;
+    if (typeof newToken !== "string" || !newToken) {
+      setTokenMsg("Error: the backend did not return a replacement key.");
+      return;
+    }
+    setCandidate(newToken);
+    setTokenMsg("Replacement generated. Install it as ADMIN_API_KEY on the backend and restart, then verify it here.");
+  };
+
+  const handleVerifyToken = async () => {
+    if (tokenBusy) return;
+    setTokenBusy(true);
     try {
-      await saveAdminToken(authState.env, newToken);
-      setTokenMsg("Key rotated and saved to your OS credential store. The old key stops working on the next backend restart.");
+      await apiClient.activateAdminToken(candidate, () => saveAdminToken(authState.env, candidate));
+      setCandidate("");
+      setTokenMsg("Replacement verified and saved to your OS credential store.");
     } catch (e) {
-      setTokenMsg(`Error: key rotated but could not be saved (${String(e)}). Copy it from the backend before closing.`);
+      setTokenMsg(`Error: ${String(e)} Your current panel credentials are retained.`);
+    } finally {
+      setTokenBusy(false);
     }
   };
 
@@ -82,9 +99,13 @@ export default function Settings() {
 
       <SettingsCard title="ADMIN KEY ROTATION">
         <p style={{ color: "var(--text-dim)", fontSize: "12px", margin: "0 0 1rem", lineHeight: "1.6" }}>
-          Generate a new admin key for {authState.env.toUpperCase()}. It replaces the saved key in your OS credential store; the old key stops working on the next backend restart (update <code style={{ color: "var(--primary)" }}>ADMIN_TOKEN</code> in .env).
+          Generate a replacement key for {authState.env.toUpperCase()}, install it as <code style={{ color: "var(--primary)" }}>ADMIN_API_KEY</code> on the backend, then restart the backend. Verification checks a protected admin endpoint before switching this panel and its saved credentials.
         </p>
-        <button onClick={handleRotateToken} style={primaryButton}>ROTATE KEY</button>
+        <button onClick={handleRotateToken} disabled={tokenBusy} style={primaryButton}>GENERATE REPLACEMENT</button>
+        {candidate && <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+          <input aria-label="Replacement admin API key" readOnly value={candidate} style={fieldStyle} />
+          <button onClick={handleVerifyToken} disabled={tokenBusy} style={primaryButton}>VERIFY AND USE REPLACEMENT</button>
+        </div>}
         {tokenMsg && <div style={{ marginTop: "8px", fontSize: "12px", color: tokenMsg.startsWith("Error") ? "#f87171" : "#4ade80" }}>{tokenMsg}</div>}
       </SettingsCard>
 

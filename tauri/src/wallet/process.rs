@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{
@@ -27,6 +29,8 @@ pub(super) struct GameProcess(OwnedHandle);
 
 impl GameProcess {
   pub(super) fn open(pid: u32) -> Result<Self, String> {
+    // SAFETY: OpenProcess validates the PID. Its successful owned handle is transferred
+    // exactly once into OwnedHandle, which closes it on every return path.
     unsafe {
       let handle = OpenProcess(
         PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
@@ -47,6 +51,7 @@ impl GameProcess {
   }
 
   pub(super) fn wait(&self) -> Result<(), String> {
+    // SAFETY: self owns a live process handle with SYNCHRONIZE rights during the wait.
     let result = unsafe { WaitForSingleObject(HANDLE(self.0.as_raw_handle()), u32::MAX) };
     if result == WAIT_OBJECT_0 {
       Ok(())
@@ -73,22 +78,23 @@ mod tests {
   }
 
   #[test]
-  fn waits_for_the_game_process_to_exit() {
+  fn waits_for_the_game_process_to_exit() -> Result<(), Box<dyn std::error::Error>> {
     let directory =
       std::env::temp_dir().join(format!("xfchess-wallet-process-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir(&directory).unwrap();
+    std::fs::create_dir(&directory)?;
     let executable = directory.join("xfchess.exe");
-    std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+    std::fs::copy(std::env::current_exe()?, &executable)?;
     let mut child = std::process::Command::new(&executable)
       .args(["--exact", "wallet::process::tests::child_fixture"])
       .env("XFCHESS_WALLET_TEST_CHILD", "1")
-      .spawn()
-      .unwrap();
-    let game = GameProcess::open(child.id()).unwrap();
-    game.wait().unwrap();
-    assert!(child.wait().unwrap().success());
+      .spawn()?;
+    let game = GameProcess::open(child.id())?;
+    game.wait()?;
+    assert!(child.wait()?.success());
     drop(game);
-    std::fs::remove_file(executable).unwrap();
-    std::fs::remove_dir(directory).unwrap();
+    std::fs::remove_file(executable)?;
+    std::fs::remove_dir(directory)?;
+
+    Ok(())
   }
 }

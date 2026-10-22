@@ -1,5 +1,5 @@
-use xfchess::game::resources::CurrentTurn;
-use xfchess::rendering::pieces::PieceColor;
+use xfchess_app::game::resources::CurrentTurn;
+use xfchess_app::rendering::pieces::PieceColor;
 
 #[test]
 fn example_execute_move_flow() {

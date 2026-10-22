@@ -40,7 +40,12 @@ pub fn settings_changed_or_added<T: Component>(
 /// every frame otherwise), so MSAA is switched off with it and restored after.
 pub fn apply_camera_quality(
     settings: Res<GameSettings>,
-    cameras: Query<(Entity, Ref<Camera3d>, Has<Bloom>, Has<ScreenSpaceAmbientOcclusion>)>,
+    cameras: Query<(
+        Entity,
+        Ref<Camera3d>,
+        Has<Bloom>,
+        Has<ScreenSpaceAmbientOcclusion>,
+    )>,
     mut commands: Commands,
 ) {
     let quality = settings.graphics_quality;
@@ -113,12 +118,14 @@ pub fn apply_light_quality(
     }
     for (entity, mut light, known) in &mut directional {
         if changed || light.is_added() {
-            light.shadow_maps_enabled = designed(entity, light.shadow_maps_enabled, known) && allowed;
+            light.shadow_maps_enabled =
+                designed(entity, light.shadow_maps_enabled, known) && allowed;
         }
     }
     for (entity, mut light, known) in &mut spot {
         if changed || light.is_added() {
-            light.shadow_maps_enabled = designed(entity, light.shadow_maps_enabled, known) && allowed;
+            light.shadow_maps_enabled =
+                designed(entity, light.shadow_maps_enabled, known) && allowed;
         }
     }
 }
@@ -157,7 +164,11 @@ mod tests {
         let world = app.world();
         assert!(world.get::<Bloom>(camera).is_some(), "bloom on Ultra");
         assert!(world.get::<ScreenSpaceAmbientOcclusion>(camera).is_some());
-        assert_eq!(world.get::<Msaa>(camera), Some(&Msaa::Off), "SSAO needs MSAA off");
+        assert_eq!(
+            world.get::<Msaa>(camera),
+            Some(&Msaa::Off),
+            "SSAO needs MSAA off"
+        );
     }
 
     #[test]
@@ -175,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn quality_caps_light_shadows_but_never_adds_them() {
+    fn quality_caps_light_shadows_but_never_adds_them() -> Result<(), Box<dyn std::error::Error>> {
         let mut app = app(GraphicsQuality::Low);
         let key = app
             .world_mut()
@@ -192,12 +203,26 @@ mod tests {
             })
             .id();
         app.update();
-        let shadows = |app: &App, light| app.world().get::<PointLight>(light).unwrap().shadow_maps_enabled;
-        assert!(!shadows(&app, key), "Low turns shadows off");
+        let shadows = |app: &App, light| {
+            app.world()
+                .get::<PointLight>(light)
+                .map(|light| light.shadow_maps_enabled)
+        };
+        assert_eq!(shadows(&app, key), Some(false), "Low turns shadows off");
 
         set_quality(&mut app, GraphicsQuality::High);
-        assert!(shadows(&app, key), "the key light gets its shadows back");
-        assert!(!shadows(&app, fill), "a light designed without shadows stays without");
+        assert_eq!(
+            shadows(&app, key),
+            Some(true),
+            "the key light gets its shadows back"
+        );
+        assert_eq!(
+            shadows(&app, fill),
+            Some(false),
+            "a light designed without shadows stays without"
+        );
+
+        Ok(())
     }
 
     #[test]

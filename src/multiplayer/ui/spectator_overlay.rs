@@ -1,5 +1,5 @@
-use crate::core::states::MenuState;
-use crate::core::states::{GameMode, GameState};
+use crate::core::state::MenuState;
+use crate::core::state::{GameMode, GameState};
 use crate::multiplayer::network::online_game_session::OnlineChatMessage;
 use crate::multiplayer::spectator::{
     SpectateViaLinkEvent, SpectatorClockState, SpectatorMatchDetails, SpectatorMatchInfo,

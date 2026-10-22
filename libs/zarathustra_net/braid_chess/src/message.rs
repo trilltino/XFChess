@@ -1,3 +1,5 @@
+#[cfg(test)]
+use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,29 +121,32 @@ mod tests {
     }
 
     #[test]
-    fn chess_message_serde_roundtrip() {
+    fn chess_message_serde_roundtrip() -> anyhow::Result<()> {
         let msg = ChessMessage::Move(MovePayload::from_uci("d2d4", "fen", 2, "alice"));
-        let json = serde_json::to_string(&msg).unwrap();
+        let json = serde_json::to_string(&msg).context("required operation value")?;
         assert!(json.contains("\"type\":\"move\""));
-        let decoded: ChessMessage = serde_json::from_str(&json).unwrap();
+        let decoded: ChessMessage =
+            serde_json::from_str(&json).context("required operation value")?;
         if let ChessMessage::Move(p) = decoded {
             assert_eq!(p.uci, "d2d4");
         } else {
             panic!("Wrong variant");
         }
+        Ok(())
     }
 
     #[test]
-    fn resign_message() {
+    fn resign_message() -> anyhow::Result<()> {
         let msg = ChessMessage::Resign {
             player: "bob".to_string(),
         };
-        let json = serde_json::to_string(&msg).unwrap();
+        let json = serde_json::to_string(&msg).context("required operation value")?;
         assert!(json.contains("\"type\":\"resign\""));
+        Ok(())
     }
 
     #[test]
-    fn engine_hint_serde() {
+    fn engine_hint_serde() -> anyhow::Result<()> {
         let hint = ChessMessage::EngineAnalysis(EngineHint {
             depth: 20,
             score_cp: 42,
@@ -149,13 +154,15 @@ mod tests {
             pv: vec!["e2e4".into(), "e7e5".into()],
             best_move: "e2e4".into(),
         });
-        let json = serde_json::to_string(&hint).unwrap();
-        let decoded: ChessMessage = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&hint).context("required operation value")?;
+        let decoded: ChessMessage =
+            serde_json::from_str(&json).context("required operation value")?;
         if let ChessMessage::EngineAnalysis(h) = decoded {
             assert_eq!(h.depth, 20);
             assert_eq!(h.best_move, "e2e4");
         } else {
             panic!("Wrong variant");
         }
+        Ok(())
     }
 }

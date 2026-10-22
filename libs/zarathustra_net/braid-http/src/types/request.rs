@@ -1,4 +1,6 @@
 use crate::types::{Patch, Version};
+#[cfg(test)]
+use anyhow::Context as _;
 
 #[derive(Clone, Debug)]
 pub struct BraidRequest {
@@ -146,14 +148,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_braid_request_builder() {
+    fn test_braid_request_builder() -> anyhow::Result<()> {
         let req = BraidRequest::new()
             .subscribe()
             .with_version(Version::new("v1"))
             .with_heartbeat(5);
 
         assert!(req.subscribe);
-        assert_eq!(req.version.unwrap().len(), 1);
+        assert_eq!(req.version.context("required operation value")?.len(), 1);
         assert_eq!(req.heartbeat_interval, Some(5));
+        Ok(())
     }
 }

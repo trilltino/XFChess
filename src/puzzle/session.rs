@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use super::api::{self, MoveOutcome, PuzzleData, PuzzleRequest};
 use super::uci::{coords_to_uci, square, uci_to_event};
 use crate::core::net_task::{Pending, Poll};
-use crate::core::states::{GameMode, GameState};
+use crate::core::state::{GameMode, GameState};
 use crate::engine::board_state::ChessEngine;
 use crate::game::ai::{AiMode, ChessAIResource};
 use crate::game::events::{MoveMadeEvent, NetworkMoveEvent};

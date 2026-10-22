@@ -6,7 +6,6 @@
 use bevy::prelude::*;
 use tokio::runtime::Runtime;
 
-
 pub mod error;
 pub mod join_link;
 pub mod monitoring;
@@ -16,7 +15,6 @@ pub mod telemetry;
 pub mod traits;
 pub mod types;
 
-// Submodules
 pub mod network;
 #[cfg(feature = "solana")]
 pub mod resume;
@@ -36,7 +34,6 @@ pub mod vps_client {
     pub use super::network::vps::*;
 }
 
-// Re-exports for public API
 pub use error::{MultiplayerError, MultiplayerResult};
 pub use network::*;
 #[cfg(feature = "solana")]
@@ -51,11 +48,6 @@ pub struct MultiplayerPlugin;
 
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
-        let runtime = Runtime::new().unwrap_or_else(|e| {
-            panic!("Failed to create Tokio runtime: {}", e);
-        });
-        app.insert_resource(TokioRuntime(runtime));
-
         app.init_resource::<OnlineNetworkState>()
             .init_resource::<OnlineGameSync>()
             .init_resource::<HeartbeatState>()
@@ -99,7 +91,8 @@ impl Plugin for MultiplayerPlugin {
         app.add_systems(
             Update,
             (
-                systems::initialize_braid_network.in_set(crate::core::schedule::ReceiveSet::Transport),
+                systems::initialize_braid_network
+                    .in_set(crate::core::schedule::ReceiveSet::Transport),
                 (
                     systems::handle_network_events,
                     systems::sweep_stale_move_buffers,
@@ -114,8 +107,7 @@ impl Plugin for MultiplayerPlugin {
                 (
                     systems::send_local_draw_events,
                     // Gate heartbeats to InGame; game_mode persists after returning to the menu.
-                    systems::tick_heartbeat
-                        .run_if(in_state(crate::core::states::GameState::InGame)),
+                    systems::tick_heartbeat.run_if(in_state(crate::core::state::GameState::InGame)),
                     systems::record_casual_game_on_end,
                 )
                     .chain()
@@ -123,7 +115,7 @@ impl Plugin for MultiplayerPlugin {
             ),
         )
         .add_systems(
-            OnExit(crate::core::states::GameState::InGame),
+            OnExit(crate::core::state::GameState::InGame),
             systems::reset_multiplayer_session_state,
         );
 

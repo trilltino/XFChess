@@ -32,9 +32,8 @@ pub const RPC_RETRY_COUNT: u32 = 5;
 
 pub const RPC_RETRY_DELAY_MS: u64 = 2_000;
 
-pub fn unique_id() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+pub fn unique_id() -> anyhow::Result<u64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs())
 }

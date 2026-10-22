@@ -31,8 +31,7 @@ function pick(results: LevelResult[], levels: number[], f: (r: LevelResult) => n
 }
 
 function redact(url: string): string {
-  const i = url.lastIndexOf('/');
-  return i >= 0 && url.length - i - 1 >= 16 ? `${url.slice(0, i + 1)}***` : url;
+  try { return new URL(url).origin; } catch { return "Invalid endpoint"; }
 }
 
 export default function App() {
@@ -77,6 +76,11 @@ export default function App() {
   }, []);
 
   async function run() {
+    if (runningRef.current) return;
+    if (!Number.isInteger(requests) || requests < 1 || requests > 10000 || levels.length < 1 || levels.length > 16 || levels.some(level => level > 256)) {
+      setStatus('Choose 1-16 levels with concurrency 1-256 and 1-10000 requests.');
+      return;
+    }
     if (!tritonUrl) {
       setStatus('Enter your Triton RPC URL first.');
       return;
@@ -104,7 +108,7 @@ export default function App() {
   const throttlePct = (r: LevelResult) =>
     Math.round((r.throttled / Math.max(r.ok + r.throttled + r.errors, 1)) * 100);
 
-  const throughputOpt: EChartsCoreOption = {
+  const throughputOpt = useMemo<EChartsCoreOption>(() => ({
     backgroundColor: 'transparent',
     title: { text: 'Throughput (req/s) — higher is better', textStyle: { color: '#e2e8f0', fontSize: 13 } },
     tooltip: { trigger: 'axis' },
@@ -116,9 +120,9 @@ export default function App() {
       { name: 'Triton', type: 'bar', data: pick(tritonRes, levels, (r) => Math.round(r.rps)), itemStyle: { color: TRITON_COLOR } },
       { name: 'public devnet', type: 'bar', data: pick(baseRes, levels, (r) => Math.round(r.rps)), itemStyle: { color: DEVNET_COLOR } },
     ],
-  };
+  }), [tritonRes, baseRes, levels]);
 
-  const throttleOpt: EChartsCoreOption = {
+  const throttleOpt = useMemo<EChartsCoreOption>(() => ({
     backgroundColor: 'transparent',
     title: { text: 'Throttled (% HTTP 429) — lower is better', textStyle: { color: '#e2e8f0', fontSize: 13 } },
     tooltip: { trigger: 'axis' },
@@ -130,9 +134,9 @@ export default function App() {
       { name: 'Triton', type: 'bar', data: pick(tritonRes, levels, throttlePct), itemStyle: { color: TRITON_COLOR } },
       { name: 'public devnet', type: 'bar', data: pick(baseRes, levels, throttlePct), itemStyle: { color: DEVNET_COLOR } },
     ],
-  };
+  }), [tritonRes, baseRes, levels]);
 
-  const latencyOpt: EChartsCoreOption = {
+  const latencyOpt = useMemo<EChartsCoreOption>(() => ({
     backgroundColor: 'transparent',
     title: { text: 'Latency p50 / p95 (ms)', textStyle: { color: '#e2e8f0', fontSize: 13 } },
     tooltip: { trigger: 'axis' },
@@ -146,7 +150,7 @@ export default function App() {
       { name: 'devnet p50', type: 'line', smooth: true, data: pick(baseRes, levels, (r) => Math.round(r.p50)), itemStyle: { color: DEVNET_COLOR } },
       { name: 'devnet p95', type: 'line', smooth: true, lineStyle: { type: 'dashed' }, data: pick(baseRes, levels, (r) => Math.round(r.p95)), itemStyle: { color: DEVNET_COLOR } },
     ],
-  };
+  }), [tritonRes, baseRes, levels]);
 
   const tritonLatency = tritonRes.length ? tritonRes[tritonRes.length - 1].p50 : undefined;
   const topoOpt = useMemo(() => buildTopologyOption({ tritonLatency, pulse }), [tritonLatency, pulse]);
@@ -172,7 +176,7 @@ export default function App() {
         XFChess Network Visualiser <span style={{ color: TRITON_COLOR }}>·</span> Triton
       </h1>
       <p style={{ color: '#94a3b8', margin: '6px 0 20px' }}>
-        Native RPC benchmark (Triton vs public devnet) + live network topology. Token stays in this window — never committed, never in a browser.
+        Native RPC benchmark (Triton vs public devnet) + live network topology. RPC URLs stay in memory for this session.
       </p>
 
       <div style={{ ...card, marginBottom: 18, display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr auto auto auto' }}>

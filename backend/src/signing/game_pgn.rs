@@ -2,16 +2,28 @@ use crate::db::repository::GameRepository;
 use crate::signing::elo_cache::EloCache;
 use xfchess_rules::{PgnAssembler, PgnResult};
 
+pub struct PgnGame<'a> {
+    pub game_id_str: &'a str,
+    pub white: &'a str,
+    pub black: &'a str,
+    pub white_username: Option<&'a str>,
+    pub black_username: Option<&'a str>,
+    pub winner: Option<&'a str>,
+}
+
 pub async fn assemble_and_store_pgn(
     repo: &GameRepository,
     elo_cache: &EloCache,
-    game_id_str: &str,
-    white: &str,
-    black: &str,
-    white_username: Option<&str>,
-    black_username: Option<&str>,
-    winner: Option<&str>,
+    input: PgnGame<'_>,
 ) {
+    let PgnGame {
+        game_id_str,
+        white,
+        black,
+        white_username,
+        black_username,
+        winner,
+    } = input;
     let moves = match repo.get_moves(game_id_str).await {
         Ok(m) => m,
         Err(e) => {

@@ -41,13 +41,10 @@ impl fmt::Display for RequestContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[req={}", self.request_id)?;
         if let Some(wallet) = &self.wallet_pubkey {
-            // Truncate wallet for privacy in logs
-            let truncated = if wallet.len() > 8 {
-                format!("{}...", &wallet[..8])
-            } else {
-                wallet.clone()
-            };
-            write!(f, ",wallet={}", truncated)?;
+            match wallet.char_indices().nth(8) {
+                Some((end, _)) => write!(f, ",wallet={}...", &wallet[..end])?,
+                None => write!(f, ",wallet={wallet}")?,
+            }
         }
         if let Some(game_id) = self.game_id {
             write!(f, ",game={}", game_id)?;
@@ -130,6 +127,35 @@ impl StructuredLogger {
     }
 }
 
+/// Stdout log writer that strips URLs, and the RPC provider tokens in their
+/// paths, from every event. Upstream error text (reqwest, Solana client)
+/// embeds the full request URL, and any `warn!("{e}")` would otherwise print it.
+#[derive(Clone, Copy)]
+pub struct RedactingStdout;
+
+pub struct RedactingWriter;
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RedactingStdout {
+    type Writer = RedactingWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        RedactingWriter
+    }
+}
+
+impl std::io::Write for RedactingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let text = String::from_utf8_lossy(buf);
+        let scrubbed = crate::signing::solana::redact_urls_in(&text);
+        std::io::stdout().lock().write_all(scrubbed.as_bytes())?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(&mut std::io::stdout())
+    }
+}
+
 pub fn scrub_pii(input: &str) -> String {
     let mut result = input.to_string();
 
@@ -183,6 +209,8 @@ mod tests {
         assert!(display.contains("endpoint=/api/test"));
         assert!(display.contains("game=12345"));
         assert!(display.contains("wallet=7xKXtg2C..."));
+        let unicode = RequestContext::new("/api/test").with_wallet("♟♟♟♟♟♟♟♟♟");
+        assert!(unicode.to_string().contains("wallet=♟♟♟♟♟♟♟♟..."));
     }
 
     #[test]

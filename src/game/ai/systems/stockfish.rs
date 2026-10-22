@@ -13,7 +13,7 @@ impl StockfishProcess {
         } else {
             (2, 64)
         };
-        Ok(Self(EngineWorker::new(path, threads, hash)))
+        Ok(Self(EngineWorker::new(path, threads, hash)?))
     }
 }
 
@@ -63,36 +63,39 @@ pub(super) fn resolve_stockfish_path() -> Result<PathBuf, String> {
         ));
     }
 
-    let binary = if cfg!(target_os = "windows") {
-        "stockfish.exe"
-    } else {
-        "stockfish"
-    };
-    let mut candidates: Vec<PathBuf> = Vec::new();
+    #[cfg(not(target_os = "android"))]
+    {
+        let binary = if cfg!(target_os = "windows") {
+            "stockfish.exe"
+        } else {
+            "stockfish"
+        };
+        let mut candidates: Vec<PathBuf> = Vec::new();
 
-    if let Ok(current_dir) = env::current_dir() {
-        candidates.push(current_dir.join("assets").join("bin").join(binary));
-        candidates.push(current_dir.join(binary));
-    }
-
-    if let Ok(exe_path) = env::current_exe() {
-        for ancestor in exe_path
-            .parent()
-            .into_iter()
-            .flat_map(|path| path.ancestors())
-        {
-            candidates.push(ancestor.join("assets").join("bin").join(binary));
-            candidates.push(ancestor.join(binary));
-            candidates.push(ancestor.join("resources").join(binary));
+        if let Ok(current_dir) = env::current_dir() {
+            candidates.push(current_dir.join("assets").join("bin").join(binary));
+            candidates.push(current_dir.join(binary));
         }
-    }
 
-    candidates
-        .into_iter()
-        .find(|path| path.is_file())
-        .ok_or_else(|| {
-            format!(
-                "Stockfish executable not found. Set STOCKFISH_PATH or place {binary} in assets/bin/ or next to the app."
-            )
-        })
+        if let Ok(exe_path) = env::current_exe() {
+            for ancestor in exe_path
+                .parent()
+                .into_iter()
+                .flat_map(|path| path.ancestors())
+            {
+                candidates.push(ancestor.join("assets").join("bin").join(binary));
+                candidates.push(ancestor.join(binary));
+                candidates.push(ancestor.join("resources").join(binary));
+            }
+        }
+
+        candidates
+            .into_iter()
+            .find(|path| path.is_file())
+            .ok_or_else(|| {
+                format!(
+                    "Stockfish executable not found. Set STOCKFISH_PATH or place {binary} in assets/bin/ or next to the app."
+                )
+            })
+    }
 }

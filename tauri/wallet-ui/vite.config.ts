@@ -1,4 +1,4 @@
-  import { defineConfig } from "vite";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 
@@ -27,15 +27,10 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks(id) {
-          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
-            return "vendor";
-          }
-          if (id.includes("node_modules/@solana/web3.js")) {
-            return "solana";
-          }
+        codeSplitting: {
+          groups: [{ name: "vendor", test: /node_modules/, maxSize: 350_000, entriesAware: true }],
         },
       },
     },

@@ -6,7 +6,7 @@ edition = "2021"
 autotests = false
 
 [lib]
-crate-type = ["cdylib", "lib"]
+crate-type = ["lib"]
 name = "xfchess_game"
 
 [features]
@@ -164,6 +164,7 @@ name = "link_external_elo_tests"
 path = "tests/link_external_elo_tests.rs"
 
 [dev-dependencies]
+anyhow.workspace = true
 xfchess-rules = { workspace = true }
 tokio = { workspace = true }
 solana-program-test = { workspace = true }
@@ -175,8 +176,6 @@ base64 = { workspace = true }
 # Contract tests exercise the same no_std validator as deployed builds.
 nimzovich_engine = { workspace = true }
 
-[lints.rust]
-unexpected_cfgs = { level = "allow" }
 
 [[test]]
 name = "lifecycle_race_tests"
@@ -192,3 +191,6 @@ required-features = ["move-validation"]
 name = "chess_logic_differential"
 path = "tests/chess_logic_differential.rs"
 required-features = ["move-validation"]
+
+[lints]
+workspace = true

@@ -184,7 +184,15 @@ pub async fn require_relay_or_jwt(
         .and_then(|h| h.strip_prefix("Bearer "))
     {
         if let Ok(claims) = state.jwt.verify(token) {
-            if state.store.token_is_revoked(&claims.sub, claims.iat).await {
+            if state
+                .store
+                .token_is_revoked(&claims.sub, claims.iat)
+                .await
+                .map_err(|error| {
+                    tracing::error!("Revocation lookup failed: {error}");
+                    StatusCode::SERVICE_UNAVAILABLE
+                })?
+            {
                 return Err(StatusCode::UNAUTHORIZED);
             }
             request.extensions_mut().insert(AuthedWallet(claims.sub));
@@ -230,6 +238,7 @@ pub fn constant_time_eq(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use axum::{
         body::Body,
         http::{Request, StatusCode},
@@ -263,8 +272,8 @@ mod tests {
     /// Debug builds fall back to the `dev` key when none is configured, so a request
     /// without that key is refused (release builds refuse every request with 503).
     #[tokio::test]
-    async fn test_require_api_key_missing_env_var() {
-        let _env = crate::test_env::lock();
+    async fn test_require_api_key_missing_env_var() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
         std::env::remove_var("ADMIN_API_KEY");
         std::env::remove_var("ADMIN_API_KEYS");
 
@@ -273,9 +282,14 @@ mod tests {
             .layer(axum::middleware::from_fn(require_api_key));
 
         let response = app
-            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .body(Body::empty())
+                    .context("test setup failed")?,
+            )
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         let expected = if cfg!(debug_assertions) {
             StatusCode::UNAUTHORIZED
@@ -283,11 +297,12 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         };
         assert_eq!(response.status(), expected);
+        Ok(())
     }
 
-    #[test]
-    fn empty_configured_keys_never_authorize_a_missing_header() {
-        let _env = crate::test_env::lock();
+    #[tokio::test]
+    async fn empty_configured_keys_never_authorize_a_missing_header() {
+        let _env = crate::test_env::lock().await;
 
         std::env::remove_var("ADMIN_API_KEYS");
         std::env::set_var("ADMIN_API_KEY", "");
@@ -306,8 +321,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_require_api_key_valid() {
-        let _env = crate::test_env::lock();
+    async fn test_require_api_key_valid() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
         std::env::remove_var("ADMIN_API_KEYS");
         std::env::set_var("ADMIN_API_KEY", "test-secret-key");
 
@@ -321,17 +336,18 @@ mod tests {
                     .uri("/test")
                     .header("X-API-Key", "test-secret-key")
                     .body(Body::empty())
-                    .expect("Failed to build test request"),
+                    .context("Failed to build test request")?,
             )
             .await
-            .expect("Failed to execute test request");
+            .context("Failed to execute test request")?;
 
         assert_eq!(response.status(), StatusCode::OK);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_require_api_key_invalid() {
-        let _env = crate::test_env::lock();
+    async fn test_require_api_key_invalid() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
         std::env::remove_var("ADMIN_API_KEYS");
         std::env::set_var("ADMIN_API_KEY", "test-secret-key");
 
@@ -345,17 +361,18 @@ mod tests {
                     .uri("/test")
                     .header("X-API-Key", "wrong-key")
                     .body(Body::empty())
-                    .expect("Failed to build test request"),
+                    .context("Failed to build test request")?,
             )
             .await
-            .expect("Failed to execute test request");
+            .context("Failed to execute test request")?;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_require_api_key_missing_header() {
-        let _env = crate::test_env::lock();
+    async fn test_require_api_key_missing_header() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
         std::env::remove_var("ADMIN_API_KEYS");
         std::env::set_var("ADMIN_API_KEY", "test-secret-key");
 
@@ -364,16 +381,22 @@ mod tests {
             .layer(axum::middleware::from_fn(require_api_key));
 
         let response = app
-            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .body(Body::empty())
+                    .context("test setup failed")?,
+            )
             .await
-            .unwrap();
+            .context("test setup failed")?;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_require_api_key_empty_header() {
-        let _env = crate::test_env::lock();
+    async fn test_require_api_key_empty_header() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
         std::env::remove_var("ADMIN_API_KEYS");
         std::env::set_var("ADMIN_API_KEY", "test-secret-key");
 
@@ -387,11 +410,12 @@ mod tests {
                     .uri("/test")
                     .header("X-API-Key", "")
                     .body(Body::empty())
-                    .expect("Failed to build test request"),
+                    .context("Failed to build test request")?,
             )
             .await
-            .expect("Failed to execute test request");
+            .context("Failed to execute test request")?;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        Ok(())
     }
 }

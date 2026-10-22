@@ -8,7 +8,7 @@ pub struct Square {
 
 impl Square {
     pub fn is_white(&self) -> bool {
-        (self.x + self.y + 1).is_multiple_of(2)
+        (self.x ^ self.y) & 1 != 0
     }
 
     pub fn new(file: u8, rank: u8) -> Self {
@@ -18,8 +18,8 @@ impl Square {
 
 #[derive(Resource)]
 pub struct SquareMaterials {
-    pub black_color: Handle<StandardMaterial>,
-    pub white_color: Handle<StandardMaterial>,
+    pub light: Handle<StandardMaterial>,
+    pub dark: Handle<StandardMaterial>,
     pub hover_matl: Handle<StandardMaterial>,
     pub selected_border_matl: Handle<StandardMaterial>,
     pub hint_mesh: Handle<Mesh>,
@@ -30,24 +30,16 @@ pub struct SquareMaterials {
 
 impl FromWorld for SquareMaterials {
     fn from_world(world: &mut World) -> Self {
-        // Use fixed Classic theme colors (Cream and Green)
         let light_color = Color::srgb(0.97, 0.97, 0.88); // Cream
         let dark_color = Color::srgb(0.52, 0.65, 0.40); // Green
 
-        let mut materials = match world.get_resource_mut::<Assets<StandardMaterial>>() {
-            Some(m) => m,
-            None => {
-                error!("[RENDERING] Assets<StandardMaterial> not available during SquareMaterials initialization");
-                error!("[RENDERING] This should not happen - DefaultPlugins should provide this resource");
-                // This is a critical error - return a placeholder that will cause issues
-                // but at least won't panic. In practice, this should never happen.
-                panic!("Assets<StandardMaterial> must be initialized before SquareMaterials - check plugin order");
-            }
-        };
+        world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<Assets<Mesh>>();
+        let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
 
         SquareMaterials {
-            black_color: materials.add(light_color), // Light squares
-            white_color: materials.add(dark_color),  // Dark squares
+            light: materials.add(light_color),
+            dark: materials.add(dark_color),
             hover_matl: materials.add(StandardMaterial {
                 base_color: Color::srgba(0.18, 0.78, 0.35, 0.82), // Vivid green (Lichess-style move dots)
                 alpha_mode: AlphaMode::Blend,
@@ -93,9 +85,9 @@ impl ReturnMaterials {
         materials: &SquareMaterials,
     ) -> Handle<StandardMaterial> {
         if square.is_white() {
-            materials.black_color.clone()
+            materials.light.clone()
         } else {
-            materials.white_color.clone()
+            materials.dark.clone()
         }
     }
 }
@@ -195,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_return_materials_default() {
-        let _materials = ReturnMaterials::default();
+        let _materials = ReturnMaterials;
         // If this compiles and runs, Default works correctly
     }
 }

@@ -1,5 +1,4 @@
-#![allow(dead_code)]
-use tracing::{error, info, warn, Level};
+use tracing::{info, Level};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::EnvFilter;
 
@@ -15,10 +14,23 @@ pub fn init_logging() {
     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("xfchess_tauri=info"));
 
   let dir = log_dir();
-  let _ = std::fs::create_dir_all(&dir);
-  // Daily rotation: this runs every time the game launches, so an unrotated
-  // single file would grow forever across a player's entire install history.
-  let file_appender = tracing_appender::rolling::daily(&dir, "wallet-bridge.log");
+  let file_appender = match tracing_appender::rolling::Builder::new()
+    .rotation(tracing_appender::rolling::Rotation::DAILY)
+    .filename_prefix("wallet-bridge.log")
+    .build(&dir)
+  {
+    Ok(writer) => writer,
+    Err(error) => {
+      eprintln!("Cannot open wallet log at {}: {error}", dir.display());
+      if let Err(error) = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .try_init()
+      {
+        eprintln!("Cannot install console logger: {error}");
+      }
+      return;
+    }
+  };
   // The tracing writer guard must live until exit; dropping it stops background flushing.
   let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
   Box::leak(Box::new(guard));
@@ -35,192 +47,11 @@ pub fn init_logging() {
     // harmless in release (goes nowhere, same as before this change).
     .with_writer(std::io::stdout.and(non_blocking))
     .compact()
-    .init();
+    .try_init()
+    .unwrap_or_else(|error| eprintln!("Wallet logging unavailable: {error}"));
 
   info!(
     "[Logging] Writing to {}",
     dir.join("wallet-bridge.log.<date>").display()
   );
-}
-
-pub fn log_window_event(window: &str, event: &str, details: Option<&str>) {
-  info!(
-    window = window,
-    event = event,
-    details = details.unwrap_or(""),
-    "Window event: {} - {}",
-    event,
-    details.unwrap_or("")
-  );
-}
-
-pub fn log_ipc_command(command: &str, window: Option<&str>) {
-  info!(
-    command = command,
-    window = window.unwrap_or("unknown"),
-    "IPC command: {} from {}",
-    command,
-    window.unwrap_or("unknown")
-  );
-}
-
-pub fn log_auth_event(event: &str, user: Option<&str>) {
-  info!(
-    event = event,
-    user = user.unwrap_or("unknown"),
-    "Auth event: {} - {}",
-    event,
-    user.unwrap_or("unknown")
-  );
-}
-
-pub fn log_error(context: &str, error: &str, details: Option<&str>) {
-  error!(
-    context = context,
-    error = error,
-    details = details.unwrap_or(""),
-    "Error in {}: {} - {}",
-    context,
-    error,
-    details.unwrap_or("")
-  );
-}
-
-pub fn log_security_event(event: &str, details: &str) {
-  warn!(
-    event = event,
-    details = details,
-    "Security event: {} - {}",
-    event,
-    details
-  );
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use std::env;
-  use std::sync::Once;
-
-  // Logging installs a process-global subscriber and panics on repeated initialization.
-  // Concurrent tests must coordinate it.
-  static INIT: Once = Once::new();
-  fn ensure_logging_init() {
-    INIT.call_once(init_logging);
-  }
-
-  #[test]
-  fn test_logging_init() {
-    ensure_logging_init();
-
-    // If we reach this point, initialization succeeded
-    assert!(true);
-  }
-
-  #[test]
-  fn test_logging_init_with_custom_level() {
-    env::set_var("RUST_LOG", "debug");
-
-    // This should not panic even with custom log level
-    ensure_logging_init();
-
-    env::remove_var("RUST_LOG");
-    assert!(true);
-  }
-
-  #[test]
-  fn test_logging_init_with_invalid_level() {
-    env::set_var("RUST_LOG", "invalid_level");
-
-    // Should fall back to default level
-    ensure_logging_init();
-
-    env::remove_var("RUST_LOG");
-    assert!(true);
-  }
-
-  #[test]
-  fn test_log_window_event() {
-    // This test ensures that window event logging function
-    // doesn't panic and formats correctly
-    log_window_event("main", "show", Some("window shown successfully"));
-
-    assert!(true);
-  }
-
-  #[test]
-  fn test_log_window_event_no_details() {
-    log_window_event("main", "hide", None);
-
-    assert!(true);
-  }
-
-  #[test]
-  fn test_log_ipc_command() {
-    log_ipc_command("show_window", Some("tournament-admin"));
-
-    assert!(true);
-  }
-
-  #[test]
-  fn test_log_ipc_command_no_window() {
-    log_ipc_command("generic_command", None);
-
-    assert!(true);
-  }
-
-  #[test]
-  fn test_log_auth_event() {
-    log_auth_event("login_success", Some("user123"));
-
-    assert!(true);
-  }
-
-  #[test]
-  fn test_log_auth_event_no_user() {
-    log_auth_event("logout", None);
-
-    assert!(true);
-  }
-
-  #[test]
-  fn test_log_error() {
-    log_error(
-      "window_manager",
-      "Failed to create window",
-      Some("Invalid parameters"),
-    );
-
-    assert!(true);
-  }
-
-  #[test]
-  fn test_log_error_no_details() {
-    log_error("ipc_handler", "Command failed", None);
-
-    assert!(true);
-  }
-
-  #[test]
-  fn test_log_security_event() {
-    log_security_event(
-      "unauthorized_access",
-      "Attempted to access admin without permissions",
-    );
-
-    assert!(true);
-  }
-
-  #[test]
-  fn test_all_logging_functions() {
-    ensure_logging_init();
-
-    log_window_event("main", "ready", Some("DOM loaded"));
-    log_ipc_command("get_info", Some("main"));
-    log_auth_event("session_start", Some("user456"));
-    log_error("network", "Connection failed", Some("timeout"));
-    log_security_event("rate_limit", "Too many requests from IP");
-
-    assert!(true);
-  }
 }

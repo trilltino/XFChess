@@ -2,7 +2,7 @@ use super::*;
 
 pub fn record_casual_game_on_end(
     game_over: Res<GameOverState>,
-    game_mode: Res<crate::core::states::GameMode>,
+    game_mode: Res<crate::core::state::GameMode>,
     players: Option<Res<crate::game::resources::player::Players>>,
     player_identity: Option<Res<crate::states::main_menu::PlayerIdentity>>,
     mut recorded: Local<bool>,
@@ -14,7 +14,7 @@ pub fn record_casual_game_on_end(
     if *recorded {
         return;
     }
-    if *game_mode != crate::core::states::GameMode::SinglePlayer {
+    if *game_mode != crate::core::state::GameMode::SinglePlayer {
         return;
     }
     *recorded = true;
@@ -133,32 +133,6 @@ pub(super) fn is_current_game_message(
                     &session.game_id,
                 )
     })
-}
-
-#[cfg(test)]
-mod game_control_scope_tests {
-    use super::*;
-    use crate::multiplayer::network::online_game_session::OnlineGameSession;
-
-    #[test]
-    fn late_control_message_cannot_affect_the_next_game() {
-        let current = OnlineGameSession {
-            game_id: "22".to_string(),
-            active: true,
-            ..Default::default()
-        };
-        let old_timeout = NetworkMessage::FlagTimeout {
-            game_id: 21,
-            flagged_player: "white".to_string(),
-        };
-        let current_timeout = NetworkMessage::FlagTimeout {
-            game_id: 22,
-            flagged_player: "white".to_string(),
-        };
-        assert!(!is_current_game_message(&old_timeout, Some(&current)));
-        assert!(is_current_game_message(&current_timeout, Some(&current)));
-        assert!(!is_current_game_message(&current_timeout, None));
-    }
 }
 
 pub fn handle_game_control_messages(
@@ -369,9 +343,9 @@ pub fn tick_heartbeat(
     mut heartbeat: ResMut<HeartbeatState>,
     network_state: Res<OnlineNetworkState>,
     session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
-    game_mode: Res<crate::core::states::GameMode>,
+    game_mode: Res<crate::core::state::GameMode>,
 ) {
-    use crate::core::states::GameMode;
+    use crate::core::state::GameMode;
     use crate::multiplayer::network::protocol::NetworkMessage;
 
     if *game_mode != GameMode::OnlineMultiplayer {
@@ -454,4 +428,30 @@ pub fn reset_multiplayer_session_state(
         rollup_bridge.reset_preserving_finalization();
     }
     info!("[NET] Reset P2P connection, heartbeat, Braid transport, opponent-liveness, and rollup bridge state on match exit");
+}
+
+#[cfg(test)]
+mod game_control_scope_tests {
+    use super::*;
+    use crate::multiplayer::network::online_game_session::OnlineGameSession;
+
+    #[test]
+    fn late_control_message_cannot_affect_the_next_game() {
+        let current = OnlineGameSession {
+            game_id: "22".to_string(),
+            active: true,
+            ..Default::default()
+        };
+        let old_timeout = NetworkMessage::FlagTimeout {
+            game_id: 21,
+            flagged_player: "white".to_string(),
+        };
+        let current_timeout = NetworkMessage::FlagTimeout {
+            game_id: 22,
+            flagged_player: "white".to_string(),
+        };
+        assert!(!is_current_game_message(&old_timeout, Some(&current)));
+        assert!(is_current_game_message(&current_timeout, Some(&current)));
+        assert!(!is_current_game_message(&current_timeout, None));
+    }
 }

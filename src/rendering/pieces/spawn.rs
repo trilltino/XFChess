@@ -243,8 +243,6 @@ pub fn spawn_king(
     rank: u8,
     sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
-    
-
     let mesh = piece_meshes.get(PieceType::King, piece_color);
 
     commands
@@ -283,7 +281,6 @@ pub fn spawn_knight(
     rank: u8,
     sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
-
     let mesh = piece_meshes.get(PieceType::Knight, piece_color);
 
     commands
@@ -322,7 +319,6 @@ pub fn spawn_queen(
     rank: u8,
     sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
-
     let mesh = piece_meshes.get(PieceType::Queen, piece_color);
 
     commands
@@ -361,7 +357,6 @@ pub fn spawn_bishop(
     rank: u8,
     sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
-
     let mesh = piece_meshes.get(PieceType::Bishop, piece_color);
 
     commands
@@ -400,7 +395,6 @@ pub fn spawn_rook(
     rank: u8,
     sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
-
     let mesh = piece_meshes.get(PieceType::Rook, piece_color);
 
     commands
@@ -439,7 +433,6 @@ pub fn spawn_pawn(
     rank: u8,
     sprite_handles: &Option<Res<PieceSpriteHandles>>,
 ) {
-
     let mesh = piece_meshes.get(PieceType::Pawn, piece_color);
 
     commands

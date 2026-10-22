@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn poll_tournament_tasks(
     mut tournament: ResMut<TournamentClientState>,
-    mut menu_state: ResMut<NextState<crate::core::states::MenuState>>,
+    mut menu_state: ResMut<NextState<crate::core::state::MenuState>>,
 ) {
     if let Some(result) = tournament.leave_rx.as_ref().map(|rx| rx.try_recv()) {
         match result {
@@ -90,7 +90,7 @@ pub(super) fn poll_tournament_tasks(
                 tournament.status_message =
                     format!("Registered in slot {}. Waiting for bracket…", slot + 1);
                 tournament.tx_rx = None;
-                menu_state.set(crate::core::states::MenuState::Tournaments);
+                menu_state.set(crate::core::state::MenuState::Tournaments);
                 info!("[TOURNAMENT] Registration confirmed — slot {}", slot);
             }
             Ok(Err(e)) => {

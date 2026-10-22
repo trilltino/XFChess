@@ -41,7 +41,13 @@ pub(crate) fn start_tcp_bridge(
       tracing::error!("No wallet TCP port available");
       return;
     };
-    let port = listener.local_addr().expect("bound TCP address").port();
+    let port = match listener.local_addr() {
+      Ok(address) => address.port(),
+      Err(error) => {
+        tracing::error!(%error, "Cannot read wallet TCP address");
+        return;
+      }
+    };
     let _ = TCP_PORT.set(port);
     if let Err(error) = std::fs::write(wallet_bridge_port_file(http_port()), port.to_string()) {
       tracing::warn!(%error, "Cannot announce wallet TCP port");

@@ -139,7 +139,7 @@ struct Config {
     environment: Vec<(String, String)>,
 }
 impl EngineWorker {
-    pub fn new(path: PathBuf, threads: u8, hash_mb: u16) -> Self {
+    pub fn new(path: PathBuf, threads: u8, hash_mb: u16) -> Result<Self, String> {
         Self::with_config(Config {
             path,
             threads,
@@ -150,7 +150,7 @@ impl EngineWorker {
             environment: Vec::new(),
         })
     }
-    fn with_config(config: Config) -> Self {
+    fn with_config(config: Config) -> Result<Self, String> {
         let (tx, rx) = unbounded();
         let shutdown = Arc::new(AtomicBool::new(false));
         let stopped = shutdown.clone();
@@ -199,10 +199,11 @@ impl EngineWorker {
                                             engine =
                                                 Some(Process::start(&config, &stopped, &cancel)?);
                                         }
-                                        let mut result = engine
+                                        let process = engine
                                             .as_mut()
-                                            .unwrap()
-                                            .search(&request, &config, &stopped, &cancel)?;
+                                            .ok_or("Stockfish failed to initialize")?;
+                                        let mut result =
+                                            process.search(&request, &config, &stopped, &cancel)?;
                                         let mv = result.best_move.as_deref().ok_or(
                                             "Stockfish returned no move in a playable position",
                                         )?;
@@ -232,8 +233,8 @@ impl EngineWorker {
                     }
                 }
             })
-            .expect("start Stockfish worker thread");
-        Self(Arc::new(Control { tx, shutdown }))
+            .map_err(|error| format!("Cannot start Stockfish worker thread: {error}"))?;
+        Ok(Self(Arc::new(Control { tx, shutdown })))
     }
     pub fn warm_up(&self) {
         let _ = self.0.tx.send(Job::Warmup);

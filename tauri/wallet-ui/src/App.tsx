@@ -3,7 +3,7 @@ import { API_BASE, SESSION_ID, apiGet, apiPost, closePopup, logLifecycle, withTi
 import { PRIMARY, PRIMARY_DIM, PRIMARY_BORDER, BG, CARD_BG, BORDER, TEXT, TEXT_DIM, TEXT_MUTED, INPUT_BG, RED, RED_DIM, RED_BORDER } from "./wallet/theme";
 import { PrimaryBtn, ErrorMsg } from "./wallet/components";
 import { TransactionSigner } from "./wallet/TransactionSigner";
-import { validateSignedTransaction, assertWalletAddress } from "./wallet/transactions";
+import { validateSignedTransaction, assertWalletAddress, serializeWalletTransaction } from "./wallet/transactions";
 
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { usePrivy, useLogin, useLogout } from "@privy-io/react-auth";
@@ -663,7 +663,7 @@ function ProfileStep({
                 60000,
                 "Wallet signature",
               );
-              signedB64 = Buffer.from(signed.serialize()).toString("base64");
+              signedB64 = Buffer.from(serializeWalletTransaction(signed)).toString("base64");
             }
             validateSignedTransaction(original, signedB64, pubkey!);
             logLifecycle("SIGNATURE_RECEIVED");
@@ -759,6 +759,8 @@ function ProfileStep({
 
 
 function Onboarding() {
+  const sessionGeneration = useRef(0);
+  useEffect(() => () => { sessionGeneration.current++; }, []);
   // A reopened sign popup with a stored session skips onboarding and displays
   // the pending transaction directly.
   const hasExistingSession = () =>
@@ -808,8 +810,11 @@ function Onboarding() {
   // Fall back to bridge wallet state when popup storage is empty so pending
   // transactions can still render their signer.
   useEffect(() => {
+    let active = true;
+    const generation = sessionGeneration.current;
     apiGet<{ connected: boolean; pubkey: string | null }>("/status")
       .then((s) => {
+        if (!active || generation !== sessionGeneration.current) return;
         setPubkey(s.pubkey ?? "");
         if (s.pubkey) {
           localStorage.setItem("xfchess_wallet_pubkey", s.pubkey);
@@ -817,6 +822,7 @@ function Onboarding() {
         }
       })
       .catch(() => { /* bridge unreachable — nothing to fall back to */ });
+    return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -842,10 +848,12 @@ function Onboarding() {
   // can be idle on wallet or splash, but an active signature must not be interrupted.
   useEffect(() => {
     if (step === "sign") return;
-    const interval = setInterval(async () => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
       try {
         const r = await apiGet<{ needs_profile: boolean }>("/api/needs-profile-step");
-        if (r.needs_profile) {
+        if (active && r.needs_profile) {
           apiPost("/api/debug-log", {
             msg: `needs-profile-step poll: flag was set (was on step="${step}") — setStep(profile), requireOnchain=true`,
           }).catch(() => {});
@@ -853,9 +861,11 @@ function Onboarding() {
           setRequireOnchain(true);
           setStep("profile");
         }
-      } catch { /* ignore — bridge may not be running */ }
-    }, 1500);
-    return () => clearInterval(interval);
+      } catch { /* Bridge may not be running. */ }
+      finally { if (active) timer = setTimeout(() => { void poll(); }, 1500); }
+    };
+    timer = setTimeout(() => { void poll(); }, 1500);
+    return () => { active = false; clearTimeout(timer); };
   }, [step]);
 
   // Resolve the current wallet's handle before mounting ProfileStep; shared
@@ -865,12 +875,14 @@ function Onboarding() {
     if (step !== "profile" || !requireOnchain || handleResolved) return;
     const activePubkey = pubkey ?? localStorage.getItem("xfchess_wallet_pubkey") ?? localStorage.getItem("xfchess_wallet");
     if (!activePubkey) { setHandleResolved(true); return; }
+    let active = true;
     (async () => {
       try {
         const token = await getAuthToken();
         if (!token) return;
         const status = await fetchProfileStatus(token);
         const existing = await resolveExistingUsername(token, activePubkey, status);
+        if (!active) return;
         if (existing) {
           setUsername(existing);
           localStorage.setItem("xfchess_username", existing);
@@ -879,11 +891,14 @@ function Onboarding() {
           setUsername("Player");
         }
       } catch { /* backend unreachable — fall back to whatever was cached */ }
-      finally { setHandleResolved(true); }
+      finally { if (active) setHandleResolved(true); }
     })();
+    return () => { active = false; };
   }, [step, requireOnchain, handleResolved, pubkey]);
 
   const handleAuth = async (token: string, user: string, nextPubkey: string) => {
+    const generation = ++sessionGeneration.current;
+    const current = () => generation === sessionGeneration.current;
     setAuthToken(token);
     localStorage.setItem("xfchess_wallet_pubkey", nextPubkey);
     setPubkey(nextPubkey);
@@ -897,7 +912,9 @@ function Onboarding() {
     let needsProfile = true;
     try {
       const status = await fetchProfileStatus(token);
+      if (!current()) return;
       const existing = await resolveExistingUsername(token, nextPubkey, status);
+      if (!current()) return;
       if (existing) {
         resolvedUser = existing;
         localStorage.setItem("xfchess_username", resolvedUser);
@@ -906,6 +923,7 @@ function Onboarding() {
       }
       if (needsProfile === false && !status.username_set) {
         const flagResp = await apiGet<{ needs_profile: boolean }>("/api/needs-profile-step");
+        if (!current()) return;
         if (flagResp.needs_profile) {
           apiPost("/api/debug-log", {
             msg: "handleAuth: off-chain username resolved, but needs-profile-step flag was set — forcing ProfileStep(requireOnchain)",
@@ -915,6 +933,7 @@ function Onboarding() {
         }
       }
     } catch {
+      if (!current()) return;
       // RPC failure does not prove a profile is missing. Keep the username verified
       // by this wallet's auth response unless it is a registration placeholder.
       const registrationPlaceholder = nextPubkey.slice(0, 8);
@@ -926,6 +945,7 @@ function Onboarding() {
       }
     }
 
+    if (!current()) return;
     // Mirror the resolved handle to the bridge; explicitly clear it when setup
     // is required so a prior wallet's cached name is not retained.
     apiPost("/wallet", { pubkey: nextPubkey, username: needsProfile ? "" : resolvedUser }).catch(

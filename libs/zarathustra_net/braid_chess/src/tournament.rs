@@ -1,3 +1,5 @@
+#[cfg(test)]
+use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -264,10 +266,10 @@ mod tests {
     }
 
     #[test]
-    fn standings_snapshot_decodes() {
+    fn standings_snapshot_decodes() -> anyhow::Result<()> {
         let body = json!([{ "player_id": "alice", "score": 2.5, "rank": 1 }]);
         let msg = SwissMessage::from_braid("tournament/9/standings", &body, true)
-            .expect("standings snapshot should decode");
+            .context("standings snapshot should decode")?;
         assert_eq!(
             msg,
             SwissMessage::StandingsUpdated {
@@ -279,14 +281,15 @@ mod tests {
                 }],
             }
         );
+        Ok(())
     }
 
     #[test]
-    fn pairings_carry_round_from_the_path() {
+    fn pairings_carry_round_from_the_path() -> anyhow::Result<()> {
         // The resource path identifies the pairing round.
         let body = json!([{ "white": "a", "black": "b", "board": 1, "game_id": 77 }]);
         let msg = SwissMessage::from_braid("tournament/9/pairings/3", &body, true)
-            .expect("pairings snapshot should decode");
+            .context("pairings snapshot should decode")?;
         match msg {
             SwissMessage::RoundStarted {
                 round, pairings, ..
@@ -296,17 +299,18 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+        Ok(())
     }
 
     #[test]
-    fn results_decode_from_the_append_patch() {
+    fn results_decode_from_the_append_patch() -> anyhow::Result<()> {
         let body = json!([{
             "op": "add",
             "path": "/-",
             "value": { "round": 2, "board": 4, "result": { "Win": { "winner": "white" } } }
         }]);
         let msg = SwissMessage::from_braid("tournament/9/results", &body, false)
-            .expect("append patch should decode");
+            .context("append patch should decode")?;
         assert_eq!(
             msg,
             SwissMessage::ResultRecorded {
@@ -318,6 +322,7 @@ mod tests {
                 },
             }
         );
+        Ok(())
     }
 
     #[test]

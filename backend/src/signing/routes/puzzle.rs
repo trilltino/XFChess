@@ -170,6 +170,7 @@ async fn next_from_lichess(
     // Lichess only serves puzzles unseen on Lichess; skip any already played here.
     for _ in 0..3 {
         let puzzle = LichessClient::global()
+            .map_err(lichess_error_status)?
             .next_puzzle(&q.wallet, &token, q.theme(), q.difficulty())
             .await
             .map_err(lichess_error_status)?;
@@ -786,7 +787,14 @@ fn sync_result_to_lichess(state: &AppState, wallet: &str, puzzle_id: &str, win: 
         let Some(token) = load_puzzle_token(&pool, &vault, &wallet).await else {
             return;
         };
-        if let Err(e) = LichessClient::global()
+        let client = match LichessClient::global() {
+            Ok(client) => client,
+            Err(error) => {
+                warn!("Lichess result sync unavailable: {error}");
+                return;
+            }
+        };
+        if let Err(e) = client
             .record_result(&wallet, &token, &puzzle_id, win, rated)
             .await
         {
@@ -1105,42 +1113,47 @@ async fn admin_close_bounty(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
-    async fn pool_with_open_challenge(nonce: &str) -> sqlx::SqlitePool {
-        // One connection: each `sqlite::memory:` connection is its own database.
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query(
-            "CREATE TABLE puzzle_challenges (
+    async fn pool_with_open_challenge(nonce: &str) -> anyhow::Result<sqlx::SqlitePool> {
+        Ok({
+            // One connection: each `sqlite::memory:` connection is its own database.
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .context("test setup failed")?;
+            sqlx::query(
+                "CREATE TABLE puzzle_challenges (
                 nonce TEXT PRIMARY KEY, consumed INTEGER NOT NULL DEFAULT 0)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query("INSERT INTO puzzle_challenges (nonce) VALUES (?)")
-            .bind(nonce)
+            )
             .execute(&pool)
             .await
-            .unwrap();
-        pool
+            .context("test setup failed")?;
+            sqlx::query("INSERT INTO puzzle_challenges (nonce) VALUES (?)")
+                .bind(nonce)
+                .execute(&pool)
+                .await
+                .context("test setup failed")?;
+            pool
+        })
     }
 
     #[tokio::test]
-    async fn only_one_submission_can_finish_a_challenge() {
+    async fn only_one_submission_can_finish_a_challenge() -> anyhow::Result<()> {
         // Two final moves for the same challenge arrive together: only one may
         // be scored and paid.
-        let pool = pool_with_open_challenge("n").await;
+        let pool = pool_with_open_challenge("n").await?;
         let (first, second) = tokio::join!(consume(&pool, "n"), consume(&pool, "n"));
         assert!(first ^ second, "first={first} second={second}");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_finished_challenge_cannot_be_finished_again() {
-        let pool = pool_with_open_challenge("n").await;
+    async fn a_finished_challenge_cannot_be_finished_again() -> anyhow::Result<()> {
+        let pool = pool_with_open_challenge("n").await?;
         assert!(consume(&pool, "n").await);
         assert!(!consume(&pool, "n").await);
+        Ok(())
     }
 }

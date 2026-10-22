@@ -30,7 +30,7 @@ pub async fn run_single_elimination_tournament_flow(
         players.len()
     );
 
-    let tournament_id = unique_id();
+    let tournament_id = unique_id()?;
     println!(
         "\n   Setting up single-elimination tournament #{} ({} players)",
         tournament_id, size

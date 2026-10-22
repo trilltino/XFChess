@@ -12,8 +12,6 @@ pub mod types;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tracing::debug;
-
 use config::AcConfig;
 use engine::stockfish::StockfishHandle;
 use error::AcResult;
@@ -21,9 +19,10 @@ use features::{accuracy, blur, complexity, timing};
 use types::{AcReport, GameRecord, PlyEval, SideAnalysis, SignalValues};
 
 pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport> {
+    cfg.validate()?;
     let sf_path = cfg.stockfish_path.clone();
     let depth = cfg.analysis_depth;
-    let movetime = cfg.movetime_ms;
+    let analysis_cfg = cfg.clone();
 
     let game_id = game.game_id.clone();
     let context = game.context.clone();
@@ -36,7 +35,7 @@ pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport
     let (white_evals, black_evals) = tokio::task::spawn_blocking(move || {
         let mut sf = StockfishHandle::spawn(&sf_path)?;
         sf.set_multipv(2)?;
-        evaluate_all_plies(&mut sf, &game, depth, movetime)
+        evaluate_all_plies(&mut sf, &game, &analysis_cfg)
     })
     .await
     .map_err(|e| error::AcError::Stockfish(format!("spawn_blocking panicked: {e}")))??;
@@ -58,10 +57,13 @@ pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport
         cfg,
     );
 
-    let now_ms = SystemTime::now()
+    let elapsed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+        .map_err(|error| {
+            error::AcError::InvalidInput(format!("system clock unavailable: {error}"))
+        })?;
+    let now_ms = u64::try_from(elapsed.as_millis())
+        .map_err(|_| error::AcError::InvalidInput("analysis timestamp is out of range".into()))?;
 
     Ok(AcReport {
         game_id,
@@ -78,36 +80,33 @@ pub async fn analyse_game(game: GameRecord, cfg: &AcConfig) -> AcResult<AcReport
 fn evaluate_all_plies(
     sf: &mut StockfishHandle,
     game: &GameRecord,
-    depth: u8,
-    movetime: u64,
+    cfg: &AcConfig,
 ) -> AcResult<(Vec<PlyEval>, Vec<PlyEval>)> {
     let mut white_evals: Vec<PlyEval> = Vec::new();
     let mut black_evals: Vec<PlyEval> = Vec::new();
 
-    for mv in &game.moves {
-        // The FEN *before* this move is what we evaluate
-        // We use fen_after of the previous move, or start_fen for ply 0
-        let fen_before = if mv.ply == 0 {
-            game.start_fen.clone()
-        } else {
-            game.moves
-                .iter()
-                .find(|m| m.ply + 1 == mv.ply)
-                .map(|m| m.fen_after.clone())
-                .unwrap_or_else(|| game.start_fen.clone())
-        };
-
-        if fen_before.is_empty() {
-            debug!("[analyse] skipping ply {} — no FEN", mv.ply);
-            continue;
+    let mut fen_before = game.start_fen.as_str();
+    for (index, mv) in game.moves.iter().enumerate() {
+        if usize::try_from(mv.ply).ok() != Some(index) {
+            return Err(error::AcError::InvalidInput(
+                "analysis plies must be contiguous and zero-based".into(),
+            ));
         }
 
-        let pos = sf.analyse(&fen_before, depth, movetime)?;
+        if fen_before.is_empty() {
+            return Err(error::AcError::InvalidInput(format!(
+                "missing position before ply {}",
+                mv.ply
+            )));
+        }
 
-        let played_eval = eval_after_played_move(sf, &mv.fen_after, depth, movetime);
+        let pos = sf.analyse(fen_before, cfg.analysis_depth, cfg.movetime_ms)?;
+
+        let played_eval =
+            eval_after_played_move(sf, &mv.fen_after, cfg.analysis_depth, cfg.movetime_ms)?;
         let cpl = cpl_from_evals(pos.top1_cp, played_eval);
         let is_t1 = pos.best_move == mv.move_uci;
-        let cplx = complexity::classify(pos.top1_cp, pos.top2_cp, &AcConfig::default());
+        let cplx = complexity::classify(pos.top1_cp, pos.top2_cp, cfg);
 
         let eval = PlyEval {
             ply: mv.ply,
@@ -125,6 +124,7 @@ fn evaluate_all_plies(
         } else {
             black_evals.push(eval);
         }
+        fen_before = &mv.fen_after;
     }
 
     Ok((white_evals, black_evals))
@@ -135,18 +135,20 @@ fn eval_after_played_move(
     fen_after: &str,
     depth: u8,
     movetime: u64,
-) -> i32 {
+) -> AcResult<i32> {
     if fen_after.is_empty() {
-        return 0;
+        return Err(error::AcError::InvalidInput(
+            "missing position after move".into(),
+        ));
     }
-    match sf.analyse(fen_after, depth, movetime) {
-        Ok(pos) => -pos.top1_cp, // negate because it's now the opponent's perspective
-        Err(_) => 0,
-    }
+    Ok(sf
+        .analyse(fen_after, depth, movetime)?
+        .top1_cp
+        .saturating_neg())
 }
 
 fn cpl_from_evals(best_before_cp: i32, played_after_cp: i32) -> i32 {
-    (best_before_cp - played_after_cp).max(0)
+    best_before_cp.saturating_sub(played_after_cp).max(0)
 }
 
 fn build_side_analysis(

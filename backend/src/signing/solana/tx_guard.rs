@@ -75,6 +75,7 @@ pub fn validate_cosignable_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use solana_compute_budget_interface::ComputeBudgetInstruction;
     use solana_sdk::{
         instruction::{AccountMeta, Instruction},
@@ -102,7 +103,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_the_real_create_game_setup_bundle() {
+    fn accepts_the_real_create_game_setup_bundle() -> anyhow::Result<()> {
         let program_id = program();
         let payer = Keypair::new();
         let game_pda = Pubkey::new_unique();
@@ -124,11 +125,13 @@ mod tests {
             &["create_game", "join_game", "authorize_session_key"],
             &[game_pda],
         )
-        .expect("the bundle the game client actually sends must be accepted");
+        .map_err(|error| anyhow::anyhow!("{error:?}"))
+        .context("the bundle the game client actually sends must be accepted")?;
+        Ok(())
     }
 
     #[test]
-    fn accepts_compute_budget_instructions_before_setup() {
+    fn accepts_compute_budget_instructions_before_setup() -> anyhow::Result<()> {
         let program_id = program();
         let payer = Keypair::new();
         let game_pda = Pubkey::new_unique();
@@ -151,11 +154,13 @@ mod tests {
             &["create_game", "authorize_session_key"],
             &[game_pda],
         )
-        .expect("compute budget metadata must not block setup activation");
+        .map_err(|error| anyhow::anyhow!("{error:?}"))
+        .context("compute budget metadata must not block setup activation")?;
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_smuggled_system_transfer() {
+    fn rejects_a_smuggled_system_transfer() -> anyhow::Result<()> {
         let program_id = program();
         let payer = Keypair::new();
         let attacker = Pubkey::new_unique();
@@ -168,23 +173,27 @@ mod tests {
         );
 
         let err = validate_cosignable_tx(&tx, &program_id, &["create_game"], &[])
-            .expect_err("a System transfer must never be co-signed");
+            .err()
+            .context("a System transfer must never be co-signed")?;
         assert!(err.contains("targets program"), "unexpected reason: {err}");
+        Ok(())
     }
 
     #[test]
-    fn rejects_an_unlisted_instruction_on_our_own_program() {
+    fn rejects_an_unlisted_instruction_on_our_own_program() -> anyhow::Result<()> {
         let program_id = program();
         let payer = Keypair::new();
         let tx = tx_of(&payer, &[ix_for(&program_id, "finalize_game", &[])]);
 
         let err = validate_cosignable_tx(&tx, &program_id, &["create_game"], &[])
-            .expect_err("only the named instructions may be co-signed");
+            .err()
+            .context("only the named instructions may be co-signed")?;
         assert!(err.contains("not one of"), "unexpected reason: {err}");
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_transaction_for_a_different_game() {
+    fn rejects_a_transaction_for_a_different_game() -> anyhow::Result<()> {
         let program_id = program();
         let payer = Keypair::new();
         let other_game_pda = Pubkey::new_unique();
@@ -199,15 +208,17 @@ mod tests {
         );
 
         let err = validate_cosignable_tx(&tx, &program_id, &["create_game"], &[expected_game_pda])
-            .expect_err("a tx for another game must be rejected");
+            .err()
+            .context("a tx for another game must be rejected")?;
         assert!(
             err.contains("does not reference"),
             "unexpected reason: {err}"
         );
+        Ok(())
     }
 
     #[test]
-    fn rejects_empty_and_oversized_transactions() {
+    fn rejects_empty_and_oversized_transactions() -> anyhow::Result<()> {
         let program_id = program();
         let payer = Keypair::new();
 
@@ -219,12 +230,14 @@ mod tests {
             .collect();
         let oversized = tx_of(&payer, &many);
         let err = validate_cosignable_tx(&oversized, &program_id, &["create_game"], &[])
-            .expect_err("instruction count must be bounded");
+            .err()
+            .context("instruction count must be bounded")?;
         assert!(err.contains("at most"), "unexpected reason: {err}");
+        Ok(())
     }
 
     #[test]
-    fn rejects_truncated_instruction_data() {
+    fn rejects_truncated_instruction_data() -> anyhow::Result<()> {
         let program_id = program();
         let payer = Keypair::new();
         let stub = Instruction {
@@ -235,7 +248,9 @@ mod tests {
         let tx = tx_of(&payer, &[stub]);
 
         let err = validate_cosignable_tx(&tx, &program_id, &["create_game"], &[])
-            .expect_err("data shorter than a discriminator must be rejected");
+            .err()
+            .context("data shorter than a discriminator must be rejected")?;
         assert!(err.contains("too short"), "unexpected reason: {err}");
+        Ok(())
     }
 }

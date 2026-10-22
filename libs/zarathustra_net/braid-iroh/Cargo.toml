@@ -35,5 +35,9 @@ anyhow = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+anyhow.workspace = true
 braid_chess = { path = "../braid_chess" }
 tempfile = "3"
+
+[lints]
+workspace = true

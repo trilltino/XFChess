@@ -198,6 +198,7 @@ pub async fn verify_access_token(token: &str) -> Result<PrivyClaims, PrivyError>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     // Keep tests independent of process environment mutation; parallel tests
     // otherwise race shared Privy configuration.
@@ -261,17 +262,18 @@ mod tests {
     }
 
     #[test]
-    fn parses_a_two_key_privy_jwks() {
+    fn parses_a_two_key_privy_jwks() -> anyhow::Result<()> {
         let raw = r#"{"keys":[
             {"kty":"EC","x":"XhMlk9TEgcQVV9tXoxBt5JI_oxLdQ-dyc3i_SWgJTDI","y":"cLe_pRiMLnJJnVZ1Bfo0pIK_tnavWweOp7YVeO6h3EY","crv":"P-256","kid":"JA2V4sxfqwYeSq5P3PB_hjYZzRlWgkMIeqKkyl84puQ","use":"sig","alg":"ES256"},
             {"kty":"EC","x":"cUIiUNgHIuCnC5_Z-EkM6OSDtZTMh6lbNhe9hEWDdnI","y":"7W7B1c4-b-wmw6HNmI-GDjWhyIW_0bu5LvUyeRLfZ2Y","crv":"P-256","kid":"OjBjEkbF1sDKlgHqFPdVFt-gyyfXlzowmeofZq47To0","use":"sig","alg":"ES256"}
         ]}"#;
-        let jwks: Jwks = serde_json::from_str(raw).expect("parses");
+        let jwks: Jwks = serde_json::from_str(raw).context("parses")?;
         assert_eq!(jwks.keys.len(), 2);
         assert!(jwks.keys.iter().all(|k| decoding_key(k).is_ok()));
         assert!(jwks
             .keys
             .iter()
             .any(|k| k.kid == "OjBjEkbF1sDKlgHqFPdVFt-gyyfXlzowmeofZq47To0"));
+        Ok(())
     }
 }

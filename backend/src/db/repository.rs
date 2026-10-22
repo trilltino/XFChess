@@ -3,6 +3,18 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 
+pub struct CompletedGame<'a> {
+    pub game_id: &'a str,
+    pub player_white: Option<&'a str>,
+    pub player_black: Option<&'a str>,
+    pub white_username: Option<&'a str>,
+    pub black_username: Option<&'a str>,
+    pub winner: Option<&'a str>,
+    pub final_fen: Option<&'a str>,
+    pub finalize_sig: &'a str,
+    pub stake_amount: f64,
+}
+
 const PGN_ZSTD_PREFIX: &str = "zstd:";
 
 pub fn filter_visible_moves(
@@ -80,6 +92,12 @@ pub struct MoveRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SpectatorMove {
+    pub move_number: i32,
+    pub move_uci: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct SpectatorGameSummary {
     pub game_id: String,
     pub status: String,
@@ -125,18 +143,18 @@ impl GameRepository {
         Ok(())
     }
 
-    pub async fn complete_game(
-        &self,
-        game_id: &str,
-        player_white: Option<&str>,
-        player_black: Option<&str>,
-        white_username: Option<&str>,
-        black_username: Option<&str>,
-        winner: Option<&str>,
-        final_fen: Option<&str>,
-        finalize_sig: &str,
-        stake_amount: f64,
-    ) -> Result<()> {
+    pub async fn complete_game(&self, input: CompletedGame<'_>) -> Result<()> {
+        let CompletedGame {
+            game_id,
+            player_white,
+            player_black,
+            white_username,
+            black_username,
+            winner,
+            final_fen,
+            finalize_sig,
+            stake_amount,
+        } = input;
         let now = chrono::Utc::now().timestamp();
         sqlx::query(
             r#"INSERT INTO games
@@ -285,41 +303,6 @@ impl GameRepository {
         Ok(games)
     }
 
-    pub async fn add_move(
-        &self,
-        game_id: &str,
-        move_number: i32,
-        move_uci: &str,
-        move_san: Option<&str>,
-        fen_before: Option<&str>,
-        fen_after: Option<&str>,
-        player: &str,
-    ) -> Result<MoveRecord> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs() as i64;
-
-        let move_record = sqlx::query_as::<_, MoveRecord>(
-            r#"
-            INSERT INTO moves (game_id, move_number, move_uci, move_san, fen_before, fen_after, player, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            RETURNING *
-            "#,
-        )
-        .bind(game_id)
-        .bind(move_number)
-        .bind(move_uci)
-        .bind(move_san)
-        .bind(fen_before)
-        .bind(fen_after)
-        .bind(player)
-        .bind(now)
-        .fetch_one(&self.pool)
-        .await?;
-
-        Ok(move_record)
-    }
-
     pub async fn get_moves(&self, game_id: &str) -> Result<Vec<MoveRecord>> {
         let moves = sqlx::query_as::<_, MoveRecord>(
             "SELECT * FROM moves WHERE game_id = ? ORDER BY move_number ASC",
@@ -427,9 +410,47 @@ impl GameRepository {
     }
 
     pub async fn get_moves_visible(&self, game_id: &str, now_ts: i64) -> Result<Vec<MoveRecord>> {
-        let delay = self.get_broadcast_delay(game_id).await;
-        let moves = self.get_moves(game_id).await?;
-        Ok(filter_visible_moves(moves, now_ts, delay))
+        let cutoff = self.spectator_cutoff(game_id, now_ts).await?;
+        Ok(sqlx::query_as::<_, MoveRecord>(
+            "SELECT * FROM moves WHERE game_id = ? AND timestamp <= ? ORDER BY move_number",
+        )
+        .bind(game_id)
+        .bind(cutoff)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    async fn spectator_cutoff(&self, game_id: &str, now_ts: i64) -> Result<i64> {
+        let delay =
+            sqlx::query_scalar::<_, i64>("SELECT broadcast_delay_secs FROM games WHERE id = ?")
+                .bind(game_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .unwrap_or(0);
+        Ok(if delay <= 0 {
+            i64::MAX
+        } else {
+            now_ts.saturating_sub(delay)
+        })
+    }
+
+    pub async fn get_spectator_moves_after(
+        &self,
+        game_id: &str,
+        now_ts: i64,
+        after_move: i32,
+    ) -> Result<(Vec<SpectatorMove>, bool)> {
+        let cutoff = self.spectator_cutoff(game_id, now_ts).await?;
+        // A cursor must identify an already visible move. Reset stale or invalid
+        // cursors to the beginning without exposing delayed rows.
+        let valid = after_move == 0 || (after_move > 0 && sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM moves WHERE game_id = ? AND move_number = ? AND timestamp <= ?)",
+        ).bind(game_id).bind(after_move).bind(cutoff).fetch_one(&self.pool).await?);
+        let moves = sqlx::query_as::<_, SpectatorMove>(
+            "SELECT move_number, move_uci FROM moves WHERE game_id = ? AND move_number > ? AND timestamp <= ? ORDER BY move_number",
+        ).bind(game_id).bind(if valid { after_move } else { 0 }).bind(cutoff)
+            .fetch_all(&self.pool).await?;
+        Ok((moves, !valid))
     }
 
     pub async fn end_game(
@@ -822,6 +843,66 @@ pub struct NewMove {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
+
+    #[tokio::test]
+    async fn spectator_cursor_filters_delay_and_resets_invalid_positions() -> anyhow::Result<()> {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .context("test setup failed")?;
+        crate::infrastructure::database::migrate_session_db(&pool)
+            .await
+            .context("test setup failed")?;
+        let repo = GameRepository::new(pool.clone());
+        repo.set_broadcast_delay("g", 10)
+            .await
+            .context("test setup failed")?;
+        for (number, timestamp) in [(1, 80_i64), (2, 90), (3, 91)] {
+            sqlx::query("INSERT INTO moves (game_id, move_number, move_uci, player, timestamp) VALUES ('g', ?, 'e2e4', 'w', ?)")
+                .bind(number).bind(timestamp).execute(&pool).await.context("test setup failed")?;
+        }
+        let (moves, reset) = repo
+            .get_spectator_moves_after("g", 100, 1)
+            .await
+            .context("test setup failed")?;
+        assert!(!reset);
+        assert_eq!(moves.iter().map(|m| m.move_number).collect::<Vec<_>>(), [2]);
+        assert_eq!(
+            repo.get_moves_visible("g", 100)
+                .await
+                .context("test setup failed")?
+                .len(),
+            2
+        );
+        let (moves, reset) = repo
+            .get_spectator_moves_after("g", 100, 2)
+            .await
+            .context("test setup failed")?;
+        assert!(!reset);
+        assert!(moves.is_empty());
+        for cursor in [-1, 3, 999] {
+            let (moves, reset) = repo
+                .get_spectator_moves_after("g", 100, cursor)
+                .await
+                .context("test setup failed")?;
+            assert!(reset);
+            assert_eq!(moves.len(), 2);
+        }
+        let (moves, reset) = repo
+            .get_spectator_moves_after("g", 101, 2)
+            .await
+            .context("test setup failed")?;
+        assert!(!reset);
+        assert_eq!(moves[0].move_number, 3);
+        sqlx::query("DROP TABLE games")
+            .execute(&pool)
+            .await
+            .context("test setup failed")?;
+        assert!(repo.get_spectator_moves_after("g", 100, 0).await.is_err());
+        Ok(())
+    }
 
     fn mv(move_number: i32, timestamp: i64) -> MoveRecord {
         MoveRecord {

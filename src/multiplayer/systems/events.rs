@@ -8,28 +8,25 @@ pub fn handle_network_events(
     mut network_events: MessageWriter<NetworkEvent>,
     mut resign_events: MessageWriter<ResignEvent>,
 ) {
-    let mut incoming: VecDeque<NetworkEvent> = {
-        if let Some(ref mut receiver) = network_state.event_receiver {
-            let mut buf = VecDeque::new();
-            while let Ok(ev) = receiver.try_recv() {
-                buf.push_back(ev);
-            }
-            buf
-        } else {
-            VecDeque::new()
-        }
-    };
-
-    while let Some(event) = incoming.pop_front() {
+    // Leave excess events in the receiver, preserving order across frames.
+    const MAX_EVENTS_PER_FRAME: usize = 256;
+    for _ in 0..MAX_EVENTS_PER_FRAME {
+        let Some(event) = network_state
+            .event_receiver
+            .as_mut()
+            .and_then(|rx| rx.try_recv().ok())
+        else {
+            break;
+        };
         // Sequence moves across gossip and relay transports before adding them to ready.
         // Do not feed released messages through the gate again. Resign bypasses the gate
         // because it is terminal, idempotent, and outside the ordered move stream.
         let mut ready: VecDeque<NetworkEvent> = VecDeque::new();
-        if let NetworkEvent::MessageReceived(NetworkMessage::Move { nonce, .. }) = &event {
-            let nonce = *nonce;
-            let (game_id, msg) = match &event {
-                NetworkEvent::MessageReceived(msg) => (msg.game_id(), msg.clone()),
-                _ => unreachable!(),
+        if let NetworkEvent::MessageReceived(msg @ NetworkMessage::Move { .. }) = event {
+            let game_id = msg.game_id();
+            let nonce = match &msg {
+                NetworkMessage::Move { nonce, .. } => *nonce,
+                _ => continue,
             };
 
             let outcome = pending
@@ -273,20 +270,26 @@ pub fn handle_network_events(
 
                             let agent_key = (game_id, signer_pubkey.clone());
                             let (last, our_head) = causal.lane(&agent_key);
-                            if *seq != last + 1 {
+                            let Some(expected) = last.checked_add(1) else {
+                                network_events.write(NetworkEvent::InvalidMoveRejected {
+                                    game_id,
+                                    reason: "causal sequence exhausted".to_string(),
+                                });
+                                continue;
+                            };
+                            if *seq != expected {
                                 warn!(
                                     "[NET] Causal seq gap for game {} agent {:?}: got {} expected {}",
                                     game_id,
                                     &signer_pubkey[..4.min(signer_pubkey.len())],
                                     seq,
-                                    last + 1
+                                    expected
                                 );
                                 network_events.write(NetworkEvent::InvalidMoveRejected {
                                     game_id,
                                     reason: format!(
                                         "causal seq gap: got {} expected {}",
-                                        seq,
-                                        last + 1
+                                        seq, expected
                                     ),
                                 });
                                 continue;
@@ -489,9 +492,9 @@ pub fn sweep_stale_move_buffers(
 pub fn dispatch_remote_moves(
     mut network_events: MessageReader<NetworkEvent>,
     mut move_events: MessageWriter<crate::game::events::NetworkMoveEvent>,
-    game_mode: Res<crate::core::states::GameMode>,
+    game_mode: Res<crate::core::state::GameMode>,
 ) {
-    if *game_mode != crate::core::states::GameMode::OnlineMultiplayer {
+    if *game_mode != crate::core::state::GameMode::OnlineMultiplayer {
         return;
     }
     for event in network_events.read() {
@@ -552,7 +555,7 @@ pub(crate) fn fen_ply(fen: &str) -> Option<u64> {
 #[cfg(test)]
 mod dual_transport_dedup_property_tests {
     use super::*;
-    use crate::core::states::GameMode;
+    use crate::core::state::GameMode;
     use crate::game::events::NetworkMoveEvent;
     use crate::multiplayer::network::braid_transport::{drain_braid_messages, BraidTransportState};
     use crate::multiplayer::network::online_game_session::OnlineGameSession;
@@ -623,7 +626,7 @@ mod dual_transport_dedup_property_tests {
         ]
     }
 
-    fn shuffle<T>(items: &mut Vec<T>, seed: u64) {
+    fn shuffle<T>(items: &mut [T], seed: u64) {
         let mut state = seed | 1; // xorshift64 needs a nonzero seed
         let mut next = move || {
             state ^= state << 13;
@@ -695,8 +698,8 @@ mod dual_transport_dedup_property_tests {
             let mut gossip_items: Vec<NetworkEvent> = Vec::new();
             let mut relay_items: Vec<ChessMessage> = Vec::new();
 
-            for i in 0..move_count {
-                match deliveries[i] {
+            for (i, delivery) in deliveries.iter().take(move_count).enumerate() {
+                match delivery {
                     Delivery::GossipOnly => {
                         gossip_items.push(NetworkEvent::MessageReceived(gossip_move(i)));
                     }
@@ -732,17 +735,16 @@ mod dual_transport_dedup_property_tests {
             let (relay_tx, relay_rx) = crossbeam_channel::unbounded::<ChessMessage>();
 
             for item in gossip_items {
-                gossip_tx.send(item).unwrap();
+                prop_assert!(gossip_tx.send(item).is_ok());
             }
             for item in relay_items {
-                relay_tx.send(item).unwrap();
+                prop_assert!(relay_tx.send(item).is_ok());
             }
 
             let mut app = build_app();
             app.insert_resource({
-                let mut ns = OnlineNetworkState::default();
-                ns.event_receiver = Some(gossip_rx);
-                ns
+
+                OnlineNetworkState { event_receiver: Some(gossip_rx), ..Default::default() }
             });
             app.insert_resource(BraidTransportState::new_for_test(
                 GAME_ID.to_string(),
@@ -807,7 +809,8 @@ mod verified_wallets_roster_tests {
     }
 
     #[test]
-    fn forged_player_pubkey_is_not_seated_on_the_roster() {
+    fn forged_player_pubkey_is_not_seated_on_the_roster() -> Result<(), Box<dyn std::error::Error>>
+    {
         let white = Pubkey::new_unique();
         let black = Pubkey::new_unique();
         let mallory = Pubkey::new_unique(); // neither white nor black
@@ -823,16 +826,15 @@ mod verified_wallets_roster_tests {
 
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<NetworkEvent>();
         app.insert_resource({
-            let mut ns = OnlineNetworkState::default();
-            ns.event_receiver = Some(event_rx);
-            ns
+            OnlineNetworkState {
+                event_receiver: Some(event_rx),
+                ..Default::default()
+            }
         });
-        event_tx
-            .send(NetworkEvent::MessageReceived(session_info(
-                mallory,
-                mallory_signing,
-            )))
-            .unwrap();
+        event_tx.send(NetworkEvent::MessageReceived(session_info(
+            mallory,
+            mallory_signing,
+        )))?;
 
         app.update();
 
@@ -844,10 +846,12 @@ mod verified_wallets_roster_tests {
             "a SessionInfo whose player_pubkey isn't on-chain white/black must not seat its \
              signing_pubkey on the roster, even though the PUT/claim itself is never rejected outright"
         );
+
+        Ok(())
     }
 
     #[test]
-    fn genuine_player_pubkey_is_seated_on_the_roster() {
+    fn genuine_player_pubkey_is_seated_on_the_roster() -> Result<(), Box<dyn std::error::Error>> {
         let white = Pubkey::new_unique();
         let black = Pubkey::new_unique();
         let white_signing = Pubkey::new_unique();
@@ -862,16 +866,15 @@ mod verified_wallets_roster_tests {
 
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<NetworkEvent>();
         app.insert_resource({
-            let mut ns = OnlineNetworkState::default();
-            ns.event_receiver = Some(event_rx);
-            ns
+            OnlineNetworkState {
+                event_receiver: Some(event_rx),
+                ..Default::default()
+            }
         });
-        event_tx
-            .send(NetworkEvent::MessageReceived(session_info(
-                white,
-                white_signing,
-            )))
-            .unwrap();
+        event_tx.send(NetworkEvent::MessageReceived(session_info(
+            white,
+            white_signing,
+        )))?;
 
         app.update();
 
@@ -879,7 +882,9 @@ mod verified_wallets_roster_tests {
         let roster = causal
             .roster
             .get(&GAME_ID)
-            .expect("roster must be populated");
+            .ok_or("participant roster missing")?;
         assert!(roster.contains(&white_signing.to_bytes().to_vec()));
+
+        Ok(())
     }
 }

@@ -236,7 +236,8 @@ pub async fn recover_stuck_delegation(
         &authority.pubkey(),
     );
 
-    let rpc = crate::signing::solana::rpc::make_async_rpc(&state.config.solana_rpc_url);
+    let rpc = crate::signing::solana::rpc::make_async_rpc(&state.config.solana_rpc_url)
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let blockhash = rpc.get_latest_blockhash().await.map_err(|e| {
         error!("[dispute] recover_stuck_delegation blockhash fetch failed: {e}");
         StatusCode::BAD_GATEWAY
@@ -277,7 +278,7 @@ async fn submit_resolve_dispute_tx(
         transaction::Transaction,
     };
 
-    let rpc = crate::signing::solana::rpc::make_async_rpc(&state.config.solana_rpc_url);
+    let rpc = crate::signing::solana::rpc::make_async_rpc(&state.config.solana_rpc_url)?;
     let program_id = Pubkey::from_str(&state.config.program_id)?;
 
     let game_id_bytes = game_id.to_le_bytes();
@@ -294,7 +295,7 @@ async fn submit_resolve_dispute_tx(
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(b"global:resolve_dispute");
-    let disc: [u8; 8] = hasher.finalize()[..8].try_into().unwrap();
+    let disc: [u8; 8] = hasher.finalize()[..8].try_into()?;
 
     // Encode args: resolution (String) + winner (Option<Pubkey>)
     let mut data = disc.to_vec();

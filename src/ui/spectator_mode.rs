@@ -37,11 +37,11 @@ fn spectator_ui_system(
     mut contexts: EguiContexts,
     spectator: Res<SpectatorMode>,
     state: Res<State<crate::core::GameState>>,
-    game_mode: Res<crate::core::states::GameMode>,
+    game_mode: Res<crate::core::state::GameMode>,
 ) {
     // HIDE ASCII window if we are in the "Full" spectator mode (InGame board)
     if *state.get() == crate::core::GameState::InGame
-        && *game_mode == crate::core::states::GameMode::Spectator
+        && *game_mode == crate::core::state::GameMode::Spectator
     {
         return;
     }
@@ -191,7 +191,7 @@ pub fn spectator_menu_ui(
     mut contexts: EguiContexts,
     mut spectator: ResMut<SpectatorMode>,
     mut next_state: ResMut<NextState<crate::core::GameState>>,
-    mut game_mode: ResMut<crate::core::states::GameMode>,
+    mut game_mode: ResMut<crate::core::state::GameMode>,
     braid_network: Res<crate::multiplayer::OnlineNetworkState>,
 ) {
     // Show join dialog only when spectator mode is not yet active
@@ -242,7 +242,7 @@ pub fn spectator_menu_ui(
 
                                     // Transition to Full Spectator Mode
                                     {
-                                        let next_mode = crate::core::states::GameMode::Spectator;
+                                        let next_mode = crate::core::state::GameMode::Spectator;
                                         if *game_mode != next_mode {
                                             *game_mode = next_mode;
                                         }

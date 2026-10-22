@@ -134,7 +134,7 @@ pub async fn build_register_transaction(
         host_treasury,
     )?;
 
-    let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
+    let rpc = solana::make_rpc(&solana::rpc_url_or_devnet())?;
     // Wallet signing requires a finalized blockhash visible on the selected cluster.
     let blockhash = solana::wallet_signable_blockhash(&rpc)?;
 
@@ -186,7 +186,7 @@ pub async fn build_claim_prize_transaction(
 
     let instruction = claim_prize_ix(program_id, tournament_id, claimant);
 
-    let rpc = solana::make_rpc(&solana::rpc_url_or_devnet());
+    let rpc = solana::make_rpc(&solana::rpc_url_or_devnet())?;
     // Wallet signing requires a finalized blockhash visible on the selected cluster.
     let blockhash = solana::wallet_signable_blockhash(&rpc)?;
 
@@ -219,7 +219,7 @@ pub async fn build_start_tournament_transactions(
 
     // Fetch one shared blockhash on the blocking pool for the batch.
     let bh = tokio::task::spawn_blocking(|| {
-        solana::make_rpc(&solana::rpc_url_or_devnet()).get_latest_blockhash()
+        solana::make_rpc(&solana::rpc_url_or_devnet())?.get_latest_blockhash()
     })
     .await??;
     // The bracket the store draws when the event starts (none for Swiss).
@@ -263,7 +263,7 @@ pub async fn check_wallet_balance(
     // pin an async worker for the client's full 30 s timeout.
     let wallet = *wallet_pubkey;
     let balance = tokio::task::spawn_blocking(move || {
-        solana::make_rpc(&solana::rpc_url_or_devnet()).get_balance(&wallet)
+        solana::make_rpc(&solana::rpc_url_or_devnet())?.get_balance(&wallet)
     })
     .await??;
 

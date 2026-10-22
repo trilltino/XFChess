@@ -12,8 +12,12 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 
 [dev-dependencies]
+anyhow.workspace = true
 tokio = { workspace = true, features = ["full"] }
 
 [features]
 default = ["std"]
 std = []
+
+[lints]
+workspace = true

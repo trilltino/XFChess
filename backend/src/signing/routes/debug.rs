@@ -230,7 +230,15 @@ pub async fn debug_transaction_endpoint(
         }
     };
 
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let rpc = match crate::signing::solana::make_rpc(&state.config.solana_rpc_url) {
+        Ok(rpc) => rpc,
+        Err(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "RPC client unavailable" })),
+            )
+        }
+    };
 
     match debug_transaction(&rpc, &sig).await {
         Ok(debug_info) => {

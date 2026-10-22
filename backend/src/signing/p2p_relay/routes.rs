@@ -167,7 +167,7 @@ pub async fn list_games(
 
     match filter.sort.as_deref().unwrap_or("newest") {
         "elo_asc" => listings.sort_by_key(|l| l.elo.unwrap_or(0)),
-        "elo_desc" => listings.sort_by(|a, b| b.elo.unwrap_or(0).cmp(&a.elo.unwrap_or(0))),
+        "elo_desc" => listings.sort_by_key(|game| std::cmp::Reverse(game.elo.unwrap_or(0))),
         "stake_asc" => listings.sort_by(|a, b| {
             a.stake_amount
                 .partial_cmp(&b.stake_amount)
@@ -179,7 +179,7 @@ pub async fn list_games(
                 .unwrap_or(std::cmp::Ordering::Equal)
         }),
         "time_asc" => listings.sort_by_key(|l| l.base_time_seconds),
-        _ => listings.sort_by(|a, b| b.ttl_seconds.cmp(&a.ttl_seconds)), // newest first
+        _ => listings.sort_by_key(|game| std::cmp::Reverse(game.ttl_seconds)), // newest first
     }
 
     Ok(AxumJson(listings))

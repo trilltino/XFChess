@@ -23,7 +23,7 @@ pub async fn run_global_session_1v1_game_flow(
     black: &Keypair,
     logger: &mut MeasurementLog,
 ) -> anyhow::Result<()> {
-    let game_id = unique_id();
+    let game_id = unique_id()?;
     let suffix = game_id & 0xFFFF;
     println!("\n   Setting up global-session 1v1 game #{}", game_id);
 
@@ -258,7 +258,7 @@ pub async fn run_global_session_1v1_game_flow(
     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
 
     println!("   Step 7: Playing 100 moves on MagicBlock ER...");
-    let sequence = generate_100_move_sequence();
+    let sequence = generate_100_move_sequence()?;
     for (i, vm) in sequence.iter().enumerate().take(100) {
         let (session_key, wallet) = if i % 2 == 0 {
             (er_session_white.pubkey(), white.pubkey())

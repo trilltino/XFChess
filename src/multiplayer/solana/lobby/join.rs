@@ -259,8 +259,15 @@ pub(super) async fn async_join_game(
     let ixs = vec![join_ix, auth_ix];
 
     // ONE wallet popup — signs everything together.
-    let signed_bytes = sign_via_tauri_only(&rpc_url, wallet_pubkey, &ixs, &[], "Joining game")
-        .map_err(|e| format!("sign bundled TX: {e}"))?;
+    let signed_bytes = sign_via_tauri_only(
+        &rpc_url,
+        wallet_pubkey,
+        &ixs,
+        &[],
+        &[session_pubkey],
+        "Joining game",
+    )
+    .map_err(|e| format!("sign bundled TX: {e}"))?;
 
     // VPS adds its session key co-signature and submits.
     vps_client::activate_session(game_id, &signed_bytes)?;

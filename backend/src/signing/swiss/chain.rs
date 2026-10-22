@@ -132,7 +132,15 @@ fn mirror_to_chain(
     };
 
     let mut progress = ChainProgress::default();
-    let rpc = make_rpc(&cfg.rpc_url);
+    let rpc = match make_rpc(&cfg.rpc_url) {
+        Ok(rpc) => rpc,
+        Err(error) => {
+            return ChainProgress {
+                error: Some(error.to_string()),
+                ..Default::default()
+            }
+        }
+    };
     let authority = cfg.authority.as_ref();
     let mut chain = match fetch_swiss_progress(&rpc, program_id, tournament_id) {
         Ok(chain) => chain,

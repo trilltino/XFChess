@@ -337,7 +337,10 @@ async fn api_add_email(
   .await
 }
 async fn api_me(headers: axum::http::HeaderMap) -> impl IntoResponse {
-  let client = backend_client();
+  let client = match backend_client() {
+    Ok(client) => client,
+    Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
+  };
   let url = format!("{}/api/auth/me", get_backend_url());
   let req = forward_client_headers(client.get(&url), &headers);
   match req.send().await {
@@ -350,7 +353,10 @@ async fn api_set_username(
   headers: axum::http::HeaderMap,
   Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-  let client = backend_client();
+  let client = match backend_client() {
+    Ok(client) => client,
+    Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
+  };
   let url = format!("{}/api/auth/username", get_backend_url());
   let req = forward_client_headers(client.patch(&url).json(&body), &headers);
   match req.send().await {
@@ -398,7 +404,10 @@ async fn api_broadcast_tx(
 // Refresh unsigned transaction blockhashes immediately before wallet signing
 // through the backend RPC proxy; build-time hashes may have expired.
 async fn api_fresh_blockhash() -> impl IntoResponse {
-  let client = backend_client();
+  let client = match backend_client() {
+    Ok(client) => client,
+    Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
+  };
   let body = serde_json::json!({
     "jsonrpc": "2.0",
     "id": 1,
@@ -450,7 +459,11 @@ async fn api_simulate_tx(Json(body): Json<serde_json::Value>) -> impl IntoRespon
   };
   let rpc_body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "simulateTransaction",
     "params": [tx, { "encoding": "base64", "sigVerify": false, "commitment": "confirmed" }] });
-  match backend_client()
+  let client = match backend_client() {
+    Ok(client) => client,
+    Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
+  };
+  match client
     .post(format!("{}/api/rpc", get_backend_url()))
     .timeout(std::time::Duration::from_secs(15))
     .json(&rpc_body)
@@ -533,7 +546,10 @@ async fn api_check_wallet(
   axum::extract::Path(pubkey): axum::extract::Path<String>,
   headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-  let client = backend_client();
+  let client = match backend_client() {
+    Ok(client) => client,
+    Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
+  };
   let url = format!("{}/api/auth/check-wallet/{pubkey}", get_backend_url());
   let req = forward_client_headers(client.get(&url), &headers);
   match req.send().await {

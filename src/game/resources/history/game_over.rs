@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn test_game_over_state_clone() {
         let original = GameOverState::Stalemate;
-        let cloned = original.clone();
+        let cloned = original;
         assert_eq!(original, cloned);
     }
 

@@ -1,5 +1,8 @@
+#![allow(unsafe_code)]
+
 use bevy::android::android_activity::AndroidApp;
 use jni::JavaVM;
+use jni::{objects::JObject, refs::Global};
 use std::path::PathBuf;
 
 fn android_app() -> Result<&'static AndroidApp, String> {
@@ -19,8 +22,10 @@ pub fn init_tls_verifier() -> Result<(), String> {
     let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
 
     vm.attach_current_thread(|env| -> Result<(), jni::errors::Error> {
-        // SAFETY: the activity is a live, process-lifetime Context owned by Android.
-        let context = unsafe { jni::objects::JObject::from_raw(env, activity_raw) };
+        // SAFETY: Android owns this global reference; `app` keeps it valid throughout
+        // the attached callback. Borrow it without taking ownership of Android's ref.
+        let activity = unsafe { env.as_cast_raw::<Global<JObject>>(&activity_raw)? };
+        let context = env.new_local_ref(&activity)?;
         rustls_platform_verifier::android::init_with_env(env, context)
     })
     .map_err(|e| format!("rustls_platform_verifier::android::init_with_env failed: {e}"))
@@ -32,13 +37,13 @@ pub fn native_library_dir() -> Result<PathBuf, String> {
     let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
 
     vm.attach_current_thread(|env| -> Result<PathBuf, jni::errors::Error> {
-        // SAFETY: as in `init_tls_verifier`, the activity outlives this call.
-        let activity = unsafe { jni::objects::JObject::from_raw(env, activity_raw) };
+        // SAFETY: `app` outlives this callback and owns the borrowed global reference.
+        let activity = unsafe { env.as_cast_raw::<Global<JObject>>(&activity_raw)? };
         let application = env
             .call_method(
                 &activity,
                 jni::jni_str!("getApplicationInfo"),
-                jni::jni_str!("()Landroid/content/pm/ApplicationInfo;"),
+                jni::jni_sig!("()Landroid/content/pm/ApplicationInfo;"),
                 &[],
             )?
             .l()?;
@@ -46,11 +51,11 @@ pub fn native_library_dir() -> Result<PathBuf, String> {
             .get_field(
                 &application,
                 jni::jni_str!("nativeLibraryDir"),
-                jni::jni_str!("Ljava/lang/String;"),
+                jni::jni_sig!("Ljava/lang/String;"),
             )?
             .l()?;
-        let native_dir = jni::objects::JString::from(native_dir);
-        let native_dir: String = env.get_string(&native_dir)?.into();
+        let native_dir = jni::objects::JString::cast_local(env, native_dir)?;
+        let native_dir = native_dir.try_to_string(env)?;
         Ok(PathBuf::from(native_dir))
     })
     .map_err(|e| format!("nativeLibraryDir lookup failed: {e}"))

@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
@@ -14,16 +15,18 @@ fn profile_pda(player: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[b"profile", player.as_ref()], &xfchess_game::ID).0
 }
 
-fn profile_account(authority: Pubkey) -> (Pubkey, solana_sdk::account::Account) {
-    let pda = profile_pda(&authority);
-    let profile = PlayerProfile {
-        authority,
-        ..Default::default()
-    };
-    (
-        pda,
-        program_account(&profile, 8 + PlayerProfile::INIT_SPACE),
-    )
+fn profile_account(authority: Pubkey) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let pda = profile_pda(&authority);
+        let profile = PlayerProfile {
+            authority,
+            ..Default::default()
+        };
+        (
+            pda,
+            program_account(&profile, 8 + PlayerProfile::INIT_SPACE)?,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -34,37 +37,39 @@ fn finished_game_account(
     fee_payer: Pubkey,
     wager_amount: u64,
     country_fee: u64,
-) -> (Pubkey, solana_sdk::account::Account) {
-    let (pda, bump) = game_pda(game_id);
-    let game = Game {
-        game_id,
-        white,
-        black,
-        status: GameStatus::Finished,
-        last_move_timestamp: 0,
-        fees_advanced: 0,
-        fee_payer,
-        result: GameResult::Winner(white),
-        board_state: start_board(),
-        move_count: 10,
-        halfmove_clock: 0,
-        turn: 11,
-        created_at: 0,
-        updated_at: 0,
-        wager_amount,
-        wager_token: None,
-        game_type: GameType::PvP,
-        match_type: MatchType::Rated,
-        country_fee,
-        base_time_seconds: 300,
-        increment_seconds: 0,
-        bump,
-        is_delegated: false,
-        tournament_id: None,
-        nonce: 0,
-        draw_offered_by: None,
-    };
-    (pda, program_account(&game, 8 + Game::INIT_SPACE))
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let (pda, bump) = game_pda(game_id);
+        let game = Game {
+            game_id,
+            white,
+            black,
+            status: GameStatus::Finished,
+            last_move_timestamp: 0,
+            fees_advanced: 0,
+            fee_payer,
+            result: GameResult::Winner(white),
+            board_state: start_board(),
+            move_count: 10,
+            halfmove_clock: 0,
+            turn: 11,
+            created_at: 0,
+            updated_at: 0,
+            wager_amount,
+            wager_token: None,
+            game_type: GameType::PvP,
+            match_type: MatchType::Rated,
+            country_fee,
+            base_time_seconds: 300,
+            increment_seconds: 0,
+            bump,
+            is_delegated: false,
+            tournament_id: None,
+            nonce: 0,
+            draw_offered_by: None,
+        };
+        (pda, program_account(&game, 8 + Game::INIT_SPACE)?)
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -74,37 +79,39 @@ fn cancelled_game_account(
     black: Pubkey,
     fee_payer: Pubkey,
     wager_amount: u64,
-) -> (Pubkey, solana_sdk::account::Account) {
-    let (pda, bump) = game_pda(game_id);
-    let game = Game {
-        game_id,
-        white,
-        black,
-        status: GameStatus::Cancelled,
-        last_move_timestamp: 0,
-        fees_advanced: 0,
-        fee_payer,
-        result: GameResult::None,
-        board_state: start_board(),
-        move_count: 0,
-        halfmove_clock: 0,
-        turn: 1,
-        created_at: 0,
-        updated_at: 0,
-        wager_amount,
-        wager_token: None,
-        game_type: GameType::PvP,
-        match_type: MatchType::Free,
-        country_fee: 0,
-        base_time_seconds: 300,
-        increment_seconds: 0,
-        bump,
-        is_delegated: false,
-        tournament_id: None,
-        nonce: 0,
-        draw_offered_by: None,
-    };
-    (pda, program_account(&game, 8 + Game::INIT_SPACE))
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let (pda, bump) = game_pda(game_id);
+        let game = Game {
+            game_id,
+            white,
+            black,
+            status: GameStatus::Cancelled,
+            last_move_timestamp: 0,
+            fees_advanced: 0,
+            fee_payer,
+            result: GameResult::None,
+            board_state: start_board(),
+            move_count: 0,
+            halfmove_clock: 0,
+            turn: 1,
+            created_at: 0,
+            updated_at: 0,
+            wager_amount,
+            wager_token: None,
+            game_type: GameType::PvP,
+            match_type: MatchType::Free,
+            country_fee: 0,
+            base_time_seconds: 300,
+            increment_seconds: 0,
+            bump,
+            is_delegated: false,
+            tournament_id: None,
+            nonce: 0,
+            draw_offered_by: None,
+        };
+        (pda, program_account(&game, 8 + Game::INIT_SPACE)?)
+    })
 }
 
 fn finalize_game_ix(game_id: u64, white: Pubkey, black: Pubkey, fee_payer: Pubkey) -> Instruction {
@@ -133,7 +140,7 @@ fn escrow_pda(game_id: u64) -> Pubkey {
 }
 
 #[tokio::test]
-async fn finalize_game_pays_the_nonzero_country_fee_to_treasury() {
+async fn finalize_game_pays_the_nonzero_country_fee_to_treasury() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
@@ -148,9 +155,9 @@ async fn finalize_game_pays_the_nonzero_country_fee_to_treasury() {
         fee_payer.pubkey(),
         wager_amount,
         country_fee,
-    );
-    let (white_profile_pda, white_profile_data) = profile_account(white);
-    let (black_profile_pda, black_profile_data) = profile_account(black);
+    )?;
+    let (white_profile_pda, white_profile_data) = profile_account(white)?;
+    let (black_profile_pda, black_profile_data) = profile_account(black)?;
 
     let mut ctx = start(vec![
         (game_pda_key, game_account_data),
@@ -168,18 +175,18 @@ async fn finalize_game_pays_the_nonzero_country_fee_to_treasury() {
         .banks_client
         .get_balance(treasury_vault_pda())
         .await
-        .unwrap();
+        .context("required operation value")?;
 
     let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
     send(&mut ctx, ix, &[])
         .await
-        .expect("finalize_game should settle a Finished game with a nonzero country_fee");
+        .context("finalize_game should settle a Finished game with a nonzero country_fee")?;
 
     let treasury_after = ctx
         .banks_client
         .get_balance(treasury_vault_pda())
         .await
-        .unwrap();
+        .context("required operation value")?;
 
     // Set fees_advanced to zero to isolate the country_fee inflow.
     assert_eq!(
@@ -190,15 +197,20 @@ async fn finalize_game_pays_the_nonzero_country_fee_to_treasury() {
 
     // Game account closes to fee_payer on finalize — confirms settlement
     // actually ran to completion rather than erroring out before reaching it.
-    let closed = ctx.banks_client.get_account(game_pda_key).await.unwrap();
+    let closed = ctx
+        .banks_client
+        .get_account(game_pda_key)
+        .await
+        .context("required operation value")?;
     assert!(
         closed.is_none(),
         "Game account should be closed after finalize_game"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn finalize_game_refunds_cancelled_zero_move_game_to_both_players() {
+async fn finalize_game_refunds_cancelled_zero_move_game_to_both_players() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
@@ -206,9 +218,9 @@ async fn finalize_game_refunds_cancelled_zero_move_game_to_both_players() {
     let wager_amount = 2_000_000u64;
 
     let (game_pda_key, game_account_data) =
-        cancelled_game_account(game_id, white, black, fee_payer.pubkey(), wager_amount);
-    let (white_profile_pda, white_profile_data) = profile_account(white);
-    let (black_profile_pda, black_profile_data) = profile_account(black);
+        cancelled_game_account(game_id, white, black, fee_payer.pubkey(), wager_amount)?;
+    let (white_profile_pda, white_profile_data) = profile_account(white)?;
+    let (black_profile_pda, black_profile_data) = profile_account(black)?;
     let white_start = 10_000_000u64;
     let black_start = 11_000_000u64;
     let treasury_start = 1_000_000u64;
@@ -228,21 +240,27 @@ async fn finalize_game_refunds_cancelled_zero_move_game_to_both_players() {
     let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
     send(&mut ctx, ix, &[])
         .await
-        .expect("finalize_game should refund a Cancelled zero-move game");
+        .context("finalize_game should refund a Cancelled zero-move game")?;
 
     assert_eq!(
-        ctx.banks_client.get_balance(white).await.unwrap(),
+        ctx.banks_client
+            .get_balance(white)
+            .await
+            .context("required operation value")?,
         white_start + wager_amount
     );
     assert_eq!(
-        ctx.banks_client.get_balance(black).await.unwrap(),
+        ctx.banks_client
+            .get_balance(black)
+            .await
+            .context("required operation value")?,
         black_start + wager_amount
     );
     assert_eq!(
         ctx.banks_client
             .get_balance(treasury_vault_pda())
             .await
-            .unwrap(),
+            .context("required operation value")?,
         treasury_start,
         "cancelled refunds must not pay treasury"
     );
@@ -250,14 +268,15 @@ async fn finalize_game_refunds_cancelled_zero_move_game_to_both_players() {
         ctx.banks_client
             .get_account(game_pda_key)
             .await
-            .unwrap()
+            .context("required operation value")?
             .is_none(),
         "Game account should be closed after cancelled finalize"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn finalize_game_rejects_mismatched_fee_payer() {
+async fn finalize_game_rejects_mismatched_fee_payer() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let real_fee_payer = Keypair::new();
@@ -273,9 +292,9 @@ async fn finalize_game_rejects_mismatched_fee_payer() {
         real_fee_payer.pubkey(), // game.fee_payer records the REAL payer
         wager_amount,
         country_fee,
-    );
-    let (white_profile_pda, white_profile_data) = profile_account(white);
-    let (black_profile_pda, black_profile_data) = profile_account(black);
+    )?;
+    let (white_profile_pda, white_profile_data) = profile_account(white)?;
+    let (black_profile_pda, black_profile_data) = profile_account(black)?;
 
     let mut ctx = start(vec![
         (game_pda_key, game_account_data),
@@ -294,7 +313,8 @@ async fn finalize_game_rejects_mismatched_fee_payer() {
     let ix = finalize_game_ix(game_id, white, black, wrong_fee_payer.pubkey());
     let err = send(&mut ctx, ix, &[])
         .await
-        .expect_err("finalize_game must reject a fee_payer that doesn't match game.fee_payer");
+        .err()
+        .context("finalize_game must reject a fee_payer that doesn't match game.fee_payer")?;
 
     assert_eq!(
         custom_code(&err),
@@ -303,12 +323,13 @@ async fn finalize_game_rejects_mismatched_fee_payer() {
     );
 
     // The rejected transaction must not have mutated or closed the game.
-    let game = fetch_game(&mut ctx, game_id).await;
+    let game = fetch_game(&mut ctx, game_id).await?;
     assert_eq!(game.status, GameStatus::Finished);
+    Ok(())
 }
 
 #[tokio::test]
-async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() {
+async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
@@ -324,12 +345,12 @@ async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() {
         fee_payer.pubkey(),
         wager_amount,
         country_fee,
-    );
+    )?;
     // Closing the fixture Game refunds its full 1_000_000_000-lamport balance as rent.
     let game_account_rent = game_account_data.lamports;
 
-    let (white_profile_pda, white_profile_data) = profile_account(white);
-    let (black_profile_pda, black_profile_data) = profile_account(black);
+    let (white_profile_pda, white_profile_data) = profile_account(white)?;
+    let (black_profile_pda, black_profile_data) = profile_account(black)?;
 
     let mut ctx = start(vec![
         (game_pda_key, game_account_data),
@@ -349,13 +370,13 @@ async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() {
     let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
     send(&mut ctx, ix, &[])
         .await
-        .expect("finalize_game should settle with the correct fee_payer");
+        .context("finalize_game should settle with the correct fee_payer")?;
 
     let fee_payer_after = ctx
         .banks_client
         .get_balance(fee_payer.pubkey())
         .await
-        .unwrap();
+        .context("required operation value")?;
 
     // escrow tx-fee reimbursement is min(10_000, pot) — the pot here (2 * 10M)
     // comfortably exceeds 10_000, so the reimbursement is the flat 10_000.
@@ -367,6 +388,7 @@ async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() {
         fee_payer_starting_balance + expected_delta,
         "fee_payer must receive exactly the closed Game account's rent plus the escrow tx-fee reimbursement"
     );
+    Ok(())
 }
 
 fn finalize_game_ix_with_spoofed_black_authority(
@@ -398,7 +420,7 @@ fn finalize_game_ix_with_spoofed_black_authority(
 }
 
 #[tokio::test]
-async fn finalize_game_rejects_spoofed_black_authority() {
+async fn finalize_game_rejects_spoofed_black_authority() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let real_black = Pubkey::new_unique();
     let spoofed_black_authority = Pubkey::new_unique(); // NOT game.black
@@ -414,9 +436,9 @@ async fn finalize_game_rejects_spoofed_black_authority() {
         fee_payer.pubkey(),
         wager_amount,
         country_fee,
-    );
-    let (white_profile_pda, white_profile_data) = profile_account(white);
-    let (black_profile_pda, black_profile_data) = profile_account(real_black);
+    )?;
+    let (white_profile_pda, white_profile_data) = profile_account(white)?;
+    let (black_profile_pda, black_profile_data) = profile_account(real_black)?;
 
     let mut ctx = start(vec![
         (game_pda_key, game_account_data),
@@ -435,12 +457,12 @@ async fn finalize_game_rejects_spoofed_black_authority() {
         .banks_client
         .get_balance(escrow_pda(game_id))
         .await
-        .unwrap();
+        .context("required operation value")?;
     let spoofed_balance_before = ctx
         .banks_client
         .get_balance(spoofed_black_authority)
         .await
-        .unwrap();
+        .context("required operation value")?;
 
     let ix = finalize_game_ix_with_spoofed_black_authority(
         game_id,
@@ -451,7 +473,8 @@ async fn finalize_game_rejects_spoofed_black_authority() {
     );
     let err = send(&mut ctx, ix, &[])
         .await
-        .expect_err("finalize_game must reject a black_authority that doesn't match game.black");
+        .err()
+        .context("finalize_game must reject a black_authority that doesn't match game.black")?;
 
     assert_eq!(
         custom_code(&err),
@@ -464,21 +487,22 @@ async fn finalize_game_rejects_spoofed_black_authority() {
         .banks_client
         .get_balance(escrow_pda(game_id))
         .await
-        .unwrap();
+        .context("required operation value")?;
     let spoofed_balance_after = ctx
         .banks_client
         .get_balance(spoofed_black_authority)
         .await
-        .unwrap();
+        .context("required operation value")?;
     assert_eq!(escrow_before, escrow_after, "escrow must be untouched");
     assert_eq!(
         spoofed_balance_before, spoofed_balance_after,
         "the spoofed account must receive nothing"
     );
-    let game = fetch_game(&mut ctx, game_id).await;
+    let game = fetch_game(&mut ctx, game_id).await?;
     assert_eq!(
         game.status,
         GameStatus::Finished,
         "a rejected finalize must not close or mutate the game"
     );
+    Ok(())
 }

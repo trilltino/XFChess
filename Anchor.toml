@@ -15,3 +15,6 @@ cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [hooks]
+
+[workspace]
+members = ["programs/xfchess-game-sbf"]

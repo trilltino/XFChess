@@ -243,7 +243,7 @@ fn tx_has_expected_instruction(
         "cancel_tournament" => (false, 14, Some(9), &[11], true),
         "claim_prize" => (false, 10, Some(5), &[7], true),
         "distribute_prize" | "prize_distribution" => (false, 3, Some(1), &[2], true),
-        _ => unreachable!(),
+        _ => return Err(format!("unsupported money action type: {action_type}")),
     };
     let id = if is_game { game_id } else { tournament_id }
         .and_then(|id| u64::try_from(id).ok())

@@ -7,9 +7,9 @@ use iroh_h3_client::IrohH3Client;
 const ALPN: &[u8] = b"iroh+h3";
 
 #[tokio::test]
-async fn error_handling_unresolvable_peer() {
+async fn error_handling_unresolvable_peer() -> anyhow::Result<()> {
     let discovery = MockDiscoveryMap::new();
-    let endpoint = discovery.spawn_endpoint().await;
+    let endpoint = discovery.spawn_endpoint().await?;
 
     let client = IrohH3Client::new(endpoint, ALPN.into());
 
@@ -21,4 +21,5 @@ async fn error_handling_unresolvable_peer() {
         res.is_err(),
         "expected error when sending to an unresolvable peer, got Ok"
     );
+    Ok(())
 }

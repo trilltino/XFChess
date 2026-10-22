@@ -324,7 +324,7 @@ impl Plugin for GamePlugin {
             crate::ui::game::game_2d::reset_evaluation,
         );
         app.add_systems(
-            OnExit(crate::core::states::InGameplay),
+            OnExit(crate::core::state::InGameplay),
             crate::ui::game::game_2d::reset_evaluation,
         );
 

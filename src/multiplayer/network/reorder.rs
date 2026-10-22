@@ -41,6 +41,10 @@ impl<T> NonceSequencer<T> {
     }
 
     pub fn ingest(&mut self, nonce: u64, payload: T) -> IngestOutcome<T> {
+        // MAX has no successor. Reject it without applying or wrapping the cursor.
+        if nonce == u64::MAX {
+            return self.expire();
+        }
         if nonce < self.expected {
             return IngestOutcome::Duplicate;
         }
@@ -52,11 +56,17 @@ impl<T> NonceSequencer<T> {
             return IngestOutcome::Ready(Vec::new());
         }
 
+        let Some(expected) = self.expected.checked_add(1) else {
+            return self.expire();
+        };
         let mut ready = vec![payload];
-        self.expected += 1;
+        self.expected = expected;
         while let Some(next) = self.buffered.remove(&self.expected) {
+            let Some(expected) = self.expected.checked_add(1) else {
+                return self.expire();
+            };
             ready.push(next);
-            self.expected += 1;
+            self.expected = expected;
         }
         IngestOutcome::Ready(ready)
     }
@@ -92,6 +102,27 @@ mod tests {
         assert_eq!(seq.ingest(1, "a"), IngestOutcome::Ready(vec!["a"]));
         assert_eq!(seq.ingest(2, "b"), IngestOutcome::Ready(vec!["b"]));
         assert_eq!(seq.ingest(3, "c"), IngestOutcome::Ready(vec!["c"]));
+    }
+
+    #[test]
+    fn exhausted_nonce_is_rejected_without_advancing() {
+        let mut seq = NonceSequencer::starting_at(u64::MAX - 1, 8);
+        assert_eq!(
+            seq.ingest(u64::MAX, "future"),
+            IngestOutcome::Overflow {
+                resync_from: u64::MAX - 1
+            }
+        );
+        assert_eq!(
+            seq.ingest(u64::MAX - 1, "last"),
+            IngestOutcome::Ready(vec!["last"])
+        );
+        assert_eq!(
+            seq.ingest(u64::MAX, "overflow"),
+            IngestOutcome::Overflow {
+                resync_from: u64::MAX
+            }
+        );
     }
 
     #[test]

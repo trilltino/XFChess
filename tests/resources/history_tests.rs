@@ -1,6 +1,7 @@
-use xfchess::game::components::MoveRecord;
-use xfchess::game::resources::MoveHistory;
-use xfchess::rendering::pieces::{PieceColor, PieceType};
+use anyhow::Context;
+use xfchess_app::game::components::MoveRecord;
+use xfchess_app::game::resources::MoveHistory;
+use xfchess_app::rendering::pieces::{PieceColor, PieceType};
 
 #[test]
 fn example_execute_move_system() {
@@ -40,16 +41,14 @@ fn example_display_last_move() {
         is_checkmate: false,
     });
 
-    if let Some(last) = history.last_move() {
-        assert_eq!(last.from, (4, 1));
-        assert_eq!(last.to, (4, 3));
-    } else {
-        panic!("History should not be empty");
-    }
+    assert_eq!(
+        history.last_move().map(|last| (last.from, last.to)),
+        Some(((4, 1), (4, 3)))
+    );
 }
 
 #[test]
-fn example_add_move_method() {
+fn example_add_move_method() -> anyhow::Result<()> {
     let mut history = MoveHistory::default();
 
     history.add_move(MoveRecord {
@@ -66,7 +65,13 @@ fn example_add_move_method() {
     });
 
     assert_eq!(history.len(), 1);
-    assert!(history.last_move().unwrap().is_check);
+    assert!(
+        history
+            .last_move()
+            .context(concat!(file!(), ":", line!()))?
+            .is_check
+    );
+    Ok(())
 }
 
 #[test]
@@ -87,17 +92,12 @@ fn example_last_move_en_passant_check() {
         is_checkmate: false,
     });
 
-    if let Some(last) = history.last_move() {
-        if last.piece_type == PieceType::Pawn {
-            let distance = (last.to.1 as i8 - last.from.1 as i8).abs();
-            if distance == 2 {
-                // En passant may be available
-                assert!(true); // Logic verified
-            } else {
-                panic!("Should be distance 2");
-            }
-        }
-    }
+    assert_eq!(
+        history
+            .last_move()
+            .map(|last| (last.piece_type, last.to.1.abs_diff(last.from.1))),
+        Some((PieceType::Pawn, 2))
+    );
 }
 
 #[test]
@@ -128,11 +128,7 @@ fn example_ply_count() {
 #[test]
 fn example_is_empty() {
     let history = MoveHistory::default();
-    if history.is_empty() {
-        assert!(true);
-    } else {
-        panic!("Should be empty");
-    }
+    assert!(history.is_empty());
 }
 
 #[test]

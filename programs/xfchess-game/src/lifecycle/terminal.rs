@@ -2,6 +2,8 @@ use crate::errors::GameErrorCode;
 use crate::lifecycle::clock;
 use crate::state::{Game, GameResult, GameStatus};
 use anchor_lang::prelude::*;
+#[cfg(test)]
+use anyhow::Context as _;
 
 pub fn finish_by_resign(game: &mut Game, resigner: Pubkey, now: i64) -> Result<()> {
     require!(
@@ -148,26 +150,27 @@ mod tests {
     }
 
     #[test]
-    fn resign_finishes_without_clearing_delegation() {
+    fn resign_finishes_without_clearing_delegation() -> anyhow::Result<()> {
         let mut game = active_game();
         let white = game.white;
         let black = game.black;
 
-        finish_by_resign(&mut game, white, 10).unwrap();
+        finish_by_resign(&mut game, white, 10).context("required operation value")?;
 
         assert_eq!(game.status, GameStatus::Finished);
         assert_eq!(game.result, GameResult::Winner(black));
         assert!(game.is_delegated);
         assert_eq!(game.updated_at, 10);
+        Ok(())
     }
 
     #[test]
-    fn draw_offer_then_accept_by_other_player_finishes_as_draw() {
+    fn draw_offer_then_accept_by_other_player_finishes_as_draw() -> anyhow::Result<()> {
         let mut game = active_game();
         let white = game.white;
         let black = game.black;
 
-        record_draw_offer(&mut game, white).unwrap();
+        record_draw_offer(&mut game, white).context("required operation value")?;
         assert_eq!(game.draw_offered_by, Some(white));
         assert_eq!(
             game.status,
@@ -175,79 +178,93 @@ mod tests {
             "offering alone doesn't end the game"
         );
 
-        finish_by_draw_agreement(&mut game, black, 10).unwrap();
+        finish_by_draw_agreement(&mut game, black, 10).context("required operation value")?;
 
         assert_eq!(game.status, GameStatus::Finished);
         assert_eq!(game.result, GameResult::Draw);
         assert_eq!(game.draw_offered_by, None);
         assert!(game.is_delegated);
         assert_eq!(game.updated_at, 10);
+        Ok(())
     }
 
     #[test]
-    fn accept_draw_rejects_accepting_own_offer() {
+    fn accept_draw_rejects_accepting_own_offer() -> anyhow::Result<()> {
         let mut game = active_game();
         let white = game.white;
 
-        record_draw_offer(&mut game, white).unwrap();
-        let err = finish_by_draw_agreement(&mut game, white, 10).unwrap_err();
+        record_draw_offer(&mut game, white).context("required operation value")?;
+        let err = finish_by_draw_agreement(&mut game, white, 10)
+            .err()
+            .context("required operation value")?;
 
         assert_eq!(err, GameErrorCode::CannotAcceptOwnDrawOffer.into());
         assert_eq!(game.status, GameStatus::Active);
+        Ok(())
     }
 
     #[test]
-    fn accept_draw_rejects_when_no_offer_pending() {
+    fn accept_draw_rejects_when_no_offer_pending() -> anyhow::Result<()> {
         let mut game = active_game();
         let black = game.black;
 
-        let err = finish_by_draw_agreement(&mut game, black, 10).unwrap_err();
+        let err = finish_by_draw_agreement(&mut game, black, 10)
+            .err()
+            .context("required operation value")?;
 
         assert_eq!(err, GameErrorCode::NoDrawOfferPending.into());
+        Ok(())
     }
 
     #[test]
-    fn offer_draw_rejects_non_participant() {
+    fn offer_draw_rejects_non_participant() -> anyhow::Result<()> {
         let mut game = active_game();
         let stranger = Pubkey::new_unique();
 
-        let err = record_draw_offer(&mut game, stranger).unwrap_err();
+        let err = record_draw_offer(&mut game, stranger)
+            .err()
+            .context("required operation value")?;
 
         assert_eq!(err, GameErrorCode::NotInGame.into());
+        Ok(())
     }
 
     #[test]
-    fn timeout_finishes_without_clearing_delegation() {
+    fn timeout_finishes_without_clearing_delegation() -> anyhow::Result<()> {
         let mut game = active_game();
         game.move_count = 1;
         let black = game.black;
 
-        finish_by_timeout(&mut game, 100).unwrap();
+        finish_by_timeout(&mut game, 100).context("required operation value")?;
 
         assert_eq!(game.status, GameStatus::Finished);
         assert_eq!(game.result, GameResult::Winner(black));
         assert!(game.is_delegated);
+        Ok(())
     }
 
     #[test]
-    fn timeout_awards_white_when_black_flags() {
+    fn timeout_awards_white_when_black_flags() -> anyhow::Result<()> {
         let mut game = active_game();
         game.turn = 2;
         game.move_count = 1;
         let white = game.white;
 
-        finish_by_timeout(&mut game, 100).unwrap();
+        finish_by_timeout(&mut game, 100).context("required operation value")?;
 
         assert_eq!(game.status, GameStatus::Finished);
         assert_eq!(game.result, GameResult::Winner(white));
+        Ok(())
     }
 
     #[test]
-    fn timeout_rejects_before_inactivity_window_elapses() {
+    fn timeout_rejects_before_inactivity_window_elapses() -> anyhow::Result<()> {
         let mut game = active_game();
         game.updated_at = 100;
 
-        let err = finish_by_timeout(&mut game, 102).unwrap_err();
+        let err = finish_by_timeout(&mut game, 102)
+            .err()
+            .context("required operation value")?;
 
         assert_eq!(err, GameErrorCode::TimeoutNotExpired.into());
         assert_eq!(
@@ -255,18 +272,20 @@ mod tests {
             GameStatus::Active,
             "a rejected timeout claim must not mutate the game"
         );
+        Ok(())
     }
 
     #[test]
-    fn crank_twin_matches_manual_claim_timeout_outcome() {
+    fn crank_twin_matches_manual_claim_timeout_outcome() -> anyhow::Result<()> {
         for (turn, move_count) in [(1u16, 0u16), (1, 1), (2, 1)] {
             let mut manual = active_game();
             manual.turn = turn;
             manual.move_count = move_count;
             let mut cranked = manual.clone();
 
-            finish_by_timeout(&mut manual, 100).unwrap();
-            let resolved = finish_by_timeout_if_expired(&mut cranked, 100).unwrap();
+            finish_by_timeout(&mut manual, 100).context("required operation value")?;
+            let resolved = finish_by_timeout_if_expired(&mut cranked, 100)
+                .context("required operation value")?;
 
             assert!(
                 resolved,
@@ -275,44 +294,50 @@ mod tests {
             assert_eq!(cranked.status, manual.status);
             assert_eq!(cranked.result, manual.result);
         }
+        Ok(())
     }
 
     #[test]
-    fn timeout_cancels_zero_move_game_instead_of_awarding_black() {
+    fn timeout_cancels_zero_move_game_instead_of_awarding_black() -> anyhow::Result<()> {
         let mut game = active_game();
 
-        finish_by_timeout(&mut game, 100).unwrap();
+        finish_by_timeout(&mut game, 100).context("required operation value")?;
 
         assert_eq!(game.status, GameStatus::Cancelled);
         assert_eq!(game.result, GameResult::None);
         assert_eq!(game.updated_at, 100);
+        Ok(())
     }
 
     #[test]
-    fn crank_timeout_cancels_zero_move_game_instead_of_awarding_black() {
+    fn crank_timeout_cancels_zero_move_game_instead_of_awarding_black() -> anyhow::Result<()> {
         let mut game = active_game();
 
-        let resolved = finish_by_timeout_if_expired(&mut game, 100).unwrap();
+        let resolved =
+            finish_by_timeout_if_expired(&mut game, 100).context("required operation value")?;
 
         assert!(resolved);
         assert_eq!(game.status, GameStatus::Cancelled);
         assert_eq!(game.result, GameResult::None);
         assert_eq!(game.updated_at, 100);
+        Ok(())
     }
 
     #[test]
-    fn crank_twin_is_a_noop_before_inactivity_window_elapses() {
+    fn crank_twin_is_a_noop_before_inactivity_window_elapses() -> anyhow::Result<()> {
         let mut game = active_game();
         game.updated_at = 100;
 
-        let resolved = finish_by_timeout_if_expired(&mut game, 102).unwrap();
+        let resolved =
+            finish_by_timeout_if_expired(&mut game, 102).context("required operation value")?;
 
         assert!(!resolved);
         assert_eq!(game.status, GameStatus::Active);
+        Ok(())
     }
 
     #[test]
-    fn timeout_accepts_just_past_the_minimum_window_for_short_timed_games() {
+    fn timeout_accepts_just_past_the_minimum_window_for_short_timed_games() -> anyhow::Result<()> {
         let mut game = active_game();
         game.move_count = 1;
         game.updated_at = 100;
@@ -321,13 +346,14 @@ mod tests {
             &mut game,
             100 + super::clock::TIMED_GAME_INACTIVITY_WINDOW_SECONDS + 1,
         )
-        .unwrap();
+        .context("required operation value")?;
 
         assert_eq!(game.status, GameStatus::Finished);
+        Ok(())
     }
 
     #[test]
-    fn timeout_never_forfeits_a_player_with_clock_time_left() {
+    fn timeout_never_forfeits_a_player_with_clock_time_left() -> anyhow::Result<()> {
         for claim in [finish_by_timeout_claim, finish_by_crank_claim] {
             let mut game = active_game();
             game.base_time_seconds = 600;
@@ -336,32 +362,36 @@ mod tests {
             game.updated_at = 1_000;
 
             // 200s on one move is legal with a 10-minute clock.
-            assert!(!claim(&mut game, 1_200));
+            assert!(!claim(&mut game, 1_200)?);
             assert_eq!(game.status, GameStatus::Active);
 
-            assert!(claim(&mut game, 1_000 + 600 + 1));
+            assert!(claim(&mut game, 1_000 + 600 + 1)?);
             assert_eq!(game.result, GameResult::Winner(game.black));
         }
+        Ok(())
     }
 
-    fn finish_by_timeout_claim(game: &mut Game, now: i64) -> bool {
-        finish_by_timeout(game, now).is_ok()
+    fn finish_by_timeout_claim(game: &mut Game, now: i64) -> anyhow::Result<bool> {
+        Ok(finish_by_timeout(game, now).is_ok())
     }
 
-    fn finish_by_crank_claim(game: &mut Game, now: i64) -> bool {
-        finish_by_timeout_if_expired(game, now).unwrap()
+    fn finish_by_crank_claim(game: &mut Game, now: i64) -> anyhow::Result<bool> {
+        finish_by_timeout_if_expired(game, now).context("required operation value")
     }
 
     #[test]
-    fn untimed_games_keep_the_24h_window_not_the_short_timed_one() {
+    fn untimed_games_keep_the_24h_window_not_the_short_timed_one() -> anyhow::Result<()> {
         let mut game = active_game();
         game.base_time_seconds = 0;
         game.move_count = 1;
         game.updated_at = 100;
 
-        let err = finish_by_timeout(&mut game, 100 + 3_600).unwrap_err();
+        let err = finish_by_timeout(&mut game, 100 + 3_600)
+            .err()
+            .context("required operation value")?;
 
         assert_eq!(err, GameErrorCode::TimeoutNotExpired.into());
         assert_eq!(game.status, GameStatus::Active);
+        Ok(())
     }
 }

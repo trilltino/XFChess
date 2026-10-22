@@ -16,9 +16,16 @@ pub fn main() {
     // Initialize AndroidContext before creating clients that use the platform verifier.
     if let Err(e) = platform::init_tls_verifier() {
         log::error!("[android] rustls-platform-verifier init failed: {e}");
+        return;
     }
 
-    let mut app = build_app(GameConfig::default());
+    let mut app = match build_app(GameConfig::default()) {
+        Ok(app) => app,
+        Err(error) => {
+            log::error!("[android] application startup failed: {error}");
+            return;
+        }
+    };
     app.run();
 }
 

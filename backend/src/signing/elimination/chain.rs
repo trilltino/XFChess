@@ -44,14 +44,16 @@ pub fn initialize_match_batches(
                 .map(|m| {
                     initialize_match_ix(
                         program_id,
-                        tournament_id,
-                        m.match_index,
-                        m.round,
-                        seat(&m.player_white).as_ref(),
-                        seat(&m.player_black).as_ref(),
-                        m.next_match_for_winner,
-                        m.next_match_slot,
-                        authority,
+                        crate::signing::solana::MatchInit {
+                            tournament_id,
+                            match_index: m.match_index,
+                            round: m.round,
+                            player_white: seat(&m.player_white).as_ref(),
+                            player_black: seat(&m.player_black).as_ref(),
+                            next_match_for_winner: m.next_match_for_winner,
+                            next_match_slot: m.next_match_slot,
+                            authority,
+                        },
                     )
                 })
                 .collect()
@@ -126,7 +128,15 @@ fn mirror_to_chain(
     tournament_id: u64,
     bracket: &EliminationState,
 ) -> ChainProgress {
-    let rpc = make_rpc(&cfg.rpc_url);
+    let rpc = match make_rpc(&cfg.rpc_url) {
+        Ok(rpc) => rpc,
+        Err(error) => {
+            return ChainProgress {
+                error: Some(error.to_string()),
+                ..Default::default()
+            }
+        }
+    };
     let mut progress = ChainProgress::default();
     for m in bracket.unsynced() {
         match sync_match(&rpc, program_id, &cfg.authority, tournament_id, m) {

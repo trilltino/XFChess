@@ -62,8 +62,10 @@ fn probe_delegated(label: &str, url: &str, program_id: &str, game_pda: &str) {
     };
     println!("  blockhash fetched: {blockhash}");
 
-    let program = Pubkey::from_str(program_id).expect("program id");
-    let pda = Pubkey::from_str(game_pda).expect("game pda");
+    let (Ok(program), Ok(pda)) = (Pubkey::from_str(program_id), Pubkey::from_str(game_pda)) else {
+        eprintln!("invalid program ID or game PDA");
+        return;
+    };
     let kp = Keypair::new();
 
     let ix = Instruction::new_with_bytes(

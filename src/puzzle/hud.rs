@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use super::session::{PuzzleBoard, PuzzlePhase, PuzzleSession, StartPuzzle};
-use crate::core::states::GameState;
+use crate::core::state::GameState;
 use crate::rendering::pieces::PieceColor;
 use crate::ui::styles::colors::UiColors;
 

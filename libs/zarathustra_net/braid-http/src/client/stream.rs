@@ -93,10 +93,13 @@ async fn run(
     mut retry: RetryState,
     acknowledgments: Option<async_channel::Receiver<(Vec<crate::Version>, bool)>>,
 ) {
-    let resource = reqwest::Url::parse(&url)
-        .expect("URL validated during handshake")
-        .path()
-        .to_owned();
+    let resource = match reqwest::Url::parse(&url) {
+        Ok(url) => url.path().to_owned(),
+        Err(error) => {
+            let _ = tx.send(Err(BraidError::Config(error.to_string()))).await;
+            return;
+        }
+    };
     loop {
         let result = tokio::select! {
             _ = tx.closed() => return,

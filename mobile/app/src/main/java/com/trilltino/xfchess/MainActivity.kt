@@ -19,7 +19,7 @@ class MainActivity : GameActivity() {
     companion object {
         init {
             // Match Cargo’s lib name and android.app.lib_name in the manifest.
-            System.loadLibrary("xfchess")
+            System.loadLibrary("xfchess_app")
         }
     }
 

@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS game_event_log (
     PRIMARY KEY (game_id, seq)
 );
 
+CREATE INDEX IF NOT EXISTS idx_game_event_log_version
+    ON game_event_log (game_id, version_hash);
+
 -- Covered by the primary key.
 DROP INDEX IF EXISTS idx_game_event_log_game;
 

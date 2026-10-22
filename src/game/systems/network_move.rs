@@ -310,7 +310,8 @@ mod application_tests {
     }
 
     #[test]
-    fn accepted_move_produces_application_acknowledgment() {
+    fn accepted_move_produces_application_acknowledgment() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut app = game();
         app.world_mut().write_message(NetworkMoveEvent {
             from: (4, 1),
@@ -324,17 +325,20 @@ mod application_tests {
             .world()
             .resource::<Messages<crate::game::events::NetworkMoveResult>>();
         let mut cursor = bevy::ecs::message::MessageCursor::default();
-        let result = cursor.read(results).next().unwrap();
+        let result = cursor.read(results).next().ok_or("missing test value")?;
         assert_eq!(result.version.as_deref(), Some("v1"));
         assert_eq!(
             result.fen.as_deref(),
             Some(app.world().resource::<ChessEngine>().current_fen())
         );
         assert!(app.world().resource::<CausalChainState>().applied_versions[&1].contains("v1"));
+
+        Ok(())
     }
 
     #[test]
-    fn illegal_turn_and_position_mismatch_never_acknowledge_a_move() {
+    fn illegal_turn_and_position_mismatch_never_acknowledge_a_move(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         for (from, to, expected_fen) in [
             ((4, 1), (4, 4), None),
             ((4, 6), (4, 4), None),
@@ -354,7 +358,12 @@ mod application_tests {
                 .world()
                 .resource::<Messages<crate::game::events::NetworkMoveResult>>();
             let mut cursor = bevy::ecs::message::MessageCursor::default();
-            assert!(cursor.read(results).next().unwrap().fen.is_none());
+            assert!(cursor
+                .read(results)
+                .next()
+                .ok_or("missing test value")?
+                .fen
+                .is_none());
             assert!(!app
                 .world()
                 .resource::<CausalChainState>()
@@ -366,6 +375,8 @@ mod application_tests {
                 .resource::<Messages<RemoteMoveApplied>>()
                 .is_empty());
         }
+
+        Ok(())
     }
 
     #[test]

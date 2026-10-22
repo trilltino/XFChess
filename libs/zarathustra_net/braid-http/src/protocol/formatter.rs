@@ -2,6 +2,8 @@ use crate::error::{BraidError, Result};
 use crate::protocol;
 use crate::protocol::constants::headers;
 use crate::types::{Patch, Update};
+#[cfg(test)]
+use anyhow::Context as _;
 use bytes::{Bytes, BytesMut};
 
 #[must_use]
@@ -150,57 +152,70 @@ mod tests {
         .is_err());
     }
 
-    fn rendered(update: &Update) -> String {
-        String::from_utf8(format_update(update).unwrap().to_vec()).unwrap()
+    fn rendered(update: &Update) -> anyhow::Result<String> {
+        Ok({
+            String::from_utf8(
+                format_update(update)
+                    .context("required operation value")?
+                    .to_vec(),
+            )
+            .context("required operation value")?
+        })
     }
 
     #[test]
-    fn snapshot_is_headers_then_body() {
-        let s = rendered(&Update::snapshot(Version::new("v1"), "data"));
+    fn snapshot_is_headers_then_body() -> anyhow::Result<()> {
+        let s = rendered(&Update::snapshot(Version::new("v1"), "data"))?;
         assert_eq!(s, "Version: \"v1\"\r\nContent-Length: 4\r\n\r\ndata\r\n");
+        Ok(())
     }
 
     #[test]
-    fn parents_are_emitted_before_the_payload() {
+    fn parents_are_emitted_before_the_payload() -> anyhow::Result<()> {
         let update = Update::snapshot(Version::new("v2"), "x").with_parent(Version::new("v1"));
-        assert!(rendered(&update).starts_with("Version: \"v2\"\r\nParents: \"v1\"\r\n"));
+        assert!(rendered(&update)?.starts_with("Version: \"v2\"\r\nParents: \"v1\"\r\n"));
+        Ok(())
     }
 
     #[test]
-    fn no_multipart_boundary_appears_anywhere() {
+    fn no_multipart_boundary_appears_anywhere() -> anyhow::Result<()> {
         // Braid subscriptions must not emit multipart boundary delimiters.
-        let s = rendered(&Update::snapshot(Version::new("v1"), "data"));
+        let s = rendered(&Update::snapshot(Version::new("v1"), "data"))?;
         assert!(!s.contains("--"), "boundary delimiter leaked into the wire");
+        Ok(())
     }
 
     #[test]
-    fn patched_update_emits_a_block_per_patch() {
+    fn patched_update_emits_a_block_per_patch() -> anyhow::Result<()> {
         let update = Update::patched(
             Version::new("v1"),
             vec![Patch::json(".a", "1"), Patch::json(".b", "22")],
         );
         assert_eq!(
-            rendered(&update),
+            rendered(&update)?,
             "Version: \"v1\"\r\nPatches: 2\r\n\r\n\
              Content-Length: 1\r\nContent-Range: json .a\r\n\r\n1\r\n\
              Content-Length: 2\r\nContent-Range: json .b\r\n\r\n22\r\n"
         );
+        Ok(())
     }
 
     #[test]
-    fn zero_patches_ends_at_the_blank_line() {
+    fn zero_patches_ends_at_the_blank_line() -> anyhow::Result<()> {
         // `Patches: 0` carries no body at all — distinct from an empty snapshot.
         let update = Update::patched(Version::new("v1"), vec![]);
-        assert_eq!(rendered(&update), "Version: \"v1\"\r\nPatches: 0\r\n\r\n");
+        assert_eq!(rendered(&update)?, "Version: \"v1\"\r\nPatches: 0\r\n\r\n");
+        Ok(())
     }
 
     #[test]
-    fn empty_snapshot_still_declares_a_zero_length_body() {
+    fn empty_snapshot_still_declares_a_zero_length_body() -> anyhow::Result<()> {
         let update = Update::snapshot(Version::new("v1"), "");
         assert_eq!(
-            rendered(&update),
+            rendered(&update)?,
             "Version: \"v1\"\r\nContent-Length: 0\r\n\r\n\r\n"
         );
+        Ok(())
     }
 
     #[test]
@@ -209,12 +224,13 @@ mod tests {
     }
 
     #[test]
-    fn content_type_and_merge_type_are_emitted() {
+    fn content_type_and_merge_type_are_emitted() -> anyhow::Result<()> {
         let update = Update::snapshot(Version::new("v1"), "{}")
             .with_content_type("application/json")
             .with_merge_type("simpleton");
-        let s = rendered(&update);
+        let s = rendered(&update)?;
         assert!(s.contains("Content-Type: application/json\r\n"));
         assert!(s.contains("Merge-Type: simpleton\r\n"));
+        Ok(())
     }
 }

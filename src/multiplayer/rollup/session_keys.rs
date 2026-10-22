@@ -24,19 +24,10 @@ pub enum SessionKeyError {
     Serialization(String),
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct HandshakeOrderingKeyManager {
     game_id: u64,
     session_keypair: Option<Keypair>,
-}
-
-impl Default for HandshakeOrderingKeyManager {
-    fn default() -> Self {
-        Self {
-            game_id: 0,
-            session_keypair: None,
-        }
-    }
 }
 
 impl HandshakeOrderingKeyManager {
@@ -124,8 +115,8 @@ impl HandshakeOrderingKeyManager {
 
     fn get_key_path(&self) -> Result<PathBuf, SessionKeyError> {
         #[cfg(target_os = "android")]
-        let base =
-            crate::core::paths::internal_data_dir().ok_or(SessionKeyError::DataDirNotFound)?;
+        let base = crate::core::android_paths::internal_data_dir()
+            .ok_or(SessionKeyError::DataDirNotFound)?;
         #[cfg(not(target_os = "android"))]
         let base = dirs::data_dir()
             .ok_or(SessionKeyError::DataDirNotFound)?
@@ -179,42 +170,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_keypair_roundtrip() {
+    fn test_keypair_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         let mut manager = HandshakeOrderingKeyManager::new(999999); // Use unlikely game ID
 
         manager.clear_session_keypair();
         manager.session_keypair = None;
 
-        let keypair = manager
-            .load_or_create_keypair()
-            .expect("Failed to create keypair");
+        let keypair = manager.load_or_create_keypair()?;
         let pubkey = keypair.pubkey();
 
         let mut manager2 = HandshakeOrderingKeyManager::new(999999);
-        let loaded_keypair = manager2
-            .load_or_create_keypair()
-            .expect("Failed to load keypair");
+        let loaded_keypair = manager2.load_or_create_keypair()?;
 
         // The loaded keypair should have the same public key
         assert_eq!(keypair.pubkey(), loaded_keypair.pubkey());
         assert_eq!(pubkey, loaded_keypair.pubkey());
 
         manager.clear_session_keypair();
+
+        Ok(())
     }
 
     #[test]
-    fn test_different_game_ids() {
+    fn test_different_game_ids() -> Result<(), Box<dyn std::error::Error>> {
         let manager1 = HandshakeOrderingKeyManager::new(111111);
         let manager2 = HandshakeOrderingKeyManager::new(222222);
 
         // Different game IDs should result in different key paths
-        let path1 = manager1
-            .get_key_path()
-            .expect("should have valid path for manager1");
-        let path2 = manager2
-            .get_key_path()
-            .expect("should have valid path for manager2");
+        let path1 = manager1.get_key_path()?;
+        let path2 = manager2.get_key_path()?;
 
         assert_ne!(path1, path2);
+
+        Ok(())
     }
 }

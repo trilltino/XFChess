@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use parking_lot::Mutex;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -20,8 +20,6 @@ pub(crate) use lifecycle::attach_game;
 pub(crate) use lifecycle::shutdown;
 pub(crate) use popup::{open_wallet_popup, spawn_wallet_popup_idle_reaper};
 pub(crate) use tcp::start_tcp_bridge;
-
-#[allow(dead_code)]
 #[derive(Default, Clone)]
 pub(super) struct WalletPubkey(pub(super) Arc<Mutex<Option<String>>>);
 
@@ -202,4 +200,3 @@ mod tests {
     }
   }
 }
-

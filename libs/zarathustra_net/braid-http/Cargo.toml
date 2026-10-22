@@ -26,6 +26,7 @@ arbitrary = { version = "1", optional = true }
 fuzzing = ["dep:arbitrary"]
 
 [dev-dependencies]
+anyhow.workspace = true
 rand.workspace = true
 async-stream = "0.3"
 # `test-util` gives tests a paused clock, so heartbeat-timeout tests assert the
@@ -33,3 +34,6 @@ async-stream = "0.3"
 tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
 axum = { workspace = true, features = ["http2"] }
 tower-http = { workspace = true, features = ["cors"] }
+
+[lints]
+workspace = true

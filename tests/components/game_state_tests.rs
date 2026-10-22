@@ -1,5 +1,5 @@
-use xfchess::game::components::{GamePhase, MoveRecord};
-use xfchess::rendering::pieces::{PieceColor, PieceType};
+use xfchess_app::game::components::{GamePhase, MoveRecord};
+use xfchess_app::rendering::pieces::{PieceColor, PieceType};
 
 #[test]
 fn example_display_game_status() {

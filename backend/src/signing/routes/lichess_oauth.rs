@@ -113,7 +113,7 @@ async fn init_oauth(
         store.insert(
             state_param.clone(),
             PkceState {
-                code_verifier: code_verifier,
+                code_verifier,
                 wallet_pubkey: req.wallet_pubkey.clone(),
                 created_at: Instant::now(),
             },

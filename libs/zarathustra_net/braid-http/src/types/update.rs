@@ -1,4 +1,6 @@
 use crate::types::{ContentRange, Patch, Version};
+#[cfg(test)]
+use anyhow::Context as _;
 use bytes::Bytes;
 use std::collections::BTreeMap;
 
@@ -318,19 +320,35 @@ mod tests {
     }
 
     #[test]
-    fn test_zero_length_body() {
+    fn test_zero_length_body() -> anyhow::Result<()> {
         // Zero-length bodies are valid per spec Section 4
         let update = Update::snapshot(Version::new("v1"), "");
         assert!(update.body.is_some());
-        assert_eq!(update.body.as_ref().unwrap().len(), 0);
+        assert_eq!(
+            update
+                .body
+                .as_ref()
+                .context("required operation value")?
+                .len(),
+            0
+        );
+        Ok(())
     }
 
     #[test]
-    fn test_zero_length_subscription() {
+    fn test_zero_length_subscription() -> anyhow::Result<()> {
         // Zero-length subscription updates are valid (e.g., deletion marker)
         let update = Update::subscription_snapshot(Version::new("v1"), Bytes::new());
         assert_eq!(update.status, 209);
         assert!(update.body.is_some());
-        assert_eq!(update.body.as_ref().unwrap().len(), 0);
+        assert_eq!(
+            update
+                .body
+                .as_ref()
+                .context("required operation value")?
+                .len(),
+            0
+        );
+        Ok(())
     }
 }

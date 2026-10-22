@@ -1,5 +1,7 @@
 use crate::error::{BraidError, Result};
 use crate::types::Patch;
+#[cfg(test)]
+use anyhow::Context as _;
 use bytes::{Buf, Bytes, BytesMut};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -34,11 +36,11 @@ pub struct MessageParser {
     patch_bytes: usize,
 }
 
-static HTTP_STATUS_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^HTTP/?\d*\.?\d* (\d{3})").unwrap());
+static HTTP_STATUS_REGEX: Lazy<std::result::Result<Regex, regex::Error>> =
+    Lazy::new(|| Regex::new(r"^HTTP/?\d*\.?\d* (\d{3})"));
 
-static ENCODING_BLOCK_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)Encoding:\s*(\w+)\r?\nLength:\s*(\d+)\r?\n").unwrap());
+static ENCODING_BLOCK_REGEX: Lazy<std::result::Result<Regex, regex::Error>> =
+    Lazy::new(|| Regex::new(r"(?i)Encoding:\s*(\w+)\r?\nLength:\s*(\d+)\r?\n"));
 
 impl MessageParser {
     pub fn new() -> Self {
@@ -210,11 +212,23 @@ impl MessageParser {
                 BraidError::Protocol(format!("Invalid encoding block UTF-8: {}", e))
             })?;
 
-            if let Some(caps) = ENCODING_BLOCK_REGEX.captures(header_str) {
-                let encoding = caps.get(1).unwrap().as_str().to_string();
-                let length: usize = caps.get(2).unwrap().as_str().parse().map_err(|_| {
-                    BraidError::Protocol("Invalid length in encoding block".to_string())
-                })?;
+            let regex = ENCODING_BLOCK_REGEX
+                .as_ref()
+                .map_err(|error| BraidError::Internal(error.to_string()))?;
+            if let Some(caps) = regex.captures(header_str) {
+                let encoding = caps
+                    .get(1)
+                    .ok_or_else(|| BraidError::Protocol("Missing encoding".into()))?
+                    .as_str()
+                    .to_string();
+                let length: usize = caps
+                    .get(2)
+                    .ok_or_else(|| BraidError::Protocol("Missing encoding length".into()))?
+                    .as_str()
+                    .parse()
+                    .map_err(|_| {
+                        BraidError::Protocol("Invalid length in encoding block".to_string())
+                    })?;
 
                 let _ = self.buffer.split_to(end);
                 self.headers.insert("encoding".to_string(), encoding);
@@ -262,7 +276,10 @@ impl MessageParser {
         let header_bytes = self.buffer.split_to(end);
         let mut header_str = String::from_utf8(header_bytes.to_vec())?;
 
-        if let Some(caps) = HTTP_STATUS_REGEX.captures(&header_str) {
+        let regex = HTTP_STATUS_REGEX
+            .as_ref()
+            .map_err(|error| BraidError::Internal(error.to_string()))?;
+        if let Some(caps) = regex.captures(&header_str) {
             if let Some(status_match) = caps.get(1) {
                 let status = status_match.as_str();
                 if let Some(first_newline) = header_str.find('\n') {
@@ -567,51 +584,61 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_message_parsing() {
+    fn test_simple_message_parsing() -> anyhow::Result<()> {
         let mut parser = MessageParser::new();
         let data = b"Content-Length: 5\r\n\r\nHello";
-        let messages = parser.feed(data).unwrap();
+        let messages = parser.feed(data).context("required operation value")?;
         assert!(!messages.is_empty());
         assert_eq!(messages[0].body, Some(Bytes::from_static(b"Hello")));
         assert!(
             messages[0].patches.is_none(),
             "a body is not a patch update"
         );
+        Ok(())
     }
 
     #[test]
-    fn zero_patches_is_a_patch_update_not_a_snapshot() {
+    fn zero_patches_is_a_patch_update_not_a_snapshot() -> anyhow::Result<()> {
         // The distinction `braid-fuzz` tests: `Patches: 0` carries no body, and
         // must not be mistaken for a snapshot whose body happens to be empty.
         let mut parser = MessageParser::new();
         let messages = parser
             .feed(b"Version: \"v1\"\r\nPatches: 0\r\n\r\n")
-            .unwrap();
+            .context("required operation value")?;
 
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].patches, Some(vec![]));
         assert!(messages[0].body.is_none());
+        Ok(())
     }
 
     #[test]
-    fn an_empty_snapshot_is_not_a_patch_update() {
+    fn an_empty_snapshot_is_not_a_patch_update() -> anyhow::Result<()> {
         let mut parser = MessageParser::new();
         let messages = parser
             .feed(b"Version: \"v1\"\r\nContent-Length: 0\r\n\r\n")
-            .unwrap();
+            .context("required operation value")?;
 
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].body, Some(Bytes::new()));
         assert!(messages[0].patches.is_none());
+        Ok(())
     }
 
     #[test]
-    fn a_heartbeat_yields_no_messages() {
+    fn a_heartbeat_yields_no_messages() -> anyhow::Result<()> {
         // A bare CRLF must be absorbed. If it ever decodes to a Message again,
         // every heartbeat becomes a versionless update and floods the logs.
         let mut parser = MessageParser::for_subscription();
-        assert!(parser.feed(b"\r\n").unwrap().is_empty());
-        assert!(parser.feed(b"\r\n\r\n\r\n").unwrap().is_empty());
+        assert!(parser
+            .feed(b"\r\n")
+            .context("required operation value")?
+            .is_empty());
+        assert!(parser
+            .feed(b"\r\n\r\n\r\n")
+            .context("required operation value")?
+            .is_empty());
+        Ok(())
     }
 
     #[test]
@@ -649,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn test_multi_patch_parsing() {
+    fn test_multi_patch_parsing() -> anyhow::Result<()> {
         let mut parser = MessageParser::new();
         let data = b"Patches: 2\r\n\r\n\
                      Content-Length: 5\r\n\
@@ -659,12 +686,13 @@ mod tests {
                      Content-Range: json .b\r\n\r\n\
                      world\r\n";
 
-        let messages = parser.feed(data).unwrap();
+        let messages = parser.feed(data).context("required operation value")?;
         assert!(!messages.is_empty());
-        let patches = messages[0].patches.as_ref().expect("a patch update");
+        let patches = messages[0].patches.as_ref().context("a patch update")?;
         assert_eq!(patches.len(), 2);
         assert_eq!(patches[0].range, ".a");
         assert_eq!(patches[1].range, ".b");
         assert!(messages[0].body.is_none());
+        Ok(())
     }
 }

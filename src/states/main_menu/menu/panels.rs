@@ -776,7 +776,10 @@ fn render_preferences(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
         .checkbox(&mut settings.highlight_last_move, "Highlight last move")
         .changed();
     changed |= ui
-        .checkbox(&mut settings.use_vps_relay, "Relay P2P games through the server")
+        .checkbox(
+            &mut settings.use_vps_relay,
+            "Relay P2P games through the server",
+        )
         .on_hover_text("More reliable behind strict NATs; adds a little latency")
         .changed();
 
@@ -792,7 +795,7 @@ fn render_preferences(ui: &mut egui::Ui, cx: &mut MainMenuUIContext) {
 }
 
 /// Exports recent logs to a text file for bug reports (desktop only). The export
-/// itself runs in `core::support_bundle::run_requested_export`.
+/// itself runs in `core::diagnostics::support_bundle::run_requested_export`.
 #[cfg(not(target_os = "android"))]
 fn render_support_export(ui: &mut egui::Ui, cx: &mut MainMenuUIContext, width: f32) {
     section(ui, "Help & Support");

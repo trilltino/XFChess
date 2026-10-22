@@ -14,25 +14,29 @@ use crate::signing::storage::vault::{KycInput, VaultStore};
 use crate::signing::AppState;
 
 /// Tax-ID formats for the countries that require one, compiled once.
-fn get_tax_id_pattern(country: &str) -> Option<&'static Regex> {
+fn get_tax_id_pattern(country: &str) -> Result<Option<&'static Regex>, StatusCode> {
     // UK NI: AB123456C
-    static GB: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^[A-Za-z]{2}\d{6}[A-Za-z]$").expect("valid pattern"));
+    static GB: LazyLock<Result<Regex, regex::Error>> =
+        LazyLock::new(|| Regex::new(r"^[A-Za-z]{2}\d{6}[A-Za-z]$"));
     // Brazil CPF
-    static BR: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$").expect("valid pattern"));
+    static BR: LazyLock<Result<Regex, regex::Error>> =
+        LazyLock::new(|| Regex::new(r"^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$"));
     // Germany Tax ID: 11 digits
-    static DE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{11}$").expect("valid pattern"));
+    static DE: LazyLock<Result<Regex, regex::Error>> = LazyLock::new(|| Regex::new(r"^\d{11}$"));
     // Canada SIN
-    static CA: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^\d{3}-?\d{3}-?\d{3}$").expect("valid pattern"));
-    match country {
-        "GB" => Some(&GB),
-        "BR" => Some(&BR),
-        "DE" => Some(&DE),
-        "CA" => Some(&CA),
-        _ => None,
-    }
+    static CA: LazyLock<Result<Regex, regex::Error>> =
+        LazyLock::new(|| Regex::new(r"^\d{3}-?\d{3}-?\d{3}$"));
+    let pattern = match country {
+        "GB" => &*GB,
+        "BR" => &*BR,
+        "DE" => &*DE,
+        "CA" => &*CA,
+        _ => return Ok(None),
+    };
+    pattern.as_ref().map(Some).map_err(|error| {
+        tracing::error!("Tax ID validator unavailable: {error}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -87,7 +91,7 @@ pub async fn submit_kyc(
     }
 
     // Validate tax ID format for supported countries
-    if let Some(pattern) = get_tax_id_pattern(&req.country) {
+    if let Some(pattern) = get_tax_id_pattern(&req.country)? {
         if !pattern.is_match(&req.tax_id) {
             // Never log raw tax IDs, including on validation failure.
             tracing::warn!(

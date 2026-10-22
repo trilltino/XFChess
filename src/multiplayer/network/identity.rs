@@ -28,7 +28,8 @@ fn key_path() -> PathBuf {
         }
     }
     #[cfg(target_os = "android")]
-    let base = crate::core::paths::internal_data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let base =
+        crate::core::android_paths::internal_data_dir().unwrap_or_else(|| PathBuf::from("."));
     #[cfg(not(target_os = "android"))]
     let base = dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -88,7 +89,8 @@ fn guest_username_path() -> PathBuf {
     // Store desktop player data beside PGNs in Documents/xfchess. Android uses
     // app-scoped external data storage instead.
     #[cfg(target_os = "android")]
-    let base = crate::core::paths::external_data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let base =
+        crate::core::android_paths::external_data_dir().unwrap_or_else(|| PathBuf::from("."));
     #[cfg(not(target_os = "android"))]
     let base = dirs::document_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -115,7 +117,8 @@ pub fn save_guest_username(name: &str) {
 
 fn profiles_dir() -> PathBuf {
     #[cfg(target_os = "android")]
-    let base = crate::core::paths::external_data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let base =
+        crate::core::android_paths::external_data_dir().unwrap_or_else(|| PathBuf::from("."));
     #[cfg(not(target_os = "android"))]
     let base = dirs::document_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -298,7 +301,7 @@ fn fallback_log_dir() -> PathBuf {
 
 #[cfg(target_os = "android")]
 fn fallback_log_dir() -> PathBuf {
-    crate::core::paths::internal_data_dir()
+    crate::core::android_paths::internal_data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("logs")
 }
@@ -316,8 +319,8 @@ pub fn active_profile_dir() -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("xfchess");
             #[cfg(target_os = "android")]
-            let base =
-                crate::core::paths::external_data_dir().unwrap_or_else(|| PathBuf::from("."));
+            let base = crate::core::android_paths::external_data_dir()
+                .unwrap_or_else(|| PathBuf::from("."));
             std::fs::create_dir_all(&base).ok();
             base
         })

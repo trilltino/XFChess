@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use common::*;
 use solana_sdk::pubkey::Pubkey;
@@ -9,83 +10,92 @@ use xfchess_game::state::{GameResult, GameStatus};
 const GAME_ID: u64 = 42;
 
 #[tokio::test]
-async fn records_a_legal_move_and_advances_state() {
+async fn records_a_legal_move_and_advances_state() -> anyhow::Result<()> {
     let session = Keypair::new();
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let board = start_board();
 
     let mut ctx = start(vec![
-        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active),
-        session_account(GAME_ID, white, session.pubkey(), i64::MAX, true),
+        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active)?,
+        session_account(GAME_ID, white, session.pubkey(), i64::MAX, true)?,
     ])
     .await;
 
     let mv = uci("e2e4");
-    let next = apply(&board, &mv);
+    let next = apply(&board, &mv)?;
     let ix = record_move_ix(GAME_ID, &white, &session.pubkey(), mv, next, 1, Some(0));
 
     send(&mut ctx, ix, &[&session])
         .await
-        .expect("legal move should succeed");
+        .context("legal move should succeed")?;
 
-    let g = fetch_game(&mut ctx, GAME_ID).await;
+    let g = fetch_game(&mut ctx, GAME_ID).await?;
     assert_eq!(g.nonce, 1, "nonce advances");
     assert_eq!(g.turn, 2, "turn flips to black");
     assert_eq!(g.move_count, 1);
     assert_eq!(g.board_state, next, "board matches applied move");
     assert_eq!(g.status, GameStatus::Active);
+    Ok(())
 }
 
 #[tokio::test]
-async fn rejects_replayed_nonce() {
+async fn rejects_replayed_nonce() -> anyhow::Result<()> {
     let session = Keypair::new();
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let board = start_board();
 
     let mut ctx = start(vec![
-        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active),
-        session_account(GAME_ID, white, session.pubkey(), i64::MAX, true),
+        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active)?,
+        session_account(GAME_ID, white, session.pubkey(), i64::MAX, true)?,
     ])
     .await;
 
     // game.nonce == 0 requires nonce == 1; sending 3 must be rejected.
     let mv = uci("e2e4");
-    let next = apply(&board, &mv);
+    let next = apply(&board, &mv)?;
     let ix = record_move_ix(GAME_ID, &white, &session.pubkey(), mv, next, 3, None);
 
-    let err = send(&mut ctx, ix, &[&session]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[&session])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidNonce)));
+    Ok(())
 }
 
 #[tokio::test]
-async fn rejects_parent_nonce_mismatch() {
+async fn rejects_parent_nonce_mismatch() -> anyhow::Result<()> {
     let session = Keypair::new();
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let board = start_board();
 
     let mut ctx = start(vec![
-        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active),
-        session_account(GAME_ID, white, session.pubkey(), i64::MAX, true),
+        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active)?,
+        session_account(GAME_ID, white, session.pubkey(), i64::MAX, true)?,
     ])
     .await;
 
     let mv = uci("e2e4");
-    let next = apply(&board, &mv);
+    let next = apply(&board, &mv)?;
     // game.nonce == 0, but the client claims a parent of 5 → causal break.
     let ix = record_move_ix(GAME_ID, &white, &session.pubkey(), mv, next, 1, Some(5));
 
-    let err = send(&mut ctx, ix, &[&session]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[&session])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::ParentNonceMismatch))
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn rejects_move_out_of_turn() {
+async fn rejects_move_out_of_turn() -> anyhow::Result<()> {
     let session = Keypair::new();
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
@@ -93,8 +103,8 @@ async fn rejects_move_out_of_turn() {
 
     // turn == 1 (white to move), but the session belongs to black.
     let mut ctx = start(vec![
-        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active),
-        session_account(GAME_ID, black, session.pubkey(), i64::MAX, true),
+        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active)?,
+        session_account(GAME_ID, black, session.pubkey(), i64::MAX, true)?,
     ])
     .await;
 
@@ -108,20 +118,24 @@ async fn rejects_move_out_of_turn() {
         Some(0),
     );
 
-    let err = send(&mut ctx, ix, &[&session]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[&session])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::NotYourTurn)));
+    Ok(())
 }
 
 #[tokio::test]
-async fn rejects_illegal_move() {
+async fn rejects_illegal_move() -> anyhow::Result<()> {
     let session = Keypair::new();
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let board = start_board();
 
     let mut ctx = start(vec![
-        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active),
-        session_account(GAME_ID, white, session.pubkey(), i64::MAX, true),
+        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active)?,
+        session_account(GAME_ID, white, session.pubkey(), i64::MAX, true)?,
     ])
     .await;
 
@@ -136,12 +150,16 @@ async fn rejects_illegal_move() {
         Some(0),
     );
 
-    let err = send(&mut ctx, ix, &[&session]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[&session])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidMove)));
+    Ok(())
 }
 
 #[tokio::test]
-async fn rejects_expired_session() {
+async fn rejects_expired_session() -> anyhow::Result<()> {
     let session = Keypair::new();
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
@@ -149,21 +167,25 @@ async fn rejects_expired_session() {
 
     // expires_at = -1 is strictly before any non-negative clock timestamp.
     let mut ctx = start(vec![
-        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active),
-        session_account(GAME_ID, white, session.pubkey(), -1, true),
+        game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active)?,
+        session_account(GAME_ID, white, session.pubkey(), -1, true)?,
     ])
     .await;
 
     let mv = uci("e2e4");
-    let next = apply(&board, &mv);
+    let next = apply(&board, &mv)?;
     let ix = record_move_ix(GAME_ID, &white, &session.pubkey(), mv, next, 1, Some(0));
 
-    let err = send(&mut ctx, ix, &[&session]).await.unwrap_err();
+    let err = send(&mut ctx, ix, &[&session])
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::SessionExpired)));
+    Ok(())
 }
 
 #[tokio::test]
-async fn detects_checkmate_and_finishes_game() {
+async fn detects_checkmate_and_finishes_game() -> anyhow::Result<()> {
     let session = Keypair::new();
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
@@ -173,23 +195,24 @@ async fn detects_checkmate_and_finishes_game() {
 
     // turn == 4 (even → black to move); nonce == 3 so the mating move is #4.
     let mut ctx = start(vec![
-        game_account(GAME_ID, white, black, board, 4, 3, GameStatus::Active),
-        session_account(GAME_ID, black, session.pubkey(), i64::MAX, true),
+        game_account(GAME_ID, white, black, board, 4, 3, GameStatus::Active)?,
+        session_account(GAME_ID, black, session.pubkey(), i64::MAX, true)?,
     ])
     .await;
 
     let mv = uci("d8h4");
-    let next = apply(&board, &mv);
+    let next = apply(&board, &mv)?;
     let ix = record_move_ix(GAME_ID, &black, &session.pubkey(), mv, next, 4, Some(3));
 
     send(&mut ctx, ix, &[&session])
         .await
-        .expect("mating move is legal");
+        .context("mating move is legal")?;
 
-    let g = fetch_game(&mut ctx, GAME_ID).await;
+    let g = fetch_game(&mut ctx, GAME_ID).await?;
     assert_eq!(g.status, GameStatus::Finished, "checkmate ends the game");
     assert!(
         matches!(g.result, GameResult::Winner(w) if w == black),
         "black (the mating side) should be recorded as the winner"
     );
+    Ok(())
 }

@@ -13,7 +13,10 @@ impl Plugin for TournamentClientPlugin {
             .add_message::<RoundStarted>()
             .add_message::<ResultRecorded>()
             .add_message::<StandingsUpdated>()
-            .add_systems(Update, process_gossip_messages.in_set(crate::core::schedule::ReceiveSet::Feeds));
+            .add_systems(
+                Update,
+                process_gossip_messages.in_set(crate::core::schedule::ReceiveSet::Feeds),
+            );
     }
 }
 

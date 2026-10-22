@@ -21,7 +21,7 @@ async fn setup_delegated_game(
     base_time_seconds: u64,
     increment_seconds: u16,
 ) -> anyhow::Result<(u64, Pubkey, Keypair, Keypair)> {
-    let game_id = unique_id();
+    let game_id = unique_id()?;
     let suffix = game_id & 0xFFFF;
 
     for (payer, username) in [

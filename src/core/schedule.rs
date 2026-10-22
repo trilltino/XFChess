@@ -29,7 +29,7 @@
 use bevy::ecs::schedule::{LogLevel, ScheduleBuildSettings};
 use bevy::prelude::*;
 
-use super::states::GameState;
+use super::state::GameState;
 
 /// The in-game pipeline; runs only in `GameState::InGame`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]

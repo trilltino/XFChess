@@ -162,7 +162,7 @@ impl CancellationService {
             let sig = Signature::from_str(signature)?;
             let service = self.clone();
             let chain_result = tokio::task::spawn_blocking(move || -> Result<Option<bool>> {
-                let rpc = make_rpc(&service.rpc_url);
+                let rpc = make_rpc(&service.rpc_url)?;
                 let statuses = rpc.get_signature_statuses_with_history(&[sig])?;
                 let Some(status) = statuses.value.first().and_then(Option::as_ref) else {
                     return Ok(None);
@@ -224,7 +224,7 @@ impl CancellationService {
                 "Stored roster differs from chain; reconcile registration before cancelling");
             ensure!(service.host_treasury == service.authority.pubkey(), "Host treasury signer unavailable");
             let players = record.players.iter().map(|p| Pubkey::from_str(p)).collect::<std::result::Result<Vec<_>, _>>()?;
-            let rpc = make_rpc(&service.rpc_url);
+            let rpc = make_rpc(&service.rpc_url)?;
             let ix = cancel_tournament_ix(&service.program_id, tournament_id, record.max_players,
                 &service.authority.pubkey(), &service.host_treasury, &players);
             let tx = Transaction::new_signed_with_payer(&[ix], Some(&service.authority.pubkey()),
@@ -238,7 +238,7 @@ impl CancellationService {
         sqlx::query("UPDATE tournament_operations SET signature=?,status='submitted',updated_at=unixepoch() WHERE id=?")
             .bind(&signature).bind(&operation.id).execute(self.store.pool()).await?;
         let rpc_url = self.rpc_url.clone();
-        tokio::task::spawn_blocking(move || make_rpc(&rpc_url).send_transaction(&tx)).await??;
+        tokio::task::spawn_blocking(move || make_rpc(&rpc_url)?.send_transaction(&tx)).await??;
         Ok("pending_reconciliation")
     }
 
@@ -248,7 +248,7 @@ impl CancellationService {
             &self.program_id,
         )
         .0;
-        let account = make_rpc(&self.rpc_url).get_account(&pda)?;
+        let account = make_rpc(&self.rpc_url)?.get_account(&pda)?;
         ensure!(
             account.owner == self.program_id,
             "Tournament account has wrong owner"

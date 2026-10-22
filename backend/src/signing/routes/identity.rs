@@ -14,6 +14,10 @@ use tracing::{error, info, warn};
 
 use crate::signing::AppState;
 
+fn signature_time_valid(now: u64, timestamp: u64) -> bool {
+    timestamp <= now.saturating_add(60) && now.saturating_sub(timestamp) <= 300
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IdentityPayload {
     pub pubkey: String,
@@ -69,9 +73,14 @@ async fn register_identity(
     // Protect replay attacks
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .expect("System time should be available")
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "System clock unavailable".to_string(),
+            )
+        })?
         .as_secs();
-    if now > payload.timestamp && now - payload.timestamp > 300 {
+    if !signature_time_valid(now, payload.timestamp) {
         return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
     }
 
@@ -126,11 +135,7 @@ async fn register_identity(
     }
 
     let admin_keypair = &state.kyc_authority;
-    let program_id = Pubkey::from_str(&state.config.program_id).unwrap_or_else(|_| {
-        "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
-            .parse()
-            .expect("Default program ID should be valid")
-    });
+    let program_id = state.program_id;
 
     let ix = crate::signing::solana::verify_profile_ix(&program_id, &admin_keypair.pubkey(), &pk);
     match crate::signing::solana::sign_and_submit_async(
@@ -246,9 +251,14 @@ async fn delete_identity_data(
     // 2. Protect replay attacks
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .expect("System time should be available")
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "System clock unavailable".to_string(),
+            )
+        })?
         .as_secs();
-    if now > req.timestamp && now - req.timestamp > 300 {
+    if !signature_time_valid(now, req.timestamp) {
         return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
     }
 
@@ -305,10 +315,19 @@ async fn log_audit_event(pubkey: &str, action: &str, pool: &Arc<sqlx::SqlitePool
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use std::time::SystemTime;
 
     #[test]
-    fn test_identity_payload_serialization() {
+    fn signature_window_rejects_future_and_stale_signatures() {
+        assert!(signature_time_valid(1000, 700));
+        assert!(!signature_time_valid(1000, 699));
+        assert!(signature_time_valid(1000, 1060));
+        assert!(!signature_time_valid(1000, 1061));
+    }
+
+    #[test]
+    fn test_identity_payload_serialization() -> anyhow::Result<()> {
         let payload = IdentityPayload {
             pubkey: "test_wallet".to_string(),
             full_name: "Test User".to_string(),
@@ -319,7 +338,7 @@ mod tests {
             signature: "test_signature".to_string(),
             timestamp: SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .context("test setup failed")?
                 .as_secs(),
             consent_kyc: true,
             consent_retention_years: 5,
@@ -327,6 +346,7 @@ mod tests {
 
         let json = serde_json::to_string(&payload);
         assert!(json.is_ok());
+        Ok(())
     }
 
     #[test]
@@ -343,19 +363,20 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_data_request_serialization() {
+    fn test_delete_data_request_serialization() -> anyhow::Result<()> {
         let req = DeleteDataRequest {
             pubkey: "test_wallet".to_string(),
             signature: "test_signature".to_string(),
             timestamp: SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .context("test setup failed")?
                 .as_secs(),
             reason: Some("Test deletion".to_string()),
         };
 
         let json = serde_json::to_string(&req);
         assert!(json.is_ok());
+        Ok(())
     }
 
     #[tokio::test]
@@ -364,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn test_identity_payload_validation() {
+    fn test_identity_payload_validation() -> anyhow::Result<()> {
         // Test that consent is required
         let payload = IdentityPayload {
             pubkey: "test_wallet".to_string(),
@@ -376,13 +397,14 @@ mod tests {
             signature: "test_signature".to_string(),
             timestamp: SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .context("test setup failed")?
                 .as_secs(),
             consent_kyc: false, // Missing consent
             consent_retention_years: 5,
         };
 
         assert!(!payload.consent_kyc);
+        Ok(())
     }
 
     #[test]

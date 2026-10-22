@@ -4,7 +4,6 @@ use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
 };
-#[allow(deprecated)]
 use solana_system_interface::program as system_program;
 
 pub const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
@@ -83,7 +82,6 @@ fn borsh_string(s: &str) -> Vec<u8> {
     buf
 }
 
-
 pub fn create_game_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -124,7 +122,6 @@ pub fn create_game_ix(
     })
 }
 
-
 pub fn join_game_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -159,7 +156,6 @@ pub fn join_game_ix(
     })
 }
 
-
 pub fn cancel_game_ix(
     program_id: Pubkey,
     player: Pubkey,
@@ -190,11 +186,7 @@ pub fn cancel_game_ix(
 }
 
 /// Reclaim an unjoined SOL wager after 24 hours. Optional SPL accounts use the program-ID sentinel.
-pub fn withdraw_expired_wager_ix(
-    program_id: Pubkey,
-    creator: Pubkey,
-    game_id: u64,
-) -> Instruction {
+pub fn withdraw_expired_wager_ix(program_id: Pubkey, creator: Pubkey, game_id: u64) -> Instruction {
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
     let escrow_pda =
@@ -218,7 +210,6 @@ pub fn withdraw_expired_wager_ix(
         data,
     }
 }
-
 
 pub fn record_move_ix(
     program_id: Pubkey,
@@ -268,7 +259,6 @@ pub fn record_move_ix(
     })
 }
 
-
 pub fn finalize_game_ix(
     program_id: Pubkey,
     game_id: u64,
@@ -305,7 +295,6 @@ pub fn finalize_game_ix(
         data,
     })
 }
-
 
 pub fn offer_draw_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Result<Instruction> {
     let game_pda =
@@ -357,7 +346,6 @@ pub fn claim_timeout_ix(program_id: Pubkey, game_id: u64, caller: Pubkey) -> Res
         data,
     })
 }
-
 
 pub fn authorize_session_key_ix(
     program_id: Pubkey,
@@ -1034,8 +1022,9 @@ mod withdraw_expired_layout_tests {
     use anchor_lang::{InstructionData, ToAccountMetas};
 
     #[test]
-    fn withdraw_expired_wager_matches_the_program_encoding_and_account_order() {
-        let program_id: Pubkey = PROGRAM_ID.parse().unwrap();
+    fn withdraw_expired_wager_matches_the_program_encoding_and_account_order(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let program_id: Pubkey = PROGRAM_ID.parse()?;
         let creator = Pubkey::new_unique();
         let ix = withdraw_expired_wager_ix(program_id, creator, 77);
         assert_eq!(
@@ -1053,7 +1042,13 @@ mod withdraw_expired_layout_tests {
             token_program: None,
         }
         .to_account_metas(None);
-        let keys = |m: &[AccountMeta]| m.iter().map(|a| (a.pubkey, a.is_signer)).collect::<Vec<_>>();
+        let keys = |m: &[AccountMeta]| {
+            m.iter()
+                .map(|a| (a.pubkey, a.is_signer))
+                .collect::<Vec<_>>()
+        };
         assert_eq!(keys(&ix.accounts), keys(&expected));
+
+        Ok(())
     }
 }

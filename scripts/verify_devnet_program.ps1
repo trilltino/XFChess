@@ -11,7 +11,7 @@ param(
 
 if ($Build) {
     Write-Host "Building locally (cargo build-sbf)..."
-    cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml
+    cargo build-sbf --arch v0 --manifest-path programs/xfchess-game-sbf/Cargo.toml
     if ($LASTEXITCODE -ne 0) {
         Write-Error "cargo build-sbf failed - aborting comparison."
         exit 1

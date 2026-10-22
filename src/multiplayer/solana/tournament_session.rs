@@ -1,5 +1,4 @@
 use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey};
-#[allow(deprecated)]
 use solana_system_interface::program as system_program;
 
 fn find_tournament_pda(program_id: &Pubkey, tournament_id: u64) -> (Pubkey, u8) {
@@ -46,9 +45,9 @@ pub fn build_register_player_ix(
 
     let mut hasher = Sha256::new();
     hasher.update(b"global:register_player");
-    let discriminator: [u8; 8] = hasher.finalize()[..8]
-        .try_into()
-        .expect("sha256 >= 8 bytes");
+    let digest = hasher.finalize();
+    let mut discriminator = [0; 8];
+    discriminator.copy_from_slice(&digest[..8]);
 
     let mut data = Vec::with_capacity(20);
     data.extend_from_slice(&discriminator);

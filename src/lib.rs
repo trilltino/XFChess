@@ -48,7 +48,7 @@ fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
     }
 }
 
-pub use core::persistent_camera::PersistentEguiCamera;
+pub use core::egui_camera::PersistentEguiCamera;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum PlayerColor {
@@ -194,10 +194,11 @@ struct SessionConfigFile {
     pub wager_amount: f64,
 }
 
-pub fn build_app(game_config: GameConfig) -> App {
+pub fn build_app(game_config: GameConfig) -> Result<App, std::io::Error> {
     let mut app = App::new();
+    app.insert_resource(multiplayer::TokioRuntime(tokio::runtime::Runtime::new()?));
 
-    core::error_handling::install_recovering_error_handler(&mut app);
+    core::diagnostics::error_handler::install_recovering_error_handler(&mut app);
 
     // Configure AI if requested
     if let Some(diff_val) = game_config.ai_difficulty {
@@ -233,10 +234,7 @@ pub fn build_app(game_config: GameConfig) -> App {
             auto_create_primary_context: false,
             ..default()
         })
-        .add_systems(
-            Startup,
-            core::persistent_camera::setup_persistent_egui_camera,
-        );
+        .add_systems(Startup, core::egui_camera::setup_persistent_egui_camera);
 
     app.add_plugins(
         DefaultPlugins
@@ -300,7 +298,7 @@ pub fn build_app(game_config: GameConfig) -> App {
     ));
 
     #[cfg(not(target_os = "android"))]
-    app.add_plugins(core::updates::UpdateCheckPlugin);
+    app.add_plugins(core::update_check::UpdateCheckPlugin);
 
     app.add_plugins((
         states::main_menu::MainMenuPlugin,
@@ -315,7 +313,7 @@ pub fn build_app(game_config: GameConfig) -> App {
 
     app.add_systems(Startup, set_window_icon);
 
-    app
+    Ok(app)
 }
 
 fn set_window_icon(

@@ -11,10 +11,12 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 use xfchess_braid_server::resource::protocol::{format_chunk, format_heartbeat, BraidUpdate};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum ResumeError {
+    #[error("requested game-log history is no longer available")]
     Gone,
-    Database(sqlx::Error),
+    #[error("game-log storage failed: {0}")]
+    Database(#[source] sqlx::Error),
 }
 
 impl From<sqlx::Error> for ResumeError {
@@ -129,6 +131,10 @@ async fn stream_response(
     let game_id = game_id.to_owned();
     let stream = stream.to_owned();
     let body = async_stream::stream! {
+        // Flush an empty subscription before a client waits to send its first move.
+        if history.is_empty() {
+            yield Ok::<Bytes, std::io::Error>(format_heartbeat());
+        }
         for update in history {
             cursor = update.version as i64;
             yield Ok::<Bytes, std::io::Error>(format_chunk(&update));
@@ -171,15 +177,33 @@ async fn stream_response(
 mod tests {
     use super::super::tests::{migrated_pool, move_message};
     use super::*;
+    use anyhow::Context as _;
     use braid_chess::braid_http::{BraidClient, BraidRequest};
 
     #[tokio::test]
-    async fn stable_versions_resume_with_stream_specific_parents() {
-        let state = GameLogState::new(migrated_pool().await, None);
+    async fn empty_stream_flushes_without_waiting_for_a_move() -> anyhow::Result<()> {
+        use futures::StreamExt as _;
+
+        let log = Arc::new(GameLogState::new(migrated_pool().await?, None));
+        let mut headers = HeaderMap::new();
+        headers.insert("Subscribe", "true".parse()?);
+        let response = stream_response(log, "empty", "moves", headers).await;
+        assert_eq!(response.status().as_u16(), 209);
+        let mut body = response.into_body().into_data_stream();
+        let first = tokio::time::timeout(Duration::from_secs(1), body.next())
+            .await?
+            .context("subscription ended before its heartbeat")??;
+        assert_eq!(first, format_heartbeat());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stable_versions_resume_with_stream_specific_parents() -> anyhow::Result<()> {
+        let state = GameLogState::new(migrated_pool().await?, None);
         state
             .put_event("g1", "moves", "alice", &move_message("fen1", 1), "v1", "0")
             .await
-            .unwrap();
+            .context("test setup failed")?;
         let chat = braid_chess::ChessMessage::Chat(braid_chess::message::ChatPayload {
             player: "alice".into(),
             text: "hi".into(),
@@ -188,18 +212,21 @@ mod tests {
         state
             .put_event("g1", "chat", "alice", &chat, "chat1", "0")
             .await
-            .unwrap();
+            .context("test setup failed")?;
         state
             .put_event("g1", "moves", "alice", &move_message("fen2", 2), "v2", "v1")
             .await
-            .unwrap();
-        let (all, _, _) = state.subscribe_from("g1", "moves", &[]).await.unwrap();
+            .context("test setup failed")?;
+        let (all, _, _) = state
+            .subscribe_from("g1", "moves", &[])
+            .await
+            .context("test setup failed")?;
         assert_eq!(all.iter().map(|u| u.version).collect::<Vec<_>>(), [1, 3]);
         assert_eq!(all[1].parents, [1]);
         let (remaining, _, _) = state
             .subscribe_from("g1", "moves", &[Version::new("1")])
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].version, 3);
         assert!(matches!(
@@ -220,18 +247,24 @@ mod tests {
                 .await,
             Err(ResumeError::Gone)
         ));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn http_resume_recovers_lag_and_avoids_overlap_duplicates() {
-        let state = Arc::new(GameLogState::new(migrated_pool().await, None));
+    async fn http_resume_recovers_lag_and_avoids_overlap_duplicates() -> anyhow::Result<()> {
+        let state = Arc::new(GameLogState::new(migrated_pool().await?, None));
         state
             .put_event("g1", "moves", "alice", &move_message("fen1", 1), "v1", "0")
             .await
-            .unwrap();
+            .context("test setup failed")?;
         let log = state.clone();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .context("test setup failed")?;
+        let url = format!(
+            "http://{}",
+            listener.local_addr().context("test setup failed")?
+        );
         let handler = axum::routing::get(move |headers: HeaderMap| {
             let log = log.clone();
             async move { stream_response(log, "g1", "moves", headers).await }
@@ -239,32 +272,43 @@ mod tests {
         let router = axum::Router::new()
             .route("/", handler.clone())
             .route("/game/g1/moves", handler);
-        let server = tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
-        });
-        let client = BraidClient::new().unwrap();
-        let mut subscription = client.subscribe(&url, BraidRequest::new()).await.unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await });
+        let client = BraidClient::new().context("test setup failed")?;
+        let mut subscription = client
+            .subscribe(&url, BraidRequest::new())
+            .await
+            .context("test setup failed")?;
         assert_eq!(
-            subscription.next().await.unwrap().unwrap().version,
+            subscription
+                .next()
+                .await
+                .context("test setup failed")?
+                .context("test setup failed")?
+                .version,
             [Version::new("1")]
         );
         drop(subscription);
         state
             .put_event("g1", "moves", "alice", &move_message("fen2", 2), "v2", "v1")
             .await
-            .unwrap();
+            .context("test setup failed")?;
         let mut resumed = client
             .subscribe(&url, BraidRequest::new().with_parent(Version::new("1")))
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(
-            resumed.next().await.unwrap().unwrap().version,
+            resumed
+                .next()
+                .await
+                .context("test setup failed")?
+                .context("test setup failed")?
+                .version,
             [Version::new("2")]
         );
         state
             .put_event("g1", "moves", "alice", &move_message("fen3", 3), "v3", "v2")
             .await
-            .unwrap();
+            .context("test setup failed")?;
         for _ in 0..100 {
             let _ = state
                 .channel("g1", "moves")
@@ -274,9 +318,9 @@ mod tests {
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(3), resumed.next())
                 .await
-                .unwrap()
-                .unwrap()
-                .unwrap()
+                .context("test setup failed")?
+                .context("test setup failed")?
+                .context("test setup failed")?
                 .version,
             [Version::new("3")]
         );
@@ -285,18 +329,19 @@ mod tests {
                 .await
                 .is_err()
         );
-        let directory = tempfile::tempdir().unwrap();
-        let journal =
-            braid_chess::journal::Journal::open(directory.path(), "backend/g1/device").unwrap();
-        let subscriber = braid_chess::ChessSubscriber::new(&url, "g1").unwrap();
+        let directory = tempfile::tempdir().context("test setup failed")?;
+        let journal = braid_chess::journal::Journal::open(directory.path(), "backend/g1/device")
+            .context("test setup failed")?;
+        let subscriber =
+            braid_chess::ChessSubscriber::new(&url, "g1").context("test setup failed")?;
         let (deliveries, _) = subscriber
             .subscribe_acknowledged(
                 braid_chess::ChessResource::moves("g1"),
                 vec![Version::new("2")],
             )
             .await
-            .unwrap();
-        let third = deliveries.recv().await.unwrap();
+            .context("test setup failed")?;
+        let third = deliveries.recv().await.context("test setup failed")?;
         assert_eq!(third.receipt.versions(), [Version::new("3")]);
         let fourth = move_message("fen4", 4);
         journal
@@ -307,12 +352,12 @@ mod tests {
                 version: "v4".into(),
                 parent: "v3".into(),
             })
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(
             state
                 .put_event("g1", "moves", "alice", &fourth, "v4", "v3")
                 .await
-                .unwrap(),
+                .context("test setup failed")?,
             4
         );
         assert!(
@@ -326,16 +371,16 @@ mod tests {
                 third.receipt.versions().to_vec(),
                 Some("fen3".into()),
             )
-            .unwrap();
-        third.receipt.acknowledge().unwrap();
-        let unapplied = deliveries.recv().await.unwrap();
+            .context("test setup failed")?;
+        third.receipt.acknowledge().context("test setup failed")?;
+        let unapplied = deliveries.recv().await.context("test setup failed")?;
         assert_eq!(unapplied.receipt.versions(), [Version::new("4")]);
         drop(unapplied);
         drop(deliveries);
         drop(journal);
-        let journal =
-            braid_chess::journal::Journal::open(directory.path(), "backend/g1/device").unwrap();
-        let pending = journal.pending().unwrap();
+        let journal = braid_chess::journal::Journal::open(directory.path(), "backend/g1/device")
+            .context("test setup failed")?;
+        let pending = journal.pending().context("test setup failed")?;
         assert_eq!(pending.len(), 1);
         // A response lost after commit must not create a second event on restart.
         assert_eq!(
@@ -349,20 +394,28 @@ mod tests {
                     &pending[0].parent
                 )
                 .await
-                .unwrap(),
+                .context("test setup failed")?,
             4
         );
-        journal.confirm_write("v4").unwrap();
-        assert!(journal.pending().unwrap().is_empty());
+        journal.confirm_write("v4").context("test setup failed")?;
+        assert!(journal.pending().context("test setup failed")?.is_empty());
         let (restarted, _) = subscriber
             .subscribe_acknowledged(
                 braid_chess::ChessResource::moves("g1"),
-                journal.checkpoint("moves").unwrap().versions,
+                journal
+                    .checkpoint("moves")
+                    .context("test setup failed")?
+                    .versions,
             )
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(
-            restarted.recv().await.unwrap().receipt.versions(),
+            restarted
+                .recv()
+                .await
+                .context("test setup failed")?
+                .receipt
+                .versions(),
             [Version::new("4")]
         );
         drop(restarted);
@@ -372,8 +425,9 @@ mod tests {
             .header("Parents", "\"999\"")
             .send()
             .await
-            .unwrap();
+            .context("test setup failed")?;
         assert_eq!(response.status(), StatusCode::GONE);
         server.abort();
+        Ok(())
     }
 }

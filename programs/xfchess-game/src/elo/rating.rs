@@ -1,6 +1,8 @@
 use crate::errors::GameErrorCode;
 use crate::state::PlayerProfile;
 use anchor_lang::prelude::*;
+#[cfg(test)]
+use anyhow::Context as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RatingBucket {
@@ -92,9 +94,16 @@ mod tests {
     }
 
     #[test]
-    fn external_to_centiscale_scales_by_100() {
-        assert_eq!(external_to_centiscale(1500).unwrap(), 150000);
-        assert_eq!(external_to_centiscale(MIN_EXTERNAL_ELO).unwrap(), 10000);
+    fn external_to_centiscale_scales_by_100() -> anyhow::Result<()> {
+        assert_eq!(
+            external_to_centiscale(1500).context("required operation value")?,
+            150000
+        );
+        assert_eq!(
+            external_to_centiscale(MIN_EXTERNAL_ELO).context("required operation value")?,
+            10000
+        );
+        Ok(())
     }
 
     #[test]

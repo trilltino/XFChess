@@ -178,26 +178,29 @@ impl Drop for InFlight<'_> {
 }
 
 impl LichessClient {
-    pub fn new(base: impl Into<String>) -> Self {
-        Self {
+    pub fn new(base: impl Into<String>) -> Result<Self, reqwest::Error> {
+        Ok(Self {
             http: reqwest::Client::builder()
                 .timeout(REQUEST_TIMEOUT)
-                .build()
-                .expect("reqwest client builds with a timeout only"),
+                .build()?,
             base: base.into().trim_end_matches('/').to_string(),
             paused_until: Mutex::new(None),
             in_flight: Mutex::new(HashSet::new()),
-        }
+        })
     }
 
     /// Process-wide client; `LICHESS_API_URL` overrides the host (tests, staging).
-    pub fn global() -> &'static LichessClient {
-        static CLIENT: OnceLock<LichessClient> = OnceLock::new();
-        CLIENT.get_or_init(|| {
-            LichessClient::new(
-                std::env::var("LICHESS_API_URL").unwrap_or_else(|_| "https://lichess.org".into()),
-            )
-        })
+    pub fn global() -> Result<&'static LichessClient, LichessError> {
+        static CLIENT: OnceLock<Result<LichessClient, reqwest::Error>> = OnceLock::new();
+        CLIENT
+            .get_or_init(|| {
+                LichessClient::new(
+                    std::env::var("LICHESS_API_URL")
+                        .unwrap_or_else(|_| "https://lichess.org".into()),
+                )
+            })
+            .as_ref()
+            .map_err(|error| LichessError::Http(error.to_string()))
     }
 
     fn begin(&self, wallet: &str) -> Result<InFlight<'_>, LichessError> {
@@ -376,17 +379,18 @@ pub fn difficulty_offset(difficulty: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use serde_json::json;
 
     #[test]
-    fn converts_an_api_puzzle_into_fen_and_line() {
+    fn converts_an_api_puzzle_into_fen_and_line() -> anyhow::Result<()> {
         // 1.e4 e5 2.Qh5 Nc6 3.Bc4 Nf6?? — the PGN ends on the setup move Nf6,
         // and the solution is Qxf7#.
         let body = json!({
             "game": { "pgn": "e4 e5 Qh5 Nc6 Bc4 Nf6" },
             "puzzle": { "id": "abc12", "rating": 900, "solution": ["h5f7"], "themes": ["mateIn1", "short"] }
         });
-        let p = puzzle_from_api(&body).unwrap();
+        let p = puzzle_from_api(&body).context("test setup failed")?;
         assert_eq!(p.id, "abc12");
         assert_eq!(p.line, vec!["g8f6".to_string(), "h5f7".to_string()]);
         assert_eq!(
@@ -395,15 +399,20 @@ mod tests {
         );
         assert_eq!(p.rating, 900);
         assert_eq!(p.themes, vec!["mateIn1".to_string(), "short".to_string()]);
+        Ok(())
     }
 
     #[test]
-    fn tolerates_move_numbers_and_check_marks() {
+    fn tolerates_move_numbers_and_check_marks() -> anyhow::Result<()> {
         let body = json!({
             "game": { "pgn": "1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6" },
             "puzzle": { "id": "x", "solution": ["h5f7"] }
         });
-        assert_eq!(puzzle_from_api(&body).unwrap().line[0], "g8f6");
+        assert_eq!(
+            puzzle_from_api(&body).context("test setup failed")?.line[0],
+            "g8f6"
+        );
+        Ok(())
     }
 
     #[test]
@@ -426,10 +435,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rate_limit_pauses_and_slots_release() {
-        let client = LichessClient::new("http://127.0.0.1:9");
+    async fn rate_limit_pauses_and_slots_release() -> anyhow::Result<()> {
+        let client = LichessClient::new("http://127.0.0.1:9")?;
         {
-            let _slot = client.begin("w").unwrap();
+            let _slot = client.begin("w").context("test setup failed")?;
             assert!(matches!(client.begin("w"), Err(LichessError::Busy)));
         }
         assert!(client.begin("w").is_ok(), "slot released on drop");
@@ -437,5 +446,6 @@ mod tests {
             .check(reqwest::StatusCode::TOO_MANY_REQUESTS)
             .is_err());
         assert!(matches!(client.begin("w"), Err(LichessError::RateLimited)));
+        Ok(())
     }
 }

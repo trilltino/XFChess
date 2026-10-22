@@ -8,7 +8,6 @@ mod wallet;
 use wallet::*;
 
 mod services;
-mod types;
 mod utils;
 mod windows;
 
@@ -47,7 +46,7 @@ fn show_tournament_admin_window(app: tauri::AppHandle) {
   open_tournament_admin(&app);
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
   init_logging();
 
   tauri::Builder::default()
@@ -65,7 +64,6 @@ fn main() {
       let wallet_jwt = WalletJwt::default();
       let pending_tx: PendingTx = Arc::new(Mutex::new(None));
       let (pending_notify, _): (PendingTxNotify, _) = tokio::sync::watch::channel(());
-      let auth_state = services::auth::AuthState::new();
 
       app.manage(wallet_pubkey.clone());
       app.manage(wallet_username);
@@ -73,7 +71,6 @@ fn main() {
       app.manage(wallet_jwt);
       app.manage(pending_tx.clone());
       app.manage(pending_notify.clone());
-      app.manage(auth_state);
       #[cfg(feature = "tournament-admin")]
       app.manage(AdminTunnel::default());
 
@@ -159,8 +156,7 @@ fn main() {
       #[cfg(feature = "tournament-admin")]
       windows::tournament_admin::admin_token_clear,
     ])
-    .build(tauri::generate_context!())
-    .expect("error while building tauri application")
+    .build(tauri::generate_context!())?
     .run(|_app_handle, event| {
       if matches!(
         event,
@@ -175,4 +171,5 @@ fn main() {
         kill_admin_tunnel_inner(_app_handle);
       }
     });
+  Ok(())
 }

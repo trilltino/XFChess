@@ -41,8 +41,7 @@ pub fn replay_spawn_pieces_system(
     let mut entity_at_sq: std::collections::HashMap<usize, Entity> =
         std::collections::HashMap::new();
 
-    for sq in 0..64usize {
-        let piece_id = curr_board[sq];
+    for (sq, &piece_id) in curr_board.iter().enumerate() {
         if piece_id == 0 {
             continue;
         }
@@ -53,7 +52,11 @@ pub fn replay_spawn_pieces_system(
         } else {
             PieceColor::Black
         };
-        let piece_type = engine_id_to_piece_type(piece_id.abs());
+        let Some(id) = piece_id.checked_abs().filter(|id| (1..=6).contains(id)) else {
+            warn!("Invalid replay piece {piece_id} at square {sq}");
+            continue;
+        };
+        let piece_type = engine_id_to_piece_type(id);
 
         let piece_material = if color == PieceColor::White {
             materials.add(crate::rendering::pieces::white_piece_material())

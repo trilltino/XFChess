@@ -1,3 +1,5 @@
+#[cfg(test)]
+use anyhow::Context as _;
 use std::time::Duration;
 
 pub const RETRYABLE_STATUS: &[u16] = &[309, 408, 425, 429, 432, 500, 502, 503, 504];
@@ -170,16 +172,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retry_after_accepts_seconds_and_http_dates() {
+    fn retry_after_accepts_seconds_and_http_dates() -> anyhow::Result<()> {
         assert_eq!(parse_retry_after(" 2 "), Some(Duration::from_secs(2)));
         assert_eq!(
             parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT"),
             Some(Duration::ZERO)
         );
         let future = std::time::SystemTime::now() + Duration::from_secs(60);
-        let delay = parse_retry_after(&httpdate::fmt_http_date(future)).unwrap();
+        let delay = parse_retry_after(&httpdate::fmt_http_date(future))
+            .context("required operation value")?;
         assert!(delay > Duration::from_secs(58) && delay <= Duration::from_secs(60));
         assert_eq!(parse_retry_after("not a date"), None);
+        Ok(())
     }
 
     #[test]

@@ -83,10 +83,9 @@ fn version_of(message: &ChessMessage) -> Option<String> {
         ChessMessage::Chat(p) => {
             braid_chess::version_hash(&format!("chat:{}:{}", p.player, p.timestamp_ms), 0)
         }
-        ChessMessage::SessionInfo { .. } => braid_chess::version_hash(
-            &serde_json::to_string(message).expect("chess message serializes"),
-            0,
-        ),
+        ChessMessage::SessionInfo { .. } => {
+            braid_chess::version_hash(&serde_json::to_string(message).ok()?, 0)
+        }
         _ => return None,
     })
 }
@@ -188,7 +187,10 @@ pub fn publish_session_info(
         signing_pubkey,
         expires_at,
     };
-    let content_version = version_of(&message).expect("session info has a version");
+    let Some(content_version) = version_of(&message) else {
+        warn!("[braid] could not serialize session info");
+        return;
+    };
     publish(
         base_url,
         game_id,
@@ -425,7 +427,7 @@ pub fn drain_braid_messages(
     let game_id_u64 =
         crate::multiplayer::network::online_game_session::numeric_game_id(&session.game_id);
 
-    loop {
+    for _ in 0..256 {
         let (msg, receipt) = if let Some(rx) = state.deliveries.as_mut() {
             let Ok(delivery) = rx.try_recv() else {
                 break;
@@ -658,26 +660,29 @@ mod tests {
     }
 
     #[test]
-    fn head_advances_on_opponent_moves_not_just_our_own() {
+    fn head_advances_on_opponent_moves_not_just_our_own() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut heads = BraidStreamHeads::default();
         assert_eq!(heads.head("moves"), GENESIS_PARENT);
 
         // Opponent's move arrives over the subscription.
         let opponent = move_msg("fen-opponent", 1);
-        let v_opponent = version_of(&opponent).unwrap();
+        let v_opponent = version_of(&opponent).ok_or("missing test value")?;
         heads.set_head(stream_of(&opponent), v_opponent.clone());
 
         // Our next publish must chain off it. Before the fix this still read
         // "0" (or our own last version), which the backend rejected with 409.
         assert_eq!(heads.head("moves"), v_opponent);
+
+        Ok(())
     }
 
     #[test]
-    fn move_and_chat_heads_are_independent() {
+    fn move_and_chat_heads_are_independent() -> Result<(), Box<dyn std::error::Error>> {
         let mut heads = BraidStreamHeads::default();
 
         let mv = move_msg("fen1", 1);
-        heads.set_head(stream_of(&mv), version_of(&mv).unwrap());
+        heads.set_head(stream_of(&mv), version_of(&mv).ok_or("missing test value")?);
         let moves_head = heads.head("moves");
 
         let chat = ChessMessage::Chat(ChatPayload {
@@ -686,7 +691,10 @@ mod tests {
             timestamp_ms: 7,
         });
         assert_eq!(stream_of(&chat), "chat");
-        heads.set_head(stream_of(&chat), version_of(&chat).unwrap());
+        heads.set_head(
+            stream_of(&chat),
+            version_of(&chat).ok_or("missing test value")?,
+        );
 
         assert_eq!(
             heads.head("moves"),
@@ -695,13 +703,15 @@ mod tests {
         );
         assert_ne!(heads.head("chat"), GENESIS_PARENT);
         assert_ne!(heads.head("chat"), moves_head);
+
+        Ok(())
     }
 
     #[test]
-    fn version_of_matches_the_publish_side_hashes() {
+    fn version_of_matches_the_publish_side_hashes() -> Result<(), Box<dyn std::error::Error>> {
         let mv = move_msg("fen-after", 3);
         assert_eq!(
-            version_of(&mv).unwrap(),
+            version_of(&mv).ok_or("missing test value")?,
             braid_chess::version_hash("fen-after", 3)
         );
 
@@ -709,7 +719,7 @@ mod tests {
             player: "white".to_string(),
         };
         assert_eq!(
-            version_of(&resign).unwrap(),
+            version_of(&resign).ok_or("missing test value")?,
             braid_chess::version_hash("resign:white", 0)
         );
 
@@ -719,7 +729,7 @@ mod tests {
             timestamp_ms: 42,
         });
         assert_eq!(
-            version_of(&chat).unwrap(),
+            version_of(&chat).ok_or("missing test value")?,
             braid_chess::version_hash("chat:bob:42", 0)
         );
 
@@ -730,8 +740,8 @@ mod tests {
             expires_at: 0,
         };
         assert_eq!(
-            version_of(&session).unwrap(),
-            braid_chess::version_hash(&serde_json::to_string(&session).unwrap(), 0)
+            version_of(&session).ok_or("missing test value")?,
+            braid_chess::version_hash(&serde_json::to_string(&session)?, 0)
         );
         let renewed = ChessMessage::SessionInfo {
             player_pubkey: "wallet1".into(),
@@ -740,13 +750,16 @@ mod tests {
             expires_at: 1,
         };
         assert_ne!(version_of(&session), version_of(&renewed));
+
+        Ok(())
     }
 
     #[test]
-    fn own_publishes_are_recognised_as_echoes_exactly_once() {
+    fn own_publishes_are_recognised_as_echoes_exactly_once(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut heads = BraidStreamHeads::default();
         let mine = move_msg("fen-mine", 1);
-        let v = version_of(&mine).unwrap();
+        let v = version_of(&mine).ok_or("missing test value")?;
 
         // publish() claims the version up-front.
         heads.self_published.insert(v.clone());
@@ -756,10 +769,12 @@ mod tests {
         // A second, genuinely-remote message with the same version would not
         // be swallowed (the claim is consumed, not permanent).
         assert!(!heads.self_published.remove(&v));
+
+        Ok(())
     }
 
     #[test]
-    fn opponent_session_info_is_not_treated_as_an_echo() {
+    fn opponent_session_info_is_not_treated_as_an_echo() -> Result<(), Box<dyn std::error::Error>> {
         let mut heads = BraidStreamHeads::default();
         let ours = ChessMessage::SessionInfo {
             player_pubkey: "us".to_string(),
@@ -767,7 +782,9 @@ mod tests {
             signing_pubkey: "g".to_string(),
             expires_at: 0,
         };
-        heads.self_published.insert(version_of(&ours).unwrap());
+        heads
+            .self_published
+            .insert(version_of(&ours).ok_or("missing test value")?);
 
         let theirs = ChessMessage::SessionInfo {
             player_pubkey: "them".to_string(),
@@ -775,10 +792,12 @@ mod tests {
             signing_pubkey: "g2".to_string(),
             expires_at: 0,
         };
-        let v_theirs = version_of(&theirs).unwrap();
+        let v_theirs = version_of(&theirs).ok_or("missing test value")?;
         assert!(
             !heads.self_published.remove(&v_theirs),
             "opponent SessionInfo must be delivered, not swallowed as an echo"
         );
+
+        Ok(())
     }
 }

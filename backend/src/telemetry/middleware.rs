@@ -131,6 +131,7 @@ pub async fn telemetry_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[tokio::test]
     async fn test_request_context_creation() {
@@ -145,8 +146,9 @@ mod tests {
     }
 
     #[test]
-    fn unknown_methods_share_one_metrics_label() {
-        let custom = Method::from_bytes(b"PROBE123").unwrap();
+    fn unknown_methods_share_one_metrics_label() -> anyhow::Result<()> {
+        let custom = Method::from_bytes(b"PROBE123").context("test setup failed")?;
         assert_eq!(endpoint_label(&custom, None), "OTHER unmatched");
+        Ok(())
     }
 }

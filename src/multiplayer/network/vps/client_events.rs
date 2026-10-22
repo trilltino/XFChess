@@ -172,15 +172,17 @@ mod tests {
     }
 
     #[test]
-    fn serialized_event_has_no_secret_material_fields() {
+    fn serialized_event_has_no_secret_material_fields() -> Result<(), Box<dyn std::error::Error>> {
         let event = ClientEvent::new("test")
             .wallet("wallet")
             .session_kind("standalone")
             .reason("safe public reason");
-        let json = serde_json::to_string(&event).unwrap();
+        let json = serde_json::to_string(&event)?;
         assert!(!json.contains("session_signer_secret"));
         assert!(!json.contains("keypair"));
         assert!(!json.contains("private"));
         assert!(json.contains("safe public reason"));
+
+        Ok(())
     }
 }

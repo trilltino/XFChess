@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use swiss_pairing::{generate_pairings, PairingConfig, SwissPlayer};
 
 fn player(id: &str, rating: u32, score: f64) -> SwissPlayer {
@@ -20,7 +21,29 @@ fn cfg() -> PairingConfig {
 }
 
 #[test]
-fn rematch_transposition_in_bottom_half() {
+fn hard_constraints_survive_the_float_fallback_and_manual_overrides() {
+    let players = vec![player("a", 2_000, 0.0), player("b", 1_900, 0.0)];
+    let mut config = PairingConfig {
+        forbidden: vec![("a".into(), "b".into())],
+        ..Default::default()
+    };
+    assert!(generate_pairings(1, &players, 5, &config).is_err());
+    config.manual_overrides.push(swiss_pairing::ManualPairing {
+        white: "a".into(),
+        black: "b".into(),
+    });
+    assert!(generate_pairings(1, &players, 5, &config).is_err());
+    config.forbidden.clear();
+    config
+        .manual_overrides
+        .push(config.manual_overrides[0].clone());
+    assert!(generate_pairings(1, &players, 5, &config).is_err());
+    assert!(generate_pairings(0, &players, 5, &cfg()).is_err());
+    assert!(generate_pairings(1, &[player("a", 1_500, f64::NAN)], 5, &cfg()).is_err());
+}
+
+#[test]
+fn rematch_transposition_in_bottom_half() -> anyhow::Result<()> {
     let mut p1 = player("p1", 2000, 2.0);
     let mut p3 = player("p3", 1800, 2.0);
     p1.opponents.push("p3".into());
@@ -28,7 +51,7 @@ fn rematch_transposition_in_bottom_half() {
 
     let players = vec![p1, player("p2", 1900, 2.0), p3, player("p4", 1700, 2.0)];
 
-    let round = generate_pairings(2, &players, 5, &cfg()).unwrap();
+    let round = generate_pairings(2, &players, 5, &cfg()).context("required operation value")?;
 
     assert_eq!(round.pairings.len(), 2, "all 4 players must be paired");
     for p in &round.pairings {
@@ -36,10 +59,11 @@ fn rematch_transposition_in_bottom_half() {
             (p.white == "p1" && p.black == "p3") || (p.white == "p3" && p.black == "p1");
         assert!(!is_rematch, "engine produced a rematch: {:?}", p);
     }
+    Ok(())
 }
 
 #[test]
-fn forced_bye_on_odd_leftover_after_float() {
+fn forced_bye_on_odd_leftover_after_float() -> anyhow::Result<()> {
     let mut p1 = player("p1", 2000, 0.0);
     let mut p2 = player("p2", 1900, 0.0);
     let mut p3 = player("p3", 1800, 0.0);
@@ -47,7 +71,8 @@ fn forced_bye_on_odd_leftover_after_float() {
     p2.opponents = vec!["p1".into(), "p3".into()];
     p3.opponents = vec!["p1".into(), "p2".into()];
 
-    let round = generate_pairings(3, &[p1, p2, p3], 5, &cfg()).unwrap();
+    let round =
+        generate_pairings(3, &[p1, p2, p3], 5, &cfg()).context("required operation value")?;
 
     let total = round.pairings.len() * 2 + round.byes.len();
     assert_eq!(
@@ -55,10 +80,11 @@ fn forced_bye_on_odd_leftover_after_float() {
         "all 3 players must be accounted for (no silent drop)"
     );
     assert!(!round.byes.is_empty(), "at least one forced bye expected");
+    Ok(())
 }
 
 #[test]
-fn five_round_bye_rotation_no_double_bye() {
+fn five_round_bye_rotation_no_double_bye() -> anyhow::Result<()> {
     let base_player = |id: &str, rating: u32| player(id, rating, 0.0);
 
     let mut current_players = vec![
@@ -72,7 +98,8 @@ fn five_round_bye_rotation_no_double_bye() {
     let mut seen_byes: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
 
     for round_num in 1u8..=5 {
-        let round = generate_pairings(round_num, &current_players, 5, &cfg()).unwrap();
+        let round = generate_pairings(round_num, &current_players, 5, &cfg())
+            .context("required operation value")?;
         assert_eq!(
             round.byes.len(),
             1,
@@ -108,10 +135,11 @@ fn five_round_bye_rotation_no_double_bye() {
             count
         );
     }
+    Ok(())
 }
 
 #[test]
-fn float_down_recorded_in_round() {
+fn float_down_recorded_in_round() -> anyhow::Result<()> {
     // Top 2 pair cleanly within their scoregroup; bottom 4 pair among themselves.
     // No floats should occur.
     let players = vec![
@@ -123,7 +151,7 @@ fn float_down_recorded_in_round() {
         player("p6", 1500, 0.0),
     ];
 
-    let round = generate_pairings(2, &players, 5, &cfg()).unwrap();
+    let round = generate_pairings(2, &players, 5, &cfg()).context("required operation value")?;
     assert!(
         round.float_downs.is_empty(),
         "no floats expected when groups pair cleanly, got: {:?}",
@@ -131,10 +159,11 @@ fn float_down_recorded_in_round() {
     );
     assert_eq!(round.pairings.len(), 3);
     assert!(round.byes.is_empty());
+    Ok(())
 }
 
 #[test]
-fn odd_scoregroups_float_down_instead_of_each_taking_a_bye() {
+fn odd_scoregroups_float_down_instead_of_each_taking_a_bye() -> anyhow::Result<()> {
     // Two odd scoregroups (3 on 2.0, 3 on 1.0) in an even field: the top group
     // floats one player down, nobody gets a bye, and all six play.
     let players = vec![
@@ -146,7 +175,7 @@ fn odd_scoregroups_float_down_instead_of_each_taking_a_bye() {
         player("f", 1500, 1.0),
     ];
 
-    let round = generate_pairings(3, &players, 5, &cfg()).unwrap();
+    let round = generate_pairings(3, &players, 5, &cfg()).context("required operation value")?;
 
     assert!(
         round.byes.is_empty(),
@@ -155,16 +184,18 @@ fn odd_scoregroups_float_down_instead_of_each_taking_a_bye() {
     );
     assert_eq!(round.pairings.len(), 3);
     assert_eq!(round.float_downs, vec!["c".to_string()]);
+    Ok(())
 }
 
 #[test]
-fn at_most_one_bye_and_everyone_accounted_for() {
+fn at_most_one_bye_and_everyone_accounted_for() -> anyhow::Result<()> {
     // Sweep field sizes and score spreads that produce many odd scoregroups.
     for n in 2usize..=17 {
         let players: Vec<SwissPlayer> = (0..n)
             .map(|i| player(&format!("p{i}"), 2000 - i as u32 * 10, (i % 4) as f64 * 0.5))
             .collect();
-        let round = generate_pairings(2, &players, 5, &cfg()).unwrap();
+        let round =
+            generate_pairings(2, &players, 5, &cfg()).context("required operation value")?;
 
         assert_eq!(round.byes.len(), n % 2, "n={n}: byes {:?}", round.byes);
         let mut seen: Vec<&String> = round
@@ -177,4 +208,5 @@ fn at_most_one_bye_and_everyone_accounted_for() {
         seen.dedup();
         assert_eq!(seen.len(), n, "n={n}: every player exactly once");
     }
+    Ok(())
 }

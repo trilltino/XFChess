@@ -1,4 +1,4 @@
-// Use android-activity native glue from libxfchess.so; linking GameActivity
+// Use android-activity native glue from libxfchess_app.so; linking GameActivity
 // prefab adds incompatible glue. AGP 9 provides Kotlin support without a separate plugin.
 plugins {
     id("com.android.application")

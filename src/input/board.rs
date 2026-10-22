@@ -1,4 +1,4 @@
-use crate::core::states::GameMode;
+use crate::core::state::GameMode;
 use crate::engine::board_state::ChessEngine;
 use crate::game::components::{HasMoved, PieceType, SelectedPiece};
 use crate::game::resources::player::Players;
@@ -63,7 +63,7 @@ pub struct InputSystemParams<'w, 's> {
     pub game_sounds: Option<Res<'w, GameSounds>>,
     pub move_events: MessageWriter<'w, crate::game::events::MoveMadeEvent>,
     pub players: Res<'w, Players>,
-    pub game_mode: Res<'w, crate::core::states::GameMode>,
+    pub game_mode: Res<'w, crate::core::state::GameMode>,
     pub start_barrier: Res<'w, crate::multiplayer::types::OnlineStartBarrier>,
     pub online_session: Option<Res<'w, OnlineGameSession>>,
     pub pending_promotion: Res<'w, PendingPromotion>,
@@ -78,7 +78,7 @@ pub struct InputSystemParams<'w, 's> {
 
 pub fn is_human_turn(params: &InputSystemParams) -> bool {
     // If we're spectating, it's NEVER a human turn (at least for THIS local instance)
-    if *params.game_mode == crate::core::states::GameMode::Spectator {
+    if *params.game_mode == crate::core::state::GameMode::Spectator {
         return false;
     }
 

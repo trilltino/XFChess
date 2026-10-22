@@ -191,7 +191,7 @@ pub fn game_status_ui(mut params: GameUIParams) {
 
     #[cfg(feature = "solana")]
     if *params.game_mode == GameMode::MultiplayerCompetitive {
-        if let (Some(ref mut wallet), Some(ref mut sync), Some(ref mut comp), Some(ref profile)) = (
+        if let (Some(ref mut wallet), Some(ref mut sync), Some(ref mut comp), Some(profile)) = (
             params.solana_wallet.as_mut(),
             params.solana_sync.as_mut(),
             params.competitive_match.as_mut(),

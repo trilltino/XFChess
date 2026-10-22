@@ -112,7 +112,7 @@ mod tests {
     fn test_has_moved_default() {
         let has_moved = HasMoved::default();
 
-        assert_eq!(has_moved.moved, false);
+        assert!(!has_moved.moved);
         assert_eq!(has_moved.move_count, 0);
     }
 
@@ -123,7 +123,7 @@ mod tests {
             move_count: 3,
         };
 
-        assert_eq!(has_moved.moved, true);
+        assert!(has_moved.moved);
         assert_eq!(has_moved.move_count, 3);
     }
 
@@ -165,7 +165,7 @@ mod tests {
             moved: true,
             move_count: 5,
         };
-        let cloned = original.clone();
+        let cloned = original;
 
         assert_eq!(original.moved, cloned.moved);
         assert_eq!(original.move_count, cloned.move_count);

@@ -176,6 +176,17 @@ impl BraidIrohNode {
         self.subscription_mgr.broadcast(url, &update).await
     }
 
+    /// Retain an update for local HTTP/bridge subscribers while sending its body
+    /// directly to gossip peers that understand the application's binary framing.
+    pub async fn put_raw(&self, url: &str, update: Update) -> anyhow::Result<()> {
+        let body = update
+            .body
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("raw gossip requires an update body"))?;
+        self.resources.append(url, update).await;
+        self.subscription_mgr.broadcast_raw(url, body).await
+    }
+
     pub async fn store_update(&self, url: &str, update: Update) {
         self.resources.append(url, update).await;
     }

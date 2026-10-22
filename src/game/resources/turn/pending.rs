@@ -35,12 +35,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_pending_turn_request() {
+    fn test_pending_turn_request() -> Result<(), Box<dyn std::error::Error>> {
         let mut pending = PendingTurnAdvance::default();
         assert!(pending.request(PieceColor::White));
         assert!(pending.is_pending());
         assert!(!pending.request(PieceColor::Black));
-        assert_eq!(pending.take().unwrap().mover, PieceColor::White);
+        assert_eq!(
+            pending.take().ok_or("missing test value")?.mover,
+            PieceColor::White
+        );
         assert!(!pending.is_pending());
+
+        Ok(())
     }
 }

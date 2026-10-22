@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiClient, type TournamentSummary } from "../../services/api";
 import { lamportsToUsd } from "../../services/sol";
 import { useSolUsdRate } from "../../hooks/useSolUsdRate";
+import { startPolling } from "../../services/poll";
 import { cancellationState, type OperationStatus } from "../../services/adminFlows";
 
 interface TournamentListProps {
@@ -22,34 +23,43 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const solUsdRate = useSolUsdRate();
 
+  const mounted = useRef(false);
+  const loadingList = useRef(false);
   useEffect(() => {
-    loadTournaments();
+    mounted.current = true;
+    void loadTournaments();
+    return () => { mounted.current = false; };
   }, []);
 
   useEffect(() => {
     const pendingIds = Object.entries(cancellations).filter(([, status]) => cancellationState(status).pending).map(([id]) => Number(id));
     if (!pendingIds.length) return;
-    let cancelled = false;
-    const timer = window.setInterval(async () => {
+    return startPolling(async active => {
       for (const id of pendingIds) {
         const r = await apiClient.getTournamentOperations(id);
-        if (cancelled) return;
+        if (!active()) return;
         if (!r.ok) { setLoadError("Could not refresh cancellation operations. Retry to refresh the list."); continue; }
         const latest = [...(r.data?.operations ?? [])].sort((a, b) => b.created_at - a.created_at)[0];
         if (latest) setCancellations(p => ({ ...p, [id]: latest.status }));
       }
-    }, 10000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    }, 10000, false);
   }, [cancellations]);
 
   const loadTournaments = async () => {
+    if (loadingList.current) return;
+    loadingList.current = true;
     try {
       setLoading(true);
       setLoadError(null);
       const response = await apiClient.getTournaments();
+      if (!mounted.current) return;
       if (response.ok && response.data) {
         setTournaments(response.data);
-        const operationResults = await Promise.all(response.data.map(async tournament => ({ id: tournament.tournament_id, result: await apiClient.getTournamentOperations(tournament.tournament_id) })));
+        const operationResults = [];
+        for (let offset = 0; offset < response.data.length; offset += 8) {
+          operationResults.push(...await Promise.all(response.data.slice(offset, offset + 8).map(async tournament => ({ id: tournament.tournament_id, result: await apiClient.getTournamentOperations(tournament.tournament_id) }))));
+          if (!mounted.current) return;
+        }
         const statuses: Record<number, OperationStatus | undefined> = {};
         for (const { id, result } of operationResults) {
           if (!result.ok) { statuses[id] = undefined; continue; }
@@ -61,9 +71,10 @@ export default function TournamentList({ onTournamentSelect }: TournamentListPro
         setLoadError("Failed to load tournaments. Retry to refresh the list.");
       }
     } catch (err) {
-      setLoadError("Network error loading tournaments.");
+      if (mounted.current) setLoadError("Network error loading tournaments.");
     } finally {
-      setLoading(false);
+      loadingList.current = false;
+      if (mounted.current) setLoading(false);
     }
   };
 

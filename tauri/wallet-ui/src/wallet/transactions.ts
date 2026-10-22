@@ -8,6 +8,14 @@ export function deserializeTransaction(bytes: Uint8Array): Transaction | Version
   return transaction.message.version === "legacy" ? Transaction.from(bytes) : transaction;
 }
 
+// A wallet may be the first signer of a bundle that the server co-signs later.
+// Validate its approval below before accepting these partially signed bytes.
+export function serializeWalletTransaction(transaction: Transaction | VersionedTransaction): Uint8Array {
+  return transaction instanceof Transaction
+    ? transaction.serialize({ requireAllSignatures: false, verifySignatures: false })
+    : transaction.serialize();
+}
+
 export function assertWalletAddress(actual: string | undefined, expected: string): void {
   if (actual !== expected) throw new Error("Your wallet account changed. Reconnect from the game before signing.");
 }
@@ -31,10 +39,16 @@ export function validateSignedTransaction(originalBase64: string, signedBase64: 
   const index = keys.slice(0, required).findIndex(key => key.toBase58() === wallet);
   if (index < 0 || signed.signatures.length !== required) throw new Error("This wallet is not a transaction signer");
   for (let i = 0; i < required; i++) {
-    if (!nacl.sign.detached.verify(message, signed.signatures[i], keys[i].toBytes())) {
+    const previous = original.signatures[i];
+    const signature = signed.signatures[i];
+    // Verify this wallet and every supplied signature. An untouched placeholder
+    // for another signer is allowed at this stage; the game client separately
+    // restricts deferred signatures to its expected server session key.
+    const deferred = i !== index && !previous.some(byte => byte !== 0)
+      && !signature.some(byte => byte !== 0);
+    if (!deferred && !nacl.sign.detached.verify(message, signature, keys[i].toBytes())) {
       throw new Error("The wallet returned an invalid or incomplete signature");
     }
-    const previous = original.signatures[i];
     if (previous.some(byte => byte !== 0) && !Buffer.from(previous).equals(Buffer.from(signed.signatures[i]))) {
       throw new Error("The wallet replaced an existing signature");
     }

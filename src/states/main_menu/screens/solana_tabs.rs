@@ -522,11 +522,14 @@ pub(super) fn render_join_tab(
 pub(super) fn render_solana_browse_tab(
     ui: &mut egui::Ui,
     lobby: &mut crate::multiplayer::solana::lobby::SolanaLobbyState,
+    mut vps_state: Option<&mut crate::multiplayer::network::p2p_vps::P2PVpsState>,
     usd_per_sol: Option<f64>,
 ) {
     use crate::multiplayer::solana::lobby::{spawn_join_game, LobbyStatus};
 
-    let is_loading = lobby.browse_rx.is_some();
+    let is_loading = vps_state
+        .as_ref()
+        .is_some_and(|vps| vps.is_game_list_loading());
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("Open Games")
@@ -537,7 +540,9 @@ pub(super) fn render_solana_browse_tab(
         if is_loading {
             ui.spinner();
         } else if ui.small_button("Refresh").clicked() {
-            lobby.browse_last_fetch = None;
+            if let Some(vps) = vps_state.as_mut() {
+                vps.last_poll = None;
+            }
         }
     });
     ui.add_space(6.0);

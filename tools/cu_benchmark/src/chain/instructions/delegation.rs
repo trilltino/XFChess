@@ -3,7 +3,6 @@ use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
 };
-#[allow(deprecated)]
 use solana_system_interface::program as system_program;
 
 use super::common::*;

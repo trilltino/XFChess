@@ -1,4 +1,4 @@
-use crate::core::states::GameMode;
+use crate::core::state::GameMode;
 use crate::game::camera_modes::CameraLockState;
 use crate::game::resources::{CurrentTurn, Players, Selection};
 use bevy::camera::visibility::RenderLayers;
@@ -456,205 +456,6 @@ pub fn camera_rotate_on_turn_system(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_camera_controller_default() {
-        let controller = CameraController::default();
-
-        assert_eq!(controller.move_speed, 12.0);
-        assert_eq!(controller.smoothing, 0.3);
-        assert_eq!(controller.zoom_speed, 2.0);
-        assert_eq!(controller.zoom_smoothing, 0.15);
-        assert_eq!(controller.current_zoom, 11.5);
-        assert_eq!(controller.target_zoom, 11.5);
-        assert_eq!(controller.min_zoom, 3.5);
-        assert_eq!(controller.max_zoom, 20.0);
-    }
-
-    #[test]
-    fn test_zoom_limits_are_logical() {
-        let controller = CameraController::default();
-
-        assert!(controller.min_zoom < controller.current_zoom);
-        assert!(controller.current_zoom < controller.max_zoom);
-        assert!(controller.min_zoom < controller.max_zoom);
-    }
-
-    #[test]
-    fn test_zoom_smoothing_is_slower_than_movement() {
-        let controller = CameraController::default();
-
-        assert!(
-            controller.zoom_smoothing < controller.smoothing,
-            "Zoom should be smoother (slower) than movement for cinematic effect"
-        );
-    }
-
-    #[test]
-    fn test_camera_controller_custom_values() {
-        let controller = CameraController {
-            move_speed: 20.0,
-            smoothing: 0.5,
-            zoom_speed: 3.0,
-            zoom_smoothing: 0.2,
-            current_zoom: 10.0,
-            target_zoom: 10.0,
-            min_zoom: 3.0,
-            max_zoom: 50.0,
-            pitch: 0.0,
-            yaw: 0.0,
-            rotation_sensitivity: 1.0,
-            initialized: false,
-        };
-
-        assert_eq!(controller.zoom_speed, 3.0);
-        assert_eq!(controller.min_zoom, 3.0);
-        assert_eq!(controller.max_zoom, 50.0);
-    }
-
-    #[test]
-    fn test_zoom_interpolation_convergence() {
-        let mut current = 15.0;
-        let target = 10.0;
-        let smoothing = 0.15;
-
-        // Simulate several frames of interpolation
-        for _ in 0..10 {
-            current = current.lerp(target, smoothing);
-        }
-
-        // Should be closer to target but not exactly at it (smooth approach)
-        assert!(current < 15.0, "Should move from start position");
-        assert!(current > 10.0, "Should not reach target instantly");
-        assert!(
-            current < 12.0,
-            "Should make significant progress after 10 frames"
-        );
-    }
-
-    #[test]
-    fn test_zoom_clamping_min() {
-        let controller = CameraController::default();
-        let attempted_zoom: f32 = 2.0; // Below min_zoom (5.0)
-
-        let clamped = attempted_zoom.clamp(controller.min_zoom, controller.max_zoom);
-
-        assert_eq!(clamped, controller.min_zoom);
-    }
-
-    #[test]
-    fn test_zoom_clamping_max() {
-        let controller = CameraController::default();
-        let attempted_zoom: f32 = 50.0; // Above max_zoom (30.0)
-
-        let clamped = attempted_zoom.clamp(controller.min_zoom, controller.max_zoom);
-
-        assert_eq!(clamped, controller.max_zoom);
-    }
-
-    #[test]
-    fn test_zoom_direction_scroll_up() {
-        let scroll_up_delta = 1.0; // Positive scroll
-        let zoom_speed = 2.0;
-        let initial_target = 15.0;
-
-        // Scroll up = zoom in = negative change
-        let new_target = initial_target + (-scroll_up_delta * zoom_speed);
-
-        assert!(
-            new_target < initial_target,
-            "Scroll up should zoom in (decrease height)"
-        );
-        assert_eq!(new_target, 13.0);
-    }
-
-    #[test]
-    fn test_zoom_direction_scroll_down() {
-        let scroll_down_delta = -1.0; // Negative scroll
-        let zoom_speed = 2.0;
-        let initial_target = 15.0;
-
-        // Scroll down = zoom out = positive change
-        let new_target = initial_target + (-scroll_down_delta * zoom_speed);
-
-        assert!(
-            new_target > initial_target,
-            "Scroll down should zoom out (increase height)"
-        );
-        assert_eq!(new_target, 17.0);
-    }
-
-    #[test]
-    fn test_zoom_speed_affects_response() {
-        let scroll_delta: f32 = 1.0;
-        let slow_speed: f32 = 1.0;
-        let fast_speed: f32 = 3.0;
-
-        let slow_change = -scroll_delta * slow_speed;
-        let fast_change = -scroll_delta * fast_speed;
-
-        assert!(
-            fast_change.abs() > slow_change.abs(),
-            "Higher zoom_speed should create larger zoom changes"
-        );
-    }
-
-    #[test]
-    fn test_camera_controller_debug() {
-        let controller = CameraController::default();
-        let debug_str = format!("{:?}", controller);
-
-        assert!(debug_str.contains("CameraController"));
-        assert!(debug_str.contains("zoom")); // Should mention zoom fields
-    }
-
-    #[test]
-    fn test_zoom_range_is_reasonable_for_chess() {
-        let controller = CameraController::default();
-
-        assert!(
-            controller.min_zoom >= 3.0,
-            "Too close might clip through board"
-        );
-        assert!(
-            controller.max_zoom <= 50.0,
-            "Too far loses board visibility"
-        );
-
-        // Range should be wide enough for varied playstyles
-        let zoom_range = controller.max_zoom - controller.min_zoom;
-        assert!(
-            zoom_range >= 15.0,
-            "Range should allow significant zoom variation"
-        );
-    }
-
-    #[test]
-    fn test_multiple_zoom_steps() {
-        let mut target_zoom: f32 = 15.0;
-        let zoom_speed: f32 = 2.0;
-        let min_zoom: f32 = 5.0;
-        let max_zoom: f32 = 30.0;
-
-        // Scroll up 3 times (zoom in)
-        for _ in 0..3 {
-            target_zoom = (target_zoom - zoom_speed).clamp(min_zoom, max_zoom);
-        }
-
-        assert_eq!(target_zoom, 9.0);
-
-        // Scroll down 2 times (zoom out)
-        for _ in 0..2 {
-            target_zoom = (target_zoom + zoom_speed).clamp(min_zoom, max_zoom);
-        }
-
-        assert_eq!(target_zoom, 13.0);
-    }
-}
-
 pub fn setup_game_camera(
     mut commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
@@ -860,4 +661,203 @@ pub fn view_mode_toggle_input_system(
 
 pub fn camera_controls_enabled(camera_lock: Res<CameraLockState>) -> bool {
     !camera_lock.locked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_camera_controller_default() {
+        let controller = CameraController::default();
+
+        assert_eq!(controller.move_speed, 12.0);
+        assert_eq!(controller.smoothing, 0.3);
+        assert_eq!(controller.zoom_speed, 2.0);
+        assert_eq!(controller.zoom_smoothing, 0.15);
+        assert_eq!(controller.current_zoom, 11.5);
+        assert_eq!(controller.target_zoom, 11.5);
+        assert_eq!(controller.min_zoom, 3.5);
+        assert_eq!(controller.max_zoom, 20.0);
+    }
+
+    #[test]
+    fn test_zoom_limits_are_logical() {
+        let controller = CameraController::default();
+
+        assert!(controller.min_zoom < controller.current_zoom);
+        assert!(controller.current_zoom < controller.max_zoom);
+        assert!(controller.min_zoom < controller.max_zoom);
+    }
+
+    #[test]
+    fn test_zoom_smoothing_is_slower_than_movement() {
+        let controller = CameraController::default();
+
+        assert!(
+            controller.zoom_smoothing < controller.smoothing,
+            "Zoom should be smoother (slower) than movement for cinematic effect"
+        );
+    }
+
+    #[test]
+    fn test_camera_controller_custom_values() {
+        let controller = CameraController {
+            move_speed: 20.0,
+            smoothing: 0.5,
+            zoom_speed: 3.0,
+            zoom_smoothing: 0.2,
+            current_zoom: 10.0,
+            target_zoom: 10.0,
+            min_zoom: 3.0,
+            max_zoom: 50.0,
+            pitch: 0.0,
+            yaw: 0.0,
+            rotation_sensitivity: 1.0,
+            initialized: false,
+        };
+
+        assert_eq!(controller.zoom_speed, 3.0);
+        assert_eq!(controller.min_zoom, 3.0);
+        assert_eq!(controller.max_zoom, 50.0);
+    }
+
+    #[test]
+    fn test_zoom_interpolation_convergence() {
+        let mut current = 15.0;
+        let target = 10.0;
+        let smoothing = 0.15;
+
+        // Simulate several frames of interpolation
+        for _ in 0..10 {
+            current = current.lerp(target, smoothing);
+        }
+
+        // Should be closer to target but not exactly at it (smooth approach)
+        assert!(current < 15.0, "Should move from start position");
+        assert!(current > 10.0, "Should not reach target instantly");
+        assert!(
+            current < 12.0,
+            "Should make significant progress after 10 frames"
+        );
+    }
+
+    #[test]
+    fn test_zoom_clamping_min() {
+        let controller = CameraController::default();
+        let attempted_zoom: f32 = 2.0; // Below min_zoom (5.0)
+
+        let clamped = attempted_zoom.clamp(controller.min_zoom, controller.max_zoom);
+
+        assert_eq!(clamped, controller.min_zoom);
+    }
+
+    #[test]
+    fn test_zoom_clamping_max() {
+        let controller = CameraController::default();
+        let attempted_zoom: f32 = 50.0; // Above max_zoom (30.0)
+
+        let clamped = attempted_zoom.clamp(controller.min_zoom, controller.max_zoom);
+
+        assert_eq!(clamped, controller.max_zoom);
+    }
+
+    #[test]
+    fn test_zoom_direction_scroll_up() {
+        let scroll_up_delta = 1.0; // Positive scroll
+        let zoom_speed = 2.0;
+        let initial_target = 15.0;
+
+        // Scroll up = zoom in = negative change
+        let new_target = initial_target + (-scroll_up_delta * zoom_speed);
+
+        assert!(
+            new_target < initial_target,
+            "Scroll up should zoom in (decrease height)"
+        );
+        assert_eq!(new_target, 13.0);
+    }
+
+    #[test]
+    fn test_zoom_direction_scroll_down() {
+        let scroll_down_delta = -1.0; // Negative scroll
+        let zoom_speed = 2.0;
+        let initial_target = 15.0;
+
+        // Scroll down = zoom out = positive change
+        let new_target = initial_target + (-scroll_down_delta * zoom_speed);
+
+        assert!(
+            new_target > initial_target,
+            "Scroll down should zoom out (increase height)"
+        );
+        assert_eq!(new_target, 17.0);
+    }
+
+    #[test]
+    fn test_zoom_speed_affects_response() {
+        let scroll_delta: f32 = 1.0;
+        let slow_speed: f32 = 1.0;
+        let fast_speed: f32 = 3.0;
+
+        let slow_change = -scroll_delta * slow_speed;
+        let fast_change = -scroll_delta * fast_speed;
+
+        assert!(
+            fast_change.abs() > slow_change.abs(),
+            "Higher zoom_speed should create larger zoom changes"
+        );
+    }
+
+    #[test]
+    fn test_camera_controller_debug() {
+        let controller = CameraController::default();
+        let debug_str = format!("{:?}", controller);
+
+        assert!(debug_str.contains("CameraController"));
+        assert!(debug_str.contains("zoom")); // Should mention zoom fields
+    }
+
+    #[test]
+    fn test_zoom_range_is_reasonable_for_chess() {
+        let controller = CameraController::default();
+
+        assert!(
+            controller.min_zoom >= 3.0,
+            "Too close might clip through board"
+        );
+        assert!(
+            controller.max_zoom <= 50.0,
+            "Too far loses board visibility"
+        );
+
+        // Range should be wide enough for varied playstyles
+        let zoom_range = controller.max_zoom - controller.min_zoom;
+        assert!(
+            zoom_range >= 15.0,
+            "Range should allow significant zoom variation"
+        );
+    }
+
+    #[test]
+    fn test_multiple_zoom_steps() {
+        let mut target_zoom: f32 = 15.0;
+        let zoom_speed: f32 = 2.0;
+        let min_zoom: f32 = 5.0;
+        let max_zoom: f32 = 30.0;
+
+        // Scroll up 3 times (zoom in)
+        for _ in 0..3 {
+            target_zoom = (target_zoom - zoom_speed).clamp(min_zoom, max_zoom);
+        }
+
+        assert_eq!(target_zoom, 9.0);
+
+        // Scroll down 2 times (zoom out)
+        for _ in 0..2 {
+            target_zoom = (target_zoom + zoom_speed).clamp(min_zoom, max_zoom);
+        }
+
+        assert_eq!(target_zoom, 13.0);
+    }
 }

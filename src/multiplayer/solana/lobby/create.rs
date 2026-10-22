@@ -113,8 +113,9 @@ pub(super) async fn async_create_game(
         "Creating game"
     };
     let step_start = Instant::now();
-    let signed_bytes = sign_via_tauri_only(&rpc_url, wallet_pubkey, &ixs, &[], label)
-        .map_err(|e| format!("sign bundled TX: {e}"))?;
+    let signed_bytes =
+        sign_via_tauri_only(&rpc_url, wallet_pubkey, &ixs, &[], &[session_pubkey], label)
+            .map_err(|e| format!("sign bundled TX: {e}"))?;
     info!(
         "[CREATE_GAME] wallet signing completed for game {game_id} in {:?}",
         step_start.elapsed()

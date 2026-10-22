@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameRecord {
     pub game_id: String,
@@ -60,7 +59,6 @@ pub enum GameResult {
     Draw,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlyEval {
     pub ply: u32,
@@ -80,7 +78,6 @@ pub enum Complexity {
     Complex,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalValues {
     pub timing_anomaly: f64,
@@ -93,7 +90,6 @@ pub struct SignalValues {
     #[serde(default)]
     pub timing_source: TimingSource,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Verdict {
@@ -121,7 +117,6 @@ impl Verdict {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SideAnalysis {

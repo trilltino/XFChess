@@ -9,6 +9,19 @@ use tracing::error;
 
 use crate::signing::AppState;
 
+type VerdictRow = (
+    String,
+    String,
+    String,
+    String,
+    f64,
+    f64,
+    String,
+    String,
+    Option<String>,
+    i64,
+);
+
 pub fn anticheat_routes() -> Router<AppState> {
     Router::new()
         .route("/anticheat/verdict/{game_id}", get(get_verdict))
@@ -21,18 +34,7 @@ pub async fn get_verdict(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let pool = state.store.pool();
 
-    let row: Option<(
-        String,
-        String,
-        String,
-        String,
-        f64,
-        f64,
-        String,
-        String,
-        Option<String>,
-        i64,
-    )> = sqlx::query_as(
+    let row: Option<VerdictRow> = sqlx::query_as(
         "SELECT white_pubkey, black_pubkey,
                     white_verdict, black_verdict,
                     white_score, black_score,

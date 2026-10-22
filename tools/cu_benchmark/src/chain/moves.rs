@@ -5,63 +5,23 @@ pub struct ValidMove {
     pub next_board: [u8; 68],
 }
 
-pub fn generate_100_move_sequence() -> Vec<ValidMove> {
+pub fn generate_100_move_sequence() -> anyhow::Result<Vec<ValidMove>> {
+    const SHUFFLE: [[u8; 5]; 4] = [*b"g1f3\0", *b"g8f6\0", *b"f3g1\0", *b"f6g8\0"];
+    const FINISH: [[u8; 5]; 4] = [*b"f2f3\0", *b"e7e5\0", *b"g2g4\0", *b"d8h4\0"];
     let mut game = Game::default();
+    let mut moves = Vec::with_capacity(100);
 
-    let mut result = Vec::with_capacity(100);
-
-    for i in 0..96 {
-        let (_src, _dst, uci) = if i % 2 == 0 {
-            // White turn
-            if (i / 2) % 2 == 0 {
-                // g1 (6) to f3 (21)
-                (6, 21, *b"g1f3\0")
-            } else {
-                // f3 (21) to g1 (6)
-                (21, 6, *b"f3g1\0")
-            }
-        } else {
-            // Black turn
-            if (i / 2) % 2 == 0 {
-                // g8 (62) to f6 (45)
-                (62, 45, *b"g8f6\0")
-            } else {
-                // f6 (45) to g8 (62)
-                (45, 62, *b"f6g8\0")
-            }
-        };
-
-        let move_text = std::str::from_utf8(&uci[..4]).expect("fixed UCI");
-        game.play_uci(move_text)
-            .expect("benchmark sequence must be legal");
-        let cb = game.compact_board();
-
-        result.push(ValidMove {
+    // Return the knights home before the final Fool's Mate sequence.
+    for uci in SHUFFLE.into_iter().cycle().take(96).chain(FINISH) {
+        let text = std::str::from_utf8(&uci[..4])?;
+        game.play_uci(text)
+            .map_err(|error| anyhow::anyhow!("illegal benchmark move {text}: {error}"))?;
+        moves.push(ValidMove {
             uci,
-            next_board: cb.to_bytes(),
+            next_board: game.compact_board().to_bytes(),
         });
     }
-
-    // After 96 shuffle plies the board is at the start position, permitting Fool’s Mate.
-    let finish: [(i8, i8, [u8; 5]); 4] = [
-        (13, 21, *b"f2f3\0"),
-        (52, 36, *b"e7e5\0"),
-        (14, 30, *b"g2g4\0"),
-        (59, 31, *b"d8h4\0"),
-    ];
-    for (_src, _dst, uci) in finish {
-        let move_text = std::str::from_utf8(&uci[..4]).expect("fixed UCI");
-        game.play_uci(move_text)
-            .expect("benchmark sequence must be legal");
-        let cb = game.compact_board();
-
-        result.push(ValidMove {
-            uci,
-            next_board: cb.to_bytes(),
-        });
-    }
-
-    result
+    Ok(moves)
 }
 
 #[cfg(test)]
@@ -69,12 +29,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_100_move_sequence() {
-        let seq = generate_100_move_sequence();
-        assert_eq!(seq.len(), 100);
-        for (i, vm) in seq.iter().enumerate() {
-            let uci_str = std::str::from_utf8(&vm.uci[..4]).unwrap_or("error");
-            println!("Move {}: {}", i + 1, uci_str);
-        }
+    fn sequence_has_100_legal_moves_and_finishes_with_fools_mate() -> anyhow::Result<()> {
+        let moves = generate_100_move_sequence()?;
+        assert_eq!(moves.len(), 100);
+        assert_eq!(moves[0].uci, *b"g1f3\0");
+        assert_eq!(moves[95].uci, *b"f6g8\0");
+        assert_eq!(moves[99].uci, *b"d8h4\0");
+        Ok(())
     }
 }

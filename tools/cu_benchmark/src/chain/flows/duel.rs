@@ -23,7 +23,7 @@ pub async fn run_1v1_game_flow(
     black: &Keypair,
     logger: &mut MeasurementLog,
 ) -> anyhow::Result<()> {
-    let game_id = unique_id();
+    let game_id = unique_id()?;
     // Use game_id suffix so usernames are unique per run — profiles persist on devnet forever.
     let suffix = game_id & 0xFFFF; // last 4 hex digits of timestamp
     println!("\n   Setting up 1v1 game #{}", game_id);
@@ -279,7 +279,7 @@ pub async fn run_1v1_game_flow(
     }
 
     println!("   Step 7: Playing 100 moves on MagicBlock ER...");
-    let sequence = generate_100_move_sequence();
+    let sequence = generate_100_move_sequence()?;
     let mut move_latencies: Vec<std::time::Duration> = Vec::with_capacity(100);
     // Reuse blockhashes for about three seconds to avoid one RPC round trip per move.
     let mut cached_blockhash: Option<(solana_sdk::hash::Hash, std::time::Instant)> = None;
@@ -347,7 +347,9 @@ pub async fn run_1v1_game_flow(
             let all_done = statuses.value.iter().all(|s| s.is_some());
             if all_done {
                 for (sig, status) in batch_sigs.iter().zip(statuses.value.iter()) {
-                    let status = status.as_ref().unwrap();
+                    let status = status
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("missing transaction status for {sig}"))?;
                     if let Some(err) = &status.err {
                         anyhow::bail!("move tx {sig} failed: {err}");
                     }
@@ -386,8 +388,18 @@ pub async fn run_1v1_game_flow(
     if !move_latencies.is_empty() {
         let total: std::time::Duration = move_latencies.iter().sum();
         let avg_ms = total.as_secs_f64() * 1000.0 / move_latencies.len() as f64;
-        let min_ms = move_latencies.iter().min().unwrap().as_secs_f64() * 1000.0;
-        let max_ms = move_latencies.iter().max().unwrap().as_secs_f64() * 1000.0;
+        let min_ms = move_latencies
+            .iter()
+            .min()
+            .ok_or_else(|| anyhow::anyhow!("missing minimum move latency"))?
+            .as_secs_f64()
+            * 1000.0;
+        let max_ms = move_latencies
+            .iter()
+            .max()
+            .ok_or_else(|| anyhow::anyhow!("missing maximum move latency"))?
+            .as_secs_f64()
+            * 1000.0;
         println!(
             "   Move latency (send+confirm round-trip): min {:.1}ms, avg {:.1}ms, max {:.1}ms",
             min_ms, avg_ms, max_ms

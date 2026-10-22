@@ -4,14 +4,14 @@ use std::str::FromStr;
 
 const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wallet_arg = std::env::args()
         .nth(1)
-        .expect("Usage: profile_pda <wallet_pubkey>");
+        .ok_or("Usage: profile_pda <wallet_pubkey>")?;
 
-    let wallet_pubkey = Pubkey::from_str(&wallet_arg).expect("Invalid wallet public key");
+    let wallet_pubkey = Pubkey::from_str(&wallet_arg)?;
 
-    let program_id = Pubkey::from_str(PROGRAM_ID).unwrap();
+    let program_id = Pubkey::from_str(PROGRAM_ID)?;
 
     let (profile_pda, profile_bump) =
         Pubkey::find_program_address(&[b"profile", wallet_pubkey.as_ref()], &program_id);
@@ -29,4 +29,5 @@ fn main() {
     println!();
     println!("MagicBlock Explorer:");
     println!("  https://explorer.magicblock.app/account/{}", profile_pda);
+    Ok(())
 }

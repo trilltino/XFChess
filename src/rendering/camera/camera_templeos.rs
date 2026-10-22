@@ -1,4 +1,4 @@
-use crate::core::states::GameMode;
+use crate::core::state::GameMode;
 use crate::core::{game_scene, GameState};
 use crate::game::resources::{CurrentTurn, Players};
 use crate::game::systems::camera::get_is_black_view;

@@ -109,6 +109,7 @@ pub fn social_routes(invite_store: InviteStore) -> Router<AppState> {
         .route("/friends/{contact_id}", delete(remove_friend))
         .route("/presence", get(get_presence).put(update_presence))
         .route("/presence/summary", get(get_presence_summary))
+        .route("/presence/{node_id}", get(get_node_presence))
         .route(
             "/friends/invite",
             post({
@@ -220,9 +221,19 @@ async fn get_presence_summary(State(state): State<AppState>) -> Json<PresenceSum
     })
 }
 
-async fn update_presence(State(state): State<AppState>, Json(p): Json<Presence>) -> StatusCode {
+async fn get_node_presence(
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+) -> Json<Option<Presence>> {
+    Json(state.presence.get_online(&node_id))
+}
+
+async fn update_presence(
+    State(state): State<AppState>,
+    Json(p): Json<Presence>,
+) -> Json<serde_json::Value> {
     state.presence.upsert(p);
-    StatusCode::OK
+    Json(serde_json::json!({ "online_count": state.presence.count_online() }))
 }
 
 async fn push_lobby_invite(

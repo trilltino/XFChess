@@ -56,9 +56,10 @@ pub fn validate_funding_url(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
-    fn test_generate_moonpay_url() {
+    fn test_generate_moonpay_url() -> anyhow::Result<()> {
         let url = generate_funding_url(
             "test_wallet",
             0.5,
@@ -66,14 +67,15 @@ mod tests {
             FundingProvider::MoonPay,
             "test_key",
         )
-        .unwrap();
+        .context("test setup failed")?;
         assert!(url.contains("moonpay.com"));
         assert!(url.contains("walletAddress=test_wallet"));
         assert!(url.contains("amount=0.5"));
+        Ok(())
     }
 
     #[test]
-    fn test_generate_transak_url() {
+    fn test_generate_transak_url() -> anyhow::Result<()> {
         let url = generate_funding_url(
             "test_wallet",
             0.5,
@@ -81,13 +83,14 @@ mod tests {
             FundingProvider::Transak,
             "test_key",
         )
-        .unwrap();
+        .context("test setup failed")?;
         assert!(url.contains("transak.com"));
         assert!(url.contains("walletAddress=test_wallet"));
+        Ok(())
     }
 
     #[test]
-    fn test_generate_banxa_url() {
+    fn test_generate_banxa_url() -> anyhow::Result<()> {
         let url = generate_funding_url(
             "test_wallet",
             0.5,
@@ -95,9 +98,10 @@ mod tests {
             FundingProvider::Banxa,
             "test_key",
         )
-        .unwrap();
+        .context("test setup failed")?;
         assert!(url.contains("banxa.com"));
         assert!(url.contains("wallet=test_wallet"));
+        Ok(())
     }
 
     #[test]

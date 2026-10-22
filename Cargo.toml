@@ -5,7 +5,7 @@ edition = "2021"
 
 # Build rlib for desktop linkage and cdylib for Android GameActivity loading.
 [lib]
-name = "xfchess"
+name = "xfchess_app"
 path = "src/lib.rs"
 crate-type = ["lib", "cdylib"]
 
@@ -22,11 +22,6 @@ required-features = ["solana"]
 [[bin]]
 name = "read_game"
 path = "src/bin/read_game.rs"
-required-features = ["solana"]
-
-[[bin]]
-name = "tournament_test"
-path = "src/bin/tournament_test.rs"
 required-features = ["solana"]
 
 [[bin]]
@@ -55,7 +50,7 @@ members = [
     "tauri/viz/src-tauri",
     "backend",
 ]
-exclude = []
+exclude = ["vendor/proc-macro-error2"]
 
 [profile.dev]
 opt-level = 1
@@ -87,6 +82,10 @@ overflow-checks = true
 opt-level = "z"
 codegen-units = 1
 
+[profile.release.package.xfchess-game-sbf]
+opt-level = "z"
+codegen-units = 1
+
 
 [workspace.package]
 edition = "2021"
@@ -105,7 +104,7 @@ anchor-lang = { version = "=1.1.2", features = ["init-if-needed"] }
 anchor-spl = "=1.1.2"
 # Solana 3.0.0: paired with the anchor-lang 1.1.2 pin above, same migration.
 solana-program = "=3.0.0"
-solana-program-test = "=3.1.12"
+solana-program-test = { version = "=3.1.12", features = ["agave-unstable-api"] }
 solana-sdk = "=3.0.0"
 solana-client = "=3.1.12"
 solana-transaction-status = "=3.1.12"
@@ -254,6 +253,9 @@ xfchess-game = { workspace = true, optional = true }
 proptest = "1"
 
 [lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+undocumented_unsafe_blocks = "deny"
 # Bevy systems take one parameter per resource or query and nest query types;
 # Bevy's own lint guidance allows both.
 too_many_arguments = "allow"
@@ -285,5 +287,19 @@ rustls-platform-verifier = "=0.7.0"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 rfd = "0.15"
 
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+undocumented_unsafe_blocks = "deny"
+
 [workspace.lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
 unexpected_cfgs = { level = "allow" }
+
+[patch.crates-io]
+proc-macro-error2 = { path = "vendor/proc-macro-error2" }

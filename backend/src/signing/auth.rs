@@ -100,22 +100,25 @@ pub fn extract_bearer(header: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
-    fn jwt_issue_and_verify_roundtrip() {
+    fn jwt_issue_and_verify_roundtrip() -> anyhow::Result<()> {
         let issuer = JwtIssuer::new("test_secret_123");
-        let token = issuer.issue("wallet123").expect("issue should succeed");
-        let claims = issuer.verify(&token).expect("verify should succeed");
+        let token = issuer.issue("wallet123").context("issue should succeed")?;
+        let claims = issuer.verify(&token).context("verify should succeed")?;
         assert_eq!(claims.sub, "wallet123");
         assert!(claims.exp > Utc::now().timestamp());
+        Ok(())
     }
 
     #[test]
-    fn jwt_verify_fails_with_bad_secret() {
+    fn jwt_verify_fails_with_bad_secret() -> anyhow::Result<()> {
         let issuer = JwtIssuer::new("correct_secret");
-        let token = issuer.issue("wallet123").unwrap();
+        let token = issuer.issue("wallet123").context("test setup failed")?;
         let bad_issuer = JwtIssuer::new("wrong_secret");
         assert!(bad_issuer.verify(&token).is_err());
+        Ok(())
     }
 
     #[test]

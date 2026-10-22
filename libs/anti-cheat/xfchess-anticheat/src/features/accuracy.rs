@@ -2,27 +2,29 @@ use crate::elo_baseline::cpl_vs_elo_signal;
 use crate::types::{Complexity, PlyEval};
 
 pub fn avg_cpl(plies: &[PlyEval]) -> f64 {
-    let relevant: Vec<_> = plies
+    let (sum, count) = plies
         .iter()
-        .filter(|p| p.complexity != Complexity::Forced)
-        .collect();
-    if relevant.is_empty() {
+        .filter(|ply| ply.complexity != Complexity::Forced)
+        .fold((0.0, 0usize), |(sum, count), ply| {
+            (sum + f64::from(ply.cpl), count + 1)
+        });
+    if count == 0 {
         return 0.0;
     }
-    let sum: i32 = relevant.iter().map(|p| p.cpl).sum();
-    sum as f64 / relevant.len() as f64
+    sum / count as f64
 }
 
 pub fn t1_rate(plies: &[PlyEval]) -> f64 {
-    let complex: Vec<_> = plies
+    let (top, count) = plies
         .iter()
-        .filter(|p| p.complexity == Complexity::Complex)
-        .collect();
-    if complex.is_empty() {
+        .filter(|ply| ply.complexity == Complexity::Complex)
+        .fold((0usize, 0usize), |(top, count), ply| {
+            (top + usize::from(ply.is_t1), count + 1)
+        });
+    if count == 0 {
         return 0.0;
     }
-    let t1_count = complex.iter().filter(|p| p.is_t1).count();
-    t1_count as f64 / complex.len() as f64
+    top as f64 / count as f64
 }
 
 pub fn cpl_signal(elo: u32, plies: &[PlyEval]) -> f64 {

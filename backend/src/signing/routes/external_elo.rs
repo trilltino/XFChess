@@ -133,13 +133,21 @@ async fn link_start(
         req.pubkey,
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("System time should be after UNIX_EPOCH")
+            .map_err(|_| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "System clock unavailable".to_string()
+            ))?
             .as_secs()
     );
     let link_id = format!("link_{}", uuid::Uuid::new_v4());
     let expires_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "System clock unavailable".to_string(),
+            )
+        })?
         .as_secs()
         + LINK_TTL.as_secs();
 
@@ -254,7 +262,12 @@ async fn link_confirm(
         .unwrap_or(0);
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "System clock unavailable".to_string(),
+            )
+        })?
         .as_millis() as i64;
     let thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
     if now_ms - created_at < thirty_days_ms {
