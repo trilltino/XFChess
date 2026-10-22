@@ -28,7 +28,10 @@ pub struct JoinLinkPlugin;
 impl Plugin for JoinLinkPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<JoinViaLinkEvent>();
-        app.add_systems(Update, handle_join_via_link.in_set(crate::core::schedule::SessionSet::Match));
+        app.add_systems(
+            Update,
+            handle_join_via_link.in_set(crate::core::schedule::SessionSet::Match),
+        );
     }
 }
 
@@ -78,10 +81,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn round_trip() {
+    fn round_trip() -> Result<(), Box<dyn std::error::Error>> {
         let link = make_join_link("12345678", "NodeABCxyz");
-        let (gid, nid) = parse_join_link(&link).unwrap();
+        let (gid, nid) = parse_join_link(&link).ok_or("join link did not parse")?;
         assert_eq!(gid, "12345678");
         assert_eq!(nid, "NodeABCxyz");
+
+        Ok(())
     }
 }

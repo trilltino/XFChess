@@ -25,7 +25,7 @@ pub async fn run_swiss_tournament_flow(
     size: u16,
     logger: &mut MeasurementLog,
 ) -> anyhow::Result<()> {
-    let tournament_id = unique_id();
+    let tournament_id = unique_id()?;
     println!(
         "\n   Setting up Swiss tournament #{} ({} players)",
         tournament_id, size

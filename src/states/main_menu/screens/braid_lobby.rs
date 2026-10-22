@@ -226,7 +226,7 @@ pub(in super::super) fn render_braid_lobby_screen(ui: &mut egui::Ui, ctx: &mut M
     use crate::multiplayer::social::LobbySort;
     match ctx.competitive_menu.lobby_sort {
         LobbySort::EloAsc => games.sort_by_key(|a| a.elo.unwrap_or(0)),
-        LobbySort::EloDesc => games.sort_by(|a, b| b.elo.unwrap_or(0).cmp(&a.elo.unwrap_or(0))),
+        LobbySort::EloDesc => games.sort_by_key(|game| std::cmp::Reverse(game.elo.unwrap_or(0))),
         LobbySort::StakeAsc => games.sort_by(|a, b| {
             a.stake_amount
                 .partial_cmp(&b.stake_amount)

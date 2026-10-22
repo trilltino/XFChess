@@ -1,5 +1,5 @@
-use xfchess::engine::board_state::ChessEngine;
-use xfchess::rendering::pieces::PieceColor;
+use xfchess_app::engine::board_state::ChessEngine;
+use xfchess_app::rendering::pieces::PieceColor;
 
 #[test]
 fn example_validate_move_helpers() {

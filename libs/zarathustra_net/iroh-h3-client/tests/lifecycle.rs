@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 #[path = "../../iroh-h3/tests/support/mod.rs"]
 mod support;
 
@@ -33,22 +34,29 @@ impl ProtocolHandler for ObservedServer {
 }
 
 #[tokio::test]
-async fn response_outlives_client_and_then_releases_its_connection() {
+async fn response_outlives_client_and_then_releases_its_connection() -> anyhow::Result<()> {
     tokio::time::timeout(Duration::from_secs(10), async {
         let discovery = support::MockDiscoveryMap::new();
-        let origin = discovery.spawn_endpoint().await;
-        let endpoint = discovery.spawn_endpoint().await;
+        let origin = discovery.spawn_endpoint().await?;
+        let endpoint = discovery.spawn_endpoint().await?;
         let (ready, receive) = oneshot::channel::<()>();
         let receive = Arc::new(Mutex::new(Some(receive)));
         let app = Router::new().route(
             "/",
             get(move || {
-                let receive = receive.lock().unwrap().take().unwrap();
+                let receive = receive.clone();
                 async move {
-                    Body::from_stream(futures::stream::once(async move {
-                        receive.await.unwrap();
-                        Ok::<_, std::io::Error>(Bytes::from_static(b"response survived"))
-                    }))
+                    let receive = receive
+                        .lock()
+                        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
+                        .take()
+                        .ok_or(axum::http::StatusCode::CONFLICT)?;
+                    Ok::<_, axum::http::StatusCode>(Body::from_stream(futures::stream::once(
+                        async move {
+                            receive.await.map_err(std::io::Error::other)?;
+                            Ok::<_, std::io::Error>(Bytes::from_static(b"response survived"))
+                        },
+                    )))
                 }
             }),
         );
@@ -67,17 +75,24 @@ async fn response_outlives_client_and_then_releases_its_connection() {
             .get(format!("iroh+h3://{}/", origin.id()))
             .send()
             .await
-            .unwrap();
+            .context("required operation value")?;
         drop(client);
-        ready.send(()).unwrap();
+        ready
+            .send(())
+            .map_err(|_| anyhow::anyhow!("response body receiver dropped"))?;
         assert_eq!(
-            response.bytes().await.unwrap(),
+            response.bytes().await.context("required operation value")?,
             b"response survived".as_slice()
         );
         closed.notified().await;
-        router.shutdown().await.unwrap();
+        router
+            .shutdown()
+            .await
+            .context("required operation value")?;
         endpoint.close().await;
+        Ok::<(), anyhow::Error>(())
     })
     .await
-    .expect("HTTP/3 client retained an abandoned connection");
+    .context("HTTP/3 client retained an abandoned connection")??;
+    Ok(())
 }

@@ -58,25 +58,31 @@ pub fn derive_match_pda(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use solana_sdk::signature::Keypair;
     use solana_sdk::signer::Signer;
     use std::str::FromStr;
 
     #[test]
-    fn test_pda_derivation() {
-        let program_id = Pubkey::from_str("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU").unwrap();
+    fn test_pda_derivation() -> anyhow::Result<()> {
+        let program_id = Pubkey::from_str("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU")
+            .context("test setup failed")?;
         let tournament_id = 1u64;
 
-        let tournament_pda = derive_tournament_pda(tournament_id, &program_id).unwrap();
+        let tournament_pda =
+            derive_tournament_pda(tournament_id, &program_id).context("test setup failed")?;
         assert_ne!(tournament_pda, program_id);
 
-        let escrow_pda = derive_escrow_pda(tournament_id, &program_id).unwrap();
+        let escrow_pda =
+            derive_escrow_pda(tournament_id, &program_id).context("test setup failed")?;
         assert_ne!(escrow_pda, program_id);
         assert_ne!(escrow_pda, tournament_pda);
 
         let wallet_pubkey = Keypair::new().pubkey();
-        let profile_pda = derive_player_profile_pda(&wallet_pubkey, &program_id).unwrap();
+        let profile_pda =
+            derive_player_profile_pda(&wallet_pubkey, &program_id).context("test setup failed")?;
         assert_ne!(profile_pda, program_id);
         assert_ne!(profile_pda, wallet_pubkey);
+        Ok(())
     }
 }

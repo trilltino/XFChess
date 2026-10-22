@@ -2,7 +2,7 @@ use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
 use iroh::EndpointId;
 
-use crate::core::states::GameState;
+use crate::core::state::GameState;
 use crate::game::events::GameStartedEvent;
 use crate::multiplayer::{network::protocol::NetworkMessage, NetworkEvent, OnlineNetworkState};
 

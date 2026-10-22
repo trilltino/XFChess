@@ -267,15 +267,14 @@ mod synchronized_start_tests {
     use super::{NetworkMessage, Pubkey};
 
     #[test]
-    fn synchronized_start_messages_round_trip() {
+    fn synchronized_start_messages_round_trip() -> Result<(), Box<dyn std::error::Error>> {
         let ready = NetworkMessage::GameReady {
             game_id: 7,
             player_pubkey: Pubkey::default(),
             ready_token: "game-7".to_string(),
         };
-        let encoded = bincode::serialize(&ready).expect("ready message serializes");
-        let decoded: NetworkMessage =
-            bincode::deserialize(&encoded).expect("ready message decodes");
+        let encoded = bincode::serialize(&ready)?;
+        let decoded: NetworkMessage = bincode::deserialize(&encoded)?;
         assert_eq!(decoded.game_id(), 7);
         assert_eq!(decoded.kind_str(), "GameReady");
 
@@ -283,11 +282,12 @@ mod synchronized_start_tests {
             game_id: 7,
             start_token: "game-7".to_string(),
         };
-        let encoded = bincode::serialize(&start).expect("start message serializes");
-        let decoded: NetworkMessage =
-            bincode::deserialize(&encoded).expect("start message decodes");
+        let encoded = bincode::serialize(&start)?;
+        let decoded: NetworkMessage = bincode::deserialize(&encoded)?;
         assert_eq!(decoded.game_id(), 7);
         assert_eq!(decoded.kind_str(), "GameStartConfirmed");
+
+        Ok(())
     }
 }
 
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn sign_and_verify() {
+    fn sign_and_verify() -> Result<(), Box<dyn std::error::Error>> {
         let sk = test_key();
         let msg = NetworkMessage::Move {
             game_id: 1,
@@ -347,12 +347,14 @@ mod tests {
             seq: 0,
             parent_version: String::new(),
         };
-        let signed = SignedNetworkMessage::sign(msg.clone(), &sk);
+        let signed = SignedNetworkMessage::sign(msg.clone(), &sk)?;
         assert!(signed.verify());
+
+        Ok(())
     }
 
     #[test]
-    fn tampered_message_rejected() {
+    fn tampered_message_rejected() -> Result<(), Box<dyn std::error::Error>> {
         let sk = test_key();
         let msg = NetworkMessage::Move {
             game_id: 1,
@@ -365,7 +367,7 @@ mod tests {
             seq: 0,
             parent_version: String::new(),
         };
-        let mut signed = SignedNetworkMessage::sign(msg, &sk);
+        let mut signed = SignedNetworkMessage::sign(msg, &sk)?;
         signed.msg = NetworkMessage::Move {
             game_id: 1,
             turn: 1,
@@ -378,10 +380,12 @@ mod tests {
             parent_version: String::new(),
         };
         assert!(!signed.verify());
+
+        Ok(())
     }
 
     #[test]
-    fn tampered_signature_rejected() {
+    fn tampered_signature_rejected() -> Result<(), Box<dyn std::error::Error>> {
         let sk = test_key();
         let msg = NetworkMessage::Move {
             game_id: 1,
@@ -394,26 +398,28 @@ mod tests {
             seq: 0,
             parent_version: String::new(),
         };
-        let mut signed = SignedNetworkMessage::sign(msg, &sk);
+        let mut signed = SignedNetworkMessage::sign(msg, &sk)?;
         if let Some(b) = signed.signature.first_mut() {
             *b ^= 0xFF;
         }
         assert!(!signed.verify());
+
+        Ok(())
     }
 }
 
 impl SignedNetworkMessage {
-    pub fn sign(msg: NetworkMessage, signing_key_bytes: &[u8; 32]) -> Self {
+    pub fn sign(msg: NetworkMessage, signing_key_bytes: &[u8; 32]) -> Result<Self, bincode::Error> {
         use ed25519_dalek::{Signer, SigningKey};
         let signing_key = SigningKey::from_bytes(signing_key_bytes);
-        let signable = bincode::serialize(&msg).expect("bincode serialize");
+        let signable = bincode::serialize(&msg)?;
         let signature = signing_key.sign(&signable).to_bytes().to_vec();
         let session_pubkey = signing_key.verifying_key().to_bytes().to_vec();
-        Self {
+        Ok(Self {
             msg,
             session_pubkey,
             signature,
-        }
+        })
     }
 
     pub fn verify(&self) -> bool {

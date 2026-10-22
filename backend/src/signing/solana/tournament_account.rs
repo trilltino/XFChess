@@ -59,7 +59,11 @@ impl<'a> Cursor<'a> {
     }
 
     fn skip_string(&mut self) -> Result<(), String> {
-        let len = u32::from_le_bytes(self.take(4)?.try_into().unwrap()) as usize;
+        let len = u32::from_le_bytes(
+            self.take(4)?
+                .try_into()
+                .map_err(|_| "short string length")?,
+        ) as usize;
         self.take(len)?;
         Ok(())
     }
@@ -272,9 +276,10 @@ pub fn fetch_bracket_match(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
-    fn reads_bracket_match_seats_winner_and_status() {
+    fn reads_bracket_match_seats_winner_and_status() -> anyhow::Result<()> {
         use solana_sdk::pubkey::Pubkey;
         let (white, black) = (Pubkey::new_unique(), Pubkey::new_unique());
         let mut d = vec![0u8; 8 + 8 + 2 + 1];
@@ -291,7 +296,9 @@ mod tests {
         d.push(MATCH_STATUS_COMPLETED);
         d.extend([0u8; 16]);
         assert_eq!(
-            parse_bracket_match(&d).unwrap(),
+            parse_bracket_match(&d)
+                .map_err(|error| anyhow::anyhow!("{error:?}"))
+                .context("test setup failed")?,
             BracketMatchOnChain {
                 player_white: Some(white),
                 player_black: Some(black),
@@ -300,6 +307,7 @@ mod tests {
             }
         );
         assert!(parse_bracket_match(&d[..20]).is_err());
+        Ok(())
     }
 
     fn account(name: &str, status: u8, start: Option<i64>, current: u8, total: u8) -> Vec<u8> {
@@ -324,10 +332,11 @@ mod tests {
     }
 
     #[test]
-    fn reads_round_progress_past_variable_length_fields() {
+    fn reads_round_progress_past_variable_length_fields() -> anyhow::Result<()> {
         for (name, start) in [("", None), ("Spring Swiss", Some(1_700_000_000))] {
             let p = parse_swiss_progress(&account(name, TOURNAMENT_STATUS_ACTIVE, start, 2, 5))
-                .unwrap();
+                .map_err(|error| anyhow::anyhow!("{error:?}"))
+                .context("test setup failed")?;
             assert_eq!(
                 p,
                 SwissChainProgress {
@@ -337,10 +346,11 @@ mod tests {
                 }
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn prize_ledger_matches_the_program_layout_and_selection() {
+    fn prize_ledger_matches_the_program_layout_and_selection() -> anyhow::Result<()> {
         use anchor_lang::AccountSerialize;
         use solana_sdk::pubkey::Pubkey;
         use xfchess_game::state::{
@@ -405,14 +415,19 @@ mod tests {
             round_boards_reported: [0; 16],
         };
         let mut data = Vec::new();
-        tournament.try_serialize(&mut data).unwrap();
+        tournament
+            .try_serialize(&mut data)
+            .context("test setup failed")?;
 
-        let ledger = parse_prize_ledger(&data).unwrap();
+        let ledger = parse_prize_ledger(&data)
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
         assert_eq!(ledger.status, TOURNAMENT_STATUS_COMPLETED);
         assert_eq!(ledger.prize_shares, tournament.prize_shares);
         assert_eq!(ledger.prizes_claimed, 0b10);
         // Fourth place is placed but unfunded; second has claimed already.
         assert_eq!(ledger.unpaid_wallets(), vec![players[0], players[2]]);
+        Ok(())
     }
 
     #[test]

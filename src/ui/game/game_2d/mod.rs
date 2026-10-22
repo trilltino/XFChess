@@ -1,7 +1,7 @@
 //! The 2D top-down board ([`render`]), with its animations ([`effects`]), eval bar
 //! ([`eval_bar`]) and colour themes ([`theme`]).
 
-use crate::core::states::GameMode;
+use crate::core::state::GameMode;
 use crate::game::components::FadingCapture;
 use crate::game::resources::{CurrentTurn, Players};
 use crate::game::systems::camera::get_is_black_view;

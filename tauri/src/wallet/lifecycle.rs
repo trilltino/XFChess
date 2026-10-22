@@ -42,13 +42,19 @@ pub(crate) fn attach_game(
   {
     return Err("This bridge already belongs to another game".into());
   }
-  std::thread::spawn(move || {
-    if let Err(error) = game.wait() {
-      eprintln!("Wallet game watcher: {error}");
-    }
-    shutdown(&pending, &notify);
-    app.exit(0);
-  });
+  if let Err(error) = std::thread::Builder::new()
+    .name("wallet-game-watch".into())
+    .spawn(move || {
+      if let Err(error) = game.wait() {
+        eprintln!("Wallet game watcher: {error}");
+      }
+      shutdown(&pending, &notify);
+      app.exit(0);
+    })
+  {
+    GAME_PID.store(0, Ordering::Release);
+    return Err(format!("Cannot watch game process: {error}"));
+  }
 
   Ok(())
 }

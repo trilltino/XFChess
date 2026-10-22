@@ -288,48 +288,51 @@ pub fn estimate(variant: &GameVariant, profile: FeeProfile) -> Result<Estimate> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
 
-    fn variant() -> GameVariant {
+    fn variant() -> anyhow::Result<GameVariant> {
         serde_json::from_value(serde_json::json!({
             "name":"game", "games":1, "transactions":[], "er_transactions":100,
             "delegations":[{"label":"game", "count":1, "deposit_lamports":30_000_000,
                 "normal_commits":0, "final_commit":true, "delegated_fee_payer":false}]
         }))
-        .unwrap()
+        .context(concat!(file!(), ":", line!()))
     }
 
     #[test]
-    fn caps_charges_at_deposit_and_returns_remainder() {
-        let mut v = variant();
+    fn caps_charges_at_deposit_and_returns_remainder() -> anyhow::Result<()> {
+        let mut v = variant()?;
         v.delegations[0].deposit_lamports = 2_000_000;
-        let cost = estimate(&v, FeeProfile::Current).unwrap();
+        let cost = estimate(&v, FeeProfile::Current).context(concat!(file!(), ":", line!()))?;
         assert_eq!(cost.nonrefundable_fees_lamports, 2_000_000);
         assert_eq!(cost.deposits_refunded_lamports, 0);
         assert_eq!(
             estimate(&v, FeeProfile::Legacy)
-                .unwrap()
+                .context(concat!(file!(), ":", line!()))?
                 .deposits_refunded_lamports,
             1_700_000
         );
+        Ok(())
     }
 
     #[test]
-    fn enforces_commit_limit_and_prices_commit_26_per_account() {
-        let mut v = variant();
+    fn enforces_commit_limit_and_prices_commit_26_per_account() -> anyhow::Result<()> {
+        let mut v = variant()?;
         v.delegations[0].normal_commits = 11;
         assert!(estimate(&v, FeeProfile::Current).is_err());
         v.delegations[0].normal_commits = 25;
         v.delegations[0].delegated_fee_payer = true;
         v.delegations[0].count = 2;
-        let cost = estimate(&v, FeeProfile::Current).unwrap();
+        let cost = estimate(&v, FeeProfile::Current).context(concat!(file!(), ":", line!()))?;
         assert_eq!(cost.delegation_charges_lamports, 56_000_000);
         assert_eq!(cost.live_commit_fees_lamports, 200_000);
         assert_eq!(cost.deposits_refunded_lamports, 4_000_000);
+        Ok(())
     }
 
     #[test]
-    fn amortizes_shared_setup_and_separates_retained_rent() {
-        let mut v = variant();
+    fn amortizes_shared_setup_and_separates_retained_rent() -> anyhow::Result<()> {
+        let mut v = variant()?;
         v.games = 10;
         v.accounts.push(AccountRent {
             label: "profile".into(),
@@ -347,7 +350,7 @@ mod tests {
             cu_price_micro_lamports: 10_001,
             shared: true,
         });
-        let cost = estimate(&v, FeeProfile::Current).unwrap();
+        let cost = estimate(&v, FeeProfile::Current).context(concat!(file!(), ":", line!()))?;
         assert_eq!(cost.rent_funded_lamports, 2_000_000);
         assert_eq!(cost.retained_storage_lamports, 2_000_000);
         assert_eq!(cost.base_transaction_fees_lamports, 24_002);
@@ -356,11 +359,12 @@ mod tests {
             cost.total_funding_lamports - cost.deposits_refunded_lamports,
             cost.nonrefundable_fees_lamports + cost.retained_storage_lamports
         );
+        Ok(())
     }
 
     #[test]
-    fn missing_rent_and_overflow_are_errors() {
-        let mut v = variant();
+    fn missing_rent_and_overflow_are_errors() -> anyhow::Result<()> {
+        let mut v = variant()?;
         v.accounts.push(AccountRent {
             label: "game".into(),
             data_bytes: 100,
@@ -375,11 +379,12 @@ mod tests {
         assert!(estimate(&v, FeeProfile::Current).is_err());
         v.games = 0;
         assert!(estimate(&v, FeeProfile::Current).is_err());
+        Ok(())
     }
 
     #[test]
-    fn actions_round_per_bundle_and_storage_is_refundable() {
-        let mut v = variant();
+    fn actions_round_per_bundle_and_storage_is_refundable() -> anyhow::Result<()> {
+        let mut v = variant()?;
         v.base_actions.push(BaseAction {
             count: 1,
             requested_cu: vec![1, 1],
@@ -391,20 +396,22 @@ mod tests {
             data_bytes: 1000,
             closed: true,
         });
-        let cost = estimate(&v, FeeProfile::Current).unwrap();
+        let cost = estimate(&v, FeeProfile::Current).context(concat!(file!(), ":", line!()))?;
         assert_eq!(cost.base_action_fees_lamports, 1);
         assert_eq!(cost.callback_fees_lamports, 5000);
         assert_eq!(cost.topup_fees_lamports, 300000);
         assert_eq!(cost.ephemeral_storage_funded_lamports, 33920);
         assert_eq!(cost.ephemeral_storage_refunded_lamports, 33920);
         assert_eq!(cost.retained_storage_lamports, 0);
+        Ok(())
     }
 
     #[test]
-    fn checked_in_matrix_has_consistent_cashflow() {
-        let w: Workload = serde_json::from_str(include_str!("../../scenarios/games.json")).unwrap();
+    fn checked_in_matrix_has_consistent_cashflow() -> anyhow::Result<()> {
+        let w: Workload = serde_json::from_str(include_str!("../../scenarios/games.json"))
+            .context(concat!(file!(), ":", line!()))?;
         for variant in &w.variants {
-            let cost = estimate(variant, w.fee_profile).unwrap();
+            let cost = estimate(variant, w.fee_profile).context(concat!(file!(), ":", line!()))?;
             assert_eq!(
                 cost.total_funding_lamports
                     - cost.rent_refunded_lamports
@@ -413,5 +420,6 @@ mod tests {
                 cost.nonrefundable_fees_lamports + cost.retained_storage_lamports
             );
         }
+        Ok(())
     }
 }

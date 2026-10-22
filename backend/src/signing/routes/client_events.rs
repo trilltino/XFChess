@@ -34,9 +34,10 @@ async fn record_client_event(Json(event): Json<ClientEventReq>) -> StatusCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
-    fn client_event_schema_excludes_secret_fields() {
+    fn client_event_schema_excludes_secret_fields() -> anyhow::Result<()> {
         let event = ClientEventReq {
             event: "solana_session_expired".to_string(),
             wallet_pubkey: Some("wallet".to_string()),
@@ -53,9 +54,10 @@ mod tests {
             status: Some("confirmed".to_string()),
             timestamp_ms: Some(1),
         };
-        let json = serde_json::to_string(&event).unwrap();
+        let json = serde_json::to_string(&event).context("test setup failed")?;
         assert!(!json.contains("session_signer_secret"));
         assert!(!json.contains("private"));
         assert!(!json.contains("keypair"));
+        Ok(())
     }
 }

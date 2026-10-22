@@ -1,0 +1,63 @@
+[package]
+name = "xfchess-game-sbf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "xfchess_game"
+path = "../xfchess-game/src/lib.rs"
+crate-type = ["cdylib"]
+test = false
+doctest = false
+bench = false
+
+[features]
+default = ["cranks", "move-validation", "devnet"]
+# Production builds require move-validation; client-supplied board validation is development-only.
+production = ["move-validation", "mainnet"]
+# Enable exactly one environment: localnet for tests, devnet for development,
+# mainnet with production keys.
+localnet = []
+devnet = []
+mainnet = []
+idl-build = ["anchor-spl/idl-build"]
+# move-validation: enables the on-chain chess move-validation module.
+# Gates `pub mod chess_logic_on_chain` in lib.rs and pulls in nimzovich_engine.
+move-validation = ["dep:nimzovich_engine"]
+cranks = ["magicblock-magic-program-api", "bincode"]
+game-tests = []
+legacy-game-tests = []
+# Host library builds may suppress the entrypoint and security.txt static;
+# deployable SBF builds retain both by default.
+no-entrypoint = []
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+solana-program = { workspace = true }
+# The on-chain engine disables default features; std is enabled only in dev tests.
+nimzovich_engine = { workspace = true, default-features = false, features = [], optional = true }
+bytemuck = { version = "1.25.0", default-features = false, features = ["derive"], optional = true }
+ephemeral-rollups-sdk = { workspace = true }
+solana-security-txt = { workspace = true }
+
+# Crank dependencies (MagicBlock scheduled tasks) — gated by the `cranks` feature
+magicblock-magic-program-api = { version = "=0.13.11", default-features = false, optional = true }
+bincode = { workspace = true, optional = true }
+
+[dev-dependencies]
+anyhow.workspace = true
+xfchess-rules = { workspace = true }
+tokio = { workspace = true }
+solana-program-test = { workspace = true }
+solana-sdk = { workspace = true }
+solana-system-interface = { version = "3", features = ["bincode"] }
+# Decodes the "Program data: <base64>" log line to verify `emit!`ed events
+# (e.g. StuckDelegationRecovered) actually fire with correct fields.
+base64 = { workspace = true }
+# Contract tests exercise the same no_std validator as deployed builds.
+nimzovich_engine = { workspace = true }
+
+[lints]
+workspace = true

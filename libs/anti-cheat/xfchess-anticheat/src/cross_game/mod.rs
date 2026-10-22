@@ -1,6 +1,8 @@
+use crate::error::{AcError, AcResult};
+#[cfg(test)]
+use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
-use tracing::warn;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::types::{SideAnalysis, Verdict};
 
@@ -57,26 +59,36 @@ impl PlayerStats {
     }
 }
 
-pub async fn load_stats(pool: &SqlitePool, pubkey: &str) -> PlayerStats {
+pub async fn load_stats(pool: &SqlitePool, pubkey: &str) -> AcResult<PlayerStats> {
+    load_stats_on(&mut *pool.acquire().await?, pubkey).await
+}
+
+pub(crate) async fn load_stats_on(
+    connection: &mut SqliteConnection,
+    pubkey: &str,
+) -> AcResult<PlayerStats> {
     let row: Option<(i64, f64, String, String, i64, i64)> = sqlx::query_as(
         "SELECT games_analysed, lifetime_cpl, last_30_cpls, last_30_t1s,
                 flags_received, reviews_received
          FROM player_anticheat_stats WHERE pubkey = ?",
     )
     .bind(pubkey)
-    .fetch_optional(pool)
-    .await
-    .unwrap_or(None);
+    .fetch_optional(connection)
+    .await?;
 
-    match row {
+    let count = |value| {
+        u32::try_from(value)
+            .map_err(|_| AcError::InvalidInput("invalid stored analysis count".into()))
+    };
+    Ok(match row {
         Some((games, cpl, cpls_json, t1s_json, flags, reviews)) => PlayerStats {
             pubkey: pubkey.to_string(),
-            games_analysed: games as u32,
+            games_analysed: count(games)?,
             lifetime_cpl: cpl,
-            last_30_cpls: serde_json::from_str(&cpls_json).unwrap_or_default(),
-            last_30_t1s: serde_json::from_str(&t1s_json).unwrap_or_default(),
-            flags_received: flags as u32,
-            reviews_received: reviews as u32,
+            last_30_cpls: serde_json::from_str(&cpls_json)?,
+            last_30_t1s: serde_json::from_str(&t1s_json)?,
+            flags_received: count(flags)?,
+            reviews_received: count(reviews)?,
         },
         None => PlayerStats {
             pubkey: pubkey.to_string(),
@@ -87,17 +99,30 @@ pub async fn load_stats(pool: &SqlitePool, pubkey: &str) -> PlayerStats {
             flags_received: 0,
             reviews_received: 0,
         },
-    }
+    })
 }
 
-pub async fn update_stats(pool: &SqlitePool, side: &SideAnalysis) {
+pub async fn update_stats(pool: &SqlitePool, side: &SideAnalysis) -> AcResult<()> {
+    let mut transaction = pool.begin().await?;
+    update_stats_on(&mut transaction, side).await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
+pub(crate) async fn update_stats_on(
+    connection: &mut SqliteConnection,
+    side: &SideAnalysis,
+) -> AcResult<()> {
     let pubkey = &side.pubkey;
-    let mut stats = load_stats(pool, pubkey).await;
+    let mut stats = load_stats_on(connection, pubkey).await?;
 
     let game_cpl = side.signals.avg_cpl;
     let game_t1 = side.signals.t1_rate;
 
-    stats.games_analysed += 1;
+    stats.games_analysed = stats
+        .games_analysed
+        .checked_add(1)
+        .ok_or_else(|| AcError::InvalidInput("analysis counter exhausted".into()))?;
     stats.lifetime_cpl = (stats.lifetime_cpl * (stats.games_analysed - 1) as f64 + game_cpl)
         / stats.games_analysed as f64;
 
@@ -107,15 +132,25 @@ pub async fn update_stats(pool: &SqlitePool, side: &SideAnalysis) {
     stats.last_30_t1s.truncate(30);
 
     match side.verdict {
-        Verdict::Flag => stats.flags_received += 1,
-        Verdict::Review => stats.reviews_received += 1,
+        Verdict::Flag => {
+            stats.flags_received = stats
+                .flags_received
+                .checked_add(1)
+                .ok_or_else(|| AcError::InvalidInput("flag counter exhausted".into()))?
+        }
+        Verdict::Review => {
+            stats.reviews_received = stats
+                .reviews_received
+                .checked_add(1)
+                .ok_or_else(|| AcError::InvalidInput("review counter exhausted".into()))?
+        }
         Verdict::Clean => {}
     }
 
-    let cpls_json = serde_json::to_string(&stats.last_30_cpls).unwrap_or_default();
-    let t1s_json = serde_json::to_string(&stats.last_30_t1s).unwrap_or_default();
+    let cpls_json = serde_json::to_string(&stats.last_30_cpls)?;
+    let t1s_json = serde_json::to_string(&stats.last_30_t1s)?;
 
-    let result = sqlx::query(
+    sqlx::query(
         r#"INSERT INTO player_anticheat_stats
                (pubkey, games_analysed, lifetime_cpl, last_30_cpls, last_30_t1s,
                 flags_received, reviews_received, last_updated)
@@ -136,12 +171,9 @@ pub async fn update_stats(pool: &SqlitePool, side: &SideAnalysis) {
     .bind(&t1s_json)
     .bind(stats.flags_received as i64)
     .bind(stats.reviews_received as i64)
-    .execute(pool)
-    .await;
-
-    if let Err(e) = result {
-        warn!("[cross_game] failed to update stats for {pubkey}: {e}");
-    }
+    .execute(connection)
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -149,10 +181,13 @@ mod tests {
     use super::*;
     use crate::types::{PlyEval, SignalValues, TimingSource, Verdict};
 
-    async fn memory_pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query(
-            r#"CREATE TABLE player_anticheat_stats (
+    async fn memory_pool() -> anyhow::Result<SqlitePool> {
+        Ok({
+            let pool = SqlitePool::connect("sqlite::memory:")
+                .await
+                .context("required operation value")?;
+            sqlx::query(
+                r#"CREATE TABLE player_anticheat_stats (
                 pubkey          TEXT    PRIMARY KEY,
                 games_analysed  INTEGER NOT NULL DEFAULT 0,
                 lifetime_cpl    REAL    NOT NULL DEFAULT 0.0,
@@ -162,11 +197,12 @@ mod tests {
                 reviews_received INTEGER NOT NULL DEFAULT 0,
                 last_updated    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
             )"#,
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        pool
+            )
+            .execute(&pool)
+            .await
+            .context("required operation value")?;
+            pool
+        })
     }
 
     fn side(avg_cpl: f64) -> SideAnalysis {
@@ -189,33 +225,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_history_reads_back_as_zeroed_stats() {
-        let pool = memory_pool().await;
-        let stats = load_stats(&pool, "nobody").await;
+    async fn no_history_reads_back_as_zeroed_stats() -> anyhow::Result<()> {
+        let pool = memory_pool().await?;
+        let stats = load_stats(&pool, "nobody").await?;
         assert_eq!(stats.games_analysed, 0);
         assert!(!stats.has_sufficient_history());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn update_then_load_round_trips() {
-        let pool = memory_pool().await;
-        update_stats(&pool, &side(50.0)).await;
+    async fn update_then_load_round_trips() -> anyhow::Result<()> {
+        let pool = memory_pool().await?;
+        update_stats(&pool, &side(50.0)).await?;
 
-        let stats = load_stats(&pool, "player1").await;
+        let stats = load_stats(&pool, "player1").await?;
         assert_eq!(stats.games_analysed, 1);
         assert_eq!(stats.last_30_cpls, vec![50.0]);
         assert_eq!(stats.lifetime_cpl, 50.0);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn z_score_flags_a_game_far_better_than_own_baseline() {
-        let pool = memory_pool().await;
+    async fn z_score_flags_a_game_far_better_than_own_baseline() -> anyhow::Result<()> {
+        let pool = memory_pool().await?;
         // Five prior games, consistently around 50 CPL (a steady baseline).
         for cpl in [48.0, 52.0, 49.0, 51.0, 50.0] {
-            update_stats(&pool, &side(cpl)).await;
+            update_stats(&pool, &side(cpl)).await?;
         }
 
-        let stats = load_stats(&pool, "player1").await;
+        let stats = load_stats(&pool, "player1").await?;
         assert!(stats.has_sufficient_history());
 
         // This game: 5 CPL — dramatically better than their own history.
@@ -231,17 +269,19 @@ mod tests {
             z_normal.abs() < 1.0,
             "expected ~0 z-score at baseline, got {z_normal}"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn flags_and_reviews_counted_from_verdict() {
-        let pool = memory_pool().await;
+    async fn flags_and_reviews_counted_from_verdict() -> anyhow::Result<()> {
+        let pool = memory_pool().await?;
         let mut flagged = side(10.0);
         flagged.verdict = Verdict::Flag;
-        update_stats(&pool, &flagged).await;
+        update_stats(&pool, &flagged).await?;
 
-        let stats = load_stats(&pool, "player1").await;
+        let stats = load_stats(&pool, "player1").await?;
         assert_eq!(stats.flags_received, 1);
         assert_eq!(stats.reviews_received, 0);
+        Ok(())
     }
 }

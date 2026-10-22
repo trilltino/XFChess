@@ -100,16 +100,18 @@ pub(super) fn validate_environment(template: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use std::collections::BTreeMap;
     #[test]
-    fn template_preserves_json_types_and_rejects_missing_values() {
+    fn template_preserves_json_types_and_rejects_missing_values() -> anyhow::Result<()> {
         let variables = BTreeMap::from([
             ("game_index".into(), Value::from(100)),
             ("move".into(), serde_json::json!({"uci":"e2e4"})),
         ]);
-        assert_eq!(render(&serde_json::json!({"id":"${game_index}","uci":"${move.uci}","path":"/game/${game_index}"}),&variables).unwrap(),
+        assert_eq!(render(&serde_json::json!({"id":"${game_index}","uci":"${move.uci}","path":"/game/${game_index}"}),&variables).context(concat!(file!(), ":", line!()))?,
             serde_json::json!({"id":100,"uci":"e2e4","path":"/game/100"}));
         assert!(render(&Value::String("${missing}".into()), &variables).is_err());
         assert!(url("http://localhost:8090", "//evil.test/", &variables).is_err());
+        Ok(())
     }
 }

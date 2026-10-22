@@ -24,6 +24,10 @@ tracing     = { workspace = true }
 tokio-stream = { version = "0.1", features = ["sync"] }
 
 [dev-dependencies]
+anyhow.workspace = true
 tower = { version = "0.5", features = ["util"] }
 tokio       = { workspace = true }
 axum-test   = "20"
+
+[lints]
+workspace = true

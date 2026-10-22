@@ -62,13 +62,35 @@ pub fn fund_account(
     lamports: u64,
 ) -> Result<Signature> {
     let start = Instant::now();
-    if let Ok(balance) = rpc.get_balance(dest) {
-        if balance >= lamports {
-            info!(
-                "[SOLANA_TX] fund_account skipped for {dest}; balance already {balance} lamports"
-            );
-            return Ok(Signature::default());
+    // Read-only, so a transient connection error (e.g. a pooled connection the
+    // provider already closed) is retried instead of failing session hosting.
+    let mut attempt = 0;
+    let balance = loop {
+        match rpc.get_balance(dest) {
+            Ok(balance) => break balance,
+            Err(e) if attempt < 2 => {
+                attempt += 1;
+                warn!(
+                    "[SOLANA_TX] fund_account balance lookup failed (retry {attempt}/2): {}",
+                    crate::signing::solana::redact_urls_in(&e.to_string())
+                );
+                std::thread::sleep(Duration::from_millis(200 * attempt));
+            }
+            Err(e) => {
+                return Err(anyhow!(
+                    "could not establish rent-payer balance for {dest}: {e}"
+                ))
+            }
         }
+    };
+    info!(
+        "[SOLANA_TX] fund_account {dest}: balance lookup {:?}",
+        start.elapsed()
+    );
+    let transfer_lamports = lamports.saturating_sub(balance);
+    if transfer_lamports == 0 {
+        info!("[SOLANA_TX] fund_account skipped for {dest}; balance already {balance} lamports");
+        return Ok(Signature::default());
     }
 
     // The payer must cover transfer lamports, signature fees, and its own
@@ -82,11 +104,11 @@ pub fn fund_account(
             const TX_FEE_LAMPORTS: u64 = 5_000;
             let needed = reserve
                 .saturating_add(TX_FEE_LAMPORTS)
-                .saturating_add(lamports);
+                .saturating_add(transfer_lamports);
             if payer_balance < needed {
                 return Err(anyhow!(
                     "fee payer {payer_pubkey} is depleted: balance {payer_balance} lamports, \
-                     needs >= {needed} ({lamports} transfer + {TX_FEE_LAMPORTS} fee + \
+                     needs >= {needed} ({transfer_lamports} transfer + {TX_FEE_LAMPORTS} fee + \
                      {reserve} rent-exempt reserve) — top up FEE_PAYER_KEYS"
                 ));
             }
@@ -94,9 +116,17 @@ pub fn fund_account(
         Err(e) => warn!("[SOLANA_TX] fund_account payer pre-flight lookup failed (non-fatal): {e}"),
     }
 
-    let ix = system_instruction::transfer(&payer_pubkey, dest, lamports);
+    let ix = system_instruction::transfer(&payer_pubkey, dest, transfer_lamports);
+    info!(
+        "[SOLANA_TX] fund_account {dest}: payer pre-flight done at {:?}",
+        start.elapsed()
+    );
     let blockhash = rpc.get_latest_blockhash()?;
     let tx = Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
+    info!(
+        "[SOLANA_TX] fund_account {dest}: blockhash fetched at {:?}, submitting",
+        start.elapsed()
+    );
 
     let sig = send_and_poll(rpc, &tx, Duration::from_secs(15), "fund_account")?;
     info!(
@@ -126,7 +156,7 @@ pub async fn sign_and_submit_async(
     instructions: Vec<Instruction>,
 ) -> Result<Signature> {
     tokio::task::spawn_blocking(move || {
-        sign_and_submit(&super::rpc::make_rpc(&rpc_url), &signer, &instructions)
+        sign_and_submit(&super::rpc::make_rpc(&rpc_url)?, &signer, &instructions)
     })
     .await
     .map_err(|e| anyhow!("submission task failed: {e}"))?
@@ -196,7 +226,7 @@ pub fn sign_and_submit_er(
             Err(e) => return Err(e),
         }
     }
-    unreachable!("loop always returns Ok or Err before exhausting attempts")
+    Err(anyhow!("ER submission exhausted its retry budget"))
 }
 
 pub fn submit_signed_tx(rpc: &RpcClient, tx_bytes: &[u8]) -> Result<Signature> {
@@ -213,7 +243,12 @@ pub fn cosign_and_submit_tx(
     let mut tx: Transaction =
         bincode::deserialize(tx_bytes).map_err(|e| anyhow!("deserialize tx: {e}"))?;
     let blockhash = tx.message.recent_blockhash;
-    tx.partial_sign(&[session_keypair], blockhash);
+    tx.try_partial_sign(&[session_keypair], blockhash)
+        .map_err(|e| anyhow!("session co-signature failed: {e}"))?;
+    // Wallet-stage validation permits this key's placeholder only. Submission
+    // requires the complete bundle, including a valid wallet signature.
+    tx.verify()
+        .map_err(|e| anyhow!("setup TX signatures invalid: {e}"))?;
 
     let ix_summary: Vec<String> = tx
         .message

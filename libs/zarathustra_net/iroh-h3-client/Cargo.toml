@@ -30,6 +30,7 @@ serde = { version = "1.0", optional = true }
 serde_json = { version = "1.0.149", optional = true }
 
 [dev-dependencies]
+anyhow.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 mockall = "0.14.0"
 iroh-h3-axum = { path = "../iroh-h3-axum" }
@@ -38,3 +39,6 @@ axum = { version = "0.8.9", features = ["json"], default-features = false }
 [features]
 default = []
 json = ["serde", "serde_json"]
+
+[lints]
+workspace = true

@@ -5,20 +5,19 @@ use std::str::FromStr;
 
 #[derive(Clone)]
 pub struct SessionEntry {
-    pub keypair_bytes: [u8; 64],
+    keypair: std::sync::Arc<Keypair>,
     pub wallet_pubkey: Pubkey,
     pub active: bool,
     pub is_global: bool,
 }
 
 impl SessionEntry {
-    pub fn keypair(&self) -> Keypair {
-        Keypair::try_from(self.keypair_bytes.as_slice())
-            .unwrap_or_else(|e| panic!("invalid keypair bytes: {}", e))
+    pub fn keypair(&self) -> std::sync::Arc<Keypair> {
+        self.keypair.clone()
     }
 
     pub fn session_pubkey(&self) -> Pubkey {
-        self.keypair().pubkey()
+        self.keypair.pubkey()
     }
 }
 
@@ -53,20 +52,18 @@ impl SessionStore {
         Ok(())
     }
 
-    pub async fn token_is_revoked(&self, subject: &str, iat: i64) -> bool {
+    pub async fn token_is_revoked(&self, subject: &str, iat: i64) -> Result<bool, sqlx::Error> {
         let cutoff: Option<(i64,)> =
             sqlx::query_as("SELECT valid_after FROM jwt_revocations WHERE subject = ?")
                 .bind(subject)
                 .fetch_optional(&self.pool)
-                .await
-                .ok()
-                .flatten();
-        match cutoff {
+                .await?;
+        Ok(match cutoff {
             // Strict `<` so a token re-issued in the same second as the logout
             // (a normal logout-then-login) is not itself revoked.
             Some((valid_after,)) => iat < valid_after,
             None => false,
-        }
+        })
     }
 
     pub async fn find_user_by_wallet(
@@ -320,12 +317,11 @@ impl SessionStore {
     }
 
     pub async fn create(&self, game_id: u64, wallet_pubkey: Pubkey) -> anyhow::Result<Pubkey> {
-        if let Some(existing) = self.get(game_id).await {
+        if let Some(existing) = self.get(game_id).await? {
             return Ok(existing.session_pubkey());
         }
 
         let kp = Keypair::new();
-        let pubkey = kp.pubkey();
         let keypair_bytes = kp.to_bytes();
         let wallet_str = wallet_pubkey.to_string();
         let encrypted = self
@@ -360,7 +356,12 @@ impl SessionStore {
             .map_err(|fallback| anyhow::anyhow!("Failed to insert session: {fallback}"))?;
         }
 
-        Ok(pubkey)
+        // A concurrent request may have won INSERT OR IGNORE. Return the key
+        // actually persisted, never an unused key the server cannot co-sign with.
+        self.get(game_id)
+            .await?
+            .map(|entry| entry.session_pubkey())
+            .ok_or_else(|| anyhow::anyhow!("Session was not persisted"))
     }
 
     pub async fn count_pending_for_wallet(&self, wallet: &str) -> i64 {
@@ -402,6 +403,8 @@ impl SessionStore {
         wallet_pubkey: Pubkey,
         keypair_bytes: [u8; 64],
     ) -> anyhow::Result<()> {
+        Keypair::try_from(keypair_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("Invalid session keypair"))?;
         let wallet_str = wallet_pubkey.to_string();
 
         // Reject changing an active session's owner. Retracking the same wallet is idempotent.
@@ -447,47 +450,33 @@ impl SessionStore {
         Ok(())
     }
 
-    fn decrypt_keypair_column(&self, blob: &[u8]) -> Option<[u8; 64]> {
+    fn decrypt_keypair_column(&self, blob: &[u8]) -> anyhow::Result<Keypair> {
         let bytes = match self.vault.decrypt_bytes(blob) {
-            Ok(plaintext) => plaintext,
+            Ok(bytes) => bytes,
+            // Legacy sessions stored raw 64-byte keys before encryption at rest.
             Err(_) if blob.len() == 64 => blob.to_vec(),
-            Err(e) => {
-                tracing::error!("Failed to decrypt session keypair: {e}");
-                return None;
-            }
+            Err(error) => return Err(anyhow::anyhow!("Session decryption failed: {error}")),
         };
-        let bytes: [u8; 64] = bytes.try_into().ok()?;
-        // SessionEntry::keypair() relies on this check: a corrupt row must be
-        // skipped here, not abort the process (release builds abort on panic)
-        // every time a worker reads it.
-        if let Err(e) = Keypair::try_from(bytes.as_slice()) {
-            tracing::error!("Stored session keypair is malformed: {e}");
-            return None;
-        }
-        Some(bytes)
+        Keypair::try_from(bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("Stored session keypair is malformed"))
     }
 
-    pub async fn get(&self, game_id: u64) -> Option<SessionEntry> {
-        let row: (Vec<u8>, String, i64, i64) = sqlx::query_as(
+    pub async fn get(&self, game_id: u64) -> anyhow::Result<Option<SessionEntry>> {
+        let row: Option<(Vec<u8>, String, i64, i64)> = sqlx::query_as(
             "SELECT keypair, wallet, active, is_global FROM sessions WHERE game_id = ?",
         )
         .bind(game_id as i64)
-        .fetch_one(&self.pool)
-        .await
-        .ok()?;
-
-        let keypair_bytes = self.decrypt_keypair_column(&row.0)?;
-
-        let wallet_pubkey = Pubkey::from_str(&row.1).ok()?;
-        let active = row.2 != 0;
-        let is_global = row.3 != 0;
-
-        Some(SessionEntry {
-            keypair_bytes,
-            wallet_pubkey,
-            active,
-            is_global,
-        })
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some((bytes, wallet, active, is_global)) = row else {
+            return Ok(None);
+        };
+        Ok(Some(SessionEntry {
+            keypair: std::sync::Arc::new(self.decrypt_keypair_column(&bytes)?),
+            wallet_pubkey: Pubkey::from_str(&wallet)?,
+            active: active != 0,
+            is_global: is_global != 0,
+        }))
     }
 
     pub async fn activate(&self, game_id: u64) {
@@ -611,33 +600,55 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use solana_sdk::signer::Signer;
 
-    async fn test_store() -> SessionStore {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .expect("in-memory sqlite pool");
-        let vault = IdentityVault::new(&"1".repeat(64), &"2".repeat(64)).expect("test vault");
-        let store = SessionStore::new(pool, vault);
-        crate::infrastructure::migrate_session_db(&store.pool)
-            .await
-            .expect("migrate");
-        store
+    async fn test_store() -> anyhow::Result<SessionStore> {
+        Ok({
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .connect("sqlite::memory:")
+                .await
+                .context("in-memory sqlite pool")?;
+            let vault = IdentityVault::new(&"1".repeat(64), &"2".repeat(64))
+                .map_err(|error| anyhow::anyhow!("{error:?}"))
+                .context("test vault")?;
+            let store = SessionStore::new(pool, vault);
+            crate::infrastructure::migrate_session_db(&store.pool)
+                .await
+                .context("migrate")?;
+            store
+        })
     }
 
     #[tokio::test]
-    async fn session_keypair_is_encrypted_at_rest() {
-        let store = test_store().await;
+    async fn corrupted_or_unavailable_sessions_are_distinct_from_missing_rows() -> anyhow::Result<()>
+    {
+        let store = test_store().await?;
+        assert!(store.get(55).await?.is_none());
+        store.create(55, Keypair::new().pubkey()).await?;
+        sqlx::query("UPDATE sessions SET keypair = ? WHERE game_id = 55")
+            .bind(vec![0u8; 3])
+            .execute(&store.pool)
+            .await?;
+        assert!(store.get(55).await.is_err());
+        store.pool.close().await;
+        assert!(store.get(56).await.is_err());
+        assert!(store.token_is_revoked("wallet", 1).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn session_keypair_is_encrypted_at_rest() -> anyhow::Result<()> {
+        let store = test_store().await?;
         let wallet = Keypair::new().pubkey();
-        let session_pubkey = store.create(1, wallet).await.expect("create session");
+        let session_pubkey = store.create(1, wallet).await.context("create session")?;
 
         // Read the raw column directly, bypassing `get()`'s decryption — this
         // is what a stolen SQLite backup would actually contain.
         let (raw,): (Vec<u8>,) = sqlx::query_as("SELECT keypair FROM sessions WHERE game_id = 1")
             .fetch_one(&store.pool)
             .await
-            .expect("raw row");
+            .context("raw row")?;
 
         assert_ne!(
             raw.len(),
@@ -654,13 +665,29 @@ mod tests {
 
         // But the store's own decrypt path must still recover it correctly —
         // this is the round-trip the game's record_move flow depends on.
-        let entry = store.get(1).await.expect("get session");
+        let entry = store.get(1).await?.context("get session")?;
         assert_eq!(entry.session_pubkey(), session_pubkey);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn legacy_plaintext_keypair_rows_still_decode() {
-        let store = test_store().await;
+    async fn concurrent_creation_returns_the_persisted_session_key() -> anyhow::Result<()> {
+        let store = test_store().await?;
+        let wallet = Keypair::new().pubkey();
+        let (first, second) = tokio::join!(store.create(991, wallet), store.create(991, wallet));
+        let persisted = store
+            .get(991)
+            .await?
+            .context("test setup failed")?
+            .session_pubkey();
+        assert_eq!(first.context("test setup failed")?, persisted);
+        assert_eq!(second.context("test setup failed")?, persisted);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn legacy_plaintext_keypair_rows_still_decode() -> anyhow::Result<()> {
+        let store = test_store().await?;
         let wallet = Keypair::new().pubkey();
         let kp = Keypair::new();
         let expected_pubkey = kp.pubkey();
@@ -675,18 +702,20 @@ mod tests {
         .bind(wallet.to_string())
         .execute(&store.pool)
         .await
-        .expect("insert legacy row");
+        .context("insert legacy row")?;
 
         let entry = store
             .get(2)
             .await
-            .expect("legacy plaintext row should still decode");
+            .context("legacy plaintext row should still decode")?
+            .context("legacy plaintext row is missing")?;
         assert_eq!(entry.session_pubkey(), expected_pubkey);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn create_with_keypair_is_also_encrypted_at_rest() {
-        let store = test_store().await;
+    async fn create_with_keypair_is_also_encrypted_at_rest() -> anyhow::Result<()> {
+        let store = test_store().await?;
         let wallet = Keypair::new().pubkey();
         let kp = Keypair::new();
         let expected_pubkey = kp.pubkey();
@@ -694,25 +723,27 @@ mod tests {
         store
             .create_with_keypair(3, wallet, kp.to_bytes())
             .await
-            .expect("create_with_keypair");
+            .context("create_with_keypair")?;
 
         let (raw,): (Vec<u8>,) = sqlx::query_as("SELECT keypair FROM sessions WHERE game_id = 3")
             .fetch_one(&store.pool)
             .await
-            .expect("raw row");
+            .context("raw row")?;
         assert_ne!(
             raw.len(),
             64,
             "global-session keypair must be encrypted too"
         );
 
-        let entry = store.get(3).await.expect("get session");
+        let entry = store.get(3).await?.context("get session")?;
         assert_eq!(entry.session_pubkey(), expected_pubkey);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn create_with_keypair_rejects_repointing_an_active_sessions_wallet() {
-        let store = test_store().await;
+    async fn create_with_keypair_rejects_repointing_an_active_sessions_wallet() -> anyhow::Result<()>
+    {
+        let store = test_store().await?;
         let wallet_a = Keypair::new().pubkey();
         let wallet_b = Keypair::new().pubkey();
         let kp = Keypair::new();
@@ -720,21 +751,22 @@ mod tests {
         store
             .create_with_keypair(7, wallet_a, kp.to_bytes())
             .await
-            .expect("first create_with_keypair should succeed");
+            .context("first create_with_keypair should succeed")?;
 
         // Re-tracking the SAME wallet for the same game_id is a no-op retry
         // and must still succeed.
         store
             .create_with_keypair(7, wallet_a, kp.to_bytes())
             .await
-            .expect("re-tracking the same wallet must still succeed");
+            .context("re-tracking the same wallet must still succeed")?;
 
         // A DIFFERENT wallet claiming the same, still-active game_id must
         // be rejected rather than silently repointing the session.
         let err = store
             .create_with_keypair(7, wallet_b, kp.to_bytes())
             .await
-            .expect_err("a different wallet must not silently take over an active session");
+            .err()
+            .context("a different wallet must not silently take over an active session")?;
         assert!(
             err.to_string().contains("different wallet"),
             "unexpected error: {err}"
@@ -745,30 +777,32 @@ mod tests {
             sqlx::query_as("SELECT wallet FROM sessions WHERE game_id = 7")
                 .fetch_one(&store.pool)
                 .await
-                .expect("raw row");
+                .context("raw row")?;
         assert_eq!(recorded_wallet, wallet_a.to_string());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn create_with_keypair_sets_created_at_timestamp() {
-        let store = test_store().await;
+    async fn create_with_keypair_sets_created_at_timestamp() -> anyhow::Result<()> {
+        let store = test_store().await?;
         let wallet = Keypair::new().pubkey();
         let kp = Keypair::new();
 
         store
             .create_with_keypair(11, wallet, kp.to_bytes())
             .await
-            .expect("create_with_keypair should succeed");
+            .context("create_with_keypair should succeed")?;
 
         let (created_at,): (i64,) =
             sqlx::query_as("SELECT created_at FROM sessions WHERE game_id = 11")
                 .fetch_one(&store.pool)
                 .await
-                .expect("created_at row");
+                .context("created_at row")?;
 
         assert!(
             created_at > 0,
             "global-session tracked rows must get a real created_at timestamp"
         );
+        Ok(())
     }
 }

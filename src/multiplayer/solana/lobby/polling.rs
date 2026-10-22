@@ -335,6 +335,9 @@ pub(super) fn sync_from_solana_state(
         lobby.rejoin_lookup_error = None;
         lobby.recovery_rx = None;
         lobby.recovery_scan = None;
+        lobby.recovery_action_rx = None;
+        lobby.recovery_message = None;
+        lobby.recovery_refresh_at = None;
         lobby.cached_display_name = None;
         if let Some(pubkey) = solana.wallet_pubkey {
             let (tx, rx) = oneshot::channel();
@@ -346,6 +349,33 @@ pub(super) fn sync_from_solana_state(
 }
 
 pub(super) fn poll_recovery_scan(mut lobby: ResMut<SolanaLobbyState>) {
+    if let Some(rx) = lobby.recovery_action_rx.as_mut() {
+        let result = match rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(oneshot::error::TryRecvError::Empty) => None,
+            Err(_) => Some(Err(
+                "Settlement check stopped. Check the chain again before retrying.".into(),
+            )),
+        };
+        if let Some(result) = result {
+            let succeeded = result.is_ok();
+            lobby.recovery_message = Some(result);
+            lobby.recovery_action_rx = None;
+            lobby.rescan_recovery();
+            if succeeded {
+                lobby.recovery_refresh_at =
+                    Some(std::time::Instant::now() + std::time::Duration::from_secs(35));
+            }
+        }
+    }
+    if lobby
+        .recovery_refresh_at
+        .is_some_and(|at| std::time::Instant::now() >= at)
+        && lobby.recovery_rx.is_none()
+    {
+        lobby.recovery_refresh_at = None;
+        lobby.rescan_recovery();
+    }
     if let Some(ref mut rx) = lobby.recovery_rx {
         match rx.try_recv() {
             Ok(scan) => {
@@ -431,56 +461,20 @@ pub fn poll_tournament_games(mut lobby: ResMut<SolanaLobbyState>) {
     });
 }
 
-pub fn poll_solana_browse(mut lobby: ResMut<SolanaLobbyState>) {
-    // Drain result if pending.
-    if let Some(ref rx) = lobby.browse_rx {
-        if let Ok(games) = rx.try_recv() {
-            lobby.browse_games = games;
-            lobby.browse_rx = None;
-        }
-    }
-
-    // Only refresh when Browse tab is active.
-    if lobby.mode != LobbyMode::Browse {
+pub fn poll_solana_browse(
+    mut lobby: ResMut<SolanaLobbyState>,
+    snapshot: Res<crate::multiplayer::network::p2p_vps::P2PVpsState>,
+) {
+    if lobby.mode != LobbyMode::Browse
+        || lobby.browse_revision == Some(snapshot.cached_games_revision)
+    {
         return;
     }
-    let should_refresh = lobby
-        .browse_last_fetch
-        .map(|t| t.elapsed().as_secs() >= 10)
-        .unwrap_or(true);
-    if !should_refresh || lobby.browse_rx.is_some() {
-        return;
-    }
-    lobby.browse_last_fetch = Some(std::time::Instant::now());
-
-    let (tx, rx) = crossbeam_channel::bounded(1);
-    lobby.browse_rx = Some(rx);
-    crate::core::net_task::spawn_detached("browse-games", move || {
-        match crate::multiplayer::vps_client::p2p_list_games() {
-            Ok(games) => {
-                let filtered: Vec<_> = games
-                    .into_iter()
-                    .filter(|g| g.game_type == "solana_wager" || g.game_type == "P2P")
-                    .map(|g| crate::multiplayer::network::p2p_vps::VpsGameListing {
-                        game_id: g.game_id,
-                        display_name: g.display_name,
-                        stake_amount: g.stake_amount,
-                        game_type: g.game_type,
-                        status: g.status,
-                        base_time_seconds: g.base_time_seconds,
-                        increment_seconds: g.increment_seconds,
-                        username: g.username,
-                        elo: g.elo,
-                        region: g.region,
-                        capacity: g.capacity,
-                        players_joined: g.players_joined,
-                        ttl_seconds: g.ttl_seconds,
-                        is_private: g.is_private,
-                    })
-                    .collect();
-                let _ = tx.send(filtered);
-            }
-            Err(e) => warn!("[SOLANA_BROWSE] Failed to fetch games: {}", e),
-        }
-    });
+    lobby.browse_games = snapshot
+        .cached_games
+        .iter()
+        .filter(|g| g.game_type == "solana_wager" || g.game_type == "P2P")
+        .cloned()
+        .collect();
+    lobby.browse_revision = Some(snapshot.cached_games_revision);
 }

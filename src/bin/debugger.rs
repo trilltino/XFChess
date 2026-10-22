@@ -130,7 +130,10 @@ fn process_stdin(
                 }
 
                 // Store in memory
-                entries.lock().unwrap().push(entry);
+                entries
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(entry);
             }
             Err(e) => {
                 eprintln!("Error reading stdin: {}", e);
@@ -196,7 +199,10 @@ fn monitor_simulation(
         }
 
         // Store in memory
-        entries.lock().unwrap().push(entry);
+        entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(entry);
 
         if event_index % 5 == 0 {
             print_summary(&entries);
@@ -205,7 +211,9 @@ fn monitor_simulation(
 }
 
 fn print_summary(entries: &Arc<Mutex<Vec<LogEntry>>>) {
-    let entries = entries.lock().unwrap();
+    let entries = entries
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let total = entries.len();
 
     println!();
@@ -223,7 +231,9 @@ fn start_websocket_server(port: u16, entries: Arc<Mutex<Vec<LogEntry>>>) {
             for stream in listener.incoming() {
                 match stream {
                     Ok(mut stream) => {
-                        let entries = entries.lock().unwrap();
+                        let entries = entries
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
                         let response =
                             format!("HTTP/1.1 200 OK\r\n\r\nTotal events: {}\r\n", entries.len());
                         use std::io::Write;

@@ -25,7 +25,21 @@ fn method_body(i: usize) -> Value {
     json!({ "jsonrpc": "2.0", "id": 1, "method": method })
 }
 
-pub async fn run(targets: &[Target], levels: &[usize], requests_per_level: usize) {
+pub async fn run(
+    targets: &[Target],
+    levels: &[usize],
+    requests_per_level: usize,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        requests_per_level > 0 && requests_per_level <= 100_000,
+        "request count must be in 1..=100000"
+    );
+    anyhow::ensure!(
+        !levels.is_empty()
+            && levels.len() <= 16
+            && levels.iter().all(|level| (1..=256).contains(level)),
+        "choose 1..=16 concurrency levels in 1..=256"
+    );
     println!("\n╔══════════════════════════════════════════════════════════╗");
     println!("║  READ-RPC LOAD TEST  (latency + 429 rate under concurrency)  ║");
     println!("╚══════════════════════════════════════════════════════════╝");
@@ -45,7 +59,7 @@ pub async fn run(targets: &[Target], levels: &[usize], requests_per_level: usize
 
         for &conc in levels {
             let wall = Instant::now();
-            let stats = bench_level(&target.url, conc, requests_per_level).await;
+            let stats = bench_level(&target.url, conc, requests_per_level).await?;
             let elapsed = wall.elapsed().as_secs_f64().max(1e-6);
             let rps = stats.ok() as f64 / elapsed;
             println!(
@@ -62,25 +76,25 @@ pub async fn run(targets: &[Target], levels: &[usize], requests_per_level: usize
             );
         }
     }
+    Ok(())
 }
 
-async fn bench_level(url: &str, concurrency: usize, total: usize) -> LatencyStats {
+async fn bench_level(url: &str, concurrency: usize, total: usize) -> anyhow::Result<LatencyStats> {
     if concurrency == 0 || total == 0 {
-        return LatencyStats::default();
+        return Ok(LatencyStats::default());
     }
     let client = Arc::new(
         Client::builder()
             .pool_max_idle_per_host(concurrency)
             .timeout(Duration::from_secs(20))
-            .build()
-            .expect("build reqwest client"),
+            .build()?,
     );
 
     let per_worker = total.div_ceil(concurrency);
     let cooldown = Arc::new(tokio::sync::Mutex::new(tokio::time::Instant::now()));
     let mut set: JoinSet<LatencyStats> = JoinSet::new();
 
-    for w in 0..concurrency {
+    for w in 0..concurrency.min(total) {
         let client = Arc::clone(&client);
         let cooldown = Arc::clone(&cooldown);
         let url = url.to_string();
@@ -123,22 +137,28 @@ async fn bench_level(url: &str, concurrency: usize, total: usize) -> LatencyStat
 
     let mut agg = LatencyStats::default();
     while let Some(res) = set.join_next().await {
-        if let Ok(local) = res {
-            agg.merge(local);
-        }
+        agg.merge(res?);
     }
-    agg
+    Ok(agg)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use axum::{routing::post, Json, Router};
 
     #[tokio::test]
-    async fn exact_request_count_and_http_200_rpc_errors() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    async fn exact_request_count_and_http_200_rpc_errors() -> anyhow::Result<()> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .context(concat!(file!(), ":", line!()))?;
+        let endpoint = format!(
+            "http://{}",
+            listener
+                .local_addr()
+                .context(concat!(file!(), ":", line!()))?
+        );
         let app = Router::new().route(
             "/",
             post(|| async {
@@ -149,13 +169,14 @@ mod tests {
                 }))
             }),
         );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
         let stats = tokio::time::timeout(Duration::from_secs(5), bench_level(&endpoint, 3, 5))
             .await
-            .unwrap();
+            .context(concat!(file!(), ":", line!()))??;
         assert_eq!(stats.total(), 5);
         assert_eq!(stats.errors, 5);
         assert_eq!(stats.ok(), 0);
         server.abort();
+        Ok(())
     }
 }

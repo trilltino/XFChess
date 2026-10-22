@@ -198,15 +198,17 @@ mod tests {
     }
 
     #[test]
-    fn test_square_algebraic() {
-        let square = Square::from_algebraic("e4").unwrap();
+    fn test_square_algebraic() -> Result<(), Box<dyn std::error::Error>> {
+        let square = Square::from_algebraic("e4").ok_or("missing test value")?;
         assert_eq!(square.file.index(), 4);
         assert_eq!(square.rank.index(), 3);
         assert_eq!(square.to_algebraic(), "e4");
 
-        let square2 = Square::from_algebraic("a1").unwrap();
+        let square2 = Square::from_algebraic("a1").ok_or("missing test value")?;
         assert_eq!(square2.file.index(), 0);
         assert_eq!(square2.rank.index(), 0);
+
+        Ok(())
     }
 
     #[test]

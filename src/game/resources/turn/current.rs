@@ -108,7 +108,7 @@ mod tests {
             color: PieceColor::Black,
             move_number: 42,
         };
-        let turn2 = turn1.clone();
+        let turn2 = turn1;
 
         assert_eq!(turn1, turn2);
         assert_eq!(turn2.color, PieceColor::Black);

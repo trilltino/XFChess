@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use anchor_lang::{system_program, AccountDeserialize, InstructionData, ToAccountMetas};
 use common::*;
@@ -11,7 +12,7 @@ pub fn config_pda() -> (Pubkey, u8) {
 }
 
 #[tokio::test]
-async fn test_initialize_and_update_config() {
+async fn test_initialize_and_update_config() -> anyhow::Result<()> {
     let mut ctx = start(vec![]).await;
     let (config_key, _bump) = config_pda();
     let authority = ctx.payer.pubkey();
@@ -51,17 +52,17 @@ async fn test_initialize_and_update_config() {
 
     send(&mut ctx, init_ix, &[])
         .await
-        .expect("initialize_config must succeed");
+        .context("initialize_config must succeed")?;
 
     let account = ctx
         .banks_client
         .get_account(config_key)
         .await
-        .unwrap()
-        .expect("config account exists");
+        .context("required operation value")?
+        .context("config account exists")?;
     let mut data_slice: &[u8] = &account.data;
     let config =
-        ProgramConfig::try_deserialize(&mut data_slice).expect("deserialize ProgramConfig");
+        ProgramConfig::try_deserialize(&mut data_slice).context("deserialize ProgramConfig")?;
 
     assert_eq!(config.authority, authority);
     assert_eq!(config.vps_authority, vps_auth);
@@ -89,19 +90,20 @@ async fn test_initialize_and_update_config() {
 
     send(&mut ctx, update_ix, &[])
         .await
-        .expect("update_config must succeed");
+        .context("update_config must succeed")?;
 
     let account_updated = ctx
         .banks_client
         .get_account(config_key)
         .await
-        .unwrap()
-        .expect("config account exists");
+        .context("required operation value")?
+        .context("config account exists")?;
     let mut data_slice_updated: &[u8] = &account_updated.data;
-    let config_updated =
-        ProgramConfig::try_deserialize(&mut data_slice_updated).expect("deserialize ProgramConfig");
+    let config_updated = ProgramConfig::try_deserialize(&mut data_slice_updated)
+        .context("deserialize ProgramConfig")?;
 
     assert_eq!(config_updated.vps_authority, new_vps);
     assert_eq!(config_updated.max_wager_amount, 20_000_000_000);
     assert_eq!(config_updated.min_wager_lamports, 2_000_000); // untouched
+    Ok(())
 }

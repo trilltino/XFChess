@@ -176,13 +176,13 @@ async fn get_registration_chain(
 
     let required_sol = tournament.entry_fee_lamports as f64 / 1_000_000_000.0;
 
-    if wallet.is_none() {
+    let Some(wallet) = wallet else {
         // No wallet provided, return onboarding chain instead
         let chain = create_onboarding_chain(id, None, required_sol);
         return Ok(Json(chain));
-    }
+    };
 
-    let chain = create_registration_chain(id, &wallet.unwrap());
+    let chain = create_registration_chain(id, &wallet);
     Ok(Json(chain))
 }
 
@@ -355,7 +355,13 @@ async fn confirm_registration(
     let confirmed = tokio::task::spawn_blocking(move || {
         use crate::signing::solana::make_rpc;
         use solana_commitment_config::CommitmentConfig;
-        let rpc = make_rpc(&rpc_url);
+        let rpc = match make_rpc(&rpc_url) {
+            Ok(rpc) => rpc,
+            Err(error) => {
+                tracing::warn!("Confirmation client failed: {error}");
+                return false;
+            }
+        };
         for _ in 0..30 {
             match rpc.get_signature_status_with_commitment(&sig, CommitmentConfig::confirmed()) {
                 Ok(Some(Ok(()))) => return true,

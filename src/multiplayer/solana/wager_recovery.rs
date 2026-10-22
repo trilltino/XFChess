@@ -40,8 +40,9 @@ pub enum RecoveryAction {
     CancelAbandoned,
     /// Cancelled game with escrow funds remaining. cancel_game idempotently refunds the remainder.
     CompleteCancellation,
-    /// Delegated accounts must be undelegated or recovered before base-layer refunds.
-    /// Display them without client cancellation actions.
+    /// A terminal base-layer game still needs the permissionless payout.
+    CompleteSettlement,
+    /// Inspect the authoritative live game before attempting timeout/undelegation.
     UndelegationRequired,
 }
 
@@ -50,6 +51,7 @@ pub struct ReclaimableWager {
     pub game_id: u64,
     pub wager_lamports: u64,
     pub action: RecoveryAction,
+    pub updated_at: i64,
     /// Seconds until an active game becomes cancellable as abandoned, when
     /// it is still in play. `None` for every actionable entry.
     pub cancellable_in_secs: Option<i64>,
@@ -58,8 +60,7 @@ pub struct ReclaimableWager {
 #[derive(Debug, Clone, Default)]
 pub struct WagerScan {
     pub reclaimable: Vec<ReclaimableWager>,
-    /// Wagered games still in play (not yet cancellable) or awaiting ER
-    /// undelegation; informational only.
+    /// Wagered games still in play or requiring a live ER settlement check.
     pub in_play: Vec<ReclaimableWager>,
     /// False when an RPC call failed, so absence of a game proves nothing.
     pub complete: bool,
@@ -84,12 +85,16 @@ pub fn classify(
         game_id: game.game_id,
         wager_lamports: game.wager_amount,
         action,
+        updated_at: game.updated_at,
         cancellable_in_secs,
     };
     if !owned_by_program || game.is_delegated {
         return matches!(
             game.status,
-            GameStatus::WaitingForOpponent | GameStatus::Active | GameStatus::Finished
+            GameStatus::WaitingForOpponent
+                | GameStatus::Active
+                | GameStatus::Finished
+                | GameStatus::Cancelled
         )
         .then(|| entry(RecoveryAction::UndelegationRequired, None));
     }
@@ -114,6 +119,9 @@ pub fn classify(
         GameStatus::Cancelled if escrow_lamports >= game.wager_amount => {
             Some(entry(RecoveryAction::CompleteCancellation, None))
         }
+        GameStatus::Finished if escrow_lamports > 0 => {
+            Some(entry(RecoveryAction::CompleteSettlement, None))
+        }
         _ => None,
     }
 }
@@ -135,7 +143,8 @@ pub fn game_pda(program_id: &Pubkey, game_id: u64) -> Pubkey {
 
 fn ledger_path() -> PathBuf {
     #[cfg(target_os = "android")]
-    let base = crate::core::paths::internal_data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let base =
+        crate::core::android_paths::internal_data_dir().unwrap_or_else(|| PathBuf::from("."));
     #[cfg(not(target_os = "android"))]
     let base = dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -195,7 +204,7 @@ pub fn forget(game_id: u64) {
 
 fn program_games_for(
     rpc: &RpcClient,
-    program_id: &Pubkey,
+    owner: &Pubkey,
     wallet: &Pubkey,
     offset: usize,
 ) -> Result<Vec<(Pubkey, Vec<u8>)>, String> {
@@ -210,10 +219,11 @@ fn program_games_for(
         },
         ..Default::default()
     };
-    rpc.get_program_ui_accounts_with_config(program_id, config)
+    rpc.get_program_ui_accounts_with_config(owner, config)
         .map(|accounts| {
             accounts
                 .into_iter()
+                .filter(|(_, a)| a.owner == owner.to_string() && !a.executable)
                 .filter_map(|(k, a)| a.data.decode().map(|data| (k, data)))
                 .collect()
         })
@@ -242,21 +252,34 @@ fn scan(wallet: &Pubkey, rpc_url: &str) -> WagerScan {
     // (game_id, decoded game, owned_by_program)
     let mut games: Vec<(Game, bool)> = Vec::new();
     let mut seen = BTreeSet::new();
-    for offset in [WHITE_FILTER_OFFSET, BLACK_FILTER_OFFSET] {
-        match program_games_for(&rpc, &program_id, wallet, offset) {
-            Ok(accounts) => {
-                for (_, data) in accounts {
-                    if let Some(game) = decode_game(&data) {
-                        if seen.insert(game.game_id) {
-                            games.push((game, true));
+    let delegation_program: Pubkey = match "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh".parse() {
+        Ok(program) => program,
+        Err(error) => {
+            out.complete = false;
+            out.errors
+                .push(format!("Invalid delegation program ID: {error}"));
+            return out;
+        }
+    };
+    for owner in [program_id, delegation_program] {
+        for offset in [WHITE_FILTER_OFFSET, BLACK_FILTER_OFFSET] {
+            match program_games_for(&rpc, &owner, wallet, offset) {
+                Ok(accounts) => {
+                    for (address, data) in accounts {
+                        if let Some(game) = decode_game(&data) {
+                            if address == game_pda(&program_id, game.game_id)
+                                && seen.insert(game.game_id)
+                            {
+                                games.push((game, owner == program_id));
+                            }
                         }
                     }
                 }
-            }
-            Err(e) => {
-                warn!("[WAGER-RECOVERY] getProgramAccounts failed: {e}");
-                out.complete = false;
-                out.errors.push(format!("chain search failed: {e}"));
+                Err(e) => {
+                    warn!("[WAGER-RECOVERY] getProgramAccounts failed: {e}");
+                    out.complete = false;
+                    out.errors.push(format!("chain search failed: {e}"));
+                }
             }
         }
     }
@@ -270,18 +293,36 @@ fn scan(wallet: &Pubkey, rpc_url: &str) -> WagerScan {
                 let pda = game_pda(&program_id, game_id);
                 match rpc.get_account_with_commitment(&pda, CommitmentConfig::confirmed()) {
                     Ok(resp) => match resp.value {
-                        Some(account) => match decode_game(&account.data) {
-                            Some(game) => {
-                                seen.insert(game_id);
-                                games.push((game, account.owner == program_id));
+                        Some(account)
+                            if (account.owner == program_id
+                                || account.owner == delegation_program)
+                                && !account.executable =>
+                        {
+                            match decode_game(&account.data) {
+                                Some(game) => {
+                                    if game.game_id != game_id {
+                                        out.complete = false;
+                                        continue;
+                                    }
+                                    seen.insert(game_id);
+                                    games.push((game, account.owner == program_id));
+                                }
+                                None => {
+                                    out.complete = false;
+                                    out.errors.push(format!(
+                                        "game {game_id}: account could not be decoded"
+                                    ));
+                                }
                             }
-                            None => out
-                                .errors
-                                .push(format!("game {game_id}: account could not be decoded")),
-                        },
+                        }
                         // Closed or never created: nothing on chain to refund
                         // from; keep the ledger entry for support reconciliation.
                         None => {}
+                        Some(_) => {
+                            out.complete = false;
+                            out.errors
+                                .push(format!("game {game_id}: unexpected account owner"));
+                        }
                     },
                     Err(e) => {
                         out.complete = false;
@@ -291,11 +332,14 @@ fn scan(wallet: &Pubkey, rpc_url: &str) -> WagerScan {
                 }
             }
         }
-        None => out.errors.push("local wager ledger unreadable".to_string()),
+        None => {
+            out.complete = false;
+            out.errors.push("local wager ledger unreadable".to_string());
+        }
     }
 
     for (game, owned_by_program) in games {
-        let escrow = if game.status == GameStatus::Cancelled {
+        let escrow = if matches!(game.status, GameStatus::Cancelled | GameStatus::Finished) {
             match rpc.get_balance(&escrow_pda(&program_id, game.game_id)) {
                 Ok(lamports) => lamports,
                 Err(e) => {
@@ -309,8 +353,7 @@ fn scan(wallet: &Pubkey, rpc_url: &str) -> WagerScan {
             0
         };
         if let Some(entry) = classify(&game, wallet, escrow, owned_by_program, now) {
-            // A delegated game is normally just being played on the ER; it is
-            // listed for visibility but never offered as a client action.
+            // Never offer cancel_game against a stale delegated base copy.
             if entry.cancellable_in_secs.is_some()
                 || entry.action == RecoveryAction::UndelegationRequired
             {
@@ -368,88 +411,117 @@ mod tests {
     }
 
     #[test]
-    fn decodes_the_program_layout_including_a_winner_result() {
+    fn decodes_the_program_layout_including_a_winner_result(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // A `Winner` result shifts every later field by 32 bytes, which the
         // old fixed `8 + 212` wager offset silently misread.
         let w = Pubkey::new_unique();
         let mut g = game(GameStatus::Finished, w, Pubkey::new_unique());
         g.result = GameResult::Winner(w);
         let mut data = Vec::new();
-        anchor_lang::AccountSerialize::try_serialize(&g, &mut data).unwrap();
-        let decoded = decode_game(&data).expect("decodes");
+        anchor_lang::AccountSerialize::try_serialize(&g, &mut data)?;
+        let decoded = decode_game(&data).ok_or("game did not decode")?;
         assert_eq!(decoded.wager_amount, 5_000_000);
         assert_eq!(decoded.result, GameResult::Winner(w));
         assert!(decode_game(&data[..40]).is_none());
         assert!(decode_game(&[0u8; 300]).is_none());
+
+        Ok(())
     }
 
     #[test]
-    fn only_the_creator_can_reclaim_an_unjoined_game() {
+    fn only_the_creator_can_reclaim_an_unjoined_game() -> Result<(), Box<dyn std::error::Error>> {
         let w = Pubkey::new_unique();
         let g = game(GameStatus::WaitingForOpponent, w, Pubkey::default());
-        let r = classify(&g, &w, 0, true, 2_000).unwrap();
+        let r = classify(&g, &w, 0, true, 2_000).ok_or("missing test value")?;
         assert_eq!(r.action, RecoveryAction::CancelUnjoined);
         assert!(classify(&g, &Pubkey::default(), 0, true, 2_000).is_none());
         assert!(classify(&g, &Pubkey::new_unique(), 0, true, 2_000).is_none());
+
+        Ok(())
     }
 
     #[test]
-    fn zero_move_active_game_is_reclaimable_by_either_player() {
+    fn zero_move_active_game_is_reclaimable_by_either_player(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (w, b) = (Pubkey::new_unique(), Pubkey::new_unique());
         let g = game(GameStatus::Active, w, b);
         for who in [w, b] {
-            let r = classify(&g, &who, 0, true, 1_001).unwrap();
+            let r = classify(&g, &who, 0, true, 1_001).ok_or("missing test value")?;
             assert_eq!(r.action, RecoveryAction::CancelBeforeFirstMove);
             assert_eq!(r.cancellable_in_secs, None);
         }
+
+        Ok(())
     }
 
     #[test]
-    fn active_game_with_moves_is_in_play_until_the_abandonment_window() {
+    fn active_game_with_moves_is_in_play_until_the_abandonment_window(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (w, b) = (Pubkey::new_unique(), Pubkey::new_unique());
         let mut g = game(GameStatus::Active, w, b);
         g.move_count = 3;
-        let early = classify(&g, &w, 0, true, 1_000 + 60).unwrap();
+        let early = classify(&g, &w, 0, true, 1_000 + 60).ok_or("missing test value")?;
         assert!(early.cancellable_in_secs.is_some());
-        let late = classify(&g, &b, 0, true, 1_000 + ABANDONED_CANCEL_AFTER_SECS + 1).unwrap();
+        let late = classify(&g, &b, 0, true, 1_000 + ABANDONED_CANCEL_AFTER_SECS + 1)
+            .ok_or("missing test value")?;
         assert_eq!(late.action, RecoveryAction::CancelAbandoned);
         assert_eq!(late.cancellable_in_secs, None);
+
+        Ok(())
     }
 
     #[test]
-    fn cancelled_game_is_only_reclaimable_while_escrow_still_holds_a_stake() {
+    fn cancelled_game_is_only_reclaimable_while_escrow_still_holds_a_stake(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (w, b) = (Pubkey::new_unique(), Pubkey::new_unique());
         let g = game(GameStatus::Cancelled, w, b);
         assert!(classify(&g, &w, 0, true, 2_000).is_none());
         assert!(classify(&g, &w, 4_999_999, true, 2_000).is_none());
-        let r = classify(&g, &w, 5_000_000, true, 2_000).unwrap();
+        let r = classify(&g, &w, 5_000_000, true, 2_000).ok_or("missing test value")?;
         assert_eq!(r.action, RecoveryAction::CompleteCancellation);
+
+        Ok(())
     }
 
     #[test]
-    fn settled_finished_or_free_games_are_not_reclaimable() {
+    fn settled_or_free_games_are_not_reclaimable_and_finished_games_can_settle(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (w, b) = (Pubkey::new_unique(), Pubkey::new_unique());
-        for status in [
-            GameStatus::Settled,
-            GameStatus::Finished,
-            GameStatus::Expired,
-        ] {
+        for status in [GameStatus::Settled, GameStatus::Expired] {
             assert!(classify(&game(status, w, b), &w, 10_000_000, true, 2_000).is_none());
         }
+        assert_eq!(
+            classify(
+                &game(GameStatus::Finished, w, b),
+                &w,
+                10_000_000,
+                true,
+                2_000
+            )
+            .ok_or("wager not classified")?
+            .action,
+            RecoveryAction::CompleteSettlement
+        );
         let mut free = game(GameStatus::WaitingForOpponent, w, Pubkey::default());
         free.wager_amount = 0;
         assert!(classify(&free, &w, 0, true, 2_000).is_none());
+
+        Ok(())
     }
 
     #[test]
-    fn delegated_game_requires_undelegation_not_a_client_cancel() {
+    fn delegated_game_requires_undelegation_not_a_client_cancel(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (w, b) = (Pubkey::new_unique(), Pubkey::new_unique());
         let mut g = game(GameStatus::Active, w, b);
         g.is_delegated = true;
-        let r = classify(&g, &w, 0, true, 2_000).unwrap();
+        let r = classify(&g, &w, 0, true, 2_000).ok_or("missing test value")?;
         assert_eq!(r.action, RecoveryAction::UndelegationRequired);
         let g = game(GameStatus::Active, w, b);
-        let r = classify(&g, &b, 0, false, 2_000).unwrap();
+        let r = classify(&g, &b, 0, false, 2_000).ok_or("missing test value")?;
         assert_eq!(r.action, RecoveryAction::UndelegationRequired);
+
+        Ok(())
     }
 }

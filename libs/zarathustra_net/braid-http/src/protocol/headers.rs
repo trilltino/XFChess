@@ -1,5 +1,7 @@
 use crate::error::{BraidError, Result};
 use crate::types::Version;
+#[cfg(test)]
+use anyhow::Context as _;
 
 pub fn parse_version_header(value: &str) -> Result<Vec<Version>> {
     use sfv::{BareItem, List, ListEntry, Parser};
@@ -136,8 +138,12 @@ pub fn parse_merge_type(value: &str) -> Result<String> {
 mod tests {
     use super::*;
     #[test]
-    fn test_headers() {
-        assert_eq!(parse_heartbeat("5s").unwrap(), 5);
+    fn test_headers() -> anyhow::Result<()> {
+        assert_eq!(
+            parse_heartbeat("5s").context("required operation value")?,
+            5
+        );
         assert_eq!(format_content_range("json", ".f"), "json .f");
+        Ok(())
     }
 }

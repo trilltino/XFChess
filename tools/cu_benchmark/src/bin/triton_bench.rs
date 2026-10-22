@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
 
     match &cli.command {
         Command::ReadLoad { requests, levels } => {
-            run_read_load(&triton, &cli.baseline_url, *requests, levels).await;
+            run_read_load(&triton, &cli.baseline_url, *requests, levels).await?;
         }
         Command::TxLand { count } => {
             run_tx_land(&triton, &cli.baseline_url, *count).await?;
@@ -110,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
             .await?;
         }
         Command::All => {
-            run_read_load(&triton, &cli.baseline_url, 200, "1,8,16,32,64,128").await;
+            run_read_load(&triton, &cli.baseline_url, 200, "1,8,16,32,64,128").await?;
             run_tx_land(&triton, &cli.baseline_url, 10).await?;
             // WS stream probe builds everywhere; gRPC Geyser only with --features geyser.
             if let Err(e) = stream::run(&stream::to_ws(&triton), 20, 15).await {
@@ -130,7 +130,12 @@ fn parse_levels(s: &str) -> Vec<usize> {
         .collect()
 }
 
-async fn run_read_load(triton: &str, baseline: &str, requests: usize, levels: &str) {
+async fn run_read_load(
+    triton: &str,
+    baseline: &str,
+    requests: usize,
+    levels: &str,
+) -> anyhow::Result<()> {
     let levels = parse_levels(levels);
     let targets = vec![
         read_load::Target {
@@ -142,7 +147,7 @@ async fn run_read_load(triton: &str, baseline: &str, requests: usize, levels: &s
             url: baseline.to_string(),
         },
     ];
-    read_load::run(&targets, &levels, requests).await;
+    read_load::run(&targets, &levels, requests).await
 }
 
 async fn run_tx_land(triton: &str, baseline: &str, count: usize) -> anyhow::Result<()> {
@@ -150,8 +155,11 @@ async fn run_tx_land(triton: &str, baseline: &str, count: usize) -> anyhow::Resu
 
     // Cheap balance gate: memo txs cost the base fee (5000 lamports) each.
     let rpc = RpcClient::new(triton.to_string());
-    let balance = rpc.get_balance(&master.pubkey()).unwrap_or(0);
-    let needed = (count as u64 * 2) * 5_000 + 1_000_000;
+    let balance = rpc.get_balance(&master.pubkey())?;
+    let needed = u64::try_from(count)?
+        .checked_mul(10_000)
+        .and_then(|fees| fees.checked_add(1_000_000))
+        .ok_or_else(|| anyhow::anyhow!("transaction funding amount overflow"))?;
     if balance < needed {
         anyhow::bail!(
             "master {} has {:.4} SOL — fund it (https://faucet.solana.com/) then retry",

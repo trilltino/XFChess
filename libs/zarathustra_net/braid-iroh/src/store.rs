@@ -1,3 +1,5 @@
+#[cfg(test)]
+use anyhow::Context as _;
 use braid_http::Update;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -178,7 +180,7 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[tokio::test]
-    async fn resuming_a_frontier_keeps_unseen_branches_and_live_updates() {
+    async fn resuming_a_frontier_keeps_unseen_branches_and_live_updates() -> anyhow::Result<()> {
         let store = ResourceStore::new(HashMap::new());
         for (version, parents) in [
             ("root", vec![]),
@@ -197,7 +199,7 @@ mod tests {
         let (history, _) = store
             .subscribe("game/1/moves", &[Version::new("a1")])
             .await
-            .unwrap();
+            .context("required operation value")?;
         assert_eq!(
             history
                 .iter()
@@ -208,13 +210,20 @@ mod tests {
         let (history, mut receiver) = store
             .subscribe("game/1/moves", &[Version::new("a1"), Version::new("b1")])
             .await
-            .unwrap();
+            .context("required operation value")?;
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].version, [Version::new("a2")]);
         let merged = Update::snapshot(Version::new("merged"), "merged")
             .with_parents(vec![Version::new("a2"), Version::new("b1")]);
         store.append("game/1/moves", merged.clone()).await;
-        assert_eq!(receiver.recv().await.unwrap().version, merged.version);
+        assert_eq!(
+            receiver
+                .recv()
+                .await
+                .context("required operation value")?
+                .version,
+            merged.version
+        );
         assert!(store
             .subscribe("game/1/moves", &[Version::new("missing")])
             .await
@@ -222,13 +231,14 @@ mod tests {
         assert!(store
             .subscribe("game/1/moves", &[Version::new("merged")])
             .await
-            .unwrap()
+            .context("required operation value")?
             .0
             .is_empty());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn history_is_normalized_bounded_and_retries_are_idempotent() {
+    async fn history_is_normalized_bounded_and_retries_are_idempotent() -> anyhow::Result<()> {
         let store = ResourceStore::new(HashMap::new());
         for i in 0..510 {
             store
@@ -247,11 +257,15 @@ mod tests {
         let history = store.history("game/1/moves").await;
         assert_eq!(history.len(), 500);
         assert_eq!(history[0].version[0].to_string(), "10");
-        assert_eq!(history.last().unwrap().version[0].to_string(), "509");
+        assert_eq!(
+            history.last().context("required operation value")?.version[0].to_string(),
+            "509"
+        );
         #[cfg(feature = "proxy")]
         assert!(matches!(
             store.subscribe("game/1/moves", &[Version::new("9")]).await,
             Err(braid_http::BraidError::HistoryDropped)
         ));
+        Ok(())
     }
 }

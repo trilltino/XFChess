@@ -188,6 +188,7 @@ pub fn get_onboarding_machine() -> &'static OnboardingStateMachine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[tokio::test]
     async fn test_start_session_no_wallet() {
@@ -219,7 +220,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_with_balance_sufficient() {
+    async fn test_update_with_balance_sufficient() -> anyhow::Result<()> {
         let machine = OnboardingStateMachine::new();
         machine
             .start_session(
@@ -240,14 +241,19 @@ mod tests {
         machine
             .update_with_balance("test_session", &balance)
             .await
-            .unwrap();
-        let session = machine.get_session("test_session").await.unwrap();
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
+        let session = machine
+            .get_session("test_session")
+            .await
+            .context("test setup failed")?;
 
         assert!(matches!(session.state, OnboardingState::ReadyToRegister));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_mark_registered() {
+    async fn test_mark_registered() -> anyhow::Result<()> {
         let machine = OnboardingStateMachine::new();
         machine
             .start_session(
@@ -258,9 +264,17 @@ mod tests {
             )
             .await;
 
-        machine.mark_registered("test_session").await.unwrap();
-        let session = machine.get_session("test_session").await.unwrap();
+        machine
+            .mark_registered("test_session")
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
+        let session = machine
+            .get_session("test_session")
+            .await
+            .context("test setup failed")?;
 
         assert!(matches!(session.state, OnboardingState::Registered));
+        Ok(())
     }
 }

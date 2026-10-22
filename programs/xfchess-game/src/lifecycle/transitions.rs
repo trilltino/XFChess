@@ -2,6 +2,8 @@ use crate::constants::{DELEGATE_COST, ER_SESSION_FEE_LAMPORTS, JOIN_GAME_COST, U
 use crate::errors::GameErrorCode;
 use crate::state::{Game, GameStatus};
 use anchor_lang::prelude::*;
+#[cfg(test)]
+use anyhow::Context as _;
 
 pub fn join_waiting_game(
     game: &mut Game,
@@ -103,42 +105,48 @@ mod tests {
     }
 
     #[test]
-    fn mark_delegated_accrues_delegate_cost() {
+    fn mark_delegated_accrues_delegate_cost() -> anyhow::Result<()> {
         let mut g = game(GameStatus::Active, false);
-        mark_delegated(&mut g).unwrap();
+        mark_delegated(&mut g).context("required operation value")?;
         assert_eq!(g.fees_advanced, DELEGATE_COST);
         assert!(g.is_delegated);
+        Ok(())
     }
 
     #[test]
-    fn mark_undelegated_accrues_undelegate_and_session_fee() {
+    fn mark_undelegated_accrues_undelegate_and_session_fee() -> anyhow::Result<()> {
         let mut g = game(GameStatus::Active, true);
         g.fees_advanced = DELEGATE_COST;
-        mark_undelegated(&mut g).unwrap();
+        mark_undelegated(&mut g).context("required operation value")?;
         assert_eq!(
             g.fees_advanced,
             DELEGATE_COST + UNDELEGATE_COST + ER_SESSION_FEE_LAMPORTS
         );
         assert!(!g.is_delegated);
+        Ok(())
     }
 
     #[test]
-    fn full_lifecycle_fees_advanced_matches_sum_of_all_flat_costs() {
+    fn full_lifecycle_fees_advanced_matches_sum_of_all_flat_costs() -> anyhow::Result<()> {
         use crate::constants::{CREATE_GAME_COST, RECORD_RESULT_COST};
 
         let mut g = game(GameStatus::WaitingForOpponent, false);
         g.fees_advanced = CREATE_GAME_COST;
         let fee_payer = g.fee_payer;
 
-        join_waiting_game(&mut g, Pubkey::new_unique(), fee_payer, 0).unwrap();
-        mark_delegated(&mut g).unwrap();
+        join_waiting_game(&mut g, Pubkey::new_unique(), fee_payer, 0)
+            .context("required operation value")?;
+        mark_delegated(&mut g).context("required operation value")?;
 
         const MOVES: u64 = 4;
         for _ in 0..MOVES {
-            g.fees_advanced = g.fees_advanced.checked_add(RECORD_RESULT_COST).unwrap();
+            g.fees_advanced = g
+                .fees_advanced
+                .checked_add(RECORD_RESULT_COST)
+                .context("required operation value")?;
         }
 
-        mark_undelegated(&mut g).unwrap();
+        mark_undelegated(&mut g).context("required operation value")?;
 
         assert_eq!(
             g.fees_advanced,
@@ -149,6 +157,7 @@ mod tests {
                 + UNDELEGATE_COST
                 + ER_SESSION_FEE_LAMPORTS
         );
+        Ok(())
     }
 
     #[test]

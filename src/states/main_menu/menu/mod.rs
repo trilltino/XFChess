@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-use crate::core::updates::{self, Platform, UpdateStatus};
+use crate::core::update_check::{self, Platform, UpdateStatus};
 use crate::core::{GameMode, GameState, MenuState};
 use crate::game::resources::MenuSounds;
 use crate::rendering::pieces::{PieceColor, PieceMeshes, PieceType};

@@ -1,3 +1,5 @@
+#[cfg(test)]
+use anyhow::Context as _;
 use braid_http::protocol::formatter;
 use braid_http::types::{Update, Version as WireVersion};
 use serde::{Deserialize, Serialize};
@@ -89,36 +91,54 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn a_snapshot_round_trips_through_the_wire() {
+    fn a_snapshot_round_trips_through_the_wire() -> anyhow::Result<()> {
         let update = BraidUpdate::snapshot(7, json!({"fen": "startpos"}));
         let bytes = format_chunk(&update);
 
         let mut parser = MessageParser::for_subscription();
-        let messages = parser.feed(&bytes).unwrap();
+        let messages = parser.feed(&bytes).context("required operation value")?;
 
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].headers.get("version").unwrap(), "\"7\"");
-        let body = messages[0].body.as_ref().unwrap();
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(body).unwrap(),
+            messages[0]
+                .headers
+                .get("version")
+                .context("required operation value")?,
+            "\"7\""
+        );
+        let body = messages[0]
+            .body
+            .as_ref()
+            .context("required operation value")?;
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(body)
+                .context("required operation value")?,
             json!({"fen": "startpos"})
         );
+        Ok(())
     }
 
     #[test]
-    fn a_patch_update_carries_its_parent() {
+    fn a_patch_update_carries_its_parent() -> anyhow::Result<()> {
         let update = BraidUpdate::patch(8, 7, json!([{"op": "add", "path": "/-", "value": 1}]));
         let bytes = format_chunk(&update);
 
         let mut parser = MessageParser::for_subscription();
-        let messages = parser.feed(&bytes).unwrap();
+        let messages = parser.feed(&bytes).context("required operation value")?;
 
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].headers.get("parents").unwrap(), "\"7\"");
+        assert_eq!(
+            messages[0]
+                .headers
+                .get("parents")
+                .context("required operation value")?,
+            "\"7\""
+        );
+        Ok(())
     }
 
     #[test]
-    fn successive_updates_parse_as_separate_messages() {
+    fn successive_updates_parse_as_separate_messages() -> anyhow::Result<()> {
         // The framing must be self-delimiting: this is what a subscriber actually
         // receives once several updates land in one TCP read.
         let mut wire = Vec::new();
@@ -127,12 +147,13 @@ mod tests {
         }
 
         let mut parser = MessageParser::for_subscription();
-        let messages = parser.feed(&wire).unwrap();
+        let messages = parser.feed(&wire).context("required operation value")?;
         assert_eq!(messages.len(), 3);
+        Ok(())
     }
 
     #[test]
-    fn heartbeats_between_updates_produce_no_messages() {
+    fn heartbeats_between_updates_produce_no_messages() -> anyhow::Result<()> {
         // The defect this replaced: heartbeats decoding as versionless updates,
         // which logged a warning per beat and reached subscribers as empty bodies.
         let mut wire = Vec::new();
@@ -143,7 +164,7 @@ mod tests {
         wire.extend_from_slice(&format_chunk(&BraidUpdate::snapshot(2, json!("b"))));
 
         let mut parser = MessageParser::for_subscription();
-        let messages = parser.feed(&wire).unwrap();
+        let messages = parser.feed(&wire).context("required operation value")?;
 
         assert_eq!(messages.len(), 2, "heartbeats must not become updates");
         for msg in &messages {
@@ -152,6 +173,7 @@ mod tests {
                 "every delivered message must carry a Version"
             );
         }
+        Ok(())
     }
 
     #[test]
@@ -163,16 +185,23 @@ mod tests {
     }
 
     #[test]
-    fn a_stream_split_across_reads_still_parses() {
+    fn a_stream_split_across_reads_still_parses() -> anyhow::Result<()> {
         // TCP does not respect message boundaries; the parser must not either.
         let bytes = format_chunk(&BraidUpdate::snapshot(42, json!({"a": "b"})));
         let mut parser = MessageParser::for_subscription();
 
         let mut total = Vec::new();
         for byte in bytes.iter() {
-            total.extend(parser.feed(&[*byte]).unwrap());
+            total.extend(parser.feed(&[*byte]).context("required operation value")?);
         }
         assert_eq!(total.len(), 1);
-        assert_eq!(total[0].headers.get("version").unwrap(), "\"42\"");
+        assert_eq!(
+            total[0]
+                .headers
+                .get("version")
+                .context("required operation value")?,
+            "\"42\""
+        );
+        Ok(())
     }
 }

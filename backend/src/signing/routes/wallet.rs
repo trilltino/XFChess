@@ -14,7 +14,6 @@ const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const EURC_MINT: &str = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"; // Circle EURC — verify on mainnet
 const BRLA_MINT: &str = "BRLbKUMNMHhpSA6pppwJT6MLBpVtCVhpPAMHu9KMLVH"; // BRLA Digital — verify on mainnet
 
-
 fn helius_rpc_url() -> String {
     let key = std::env::var("HELIUS_API_KEY").unwrap_or_default();
     format!("https://mainnet.helius-rpc.com/?api-key={key}")
@@ -137,7 +136,6 @@ async fn fetch_token_balances(
     Ok(rpc.result.value)
 }
 
-
 #[derive(Serialize)]
 pub struct StablecoinBalances {
     pub usdc: f64,
@@ -165,7 +163,6 @@ fn country_currency(country: &str) -> (&'static str, &'static str) {
         _ => ("usd", "$"),
     }
 }
-
 
 async fn get_wallet_balance(
     Path(pubkey): Path<String>,

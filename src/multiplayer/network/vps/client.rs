@@ -1,4 +1,4 @@
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
 const VPS_PROD_URL: &str = "https://xfchess.com";
 
@@ -81,19 +81,37 @@ fn default_headers() -> reqwest::header::HeaderMap {
 }
 
 pub fn client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .default_headers(default_headers())
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))
+    pooled_client(&NORMAL_CLIENT, 120)
 }
 
 pub fn client_fast() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .default_headers(default_headers())
-        .timeout(std::time::Duration::from_secs(15))
+    pooled_client(&FAST_CLIENT, 15)
+}
+
+type CachedClient = Mutex<Option<(reqwest::header::HeaderMap, reqwest::blocking::Client)>>;
+static NORMAL_CLIENT: CachedClient = Mutex::new(None);
+static FAST_CLIENT: CachedClient = Mutex::new(None);
+
+fn pooled_client(
+    cache: &CachedClient,
+    timeout_secs: u64,
+) -> Result<reqwest::blocking::Client, String> {
+    // JWT and relay-secret changes replace the pool before another caller can use it.
+    // Cloning a reqwest client retains its connection pool.
+    let mut cached = cache.lock().map_err(|e| format!("HTTP client lock: {e}"))?;
+    let headers = default_headers();
+    if let Some((previous, client)) = cached.as_ref() {
+        if previous == &headers {
+            return Ok(client.clone());
+        }
+    }
+    let client = reqwest::blocking::Client::builder()
+        .default_headers(headers.clone())
+        .timeout(std::time::Duration::from_secs(timeout_secs))
         .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+    *cached = Some((headers, client.clone()));
+    Ok(client)
 }
 
 // Keep wallet bridge port lookup feature-independent; menu polling also
@@ -166,4 +184,58 @@ pub fn fetch_sol_usd_rate() -> Result<SolUsdRateResponse, String> {
         usd_per_sol,
         fetched_at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    #[test]
+    fn pool_reuses_connections_and_replaces_auth_on_login_and_logout(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let url = format!("http://{}", listener.local_addr()?);
+        let server = std::thread::spawn(
+            move || -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+                let mut requests = Vec::new();
+                // The first two requests reuse a socket; changing credentials creates
+                // a new pool for the subsequent two requests.
+                for count in [2, 1, 1] {
+                    let (mut socket, _) = listener.accept()?;
+                    socket.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
+                    for _ in 0..count {
+                        let mut header = Vec::new();
+                        while !header.ends_with(b"\r\n\r\n") {
+                            let mut byte = [0];
+                            socket.read_exact(&mut byte)?;
+                            header.push(byte[0]);
+                        }
+                        requests.push(String::from_utf8(header)?.to_ascii_lowercase());
+                        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")?;
+                    }
+                }
+                Ok(requests)
+            },
+        );
+        let cache = Mutex::new(None);
+        set_auth_token(Some("first".into()));
+        for _ in 0..2 {
+            pooled_client(&cache, 5)?.get(&url).send()?.text()?;
+        }
+        set_auth_token(Some("second".into()));
+        pooled_client(&cache, 5)?.get(&url).send()?.text()?;
+        set_auth_token(None);
+        pooled_client(&cache, 5)?.get(&url).send()?.text()?;
+        let requests = server
+            .join()
+            .map_err(|_| "HTTP fixture thread panicked")?
+            .map_err(|error| error.to_string())?;
+        assert!(requests[0].contains("authorization: bearer first\r\n"));
+        assert!(requests[1].contains("authorization: bearer first\r\n"));
+        assert!(requests[2].contains("authorization: bearer second\r\n"));
+        assert!(!requests[3].contains("authorization:"));
+
+        Ok(())
+    }
 }

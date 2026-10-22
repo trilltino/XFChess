@@ -1,6 +1,7 @@
 //! Chess rules and notation shared by the game and server. No search engine or process.
 use shakmaty::{
-    fen::Fen, san::SanPlus, uci::UciMove, CastlingMode, Chess, EnPassantMode, Position,
+    fen::Fen, san::SanPlus, uci::UciMove, CastlingMode, CastlingSide, Chess, Color, EnPassantMode,
+    Position,
 };
 
 mod pgn;
@@ -142,18 +143,18 @@ impl Game {
         Ok(())
     }
     pub fn compact_board(&self) -> CompactBoard {
-        let fen = self.fen();
-        let parts: Vec<_> = fen.split_whitespace().collect();
-        let castling = [('K', 1), ('Q', 2), ('k', 4), ('q', 8)]
-            .iter()
-            .fold(0, |flags, (c, bit)| {
-                flags | if parts[2].contains(*c) { *bit } else { 0 }
-            });
-        let ep_target = if parts[3] == "-" {
-            -1
-        } else {
-            ((parts[3].as_bytes()[1] - b'1') * 8 + parts[3].as_bytes()[0] - b'a') as i8
-        };
+        let castles = self.position.castles();
+        let castling = [
+            (Color::White, CastlingSide::KingSide, 1),
+            (Color::White, CastlingSide::QueenSide, 2),
+            (Color::Black, CastlingSide::KingSide, 4),
+            (Color::Black, CastlingSide::QueenSide, 8),
+        ]
+        .into_iter()
+        .fold(0, |flags, (color, side, bit)| {
+            flags | if castles.has(color, side) { bit } else { 0 }
+        });
+        let ep_target = self.position.maybe_ep_square().map_or(-1, i8::from);
         CompactBoard {
             squares: self.board,
             castling,
@@ -183,7 +184,14 @@ impl CompactBoard {
         out
     }
     /// Preserve the contract's legacy FEN convention (no move clocks).
-    pub fn to_fen(&self) -> String {
+    pub fn to_fen(&self) -> Result<String, String> {
+        if self.squares.iter().any(|piece| piece.unsigned_abs() > 6)
+            || self.castling & !15 != 0
+            || !(-1..64).contains(&self.ep_target)
+            || !matches!(self.side_to_move, -1 | 1)
+        {
+            return Err("Invalid compact board".into());
+        }
         let mut fen = String::new();
         for rank in (0..8).rev() {
             let mut empty = 0;
@@ -224,7 +232,7 @@ impl CompactBoard {
             fen.push((b'1' + self.ep_target as u8 / 8) as char);
         }
         fen.push_str(" 0 1");
-        fen
+        Ok(fen)
     }
 }
 
@@ -292,29 +300,34 @@ pub fn do_move_with_promo(game: &mut Game, src: i8, dst: i8, promo: i8) -> Resul
 mod tests {
     use super::*;
 
-    fn insufficient(fen: &str) -> bool {
-        Game::from_fen(fen).unwrap().is_insufficient_material()
+    fn insufficient(fen: &str) -> anyhow::Result<bool> {
+        Ok(Game::from_fen(fen)
+            .map_err(anyhow::Error::msg)?
+            .is_insufficient_material())
     }
 
     #[test]
-    fn insufficient_material_follows_the_contract_definition() {
-        assert!(insufficient("8/8/4k3/8/8/4K3/8/8 w - - 0 1"));
-        assert!(insufficient("8/8/4k3/8/8/4K3/8/5N2 w - - 0 1"));
+    fn insufficient_material_follows_the_contract_definition() -> anyhow::Result<()> {
+        assert!(insufficient("8/8/4k3/8/8/4K3/8/8 w - - 0 1")?);
+        assert!(insufficient("8/8/4k3/8/8/4K3/8/5N2 w - - 0 1")?);
         // Same-coloured bishops (c1 and f8 are both dark).
-        assert!(insufficient("5b2/8/4k3/8/8/4K3/8/2B5 w - - 0 1"));
+        assert!(insufficient("5b2/8/4k3/8/8/4K3/8/2B5 w - - 0 1")?);
         // Opposite-coloured bishops, two knights and two bishops can still mate.
-        assert!(!insufficient("2b5/8/4k3/8/8/4K3/8/2B5 w - - 0 1"));
-        assert!(!insufficient("8/8/4k3/8/8/4K3/8/1N3N2 w - - 0 1"));
-        assert!(!insufficient("8/8/4k3/8/8/4K3/8/2B2B2 w - - 0 1"));
-        assert!(!insufficient("8/8/4k3/8/8/4K3/4P3/8 w - - 0 1"));
+        assert!(!insufficient("2b5/8/4k3/8/8/4K3/8/2B5 w - - 0 1")?);
+        assert!(!insufficient("8/8/4k3/8/8/4K3/8/1N3N2 w - - 0 1")?);
+        assert!(!insufficient("8/8/4k3/8/8/4K3/8/2B2B2 w - - 0 1")?);
+        assert!(!insufficient("8/8/4k3/8/8/4K3/4P3/8 w - - 0 1")?);
+        Ok(())
     }
 
     #[test]
-    fn halfmove_clock_reads_the_position() {
-        let game = Game::from_fen("8/8/4k3/8/8/4K3/8/R7 w - - 99 80").unwrap();
+    fn halfmove_clock_reads_the_position() -> anyhow::Result<()> {
+        let game =
+            Game::from_fen("8/8/4k3/8/8/4K3/8/R7 w - - 99 80").map_err(anyhow::Error::msg)?;
         assert_eq!(game.halfmove_clock(), 99);
         let mut next = game.clone();
-        next.play_uci("a1a2").unwrap();
+        next.play_uci("a1a2").map_err(anyhow::Error::msg)?;
         assert_eq!(next.halfmove_clock(), FIFTY_MOVE_HALFMOVES);
+        Ok(())
     }
 }

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use tracing::{info, warn};
 
-use crate::core::states::GameState;
+use crate::core::state::GameState;
 use crate::game::replay::ParsedPgnGameResource;
 
 pub struct PendingPgnReplay {

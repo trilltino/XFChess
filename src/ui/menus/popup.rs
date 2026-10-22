@@ -266,8 +266,10 @@ pub struct PopupPlugin;
 impl Plugin for PopupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GamePopupQueue>()
-            .add_systems(Update,
-            tick_popups.after(crate::core::schedule::NetworkSet::Send))
+            .add_systems(
+                Update,
+                tick_popups.after(crate::core::schedule::NetworkSet::Send),
+            )
             .add_systems(EguiPrimaryContextPass, render_popups);
     }
 }

@@ -71,8 +71,7 @@ pub use moves_ix::{GlobalRecordMove, RecordMove};
 pub use tournament_ix::{
     AdvanceRound, AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
     CancelTournament, ClaimTournamentPrize, CloseTournament, CompleteSwissTournament,
-    CreateTournamentGame,
-    DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize, InitializeMatch,
+    CreateTournamentGame, DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize, InitializeMatch,
     InitializeShardsMedium, InitializeShardsSmall, InitializeTournament,
     InitializeTournamentEscrow, InitializeTournamentShards, LeaveTournament, RecordMatchResult,
     RecordSwissResult, RegisterPlayer, RevokeTournamentSessionCtx, SessionCreateGame,
@@ -293,9 +292,6 @@ pub mod __client_accounts_update_config {
     pub use crate::account_ix::config_ix::__client_accounts_update_config::*;
 }
 
-#[allow(unused_imports)]
-use ephemeral_rollups_sdk::anchor::MagicProgram;
-
 // Localnet and devnet share the deployment address pinned in Anchor.toml.
 #[cfg(any(feature = "localnet", feature = "devnet"))]
 declare_id!("8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU");
@@ -366,7 +362,6 @@ pub mod xfchess_game {
             bullet_rating,
         )
     }
-
 
     pub fn send_friend_request(ctx: Context<SendFriendRequest>) -> Result<()> {
         crate::account_ix::friends_ix::send_request(ctx)
@@ -565,6 +560,10 @@ pub mod xfchess_game {
         Ok(())
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Matches the deployed Anchor instruction ABI"
+    )]
     pub fn initialize_tournament(
         ctx: Context<InitializeTournament>,
         tournament_id: u64,
@@ -631,6 +630,10 @@ pub mod xfchess_game {
         crate::tournament_ix::lifecycle::initialize_escrow::handler(ctx, tournament_id)
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Matches the deployed Anchor instruction ABI"
+    )]
     pub fn initialize_match(
         ctx: Context<InitializeMatch>,
         tournament_id: u64,
@@ -785,7 +788,6 @@ pub mod xfchess_game {
         )
     }
 
-
     pub fn authorize_tournament_session(
         ctx: Context<AuthorizeTournamentSessionCtx>,
         tournament_id: u64,
@@ -808,6 +810,10 @@ pub mod xfchess_game {
         )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Matches the deployed Anchor instruction ABI"
+    )]
     pub fn session_create_game(
         ctx: Context<SessionCreateGame>,
         tournament_id: u64,
@@ -837,7 +843,6 @@ pub mod xfchess_game {
     ) -> Result<()> {
         crate::tournament_ix::session::session_join_game::handler(ctx, tournament_id, game_id)
     }
-
 
     pub fn authorize_global_session(
         ctx: Context<AuthorizeGlobalSessionCtx>,
@@ -882,7 +887,6 @@ pub mod xfchess_game {
         crate::account_ix::treasury::handler(ctx, amount)
     }
 
-
     pub fn create_session(
         ctx: Context<CreateSession>,
         session_key: Pubkey,
@@ -903,7 +907,6 @@ pub mod xfchess_game {
         crate::account_ix::fee_vault_ix::handler_revoke_session(ctx)
     }
 
-
     pub fn update_elo(
         ctx: Context<UpdateElo>,
         opponent_rating: u32,
@@ -923,7 +926,6 @@ pub mod xfchess_game {
             won_amount,
         )
     }
-
 
     #[cfg(feature = "cranks")]
     pub fn schedule_time_check(

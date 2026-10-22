@@ -7,3 +7,9 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 shakmaty = "=0.30.2"
 pgn-reader = "=0.29.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true

@@ -35,17 +35,21 @@ pub struct EloCache {
 }
 
 impl EloCache {
-    pub fn new(rpc_url: String, ttl: Duration, program_id: Pubkey) -> Self {
+    pub fn new(
+        rpc_url: String,
+        ttl: Duration,
+        program_id: Pubkey,
+    ) -> solana_client::client_error::Result<Self> {
         // Use the shared hardened constructor (bounded request timeout) rather than a
         // bespoke client — an RPC hang must not wedge profile/matchmaking reads.
-        let rpc = Arc::new(crate::signing::solana::make_rpc(&rpc_url));
+        let rpc = Arc::new(crate::signing::solana::make_rpc(&rpc_url)?);
 
-        Self {
+        Ok(Self {
             rpc,
             cache: Arc::new(Mutex::new(HashMap::new())),
             ttl,
             program_id,
-        }
+        })
     }
 
     pub async fn get_elo(&self, pubkey: &str) -> Result<CachedElo, String> {
@@ -246,22 +250,27 @@ impl EloCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
-    fn test_deserialize_f64() {
+    fn test_deserialize_f64() -> anyhow::Result<()> {
         let program_id = Pubkey::new_from_array([0u8; 32]);
         let cache = EloCache::new(
             "http://localhost".to_string(),
             Duration::from_secs(60),
             program_id,
-        );
+        )?;
         let mut data = vec![0u8; 56];
 
         // Write f64 = 1200.5 at offset 40
         let value: f64 = 1200.5;
         data[40..48].copy_from_slice(&value.to_le_bytes());
 
-        let result = cache.deserialize_f64(&data, 40).unwrap();
+        let result = cache
+            .deserialize_f64(&data, 40)
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
         assert!((result - 1200.5).abs() < 0.01);
+        Ok(())
     }
 }

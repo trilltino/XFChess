@@ -40,7 +40,9 @@ pub fn numeric_game_id(game_id: &str) -> u64 {
     }
     use sha2::Digest;
     let digest = sha2::Sha256::digest(game_id.as_bytes());
-    u64::from_be_bytes(digest[0..8].try_into().expect("sha256 digest is 32 bytes"))
+    let mut prefix = [0; 8];
+    prefix.copy_from_slice(&digest[..8]);
+    u64::from_be_bytes(prefix)
 }
 
 impl OnlineGameSession {
@@ -109,7 +111,7 @@ impl Plugin for OnlineGameSessionPlugin {
                     .in_set(crate::core::schedule::SendSet::Moves),
             );
         app.add_systems(
-            OnExit(crate::core::states::GameState::InGame),
+            OnExit(crate::core::state::GameState::InGame),
             reset_start_barrier,
         );
         #[cfg(feature = "solana")]

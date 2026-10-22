@@ -78,7 +78,7 @@ build-all: build-wallet-ui-force build-admin-ui-force build-release build-web
 build-android:
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare_stockfish_android.ps1
     cargo ndk -t arm64-v8a -P 31 -o mobile/app/src/main/jniLibs build --release --lib --features solana
-    @Get-ChildItem -LiteralPath mobile/app/src/main/jniLibs/arm64-v8a -Filter *.so | Where-Object { $_.Name -notin @('libxfchess.so', 'libstockfish.so') } | Remove-Item -Force -ErrorAction Stop
+    @Get-ChildItem -LiteralPath mobile/app/src/main/jniLibs/arm64-v8a -Filter *.so | Where-Object { $_.Name -notin @('libxfchess_app.so', 'libstockfish.so') } | Remove-Item -Force -ErrorAction Stop
     Set-Location mobile; ./gradlew.bat assembleRelease
 
 # Build and extract a Linux game folder via Docker
@@ -338,7 +338,7 @@ dev2: kill build build-wallet-ui build-admin-ui build-web-ui
 
 # Build Solana program without Anchor IDL generation (works on Windows)
 build-program:
-    cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml
+    cargo build-sbf --arch v0 --manifest-path programs/xfchess-game-sbf/Cargo.toml
 
 # Build program and IDL in the Linux Anchor toolchain container
 build-program-docker:

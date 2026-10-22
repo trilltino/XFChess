@@ -29,7 +29,7 @@ impl Plugin for CameraPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::states::{GameMode, GameState};
+    use crate::core::state::{GameMode, GameState};
     use crate::game::resources::{CurrentTurn, Players};
     use crate::game::systems::camera::CameraRotationState;
     use crate::game::view_mode::ViewMode;
@@ -57,7 +57,9 @@ mod tests {
         keys.clear();
         keys.press(KeyCode::KeyV);
         app.update();
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
     }
 
     #[test]

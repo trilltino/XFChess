@@ -53,8 +53,10 @@ mod tests {
 
     #[test]
     fn test_selection_is_selected_when_entity_set() {
-        let mut selection = Selection::default();
-        selection.selected_entity = Some(Entity::PLACEHOLDER);
+        let selection = Selection {
+            selected_entity: Some(Entity::PLACEHOLDER),
+            ..Default::default()
+        };
 
         assert!(selection.is_selected());
     }
@@ -67,10 +69,12 @@ mod tests {
 
     #[test]
     fn test_selection_clear_removes_entity() {
-        let mut selection = Selection::default();
-        selection.selected_entity = Some(Entity::PLACEHOLDER);
-        selection.is_dragging = true;
-        selection.drag_start = Some((0, 0));
+        let mut selection = Selection {
+            selected_entity: Some(Entity::PLACEHOLDER),
+            is_dragging: true,
+            drag_start: Some((0, 0)),
+            ..Default::default()
+        };
 
         selection.clear();
 
@@ -82,8 +86,10 @@ mod tests {
 
     #[test]
     fn test_selection_clear_removes_position() {
-        let mut selection = Selection::default();
-        selection.selected_position = Some((3, 4));
+        let mut selection = Selection {
+            selected_position: Some((3, 4)),
+            ..Default::default()
+        };
 
         selection.clear();
 
@@ -92,10 +98,12 @@ mod tests {
 
     #[test]
     fn test_selection_clear_removes_possible_moves() {
-        let mut selection = Selection::default();
-        selection.possible_moves = vec![(1, 2), (3, 4), (5, 6)];
-        selection.drag_start = Some((1, 2));
-        selection.is_dragging = true;
+        let mut selection = Selection {
+            possible_moves: vec![(1, 2), (3, 4), (5, 6)],
+            drag_start: Some((1, 2)),
+            is_dragging: true,
+            ..Default::default()
+        };
 
         selection.clear();
 
@@ -106,11 +114,12 @@ mod tests {
 
     #[test]
     fn test_selection_with_position_and_moves() {
-        let mut selection = Selection::default();
-
-        selection.selected_entity = Some(Entity::PLACEHOLDER);
-        selection.selected_position = Some((2, 1));
-        selection.possible_moves = vec![(2, 2), (2, 3)];
+        let selection = Selection {
+            selected_entity: Some(Entity::PLACEHOLDER),
+            selected_position: Some((2, 1)),
+            possible_moves: vec![(2, 2), (2, 3)],
+            ..Default::default()
+        };
 
         assert!(selection.is_selected());
         assert_eq!(selection.selected_position, Some((2, 1)));
@@ -119,11 +128,12 @@ mod tests {
 
     #[test]
     fn test_selection_possible_moves_can_be_empty() {
-        let mut selection = Selection::default();
-
-        selection.selected_entity = Some(Entity::PLACEHOLDER);
-        selection.selected_position = Some((4, 4));
-        selection.possible_moves = vec![]; // Surrounded piece
+        let selection = Selection {
+            selected_entity: Some(Entity::PLACEHOLDER),
+            selected_position: Some((4, 4)),
+            possible_moves: vec![],
+            ..Default::default()
+        }; // Surrounded piece
 
         assert!(selection.is_selected());
         assert!(selection.possible_moves.is_empty());
@@ -131,10 +141,11 @@ mod tests {
 
     #[test]
     fn test_selection_multiple_possible_moves() {
-        let mut selection = Selection::default();
-
         let moves: Vec<(u8, u8)> = (0..8).map(|i| (i, i)).collect();
-        selection.possible_moves = moves.clone();
+        let selection = Selection {
+            possible_moves: moves.clone(),
+            ..Default::default()
+        };
 
         assert_eq!(selection.possible_moves.len(), 8);
         assert_eq!(selection.possible_moves, moves);
@@ -142,11 +153,12 @@ mod tests {
 
     #[test]
     fn test_selection_clear_is_idempotent() {
-        let mut selection = Selection::default();
-
-        selection.selected_entity = Some(Entity::PLACEHOLDER);
-        selection.drag_start = Some((2, 2));
-        selection.is_dragging = true;
+        let mut selection = Selection {
+            selected_entity: Some(Entity::PLACEHOLDER),
+            drag_start: Some((2, 2)),
+            is_dragging: true,
+            ..Default::default()
+        };
         selection.clear();
         selection.clear(); // Should not panic or cause issues
 
@@ -157,8 +169,10 @@ mod tests {
 
     #[test]
     fn test_selection_begin_and_end_drag() {
-        let mut selection = Selection::default();
-        selection.selected_position = Some((3, 3));
+        let mut selection = Selection {
+            selected_position: Some((3, 3)),
+            ..Default::default()
+        };
         selection.begin_drag();
 
         assert!(selection.is_dragging);

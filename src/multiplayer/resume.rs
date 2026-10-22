@@ -46,14 +46,21 @@ pub struct ResumePlan {
     pub is_delegated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ResumeError {
+    #[error("wallet is not a game participant")]
     NotParticipant,
+    #[error("game is not in progress: {0}")]
     NotInProgress(String),
+    #[error("game already ended: {0}")]
     Ended(String),
+    #[error("move log has {log} moves but chain has {chain}")]
     LogBehindChain { log: usize, chain: u16 },
+    #[error("move log is too far ahead: log={log}, chain={chain}")]
     LogTooFarAhead { log: usize, chain: u16 },
+    #[error("invalid move history: {0}")]
     InvalidLog(String),
+    #[error("game data unavailable: {0}")]
     Unavailable(String),
 }
 
@@ -215,12 +222,7 @@ struct ResumeInputs {
     next_nonce: Option<u64>,
 }
 
-fn gather(
-    game_id: u64,
-    wallet: Pubkey,
-    rpc_url: String,
-    er_url: String,
-) -> Result<ResumeInputs, ResumeError> {
+fn gather(game_id: u64, wallet: Pubkey, rpc_url: String) -> Result<ResumeInputs, ResumeError> {
     use solana_client::rpc_client::RpcClient;
     use solana_commitment_config::CommitmentConfig;
 
@@ -238,7 +240,7 @@ fn gather(
         .map_err(|e| ResumeError::Unavailable(format!("base account: {e}")))?
         .value
         .ok_or_else(|| ResumeError::NotInProgress("game account closed".into()))?;
-    if account.owner != program_id && account.owner != delegation_program {
+    if account.executable || (account.owner != program_id && account.owner != delegation_program) {
         return Err(ResumeError::InvalidLog(format!(
             "game account owned by unexpected program {}",
             account.owner
@@ -250,15 +252,27 @@ fn gather(
     let is_delegated = account.owner == delegation_program || base_game.is_delegated;
     // While delegated the base copy is frozen; the ER copy is authoritative.
     let game = if is_delegated {
+        let er_url = crate::multiplayer::network::vps::game::game_er_endpoint(game_id)
+            .map_err(ResumeError::Unavailable)?;
         let er = RpcClient::new_with_commitment(er_url, CommitmentConfig::confirmed());
-        let data = er
-            .get_account_data(&pda)
+        let live = er
+            .get_account(&pda)
             .map_err(|e| ResumeError::Unavailable(format!("rollup account: {e}")))?;
-        crate::multiplayer::solana::wager_recovery::decode_game(&data)
+        if live.owner != program_id || live.executable {
+            return Err(ResumeError::Unavailable(
+                "live game is returning to the base layer".into(),
+            ));
+        }
+        crate::multiplayer::solana::wager_recovery::decode_game(&live.data)
             .ok_or_else(|| ResumeError::InvalidLog("rollup game account undecodable".into()))?
     } else {
         base_game
     };
+    if game.game_id != game_id {
+        return Err(ResumeError::InvalidLog(
+            "game ID does not match the requested PDA".into(),
+        ));
+    }
 
     let mut events = crate::multiplayer::vps_client::fetch_game_events(game_id)
         .map_err(ResumeError::Unavailable)?;
@@ -322,13 +336,13 @@ pub struct ResumeState {
 
 impl ResumeState {
     /// Start verifying `game_id` for `wallet`. Ignored while a check runs.
-    pub fn request(&mut self, game_id: u64, wallet: Pubkey, rpc_url: String, er_url: String) {
+    pub fn request(&mut self, game_id: u64, wallet: Pubkey, rpc_url: String) {
         if self.rx.is_some() {
             return;
         }
         let (tx, rx) = oneshot::channel();
         crate::core::net_task::spawn_detached("resume", move || {
-            let _ = tx.send(gather(game_id, wallet, rpc_url, er_url));
+            let _ = tx.send(gather(game_id, wallet, rpc_url));
         });
         self.rx = Some(rx);
         self.status = ResumeStatus::Checking(game_id);
@@ -365,7 +379,11 @@ pub struct ResumeTransitions<'w> {
     started: MessageWriter<'w, crate::game::events::GameStartedEvent>,
 }
 
-pub(crate) fn poll_resume(mut resume: ResMut<ResumeState>, mut t: ResumeTargets, mut go: ResumeTransitions) {
+pub(crate) fn poll_resume(
+    mut resume: ResMut<ResumeState>,
+    mut t: ResumeTargets,
+    mut go: ResumeTransitions,
+) {
     let Some(rx) = resume.rx.as_mut() else {
         return;
     };
@@ -552,7 +570,10 @@ pub struct ResumePlugin;
 impl Plugin for ResumePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ResumeState>()
-            .add_systems(Update, poll_resume.in_set(crate::core::schedule::SessionSet::Match))
+            .add_systems(
+                Update,
+                poll_resume.in_set(crate::core::schedule::SessionSet::Match),
+            )
             .add_systems(
                 Update,
                 apply_resume_board.in_set(crate::core::schedule::MoveSource::Resume),
@@ -610,9 +631,11 @@ mod tests {
     }
 
     #[test]
-    fn white_resumes_with_own_lane_opponent_lane_and_unrecorded_tail() {
+    fn white_resumes_with_own_lane_opponent_lane_and_unrecorded_tail(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (w, b) = (Pubkey::new_unique(), Pubkey::new_unique());
-        let plan = plan_resume(&game(w, b, GameStatus::Active, 2), 2, true, &w, &log()).unwrap();
+        let plan = plan_resume(&game(w, b, GameStatus::Active, 2), 2, true, &w, &log())
+            .map_err(|error| format!("{error:?}"))?;
         assert_eq!(plan.my_color, PieceColor::White);
         assert_eq!(plan.fen, NF3);
         assert_eq!((plan.my_moves, plan.opponent_moves), (2, 1));
@@ -623,26 +646,34 @@ mod tests {
         assert_eq!(plan.unrecorded, vec![("g1f3".to_string(), NF3.to_string())]);
         assert_eq!(plan.last_move_uci.as_deref(), Some("g1f3"));
         assert_eq!((plan.base_time_seconds, plan.increment_seconds), (300, 2));
+
+        Ok(())
     }
 
     #[test]
-    fn black_resumes_from_its_own_perspective() {
+    fn black_resumes_from_its_own_perspective() -> Result<(), Box<dyn std::error::Error>> {
         let (w, b) = (Pubkey::new_unique(), Pubkey::new_unique());
-        let plan = plan_resume(&game(w, b, GameStatus::Active, 3), 3, true, &b, &log()).unwrap();
+        let plan = plan_resume(&game(w, b, GameStatus::Active, 3), 3, true, &b, &log())
+            .map_err(|error| format!("{error:?}"))?;
         assert_eq!(plan.my_color, PieceColor::Black);
         assert_eq!((plan.my_moves, plan.opponent_moves), (1, 2));
         assert!(plan.unrecorded.is_empty());
         assert_eq!(plan.last_move_uci.as_deref(), Some("g1f3"));
         assert_eq!(plan.chain_fen, NF3);
+
+        Ok(())
     }
 
     #[test]
-    fn zero_move_game_resumes_at_the_start_position() {
+    fn zero_move_game_resumes_at_the_start_position() -> Result<(), Box<dyn std::error::Error>> {
         let (w, b) = (Pubkey::new_unique(), Pubkey::new_unique());
-        let plan = plan_resume(&game(w, b, GameStatus::Active, 0), 0, false, &b, &[]).unwrap();
+        let plan = plan_resume(&game(w, b, GameStatus::Active, 0), 0, false, &b, &[])
+            .map_err(|error| format!("{error:?}"))?;
         assert_eq!(plan.fen, START_FEN);
         assert_eq!(plan.my_head, "0");
         assert_eq!(plan.last_move_uci, None);
+
+        Ok(())
     }
 
     #[test]

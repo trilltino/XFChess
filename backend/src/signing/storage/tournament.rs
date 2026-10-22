@@ -743,14 +743,12 @@ async fn backfill_index_columns(pool: &SqlitePool) {
 }
 
 impl TournamentStore {
-    pub async fn new(pool: SqlitePool) -> Self {
-        crate::signing::tournament_operations::init(&pool)
-            .await
-            .expect("tournament operations storage must be available");
+    pub async fn new(pool: SqlitePool) -> Result<Self, sqlx::Error> {
+        crate::signing::tournament_operations::init(&pool).await?;
         for statement in TOURNAMENTS_SCHEMA {
             if let Err(e) = sqlx::query(*statement).execute(&pool).await {
                 if !e.to_string().contains("duplicate column") {
-                    tracing::error!("[tournament-store] schema statement failed: {e}");
+                    return Err(e);
                 }
             }
         }
@@ -766,8 +764,7 @@ impl TournamentStore {
             );",
         )
         .execute(&pool)
-        .await
-        .ok();
+        .await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS tournament_transactions (
                 tournament_id INTEGER NOT NULL,
@@ -781,10 +778,9 @@ impl TournamentStore {
             );",
         )
         .execute(&pool)
-        .await
-        .ok();
+        .await?;
         tracing::info!("[tournament-store] SQLite table ready");
-        Self { pool }
+        Ok(Self { pool })
     }
 
     pub async fn record_registration_transaction(&self, tx: RegistrationTransaction) -> bool {
@@ -1143,6 +1139,7 @@ impl Default for TournamentRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     fn record_with_players(tournament_id: u64, n: usize) -> TournamentRecord {
         let mut t = TournamentRecord::new(tournament_id, "test", 0);
@@ -1154,10 +1151,14 @@ mod tests {
         t
     }
 
-    fn started_bracket(tournament_id: u64, n: usize) -> TournamentRecord {
-        let mut t = record_with_players(tournament_id, n);
-        t.start().unwrap();
-        t
+    fn started_bracket(tournament_id: u64, n: usize) -> anyhow::Result<TournamentRecord> {
+        Ok({
+            let mut t = record_with_players(tournament_id, n);
+            t.start()
+                .map_err(|error| anyhow::anyhow!("{error:?}"))
+                .context("test setup failed")?;
+            t
+        })
     }
 
     fn swiss_record(tournament_id: u64) -> TournamentRecord {
@@ -1189,51 +1190,65 @@ mod tests {
 
     /// `t` as an older row stored it: an undrawn bracket padded with nulls and no
     /// Swiss data before round 1.
-    fn legacy_json(t: &TournamentRecord, padding: usize) -> String {
-        let mut v = serde_json::to_value(t).unwrap();
-        v["matches"] = serde_json::Value::Array(vec![serde_json::Value::Null; padding]);
-        v["swiss_data"] = serde_json::Value::Null;
-        v.to_string()
+    fn legacy_json(t: &TournamentRecord, padding: usize) -> anyhow::Result<String> {
+        Ok({
+            let mut v = serde_json::to_value(t).context("test setup failed")?;
+            v["matches"] = serde_json::Value::Array(vec![serde_json::Value::Null; padding]);
+            v["swiss_data"] = serde_json::Value::Null;
+            v.to_string()
+        })
     }
 
     #[test]
-    fn older_bracket_rows_load_and_save_in_the_same_shape() {
+    fn older_bracket_rows_load_and_save_in_the_same_shape() -> anyhow::Result<()> {
         let t = record_with_players(1, 8);
-        let loaded: TournamentRecord = serde_json::from_str(&legacy_json(&t, 7)).unwrap();
+        let loaded: TournamentRecord =
+            serde_json::from_str(&legacy_json(&t, 7)?).context("test setup failed")?;
         assert_eq!(loaded.format(), TournamentFormat::SingleElimination);
         assert_eq!(loaded.elimination(), Some(&EliminationState::default()));
 
-        let saved = serde_json::to_value(started_bracket(1, 8)).unwrap();
+        let saved = serde_json::to_value(started_bracket(1, 8)?).context("test setup failed")?;
         assert_eq!(saved["format"], serde_json::json!("SingleElimination"));
-        assert_eq!(saved["matches"].as_array().unwrap().len(), 7);
+        assert_eq!(
+            saved["matches"]
+                .as_array()
+                .context("test setup failed")?
+                .len(),
+            7
+        );
         assert!(saved["swiss_data"].is_null());
-        let again: TournamentRecord = serde_json::from_value(saved).unwrap();
-        assert_eq!(again.state, started_bracket(1, 8).state);
+        let again: TournamentRecord = serde_json::from_value(saved).context("test setup failed")?;
+        assert_eq!(again.state, started_bracket(1, 8)?.state);
+        Ok(())
     }
 
     #[test]
-    fn older_swiss_rows_without_swiss_data_keep_their_round_count() {
+    fn older_swiss_rows_without_swiss_data_keep_their_round_count() -> anyhow::Result<()> {
         let mut t = record_with_players(2, 6);
         t.state = FormatState::for_format(&TournamentFormat::Swiss { rounds: 5 });
-        let loaded: TournamentRecord = serde_json::from_str(&legacy_json(&t, 5)).unwrap();
+        let loaded: TournamentRecord =
+            serde_json::from_str(&legacy_json(&t, 5)?).context("test setup failed")?;
         assert_eq!(loaded.format(), TournamentFormat::Swiss { rounds: 5 });
         assert_eq!(loaded.swiss().map(|sd| sd.total_rounds), Some(5));
 
-        let saved = serde_json::to_value(swiss_record(2)).unwrap();
+        let saved = serde_json::to_value(swiss_record(2)).context("test setup failed")?;
         assert_eq!(
             saved["format"],
             serde_json::json!({ "Swiss": { "rounds": 3 } })
         );
         assert_eq!(saved["matches"], serde_json::json!([]));
         assert_eq!(saved["swiss_data"]["current_round"], serde_json::json!(1));
+        Ok(())
     }
 
     #[test]
-    fn starting_a_bracket_seeds_by_rating_and_schedules_round_one() {
+    fn starting_a_bracket_seeds_by_rating_and_schedules_round_one() -> anyhow::Result<()> {
         let mut t = record_with_players(3, 4);
         t.players.reverse();
         t.player_elos.reverse();
-        t.start().unwrap();
+        t.start()
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
         assert_eq!(t.players, vec!["P0", "P1", "P2", "P3"]);
         assert_eq!(t.status, TournamentStatus::Active);
         let ready: Vec<_> = t
@@ -1246,26 +1261,30 @@ mod tests {
             ready,
             vec![("P0".into(), "P3".into()), ("P1".into(), "P2".into())]
         );
+        Ok(())
     }
 
     #[test]
-    fn a_swiss_event_needs_its_minimum_to_start_and_pairs_later() {
+    fn a_swiss_event_needs_its_minimum_to_start_and_pairs_later() -> anyhow::Result<()> {
         let mut t = record_with_players(4, 3);
         t.state = FormatState::for_format(&TournamentFormat::Swiss { rounds: 3 });
         t.min_players = Some(4);
         assert!(t.start().is_err());
         t.min_players = Some(3);
-        t.start().unwrap();
+        t.start()
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
         assert_eq!(
             t.current_round(),
             None,
             "round 1 is paired by the Swiss service"
         );
         assert!(t.state.open_games(4).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn game_ids_are_unique_per_match_replay_and_board() {
+    fn game_ids_are_unique_per_match_replay_and_board() -> anyhow::Result<()> {
         assert_eq!(
             TournamentStore::deterministic_game_id(42, 7),
             Some((42 << 16) | 7)
@@ -1281,7 +1300,7 @@ mod tests {
         );
         assert_eq!(TournamentStore::bracket_game_id(42, 256, 0), None);
 
-        let id = TournamentStore::swiss_game_id(7, 3, 12).unwrap();
+        let id = TournamentStore::swiss_game_id(7, 3, 12).context("test setup failed")?;
         assert_eq!(
             TournamentStore::swiss_board_for_game_id(7, id),
             Some((3, 12))
@@ -1290,17 +1309,18 @@ mod tests {
         assert_eq!(TournamentStore::swiss_game_id(7, 0, 1), None);
         assert_eq!(TournamentStore::swiss_game_id(7, 1, 0), None);
         assert_eq!(TournamentStore::swiss_game_id(7, 1, 256), None);
+        Ok(())
     }
 
     #[test]
-    fn every_format_lists_its_games_and_their_rounds() {
+    fn every_format_lists_its_games_and_their_rounds() -> anyhow::Result<()> {
         let swiss = swiss_record(9);
-        let board_two = TournamentStore::swiss_game_id(9, 1, 2).unwrap();
+        let board_two = TournamentStore::swiss_game_id(9, 1, 2).context("test setup failed")?;
         assert_eq!(swiss.state.game_ids(9).len(), 2);
         assert_eq!(swiss.state.round_of_game(9, board_two), Some(0));
         assert_eq!(swiss.state.round_of_game(9, 12345), None);
 
-        let bracket = started_bracket(10, 4);
+        let bracket = started_bracket(10, 4)?;
         let first = bracket.state.open_games(10)[0].game_id;
         assert_eq!(
             bracket.state.game_ids(10).len(),
@@ -1308,6 +1328,7 @@ mod tests {
             "the final has no game yet"
         );
         assert_eq!(bracket.state.round_of_game(10, first), Some(0));
+        Ok(())
     }
 
     #[test]
@@ -1323,38 +1344,47 @@ mod tests {
     }
 
     #[test]
-    fn bracket_players_see_their_match_then_the_next_one() {
-        let mut t = started_bracket(1, 4);
+    fn bracket_players_see_their_match_then_the_next_one() -> anyhow::Result<()> {
+        let mut t = started_bracket(1, 4)?;
         let ready = t.player_status("P0");
         assert_eq!(ready.state, PlayerState::MatchReady);
-        assert!(ready.r#match.unwrap().game_id.is_some());
+        assert!(ready
+            .r#match
+            .context("test setup failed")?
+            .game_id
+            .is_some());
 
         let FormatState::Elimination(bracket) = &mut t.state else {
-            unreachable!()
+            anyhow::bail!("expected an elimination bracket")
         };
         bracket
             .decide(1, 0, "P0", "P3", ResultSource::OnChain)
-            .unwrap();
+            .context("test setup failed")?;
 
         let advanced = t.player_status("P0");
         assert_eq!(advanced.state, PlayerState::AwaitingOpponent);
-        let blocked = advanced.blocked_by.expect("waits on the other semifinal");
+        let blocked = advanced
+            .blocked_by
+            .context("waits on the other semifinal")?;
         assert_eq!((blocked.round, blocked.matches_remaining), (0, 1));
-        let last = advanced.last_result.expect("recalls the win");
+        let last = advanced.last_result.context("recalls the win")?;
         assert!(last.won && last.opponent == "P3");
 
         assert_eq!(t.player_status("P3").state, PlayerState::Eliminated);
         let stranger = t.player_status("NOT_A_PLAYER");
         assert_eq!(stranger.state, PlayerState::NotRegistered);
         assert!(stranger.blocked_by.is_none());
+        Ok(())
     }
 
     #[test]
-    fn registration_and_terminal_states() {
+    fn registration_and_terminal_states() -> anyhow::Result<()> {
         let mut t = record_with_players(3, 4);
         assert_eq!(t.player_status("P0").state, PlayerState::Registered);
 
-        t.start().unwrap();
+        t.start()
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
         t.status = TournamentStatus::Completed;
         t.winner = Some("P1".into());
         t.second_place = Some("P0".into());
@@ -1376,36 +1406,38 @@ mod tests {
 
         t.status = TournamentStatus::Cancelled;
         assert_eq!(t.player_status("P0").state, PlayerState::Cancelled);
+        Ok(())
     }
 
     #[test]
-    fn sixteen_player_bracket_reports_round_progress() {
-        let mut t = started_bracket(4, 16);
+    fn sixteen_player_bracket_reports_round_progress() -> anyhow::Result<()> {
+        let mut t = started_bracket(4, 16)?;
         assert_eq!(t.total_rounds(), 4);
         let FormatState::Elimination(bracket) = &mut t.state else {
-            unreachable!()
+            anyhow::bail!("expected an elimination bracket")
         };
         for i in 0..8u16 {
             let (white, black) = {
                 let m = &bracket.matches[i as usize];
                 (
-                    m.player_white.clone().unwrap(),
-                    m.player_black.clone().unwrap(),
+                    m.player_white.clone().context("test setup failed")?,
+                    m.player_black.clone().context("test setup failed")?,
                 )
             };
             bracket
                 .decide(4, i, &white, &black, ResultSource::OnChain)
-                .unwrap();
+                .context("test setup failed")?;
         }
         assert_eq!(t.current_round(), Some(1));
         assert_eq!(t.matches_remaining_in_round(1), 4);
         let s = t.player_status("P0");
         assert_eq!(s.state, PlayerState::MatchReady);
         assert_eq!((s.round, s.total_rounds), (Some(1), 4));
+        Ok(())
     }
 
     #[test]
-    fn swiss_players_get_their_board_game_until_it_is_decided() {
+    fn swiss_players_get_their_board_game_until_it_is_decided() -> anyhow::Result<()> {
         let mut t = swiss_record(9);
 
         let white = t.player_status("P0");
@@ -1415,42 +1447,66 @@ mod tests {
             Some(0),
             "round is reported 0-based like brackets"
         );
-        let m = white.r#match.unwrap();
+        let m = white.r#match.context("test setup failed")?;
         assert_eq!(m.round, Some(0), "and so is the board's round");
         assert_eq!(m.your_color, "white");
         assert_eq!(m.game_id, TournamentStore::swiss_game_id(9, 1, 1));
-        assert_eq!(t.player_status("P1").r#match.unwrap().your_color, "black");
+        assert_eq!(
+            t.player_status("P1")
+                .r#match
+                .context("test setup failed")?
+                .your_color,
+            "black"
+        );
 
         // The bye waits for the round instead of being sent into a game.
         let bye = t.player_status("P4");
         assert_eq!(bye.state, PlayerState::AwaitingOpponent);
-        assert_eq!(bye.blocked_by.unwrap().matches_remaining, 2);
+        assert_eq!(
+            bye.blocked_by
+                .context("test setup failed")?
+                .matches_remaining,
+            2
+        );
 
         // Once board 1 is decided its players wait for board 2.
-        t.swiss_mut()
-            .unwrap()
-            .results
-            .push((1, 1, swiss_pairing::MatchResult::Draw));
+        t.swiss_mut().context("test setup failed")?.results.push((
+            1,
+            1,
+            swiss_pairing::MatchResult::Draw,
+        ));
         let done = t.player_status("P0");
         assert_eq!(done.state, PlayerState::AwaitingOpponent);
-        assert_eq!(done.blocked_by.unwrap().matches_remaining, 1);
+        assert_eq!(
+            done.blocked_by
+                .context("test setup failed")?
+                .matches_remaining,
+            1
+        );
         assert_eq!(t.player_status("P3").state, PlayerState::MatchReady);
+        Ok(())
     }
 
     #[test]
-    fn withdrawn_swiss_player_is_out() {
+    fn withdrawn_swiss_player_is_out() -> anyhow::Result<()> {
         let mut t = swiss_record(9);
-        t.swiss_mut().unwrap().withdrawn_players.push("P2".into());
+        t.swiss_mut()
+            .context("test setup failed")?
+            .withdrawn_players
+            .push("P2".into());
         assert_eq!(t.player_status("P2").state, PlayerState::Eliminated);
+        Ok(())
     }
 
     /// One connection: each `sqlite::memory:` connection is its own database.
-    async fn memory_pool() -> SqlitePool {
-        sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap()
+    async fn memory_pool() -> anyhow::Result<SqlitePool> {
+        Ok({
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .context("test setup failed")?
+        })
     }
 
     fn ids(records: Vec<TournamentRecord>) -> Vec<u64> {
@@ -1460,10 +1516,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn each_loop_sees_only_the_events_it_acts_on() {
-        let store = TournamentStore::new(memory_pool().await).await;
+    async fn each_loop_sees_only_the_events_it_acts_on() -> anyhow::Result<()> {
+        let store = TournamentStore::new(memory_pool().await?).await?;
         store.create(record_with_players(21, 4)).await;
-        store.create(started_bracket(22, 4)).await;
+        store.create(started_bracket(22, 4)?).await;
         let mut unpaid = record_with_players(23, 4);
         unpaid.status = TournamentStatus::Completed;
         unpaid.prize_pool = 1_000;
@@ -1487,19 +1543,23 @@ mod tests {
         assert_eq!(store.list().await.len(), 5);
 
         // Every write re-derives the columns from the record.
-        store.start_tournament(21).await.unwrap();
+        store
+            .start_tournament(21)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
         assert_eq!(
             ids(store.with_status(TournamentStatus::Active).await),
             [21, 22]
         );
         store
             .update(22, |t| {
-                let FormatState::Elimination(bracket) = &mut t.state else {
-                    unreachable!()
-                };
-                bracket
-                    .decide(22, 0, "P0", "P3", ResultSource::OnChain)
-                    .unwrap();
+                assert!(matches!(t.state, FormatState::Elimination(_)));
+                if let FormatState::Elimination(bracket) = &mut t.state {
+                    assert!(bracket
+                        .decide(22, 0, "P0", "P3", ResultSource::OnChain)
+                        .is_ok());
+                }
             })
             .await;
         assert_eq!(ids(store.chain_sync_pending().await), [22]);
@@ -1513,24 +1573,28 @@ mod tests {
         assert!(store.chain_sync_pending().await.is_empty());
         store.update(23, |t| t.prizes_distributed = true).await;
         assert!(store.awaiting_prizes().await.is_empty());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn rows_from_before_the_index_columns_are_backfilled() {
-        let pool = memory_pool().await;
+    async fn rows_from_before_the_index_columns_are_backfilled() -> anyhow::Result<()> {
+        let pool = memory_pool().await?;
         sqlx::raw_sql(
             "CREATE TABLE tournaments (id INTEGER PRIMARY KEY, data TEXT NOT NULL, \
              updated_at INTEGER NOT NULL DEFAULT 0)",
         )
         .execute(&pool)
         .await
-        .unwrap();
-        let mut unpaid = started_bracket(41, 2);
+        .context("test setup failed")?;
+        let mut unpaid = started_bracket(41, 2)?;
         unpaid.status = TournamentStatus::Completed;
         unpaid.prize_pool = 1_000;
         unpaid.winner = Some("P0".into());
         for (id, data) in [
-            (41, serde_json::to_string(&unpaid).unwrap()),
+            (
+                41,
+                serde_json::to_string(&unpaid).context("test setup failed")?,
+            ),
             (42, "{not a record".to_string()),
         ] {
             sqlx::query("INSERT INTO tournaments (id, data) VALUES (?, ?)")
@@ -1538,10 +1602,10 @@ mod tests {
                 .bind(data)
                 .execute(&pool)
                 .await
-                .unwrap();
+                .context("test setup failed")?;
         }
 
-        let store = TournamentStore::new(pool.clone()).await;
+        let store = TournamentStore::new(pool.clone()).await?;
         assert_eq!(
             ids(store.with_status(TournamentStatus::Completed).await),
             [41]
@@ -1556,22 +1620,23 @@ mod tests {
             sqlx::query_scalar("SELECT status FROM tournaments WHERE id = 42")
                 .fetch_one(&pool)
                 .await
-                .unwrap();
+                .context("test setup failed")?;
         assert_eq!(unindexed, None, "left for a later start to retry");
 
         // A restart finds nothing left to fill.
-        let again = TournamentStore::new(pool).await;
+        let again = TournamentStore::new(pool).await?;
         assert_eq!(ids(again.awaiting_prizes().await), [41]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_game_leads_to_its_tournament() {
-        let store = TournamentStore::new(memory_pool().await).await;
-        let bracket = started_bracket(31, 4);
+    async fn a_game_leads_to_its_tournament() -> anyhow::Result<()> {
+        let store = TournamentStore::new(memory_pool().await?).await?;
+        let bracket = started_bracket(31, 4)?;
         let bracket_game = bracket.state.open_games(31)[0].game_id;
         store.create(bracket).await;
         store.create(swiss_record(32)).await;
-        let swiss_game = TournamentStore::swiss_game_id(32, 1, 2).unwrap();
+        let swiss_game = TournamentStore::swiss_game_id(32, 1, 2).context("test setup failed")?;
 
         let found = |game_id| {
             let store = store.clone();
@@ -1585,21 +1650,31 @@ mod tests {
         store
             .update(31, |t| {
                 if let FormatState::Elimination(bracket) = &mut t.state {
-                    bracket.set_game_id(1, 999_999).unwrap();
+                    let result = bracket.set_game_id(1, 999_999);
+                    assert!(result.is_ok(), "assign fixture game: {result:?}");
                 }
             })
             .await;
         assert_eq!(found(999_999).await, Some(31));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn the_store_starts_an_event_once() {
-        let store = TournamentStore::new(memory_pool().await).await;
+    async fn the_store_starts_an_event_once() -> anyhow::Result<()> {
+        let store = TournamentStore::new(memory_pool().await?).await?;
         store.create(record_with_players(11, 2)).await;
-        store.start_tournament(11).await.unwrap();
-        let t = store.get(11).await.unwrap();
+        store
+            .start_tournament(11)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("test setup failed")?;
+        let t = store.get(11).await.context("test setup failed")?;
         assert_eq!(t.status, TournamentStatus::Active);
-        assert_eq!(t.elimination().unwrap().matches.len(), 1);
+        assert_eq!(
+            t.elimination().context("test setup failed")?.matches.len(),
+            1
+        );
         assert!(store.start_tournament(99).await.is_err());
+        Ok(())
     }
 }

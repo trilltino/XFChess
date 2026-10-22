@@ -17,7 +17,32 @@ use crate::signing::routes::tournament as tournament_routes;
 use crate::signing::social::routes::social_routes;
 use crate::signing::swiss::handlers::{swiss_admin_routes, swiss_read_routes};
 use crate::signing::{build_router, AppState};
-use axum::{extract::State, middleware, Router};
+use axum::{extract::State, middleware, response::IntoResponse, Router};
+
+const ERROR_BODY_SCRUB_LIMIT: usize = 64 * 1024;
+
+/// Strips URLs (and the RPC provider tokens in their paths) from 4xx/5xx
+/// bodies. Handlers format upstream errors straight into responses, and
+/// reqwest's Display includes the full request URL.
+async fn scrub_error_bodies(
+    request: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let response = next.run(request).await;
+    if !(response.status().is_client_error() || response.status().is_server_error()) {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, ERROR_BODY_SCRUB_LIMIT).await else {
+        return (parts.status, "error body unavailable").into_response();
+    };
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return axum::response::Response::from_parts(parts, axum::body::Body::from(bytes));
+    };
+    let scrubbed = crate::signing::solana::redact_urls_in(text);
+    parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+    axum::response::Response::from_parts(parts, axum::body::Body::from(scrubbed))
+}
 
 pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
     let signing_router = build_router(signing_state.clone());
@@ -191,6 +216,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
             signing_state.clone(),
             crate::telemetry::telemetry_middleware,
         ))
+        .layer(middleware::from_fn(scrub_error_bodies))
         // Cap caller-supplied transaction and JSON payloads at 1 MiB to bound allocation.
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
         .layer(cors_layer(&signing_state.config.allowed_origins))

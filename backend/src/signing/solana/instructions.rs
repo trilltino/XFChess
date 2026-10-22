@@ -14,12 +14,49 @@ const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";
 pub(crate) const TOURNAMENT_MATCH_SEED: &[u8] = b"t_match";
 const TOURNAMENT_USDC_PRIZE_SEED: &[u8] = b"t_usdc_prize";
 
+pub struct MoveInput {
+    pub game_id: u64,
+    pub move_uci: [u8; 5],
+    pub next_board: [u8; 68],
+    pub nonce: u64,
+    pub signature: Option<Vec<u8>>,
+    pub parent_nonce: Option<u64>,
+}
+
+pub struct TournamentInit<'a> {
+    pub tournament_id: u64,
+    pub name: &'a str,
+    pub entry_fee: u64,
+    pub platform_fee: u64,
+    pub max_players: u16,
+    pub tournament_type: u8,
+    pub swiss_rounds: u8,
+    pub elo_min: u32,
+    pub elo_max: u32,
+    pub min_players: u16,
+    pub prize_shares: [u16; 10],
+    pub winner_takes_all: bool,
+    pub host_treasury: &'a Pubkey,
+}
+
+pub struct MatchInit<'a> {
+    pub tournament_id: u64,
+    pub match_index: u16,
+    pub round: u8,
+    pub player_white: Option<&'a Pubkey>,
+    pub player_black: Option<&'a Pubkey>,
+    pub next_match_for_winner: Option<u16>,
+    pub next_match_slot: u8,
+    pub authority: &'a Pubkey,
+}
+
 pub(crate) fn anchor_discriminator(name: &str) -> [u8; 8] {
     let mut hasher = Sha256::new();
     hasher.update(format!("global:{}", name));
-    hasher.finalize()[..8]
-        .try_into()
-        .expect("SHA256 hash should be at least 8 bytes")
+    let hash = hasher.finalize();
+    let mut discriminator = [0; 8];
+    discriminator.copy_from_slice(&hash[..8]);
+    discriminator
 }
 
 fn borsh_string(s: &str) -> Vec<u8> {
@@ -32,13 +69,16 @@ pub fn record_move_ix(
     program_id: &Pubkey,
     session_pubkey: &Pubkey,
     wallet_pubkey: &Pubkey,
-    game_id: u64,
-    move_uci: [u8; 5],
-    next_board: [u8; 68],
-    nonce: u64,
-    signature: Option<Vec<u8>>,
-    parent_nonce: Option<u64>,
+    input: MoveInput,
 ) -> anyhow::Result<Instruction> {
+    let MoveInput {
+        game_id,
+        move_uci,
+        next_board,
+        nonce,
+        signature,
+        parent_nonce,
+    } = input;
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let session_delegation_pda = Pubkey::find_program_address(
         &[
@@ -86,13 +126,16 @@ pub fn global_record_move_ix(
     program_id: &Pubkey,
     session_pubkey: &Pubkey,
     wallet_pubkey: &Pubkey,
-    game_id: u64,
-    move_uci: [u8; 5],
-    next_board: [u8; 68],
-    nonce: u64,
-    signature: Option<Vec<u8>>,
-    parent_nonce: Option<u64>,
+    input: MoveInput,
 ) -> anyhow::Result<Instruction> {
+    let MoveInput {
+        game_id,
+        move_uci,
+        next_board,
+        nonce,
+        signature,
+        parent_nonce,
+    } = input;
     let game_pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], program_id).0;
     let global_session_pda =
         Pubkey::find_program_address(&[b"global_session", wallet_pubkey.as_ref()], program_id).0;
@@ -577,20 +620,23 @@ pub fn leave_tournament_ix(
 pub fn initialize_tournament_ix(
     program_id: &Pubkey,
     admin: &Pubkey,
-    tournament_id: u64,
-    name: &str,
-    entry_fee: u64,
-    platform_fee: u64,
-    max_players: u16,
-    tournament_type: u8, // 0 = SingleElimination, 1 = Swiss
-    swiss_rounds: u8,
-    elo_min: u32,
-    elo_max: u32,
-    min_players: u16,
-    prize_shares: [u16; 10],
-    winner_takes_all: bool,
-    host_treasury: &Pubkey,
+    input: TournamentInit<'_>,
 ) -> Instruction {
+    let TournamentInit {
+        tournament_id,
+        name,
+        entry_fee,
+        platform_fee,
+        max_players,
+        tournament_type,
+        swiss_rounds,
+        elo_min,
+        elo_max,
+        min_players,
+        prize_shares,
+        winner_takes_all,
+        host_treasury,
+    } = input;
     let tournament_pda =
         Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
             .0;
@@ -631,12 +677,9 @@ pub fn initialize_tournament_ix(
         program_id,
     )
     .0;
-    let token_program: Pubkey = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        .parse()
-        .expect("spl token id");
-    let associated_token_program: Pubkey = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
-        .parse()
-        .expect("spl associated token id");
+    let token_program: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    let associated_token_program: Pubkey =
+        solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
     Instruction {
         program_id: *program_id,
@@ -881,9 +924,7 @@ pub fn cancel_tournament_ix(
         program_id,
     )
     .0;
-    let token_program: Pubkey = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        .parse()
-        .expect("spl token id");
+    let token_program: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
     let present = required_shards(max_players);
     let shard = |idx: u8| {
@@ -1235,17 +1276,17 @@ pub fn distribute_tournament_prizes_ix(
     }
 }
 
-pub fn initialize_match_ix(
-    program_id: &Pubkey,
-    tournament_id: u64,
-    match_index: u16,
-    round: u8,
-    player_white: Option<&Pubkey>,
-    player_black: Option<&Pubkey>,
-    next_match_for_winner: Option<u16>,
-    next_match_slot: u8,
-    authority: &Pubkey,
-) -> Instruction {
+pub fn initialize_match_ix(program_id: &Pubkey, input: MatchInit<'_>) -> Instruction {
+    let MatchInit {
+        tournament_id,
+        match_index,
+        round,
+        player_white,
+        player_black,
+        next_match_for_winner,
+        next_match_slot,
+        authority,
+    } = input;
     let tournament_pda =
         Pubkey::find_program_address(&[TOURNAMENT_SEED, &tournament_id.to_le_bytes()], program_id)
             .0;
@@ -1414,9 +1455,7 @@ pub fn claim_prize_ix(program_id: &Pubkey, tournament_id: u64, claimant: &Pubkey
             AccountMeta::new(*claimant, true), // claimant signer
             // SPL Token program (required by the program even on the SOL path)
             AccountMeta::new_readonly(
-                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-                    .parse()
-                    .expect("spl token id"),
+                solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
                 false,
             ),
             AccountMeta::new_readonly(solana_system_interface::program::id(), false),
@@ -1428,6 +1467,7 @@ pub fn claim_prize_ix(program_id: &Pubkey, tournament_id: u64, claimant: &Pubkey
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
     fn claim_timeout_matches_the_program_account_order() {
@@ -1512,7 +1552,7 @@ mod tests {
     }
 
     #[test]
-    fn schedule_time_check_ix_builds_expected_accounts_and_data() {
+    fn schedule_time_check_ix_builds_expected_accounts_and_data() -> anyhow::Result<()> {
         let program_id = Pubkey::new_unique();
         let payer = Pubkey::new_unique();
         let white = Pubkey::new_unique();
@@ -1521,7 +1561,7 @@ mod tests {
         let interval_ms = 30_000u64;
 
         let ix = schedule_time_check_ix(&program_id, &payer, game_id, &white, &black, interval_ms)
-            .expect("build schedule_time_check ix");
+            .context("build schedule_time_check ix")?;
 
         assert_eq!(ix.program_id, program_id);
         assert_eq!(ix.accounts.len(), 5);
@@ -1534,7 +1574,9 @@ mod tests {
         assert_eq!(ix.accounts[3].pubkey, black);
         assert_eq!(
             ix.accounts[4].pubkey,
-            MAGIC_PROGRAM_PUBKEY.parse::<Pubkey>().unwrap()
+            MAGIC_PROGRAM_PUBKEY
+                .parse::<Pubkey>()
+                .context("test setup failed")?
         );
 
         assert_eq!(&ix.data[..8], &anchor_discriminator("schedule_time_check"));
@@ -1545,16 +1587,17 @@ mod tests {
             &(i64::MAX as u64).to_le_bytes(),
             "iterations must be positive and effectively unlimited"
         );
+        Ok(())
     }
 
     #[test]
-    fn cancel_time_check_ix_builds_expected_accounts_and_data() {
+    fn cancel_time_check_ix_builds_expected_accounts_and_data() -> anyhow::Result<()> {
         let program_id = Pubkey::new_unique();
         let payer = Pubkey::new_unique();
         let game_id = 42u64;
 
-        let ix =
-            cancel_time_check_ix(&program_id, &payer, game_id).expect("build cancel_time_check ix");
+        let ix = cancel_time_check_ix(&program_id, &payer, game_id)
+            .context("build cancel_time_check ix")?;
 
         assert_eq!(ix.program_id, program_id);
         assert_eq!(ix.accounts.len(), 3);
@@ -1565,7 +1608,9 @@ mod tests {
         assert_eq!(ix.accounts[1].pubkey, game_pda);
         assert_eq!(
             ix.accounts[2].pubkey,
-            MAGIC_PROGRAM_PUBKEY.parse::<Pubkey>().unwrap()
+            MAGIC_PROGRAM_PUBKEY
+                .parse::<Pubkey>()
+                .context("test setup failed")?
         );
 
         assert_eq!(&ix.data[..8], &anchor_discriminator("cancel_time_check"));
@@ -1574,6 +1619,7 @@ mod tests {
             &game_id.to_le_bytes(),
             "task_id must equal game_id"
         );
+        Ok(())
     }
 }
 

@@ -78,7 +78,7 @@ fn fetch_pgn_blocking(game_id: String) -> Result<String, String> {
     if !resp.status().is_success() {
         return Err(format!("fetch_pgn: HTTP {}", resp.status()));
     }
-    Ok(resp.text().map_err(|e| format!("parse pgn: {e}"))?)
+    resp.text().map_err(|e| format!("parse pgn: {e}"))
 }
 
 pub fn fetch_profile_history(
@@ -341,19 +341,18 @@ pub fn profile_view_ui(
                                                 ),
                                             )
                                             .clicked()
+                                            && !view.pgn_fetching
                                         {
-                                            if !view.pgn_fetching {
-                                                view.pgn_fetching = true;
-                                                let (tx, rx) = crossbeam_channel::bounded(1);
-                                                view.pgn_fetch_rx = Some(rx);
-                                                let gid = entry.game_id.clone();
-                                                crate::core::net_task::spawn_detached(
-                                                    "profile_view",
-                                                    move || {
-                                                        let _ = tx.send(fetch_pgn_blocking(gid));
-                                                    },
-                                                );
-                                            }
+                                            view.pgn_fetching = true;
+                                            let (tx, rx) = crossbeam_channel::bounded(1);
+                                            view.pgn_fetch_rx = Some(rx);
+                                            let gid = entry.game_id.clone();
+                                            crate::core::net_task::spawn_detached(
+                                                "profile_view",
+                                                move || {
+                                                    let _ = tx.send(fetch_pgn_blocking(gid));
+                                                },
+                                            );
                                         }
                                     },
                                 );

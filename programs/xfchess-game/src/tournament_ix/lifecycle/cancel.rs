@@ -211,8 +211,7 @@ pub fn handler<'info>(
             GameErrorCode::InsufficientTreasuryForRefund
         );
 
-        for i in 0..registered {
-            let player_key = all_players[i];
+        for (i, &player_key) in all_players.iter().take(registered).enumerate() {
             let player_wallet = &ctx.remaining_accounts[i];
             require_keys_eq!(
                 player_wallet.key(),

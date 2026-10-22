@@ -23,10 +23,13 @@ pub fn get_blockhash_for_accounts(
         },
         params,
     )?;
-    Ok(resp
-        .blockhash
-        .parse()
-        .expect("router returned an invalid blockhash string"))
+    resp.blockhash.parse().map_err(|error| {
+        solana_client::client_error::ClientError::from(
+            solana_client::client_error::ClientErrorKind::Custom(format!(
+                "router returned an invalid blockhash: {error}"
+            )),
+        )
+    })
 }
 
 pub fn base_client() -> RpcClient {

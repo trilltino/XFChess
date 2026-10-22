@@ -66,7 +66,7 @@ pub struct AIPlugin;
 
 impl Plugin for AIPlugin {
     fn build(&self, app: &mut App) {
-        use crate::core::states::{GameMode, InGameplay};
+        use crate::core::state::{GameMode, InGameplay};
 
         // The AI only plays in vs-AI games; replay, spectating, puzzles and
         // online games never start a search.
@@ -595,7 +595,7 @@ fn find_move_entities(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::states::{GameMode, GameState};
+    use crate::core::state::{GameMode, GameState};
 
     use crate::game::resources::player::{Player, Players};
     use crate::rendering::pieces::PieceColor;
@@ -652,15 +652,17 @@ mod tests {
     }
 
     #[test]
-    fn promotion_suffixes_are_preserved_in_uci() {
-        let from = ChessEngine::uci_to_coords("e7").unwrap();
-        let to = ChessEngine::uci_to_coords("e8").unwrap();
+    fn promotion_suffixes_are_preserved_in_uci() -> Result<(), Box<dyn std::error::Error>> {
+        let from = ChessEngine::uci_to_coords("e7").ok_or("missing test value")?;
+        let to = ChessEngine::uci_to_coords("e8").ok_or("missing test value")?;
         for promotion in ['q', 'r', 'b', 'n'] {
             assert_eq!(
                 normalized_move_uci(from, to, Some(promotion)),
                 format!("e7e8{promotion}")
             );
         }
+
+        Ok(())
     }
 
     fn poll_app() -> App {

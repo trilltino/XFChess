@@ -213,11 +213,12 @@ pub fn format_node_id(node_id: &EndpointId) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use anyhow::Context as _;
+    use parking_lot::Mutex;
     use xfchess_braid_server::{bridge, ResourceHub};
 
     #[test]
-    fn a_hub_write_reaches_a_client_as_the_same_event() {
+    fn a_hub_write_reaches_a_client_as_the_same_event() -> anyhow::Result<()> {
         let hub = ResourceHub::new();
         let captured: Arc<Mutex<Vec<(String, BraidUpdate)>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -225,7 +226,6 @@ mod tests {
         hub.set_gossip_sink(Arc::new(move |path: &str, update: &BraidUpdate| {
             sink_captured
                 .lock()
-                .expect("sink mutex")
                 .push((path.to_string(), update.clone()));
         }));
 
@@ -235,16 +235,16 @@ mod tests {
             serde_json::json!([{ "player_id": "alice", "score": 1.5, "rank": 1 }]),
         );
 
-        let events = captured.lock().expect("sink mutex");
+        let events = captured.lock();
         let (path, update) = events
             .iter()
             .find(|(p, _)| p.ends_with("/standings"))
-            .expect("a standings write must reach the gossip sink");
+            .context("a standings write must reach the gossip sink")?;
         assert_eq!(path, "tournament/7/standings");
 
-        let bytes = encode_for_gossip(path, update).expect("update should encode");
+        let bytes = encode_for_gossip(path, update).context("update should encode")?;
         let wire: braid_chess::braid_http::types::Update =
-            serde_json::from_slice(&bytes).expect("encoded update should be valid JSON");
+            serde_json::from_slice(&bytes).context("encoded update should be valid JSON")?;
 
         assert_eq!(
             braid_chess::SwissMessage::from_update(&wire),
@@ -257,16 +257,18 @@ mod tests {
                 }],
             })
         );
+        Ok(())
     }
 
     #[test]
-    fn test_format_and_parse_node_id() {
+    fn test_format_and_parse_node_id() -> anyhow::Result<()> {
         let node_id: EndpointId = "test_node_id_12345".to_string();
 
         let formatted = format_node_id(&node_id);
-        let parsed = parse_node_id(&formatted).expect("parse_node_id should succeed");
+        let parsed = parse_node_id(&formatted).context("parse_node_id should succeed")?;
 
         assert_eq!(node_id, parsed);
+        Ok(())
     }
 
     #[test]
@@ -276,12 +278,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn broadcast_without_a_topic_is_a_no_op() {
+    async fn broadcast_without_a_topic_is_a_no_op() -> anyhow::Result<()> {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .connect("sqlite::memory:")
             .await
-            .expect("in-memory sqlite pool");
-        let tournament_store = TournamentStore::new(pool).await;
+            .context("in-memory sqlite pool")?;
+        let tournament_store = TournamentStore::new(pool).await?;
         let gossip = TournamentGossipService::new(tournament_store, None);
 
         let update = BraidUpdate::snapshot(1, serde_json::json!([]));
@@ -290,5 +292,6 @@ mod tests {
             .await;
 
         assert!(!gossip.has_topic(42).await);
+        Ok(())
     }
 }

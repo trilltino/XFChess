@@ -123,19 +123,19 @@ pub fn initialize_players(
     _commands: Commands,
     mut players: ResMut<Players>,
     ai_config: Res<ChessAIResource>,
-    core_mode: Res<crate::core::states::GameMode>,
+    core_mode: Res<crate::core::state::GameMode>,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
     player_identity: Res<crate::states::main_menu::PlayerIdentity>,
     puzzle_board: Option<Res<crate::puzzle::PuzzleBoard>>,
 ) {
-    if let crate::core::states::GameMode::MultiplayerLocal = *core_mode {
+    if let crate::core::state::GameMode::MultiplayerLocal = *core_mode {
         let p1_name = player_identity.display_name().to_string();
         *players = Players {
             player_1: Player::new(1, p1_name, PieceColor::White, true),
             player_2: Player::new(2, "Player 2".to_string(), PieceColor::Black, true),
         };
         info!("[GAME_INIT] Local PvP players initialized (both human)");
-    } else if let crate::core::states::GameMode::Puzzle = *core_mode {
+    } else if let crate::core::state::GameMode::Puzzle = *core_mode {
         // The human plays the puzzle's side; the server plays the other one.
         let human = puzzle_board.map_or(PieceColor::White, |b| b.player_color);
         let me = player_identity.display_name().to_string();
@@ -150,7 +150,7 @@ pub fn initialize_players(
             },
         };
         info!("[GAME_INIT] Puzzle players initialized: human={human:?}");
-    } else if let crate::core::states::GameMode::OnlineMultiplayer = *core_mode {
+    } else if let crate::core::state::GameMode::OnlineMultiplayer = *core_mode {
         // Each instance only controls its assigned color; the other color is driven by the network.
         let my_color = p2p_conn
             .as_ref()

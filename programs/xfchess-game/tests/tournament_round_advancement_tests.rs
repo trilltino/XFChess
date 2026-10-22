@@ -1,4 +1,5 @@
 use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
+use anyhow::Context as _;
 use solana_program_test::{
     BanksClientError, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
 };
@@ -34,19 +35,23 @@ fn shard_pda(id: u64, shard: u8) -> (Pubkey, u8) {
     )
 }
 
-fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> Account {
-    let mut data = Vec::with_capacity(space);
-    value.try_serialize(&mut data).unwrap();
-    if data.len() < space {
-        data.resize(space, 0);
-    }
-    Account {
-        lamports: 10_000_000,
-        data,
-        owner: xfchess_game::ID,
-        executable: false,
-        rent_epoch: 0,
-    }
+fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> anyhow::Result<Account> {
+    Ok({
+        let mut data = Vec::with_capacity(space);
+        value
+            .try_serialize(&mut data)
+            .context("required operation value")?;
+        if data.len() < space {
+            data.resize(space, 0);
+        }
+        Account {
+            lamports: 10_000_000,
+            data,
+            owner: xfchess_game::ID,
+            executable: false,
+            rent_epoch: 0,
+        }
+    })
 }
 
 fn tournament(authority: Pubkey, white: Pubkey, bump: u8) -> Tournament {
@@ -196,22 +201,24 @@ async fn send(
     ctx: &mut ProgramTestContext,
     ix: Instruction,
     extra: &[&Keypair],
-) -> Result<(), TransactionError> {
-    let blockhash = ctx
-        .banks_client
-        .get_new_latest_blockhash(&ctx.last_blockhash)
-        .await
-        .expect("failed to get a fresh blockhash");
-    ctx.last_blockhash = blockhash;
-    let payer_pk = ctx.payer.pubkey();
-    let mut signers: Vec<&Keypair> = vec![&ctx.payer];
-    signers.extend_from_slice(extra);
-    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer_pk));
-    tx.sign(&signers, blockhash);
-    ctx.banks_client
-        .process_transaction(tx)
-        .await
-        .map_err(transaction_error)
+) -> anyhow::Result<Result<(), TransactionError>> {
+    Ok({
+        let blockhash = ctx
+            .banks_client
+            .get_new_latest_blockhash(&ctx.last_blockhash)
+            .await
+            .context("failed to get a fresh blockhash")?;
+        ctx.last_blockhash = blockhash;
+        let payer_pk = ctx.payer.pubkey();
+        let mut signers: Vec<&Keypair> = vec![&ctx.payer];
+        signers.extend_from_slice(extra);
+        let mut tx = Transaction::new_with_payer(&[ix], Some(&payer_pk));
+        tx.sign(&signers, blockhash);
+        ctx.banks_client
+            .process_transaction(tx)
+            .await
+            .map_err(transaction_error)
+    })
 }
 
 fn transaction_error(e: BanksClientError) -> TransactionError {
@@ -229,55 +236,66 @@ fn custom_code(err: &TransactionError) -> Option<u32> {
     }
 }
 
-async fn fetch_tournament(ctx: &mut ProgramTestContext) -> Tournament {
-    use anchor_lang::AccountDeserialize;
-    let acc = ctx
-        .banks_client
-        .get_account(tournament_pda(TOURNAMENT_ID).0)
-        .await
-        .unwrap()
-        .expect("tournament account missing");
-    Tournament::try_deserialize(&mut &acc.data[..]).unwrap()
+async fn fetch_tournament(ctx: &mut ProgramTestContext) -> anyhow::Result<Tournament> {
+    Ok({
+        use anchor_lang::AccountDeserialize;
+        let acc = ctx
+            .banks_client
+            .get_account(tournament_pda(TOURNAMENT_ID).0)
+            .await
+            .context("required operation value")?
+            .context("tournament account missing")?;
+        Tournament::try_deserialize(&mut &acc.data[..]).context("required operation value")?
+    })
 }
 
-async fn fetch_shard0(ctx: &mut ProgramTestContext) -> TournamentPlayersShard {
-    use anchor_lang::AccountDeserialize;
-    let acc = ctx
-        .banks_client
-        .get_account(shard_pda(TOURNAMENT_ID, 0).0)
-        .await
-        .unwrap()
-        .expect("shard account missing");
-    TournamentPlayersShard::try_deserialize(&mut &acc.data[..]).unwrap()
+async fn fetch_shard0(ctx: &mut ProgramTestContext) -> anyhow::Result<TournamentPlayersShard> {
+    Ok({
+        use anchor_lang::AccountDeserialize;
+        let acc = ctx
+            .banks_client
+            .get_account(shard_pda(TOURNAMENT_ID, 0).0)
+            .await
+            .context("required operation value")?
+            .context("shard account missing")?;
+        TournamentPlayersShard::try_deserialize(&mut &acc.data[..])
+            .context("required operation value")?
+    })
 }
 
-async fn setup(authority: Pubkey, white: Pubkey, black: Pubkey) -> ProgramTestContext {
-    let (_, t_bump) = tournament_pda(TOURNAMENT_ID);
-    start(vec![
-        (
-            tournament_pda(TOURNAMENT_ID).0,
-            serialize_padded(
-                &tournament(authority, white, t_bump),
-                8 + Tournament::INIT_SPACE,
+async fn setup(
+    authority: Pubkey,
+    white: Pubkey,
+    black: Pubkey,
+) -> anyhow::Result<ProgramTestContext> {
+    Ok({
+        let (_, t_bump) = tournament_pda(TOURNAMENT_ID);
+        start(vec![
+            (
+                tournament_pda(TOURNAMENT_ID).0,
+                serialize_padded(
+                    &tournament(authority, white, t_bump),
+                    8 + Tournament::INIT_SPACE,
+                )?,
             ),
-        ),
-        (
-            shard_pda(TOURNAMENT_ID, 0).0,
-            serialize_padded(
-                &shard0(white, black),
-                8 + TournamentPlayersShard::space_for(),
+            (
+                shard_pda(TOURNAMENT_ID, 0).0,
+                serialize_padded(
+                    &shard0(white, black),
+                    8 + TournamentPlayersShard::space_for(),
+                )?,
             ),
-        ),
-    ])
-    .await
+        ])
+        .await
+    })
 }
 
 #[tokio::test]
-async fn authority_records_the_board_then_advances_the_round() {
+async fn authority_records_the_board_then_advances_the_round() -> anyhow::Result<()> {
     let authority = Keypair::new();
     let white = Keypair::new();
     let black = Keypair::new();
-    let mut ctx = setup(authority.pubkey(), white.pubkey(), black.pubkey()).await;
+    let mut ctx = setup(authority.pubkey(), white.pubkey(), black.pubkey()).await?;
 
     // Advancing before the (only) board has reported must fail.
     let err = send(
@@ -285,8 +303,9 @@ async fn authority_records_the_board_then_advances_the_round() {
         advance_round_ix(authority.pubkey(), 1),
         &[&authority],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::TournamentRoundIncomplete))
@@ -304,10 +323,10 @@ async fn authority_records_the_board_then_advances_the_round() {
         ),
         &[&authority],
     )
-    .await
-    .expect("record_swiss_result should succeed");
+    .await?
+    .context("record_swiss_result should succeed")?;
 
-    let shard = fetch_shard0(&mut ctx).await;
+    let shard = fetch_shard0(&mut ctx).await?;
     let white_standing = &shard.swiss_standings[0];
     let black_standing = &shard.swiss_standings[1];
     assert_eq!((white_standing.score, white_standing.color_balance), (2, 1));
@@ -329,8 +348,9 @@ async fn authority_records_the_board_then_advances_the_round() {
         ),
         &[&authority],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::BoardAlreadyRecorded))
@@ -341,10 +361,10 @@ async fn authority_records_the_board_then_advances_the_round() {
         advance_round_ix(authority.pubkey(), 1),
         &[&authority],
     )
-    .await
-    .expect("advance_round should succeed once the board is in");
+    .await?
+    .context("advance_round should succeed once the board is in")?;
 
-    let t = fetch_tournament(&mut ctx).await;
+    let t = fetch_tournament(&mut ctx).await?;
     assert_eq!(t.current_round, 1);
     assert_eq!(t.round_boards_reported, [0u8; 16]);
 
@@ -354,20 +374,22 @@ async fn authority_records_the_board_then_advances_the_round() {
         advance_round_ix(authority.pubkey(), 1),
         &[&authority],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::InvalidGameStatus))
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn players_and_third_parties_cannot_report_or_advance() {
+async fn players_and_third_parties_cannot_report_or_advance() -> anyhow::Result<()> {
     let authority = Keypair::new();
     let white = Keypair::new();
     let black = Keypair::new();
-    let mut ctx = setup(authority.pubkey(), white.pubkey(), black.pubkey()).await;
+    let mut ctx = setup(authority.pubkey(), white.pubkey(), black.pubkey()).await?;
 
     // A player signing their own win is no longer accepted.
     let err = send(
@@ -382,28 +404,31 @@ async fn players_and_third_parties_cannot_report_or_advance() {
         ),
         &[&white],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::NotTournamentAuthority))
     );
 
     let err = send(&mut ctx, advance_round_ix(black.pubkey(), 0), &[&black])
-        .await
-        .unwrap_err();
+        .await?
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::NotTournamentAuthority))
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn self_pairing_and_oversized_rounds_are_rejected() {
+async fn self_pairing_and_oversized_rounds_are_rejected() -> anyhow::Result<()> {
     let authority = Keypair::new();
     let white = Keypair::new();
     let black = Keypair::new();
-    let mut ctx = setup(authority.pubkey(), white.pubkey(), black.pubkey()).await;
+    let mut ctx = setup(authority.pubkey(), white.pubkey(), black.pubkey()).await?;
 
     let err = send(
         &mut ctx,
@@ -417,8 +442,9 @@ async fn self_pairing_and_oversized_rounds_are_rejected() {
         ),
         &[&authority],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidArgument)));
 
     // Two registered players means at most one board per round.
@@ -427,17 +453,19 @@ async fn self_pairing_and_oversized_rounds_are_rejected() {
         advance_round_ix(authority.pubkey(), 2),
         &[&authority],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidArgument)));
+    Ok(())
 }
 
 #[tokio::test]
-async fn bye_is_a_full_point_for_one_player() {
+async fn bye_is_a_full_point_for_one_player() -> anyhow::Result<()> {
     let authority = Keypair::new();
     let white = Keypair::new();
     let black = Keypair::new();
-    let mut ctx = setup(authority.pubkey(), white.pubkey(), black.pubkey()).await;
+    let mut ctx = setup(authority.pubkey(), white.pubkey(), black.pubkey()).await?;
 
     // A bye names one player twice; two different players is a malformed bye.
     let err = send(
@@ -452,8 +480,9 @@ async fn bye_is_a_full_point_for_one_player() {
         ),
         &[&authority],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidArgument)));
 
     send(
@@ -468,11 +497,12 @@ async fn bye_is_a_full_point_for_one_player() {
         ),
         &[&authority],
     )
-    .await
-    .expect("bye should record");
+    .await?
+    .context("bye should record")?;
 
-    let shard = fetch_shard0(&mut ctx).await;
+    let shard = fetch_shard0(&mut ctx).await?;
     let bye = &shard.swiss_standings[1];
     assert_eq!((bye.score, bye.color_balance), (2, 0));
     assert_eq!(shard.swiss_standings[0].score, 0);
+    Ok(())
 }

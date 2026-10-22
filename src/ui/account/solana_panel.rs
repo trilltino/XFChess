@@ -114,15 +114,15 @@ pub fn render_solana_panel(
                 let has_kyc = status.as_ref().map(|s| s.has_kyc).unwrap_or(false);
 
                 ui.horizontal(|ui| {
-                    ui.label(if has_profile { "" } else { "" });
+                    ui.label(if has_profile { "Verified" } else { "Missing" });
                     ui.label("Profile");
                 });
                 ui.horizontal(|ui| {
-                    ui.label(if has_email { "" } else { "" });
+                    ui.label(if has_email { "Verified" } else { "Missing" });
                     ui.label("Email");
                 });
                 ui.horizontal(|ui| {
-                    ui.label(if has_kyc { "" } else { "" });
+                    ui.label(if has_kyc { "Verified" } else { "Missing" });
                     ui.colored_label(
                         if has_kyc {
                             UiColors::SUCCESS
@@ -167,10 +167,13 @@ pub fn render_solana_panel(
                 if let Some(imported) = imported_session.and_then(|s| s.session.as_ref()) {
                     ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new(format!("Imported wallet: {}", imported.short_wallet()))
-                            .size(10.0)
-                            .color(UiColors::TEXT_SECONDARY)
-                            .monospace(),
+                        egui::RichText::new(format!(
+                            "Imported wallet: {}",
+                            imported.short_wallet()
+                        ))
+                        .size(10.0)
+                        .color(UiColors::TEXT_SECONDARY)
+                        .monospace(),
                     );
                     ui.label(
                         egui::RichText::new(format!(

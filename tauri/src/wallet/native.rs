@@ -1,9 +1,12 @@
+#![allow(unsafe_code)]
+
 use windows::core::BOOL;
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 fn browser_window(hwnd: HWND) -> bool {
+  // SAFETY: Win32 validates the borrowed HWND; the process handle is closed once below.
   unsafe {
     let mut pid = 0;
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
@@ -30,34 +33,42 @@ fn find_window(title: Option<&str>, pid: u32) -> Option<HWND> {
     result: Option<HWND>,
   }
   unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> BOOL {
-    let search = &mut *(data.0 as *mut Search<'_>);
-    if let Some(title) = search.title {
-      let mut buffer = [0u16; 256];
-      let len = GetWindowTextW(hwnd, &mut buffer);
-      if len <= 0
-        || String::from_utf16_lossy(&buffer[..len as usize]) != title
-        || !browser_window(hwnd)
-      {
-        return BOOL(1);
+    std::panic::catch_unwind(|| {
+      // SAFETY: EnumWindows invokes this synchronously with the unique Search pointer
+      // below. Both Search and its borrowed title remain alive until enumeration ends.
+      unsafe {
+        let search = &mut *(data.0 as *mut Search<'_>);
+        if let Some(title) = search.title {
+          let mut buffer = [0u16; 256];
+          let len = GetWindowTextW(hwnd, &mut buffer);
+          if len <= 0
+            || String::from_utf16_lossy(&buffer[..len as usize]) != title
+            || !browser_window(hwnd)
+          {
+            return BOOL(1);
+          }
+        } else {
+          let mut pid = 0;
+          GetWindowThreadProcessId(hwnd, Some(&mut pid));
+          if pid != search.pid
+            || !IsWindowVisible(hwnd).as_bool()
+            || GetWindow(hwnd, GW_OWNER).is_ok_and(|owner| !owner.0.is_null())
+          {
+            return BOOL(1);
+          }
+        }
+        search.result = Some(hwnd);
+        BOOL(0)
       }
-    } else {
-      let mut pid = 0;
-      GetWindowThreadProcessId(hwnd, Some(&mut pid));
-      if pid != search.pid
-        || !IsWindowVisible(hwnd).as_bool()
-        || GetWindow(hwnd, GW_OWNER).is_ok_and(|owner| !owner.0.is_null())
-      {
-        return BOOL(1);
-      }
-    }
-    search.result = Some(hwnd);
-    BOOL(0)
+    })
+    .unwrap_or(BOOL(0))
   }
   let mut search = Search {
     title,
     pid,
     result: None,
   };
+  // SAFETY: search is uniquely borrowed by synchronous callbacks and is not retained.
   unsafe {
     let _ = EnumWindows(Some(visit), LPARAM(&mut search as *mut _ as isize));
   }
@@ -71,6 +82,7 @@ fn popup() -> Option<HWND> {
 
 pub(super) fn close() -> bool {
   if let Some(hwnd) = popup() {
+    // SAFETY: the borrowed HWND is validated by Win32; WM_CLOSE contains no pointers.
     unsafe {
       let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
     }
@@ -83,6 +95,7 @@ pub(super) fn hide() -> bool {
   let Some(hwnd) = popup() else {
     return false;
   };
+  // SAFETY: Win32 validates this borrowed HWND; no ownership is transferred.
   unsafe {
     let _ = ShowWindow(hwnd, SW_HIDE);
   }
@@ -93,6 +106,7 @@ pub(super) fn show() -> bool {
   let Some(hwnd) = popup() else {
     return false;
   };
+  // SAFETY: Win32 validates this borrowed HWND; no ownership is transferred.
   unsafe {
     let _ = ShowWindow(hwnd, SW_RESTORE);
     let _ = SetForegroundWindow(hwnd);
@@ -108,6 +122,7 @@ pub(super) fn position(width: i32, height: i32) -> bool {
   if super::lifecycle::game_pid() != 0 && game.is_none() {
     return false;
   }
+  // SAFETY: all HWNDs are borrowed; rect is writable for the duration of GetWindowRect.
   unsafe {
     let mut rect = RECT::default();
     if let Some(game) = game.filter(|game| GetWindowRect(*game, &mut rect).is_ok()) {

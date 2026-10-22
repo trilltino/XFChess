@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn test_ai_difficulty_clone() {
         let original = AIDifficulty::Level8;
-        let cloned = original.clone();
+        let cloned = original;
         assert_eq!(original, cloned);
     }
 
@@ -251,19 +251,18 @@ mod tests {
         let original = AiMode::VsAI {
             ai_color: PieceColor::White,
         };
-        let cloned = original.clone();
+        let cloned = original;
         assert_eq!(original, cloned);
     }
 
     #[test]
     fn test_setting_ai_vs_human_mode() {
-        let mut ai_config = ChessAIResource::default();
-
-        // Start human vs AI with AI playing black
-        ai_config.mode = AiMode::VsAI {
-            ai_color: PieceColor::Black,
+        let ai_config = ChessAIResource {
+            mode: AiMode::VsAI {
+                ai_color: PieceColor::Black,
+            },
+            difficulty: AIDifficulty::Level8,
         };
-        ai_config.difficulty = AIDifficulty::Level8;
 
         if let AiMode::VsAI { ai_color } = ai_config.mode {
             assert_eq!(ai_color, PieceColor::Black);
@@ -309,11 +308,13 @@ mod tests {
     }
 
     #[test]
-    fn every_difficulty_has_a_search_budget() {
+    fn every_difficulty_has_a_search_budget() -> Result<(), Box<dyn std::error::Error>> {
         for value in 1..=8 {
             let level = AIDifficulty::from_u8(value);
-            assert!(level.stockfish_movetime_ms().unwrap() > 0);
-            assert!(level.stockfish_depth().unwrap() > 0);
+            assert!(level.stockfish_movetime_ms().ok_or("missing test value")? > 0);
+            assert!(level.stockfish_depth().ok_or("missing test value")? > 0);
         }
+
+        Ok(())
     }
 }

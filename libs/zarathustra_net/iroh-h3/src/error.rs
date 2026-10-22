@@ -1,6 +1,11 @@
 use h3::quic::{ConnectionErrorIncoming, StreamErrorIncoming};
 use iroh::endpoint::{ConnectionError, ReadError, WriteError};
 use std::sync::Arc;
+pub(crate) fn internal_stream_error(message: String) -> StreamErrorIncoming {
+    StreamErrorIncoming::ConnectionErrorIncoming {
+        connection_error: ConnectionErrorIncoming::InternalError(message),
+    }
+}
 pub(crate) fn convert_connection_error(e: ConnectionError) -> h3::quic::ConnectionErrorIncoming {
     match e {
         ConnectionError::ApplicationClosed(application_close) => {

@@ -154,7 +154,7 @@ fn test_move_record_clone() {
         is_checkmate: false,
     };
 
-    let cloned = original.clone();
+    let cloned = original;
 
     assert_eq!(cloned.piece_type, original.piece_type);
     assert_eq!(cloned.piece_color, original.piece_color);
@@ -177,10 +177,10 @@ fn test_has_moved_default() {
 
 #[test]
 fn test_has_moved_after_first_move() {
-    let mut has_moved = HasMoved::default();
-
-    has_moved.moved = true;
-    has_moved.move_count = 1;
+    let has_moved = HasMoved {
+        moved: true,
+        move_count: 1,
+    };
 
     assert!(has_moved.moved, "Piece should be marked as moved");
     assert_eq!(has_moved.move_count, 1, "Move count should be 1");

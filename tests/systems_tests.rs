@@ -1,12 +1,12 @@
 use bevy::prelude::*;
-use xfchess::engine::board_state::ChessEngine;
-use xfchess::game::components::{GamePhase, MoveRecord};
-use xfchess::game::resources::*;
-use xfchess::game::systems::game_init::reset_game_resources;
-use xfchess::rendering::{PieceColor, PieceType};
+use xfchess_app::engine::board_state::ChessEngine;
+use xfchess_app::game::components::{GamePhase, MoveRecord};
+use xfchess_app::game::resources::*;
+use xfchess_app::game::systems::game_init::reset_game_resources;
+use xfchess_app::rendering::{PieceColor, PieceType};
 
 #[test]
-fn test_reset_game_resources_system() {
+fn test_reset_game_resources_system() -> anyhow::Result<()> {
     let mut app = App::new();
 
     app.insert_resource(CurrentTurn {
@@ -16,9 +16,11 @@ fn test_reset_game_resources_system() {
     app.insert_resource(CurrentGamePhase(GamePhase::Check));
 
     let piece_entity = app.world_mut().spawn_empty().id();
-    let mut selection = Selection::default();
-    selection.selected_entity = Some(piece_entity);
-    selection.selected_position = Some((4, 4));
+    let selection = Selection {
+        selected_entity: Some(piece_entity),
+        selected_position: Some((4, 4)),
+        ..Default::default()
+    };
     app.insert_resource(selection);
 
     let mut history = MoveHistory::default();
@@ -54,16 +56,29 @@ fn test_reset_game_resources_system() {
 
     app.update();
 
-    let turn = app.world().get_resource::<CurrentTurn>().unwrap();
+    let turn = app
+        .world()
+        .get_resource::<CurrentTurn>()
+        .ok_or_else(|| anyhow::anyhow!("expected game resource is missing"))?;
     assert_eq!(turn.color, PieceColor::White);
     assert_eq!(turn.move_number, 1);
 
-    let phase = app.world().get_resource::<CurrentGamePhase>().unwrap();
+    let phase = app
+        .world()
+        .get_resource::<CurrentGamePhase>()
+        .ok_or_else(|| anyhow::anyhow!("expected game resource is missing"))?;
     assert_eq!(phase.0, GamePhase::Playing);
 
-    let selection = app.world().get_resource::<Selection>().unwrap();
+    let selection = app
+        .world()
+        .get_resource::<Selection>()
+        .ok_or_else(|| anyhow::anyhow!("expected game resource is missing"))?;
     assert!(selection.selected_entity.is_none());
 
-    let game_over = app.world().get_resource::<GameOverState>().unwrap();
+    let game_over = app
+        .world()
+        .get_resource::<GameOverState>()
+        .ok_or_else(|| anyhow::anyhow!("expected game resource is missing"))?;
     assert_eq!(*game_over, GameOverState::Playing);
+    Ok(())
 }

@@ -60,7 +60,7 @@ pub enum TransportError {
 }
 
 impl From<Infallible> for Error {
-    fn from(_: Infallible) -> Self {
-        unreachable!()
+    fn from(value: Infallible) -> Self {
+        match value {}
     }
 }

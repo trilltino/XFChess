@@ -11,7 +11,7 @@ const hash = new PublicKey(new Uint8Array(32).fill(7)).toBase58();
 const encode = (tx: Transaction | VersionedTransaction) => Buffer.from(tx instanceof Transaction
   ? tx.serialize({ requireAllSignatures: false, verifySignatures: false }) : tx.serialize()).toString("base64");
 
-function fixture(versioned: boolean) {
+function fixture(versioned: boolean, deferredServer = false) {
   const wallet = Keypair.generate();
   const local = Keypair.generate();
   const instruction = {
@@ -22,8 +22,10 @@ function fixture(versioned: boolean) {
   const tx = versioned ? new VersionedTransaction(new TransactionMessage({
     payerKey: wallet.publicKey, recentBlockhash: hash, instructions: [instruction],
   }).compileToV0Message()) : new Transaction({ feePayer: wallet.publicKey, recentBlockhash: hash }).add(instruction);
-  if (tx instanceof Transaction) tx.partialSign(local);
-  else tx.sign([local]);
+  if (!deferredServer) {
+    if (tx instanceof Transaction) tx.partialSign(local);
+    else tx.sign([local]);
+  }
   const original = encode(tx);
   if (tx instanceof Transaction) tx.partialSign(wallet);
   else tx.sign([wallet]);
@@ -52,6 +54,35 @@ describe.each([false, true])("transaction signing (versioned=%s)", versioned => 
   it("validates wallet approval while preserving the local signature", () => {
     const { tx, original, wallet } = fixture(versioned);
     expect(() => validateSignedTransaction(original, encode(tx), wallet.publicKey.toBase58())).not.toThrow();
+  });
+
+  it("accepts wallet approval before the server session co-signs", () => {
+    const { tx, original, wallet } = fixture(versioned, true);
+    expect(() => validateSignedTransaction(original, encode(tx), wallet.publicKey.toBase58())).not.toThrow();
+    expect(() => validateSignedTransaction(original, original, wallet.publicKey.toBase58())).toThrow(/invalid/);
+  });
+
+  it("serializes an extension response with a deferred server signature", async () => {
+    const { original, wallet } = fixture(versioned, true);
+    vi.stubGlobal("window", { phantom: { solana: {
+      publicKey: wallet.publicKey,
+      connect: async () => ({ publicKey: wallet.publicKey }),
+      signTransaction: async (tx: Transaction | VersionedTransaction) => {
+        if (tx instanceof Transaction) tx.partialSign(wallet);
+        else tx.sign([wallet]);
+        return tx;
+      },
+    } } });
+    const source = await connectExtension("phantom");
+    const signed = await source.signTransaction(Buffer.from(original, "base64"));
+    expect(() => validateSignedTransaction(original, Buffer.from(signed).toString("base64"), source.pubkey)).not.toThrow();
+  });
+
+  it("rejects stripping an existing server signature", () => {
+    const { tx, original, wallet } = fixture(versioned);
+    const signed = VersionedTransaction.deserialize(Buffer.from(encode(tx), "base64"));
+    signed.signatures[1] = new Uint8Array(64);
+    expect(() => validateSignedTransaction(original, encode(signed), wallet.publicKey.toBase58())).toThrow(/invalid|replaced/);
   });
 
   it("rejects a wallet that changes the blockhash", () => {

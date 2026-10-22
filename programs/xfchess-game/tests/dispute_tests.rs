@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anyhow::Context as _;
 use xfchess_game::governance_ix::resolution;
 use xfchess_game::state::{
     DisputeRecord, DisputeStatus, Game, GameResult, GameStatus, GameType, MatchType,
@@ -53,21 +54,23 @@ fn dispute() -> DisputeRecord {
 }
 
 #[test]
-fn resolution_rejects_non_player_winner() {
+fn resolution_rejects_non_player_winner() -> anyhow::Result<()> {
     let game = game();
     assert!(resolution::validate_resolution(&game, Some(Pubkey::new_unique())).is_err());
     assert_eq!(
-        resolution::validate_resolution(&game, Some(game.white)).unwrap(),
+        resolution::validate_resolution(&game, Some(game.white))
+            .context("required operation value")?,
         GameResult::Winner(game.white)
     );
     assert_eq!(
-        resolution::validate_resolution(&game, None).unwrap(),
+        resolution::validate_resolution(&game, None).context("required operation value")?,
         GameResult::Draw
     );
+    Ok(())
 }
 
 #[test]
-fn apply_resolution_sets_dispute_and_game_terminal_state() {
+fn apply_resolution_sets_dispute_and_game_terminal_state() -> anyhow::Result<()> {
     let mut game = game();
     let mut dispute = dispute();
     let authority = Pubkey::new_unique();
@@ -79,11 +82,12 @@ fn apply_resolution_sets_dispute_and_game_terminal_state() {
         authority,
         55,
     )
-    .unwrap();
+    .context("required operation value")?;
 
     assert!(dispute.status == DisputeStatus::Resolved);
     assert_eq!(dispute.resolved_by, Some(authority));
     assert_eq!(dispute.resolved_at, Some(55));
     assert_eq!(game.status, GameStatus::Settled);
     assert_eq!(game.result, GameResult::Draw);
+    Ok(())
 }

@@ -1,14 +1,17 @@
 use axum::{http::StatusCode, response::IntoResponse, Json};
 
-pub(super) fn backend_client() -> &'static reqwest::Client {
-  static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-  CLIENT.get_or_init(|| {
-    reqwest::Client::builder()
-      .timeout(std::time::Duration::from_secs(15))
-      .redirect(reqwest::redirect::Policy::none())
-      .build()
-      .expect("wallet backend HTTP client")
-  })
+pub(super) fn backend_client() -> Result<&'static reqwest::Client, String> {
+  static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> = std::sync::OnceLock::new();
+  CLIENT
+    .get_or_init(|| {
+      reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("Wallet backend HTTP client: {error}"))
+    })
+    .as_ref()
+    .map_err(Clone::clone)
 }
 
 pub(super) fn backend_unreachable_msg(e: reqwest::Error) -> String {
@@ -60,11 +63,13 @@ pub(super) async fn proxy_post(
   body: serde_json::Value,
   headers: &axum::http::HeaderMap,
 ) -> axum::response::Response {
-  let client = backend_client();
+  let client = match backend_client() {
+    Ok(client) => client,
+    Err(error) => return (StatusCode::SERVICE_UNAVAILABLE, error).into_response(),
+  };
   let req = forward_client_headers(client.post(url).json(&body), headers);
   match req.send().await {
     Ok(resp) => forward_backend_response(resp).await,
     Err(e) => (StatusCode::BAD_GATEWAY, backend_unreachable_msg(e)).into_response(),
   }
 }
-

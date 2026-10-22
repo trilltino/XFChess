@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use bytes::Bytes;
 #[path = "../../iroh-h3/tests/support/mod.rs"]
 mod support;
@@ -10,10 +11,10 @@ use axum::{Router, response::IntoResponse, routing::get};
 const ALPN: &[u8] = b"iroh+h3";
 
 #[tokio::test]
-async fn basic_get_and_headers() {
+async fn basic_get_and_headers() -> anyhow::Result<()> {
     let discovery = MockDiscoveryMap::new();
-    let endpoint_1 = discovery.spawn_endpoint().await;
-    let endpoint_2 = discovery.spawn_endpoint().await;
+    let endpoint_1 = discovery.spawn_endpoint().await?;
+    let endpoint_2 = discovery.spawn_endpoint().await?;
 
     async fn hello() -> impl IntoResponse {
         (
@@ -29,11 +30,19 @@ async fn basic_get_and_headers() {
 
     let client = IrohH3Client::new(endpoint_2, ALPN.into());
     let uri = format!("iroh+h3://{}/hello", endpoint_1.id());
-    let response = client.get(&uri).send().await.unwrap();
+    let response = client
+        .get(&uri)
+        .send()
+        .await
+        .context("required operation value")?;
 
-    let header = response.headers.get("x-test").unwrap();
+    let header = response
+        .headers
+        .get("x-test")
+        .context("required operation value")?;
     assert_eq!(header, "value");
 
-    let body = response.bytes().await.unwrap();
+    let body = response.bytes().await.context("required operation value")?;
     assert_eq!(body, Bytes::from_static(b"Hello, World!"));
+    Ok(())
 }

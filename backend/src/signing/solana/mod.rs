@@ -1,5 +1,6 @@
 pub mod debug;
 pub mod game_account;
+pub mod game_discovery;
 pub mod game_participants;
 pub mod instructions;
 pub mod routing;
@@ -20,11 +21,12 @@ pub use instructions::{
     leave_tournament_ix, link_external_elo_ix, record_move_ix, record_result_ix,
     record_swiss_result_ix, recover_stuck_delegation_ix, register_player_ix,
     request_force_undelegate_ix, required_shards, schedule_time_check_ix, start_tournament_ix,
-    undelegate_game_ix, verify_profile_ix, withdraw_treasury_ix,
+    undelegate_game_ix, verify_profile_ix, withdraw_treasury_ix, MatchInit, MoveInput,
+    TournamentInit,
 };
 pub use routing::{rpc_for, rpc_url_for, Instr as RoutedInstr, Layer as RpcLayer};
 pub use rpc::{
-    fallback_rpc_url, make_rpc, read_with_failover, redact_url, rpc_url_or_devnet,
+    fallback_rpc_url, make_rpc, read_with_failover, redact_url, redact_urls_in, rpc_url_or_devnet,
     wallet_signable_blockhash,
 };
 pub use telemetry::{classify_error_str, TxErrorCategory};

@@ -194,6 +194,7 @@ fn move_record_to_json(m: &crate::db::repository::MoveRecord) -> serde_json::Val
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use serde_json::json;
 
     #[test]
@@ -218,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn a_persisted_move_matches_the_live_message_shape() {
+    fn a_persisted_move_matches_the_live_message_shape() -> anyhow::Result<()> {
         let record = crate::db::repository::MoveRecord {
             id: Some(1),
             game_id: "7".into(),
@@ -233,7 +234,7 @@ mod tests {
 
         let encoded = move_record_to_json(&record);
         let decoded: ChessMessage =
-            serde_json::from_value(encoded).expect("must decode as a ChessMessage");
+            serde_json::from_value(encoded).context("must decode as a ChessMessage")?;
 
         match decoded {
             ChessMessage::Move(p) => {
@@ -243,7 +244,8 @@ mod tests {
                 assert_eq!(p.promotion, Some('q'));
                 assert_eq!(p.move_number, 3);
             }
-            other => panic!("unexpected message: {other:?}"),
+            other => anyhow::bail!("unexpected message: {other:?}"),
         }
+        Ok(())
     }
 }

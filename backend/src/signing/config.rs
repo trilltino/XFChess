@@ -25,6 +25,10 @@ pub struct SigningConfig {
     pub allowed_origins: Vec<String>,
 }
 
+fn required_env(name: &str) -> Result<String, String> {
+    env::var(name).map_err(|_| format!("{name} must be set to a valid value"))
+}
+
 impl SigningConfig {
     pub fn is_devnet(&self) -> bool {
         self.solana_rpc_url.contains("devnet")
@@ -36,12 +40,15 @@ impl SigningConfig {
             .unwrap_or(false)
     }
 
-    pub fn from_env() -> Self {
-        Self {
-            port: env::var("SIGNING_PORT")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(8090),
+    pub fn from_env() -> Result<Self, String> {
+        Ok(Self {
+            port: match env::var("SIGNING_PORT") {
+                Ok(value) => value
+                    .parse()
+                    .map_err(|_| "SIGNING_PORT must be a valid port".to_string())?,
+                Err(env::VarError::NotPresent) => 8090,
+                Err(_) => return Err("SIGNING_PORT must contain valid text".into()),
+            },
             solana_rpc_url: env::var("SOLANA_RPC_URL")
                 .unwrap_or_else(|_| "https://api.devnet.solana.com".into()),
             solana_mainnet_rpc_url: env::var("SOLANA_MAINNET_RPC_URL").ok(),
@@ -53,13 +60,9 @@ impl SigningConfig {
             // Match declare_id; PROGRAM_ID overrides it for other deployments.
             program_id: env::var("PROGRAM_ID")
                 .unwrap_or_else(|_| "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into()),
-            jwt_secret: env::var("JWT_SECRET")
-                .expect("JWT_SECRET must be set — generate with: openssl rand -hex 32"),
-            identity_encryption_key: env::var("IDENTITY_ENCRYPTION_KEY").expect(
-                "IDENTITY_ENCRYPTION_KEY must be set — generate with: openssl rand -hex 32",
-            ),
-            identity_salt: env::var("IDENTITY_SALT")
-                .expect("IDENTITY_SALT must be set — generate with: openssl rand -hex 32"),
+            jwt_secret: required_env("JWT_SECRET")?,
+            identity_encryption_key: required_env("IDENTITY_ENCRYPTION_KEY")?,
+            identity_salt: required_env("IDENTITY_SALT")?,
             fee_payer_keys: env::var("FEE_PAYER_KEYS")
                 .unwrap_or_default()
                 .split(',')
@@ -84,7 +87,7 @@ impl SigningConfig {
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
                 .collect(),
-        }
+        })
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -190,6 +193,7 @@ impl SigningConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     fn base_config() -> SigningConfig {
         SigningConfig {
@@ -215,18 +219,18 @@ mod tests {
         }
     }
 
-    #[test]
-    fn missing_authority_key_is_fine_outside_production() {
-        let _env = crate::test_env::lock();
+    #[tokio::test]
+    async fn missing_authority_key_is_fine_outside_production() {
+        let _env = crate::test_env::lock().await;
         std::env::remove_var("APP_ENV");
         let mut config = base_config();
         config.vps_authority_key = None;
         assert!(config.validate().is_ok());
     }
 
-    #[test]
-    fn missing_authority_key_is_fatal_in_production() {
-        let _env = crate::test_env::lock();
+    #[tokio::test]
+    async fn missing_authority_key_is_fatal_in_production() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
         std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let mut config = base_config();
@@ -234,13 +238,16 @@ mod tests {
         let result = config.validate();
         std::env::remove_var("APP_ENV");
         std::env::remove_var("ADMIN_API_KEY");
-        let err = result.expect_err("missing VPS_AUTHORITY_KEY must be fatal in production");
+        let err = result
+            .err()
+            .context("missing VPS_AUTHORITY_KEY must be fatal in production")?;
         assert!(err.contains("VPS_AUTHORITY_KEY"));
+        Ok(())
     }
 
-    #[test]
-    fn all_authority_keys_present_passes_in_production() {
-        let _env = crate::test_env::lock();
+    #[tokio::test]
+    async fn all_authority_keys_present_passes_in_production() {
+        let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
         std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let result = base_config().validate();
@@ -249,20 +256,23 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn missing_admin_api_key_is_fatal_in_production() {
-        let _env = crate::test_env::lock();
+    #[tokio::test]
+    async fn missing_admin_api_key_is_fatal_in_production() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
         std::env::remove_var("ADMIN_API_KEY");
         let result = base_config().validate();
         std::env::remove_var("APP_ENV");
-        let err = result.expect_err("missing ADMIN_API_KEY must be fatal in production");
+        let err = result
+            .err()
+            .context("missing ADMIN_API_KEY must be fatal in production")?;
         assert!(err.contains("ADMIN_API_KEY"));
+        Ok(())
     }
 
-    #[test]
-    fn invalid_treasury_pubkey_is_fatal_in_production() {
-        let _env = crate::test_env::lock();
+    #[tokio::test]
+    async fn invalid_treasury_pubkey_is_fatal_in_production() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
         std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let mut config = base_config();
@@ -270,13 +280,16 @@ mod tests {
         let result = config.validate();
         std::env::remove_var("APP_ENV");
         std::env::remove_var("ADMIN_API_KEY");
-        let err = result.expect_err("an invalid TREASURY_AUTHORITY_PUBKEY must fail validate()");
+        let err = result
+            .err()
+            .context("an invalid TREASURY_AUTHORITY_PUBKEY must fail validate()")?;
         assert!(err.contains("TREASURY_AUTHORITY_PUBKEY"));
+        Ok(())
     }
 
-    #[test]
-    fn missing_allowed_origins_is_fatal_in_production() {
-        let _env = crate::test_env::lock();
+    #[tokio::test]
+    async fn missing_allowed_origins_is_fatal_in_production() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
         std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
         let mut config = base_config();
@@ -284,24 +297,21 @@ mod tests {
         let result = config.validate();
         std::env::remove_var("APP_ENV");
         std::env::remove_var("ADMIN_API_KEY");
-        let err = result.expect_err("empty ALLOWED_ORIGINS must be fatal in production");
+        let err = result
+            .err()
+            .context("empty ALLOWED_ORIGINS must be fatal in production")?;
         assert!(err.contains("ALLOWED_ORIGINS"));
+        Ok(())
     }
 
-    #[test]
-    fn is_production_reflects_app_env() {
-        let _env = crate::test_env::lock();
+    #[tokio::test]
+    async fn is_production_reflects_app_env() {
+        let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
         assert!(base_config().is_production());
         std::env::set_var("APP_ENV", "development");
         assert!(!base_config().is_production());
         std::env::remove_var("APP_ENV");
         assert!(!base_config().is_production());
-    }
-}
-
-impl Default for SigningConfig {
-    fn default() -> Self {
-        Self::from_env()
     }
 }

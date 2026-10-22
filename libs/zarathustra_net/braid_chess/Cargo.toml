@@ -15,3 +15,9 @@ tokio.workspace = true
 tracing.workspace = true
 braid-http.workspace = true
 tempfile = "3.27"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true

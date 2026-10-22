@@ -77,7 +77,10 @@ async fn handle_get(
             .header("Cache-Control", "no-cache")
             .header("Vary", "Subscribe, Version, Parents")
             .body(body)
-            .unwrap();
+            .unwrap_or_else(|error| {
+                tracing::error!("Cannot construct subscription response: {error}");
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            });
     }
     let history = state.resources.history(&url).await;
     if let Some(version) = params.get("version") {

@@ -7,6 +7,7 @@ use anchor_lang::prelude::*;
 #[instruction(game_id: u64)]
 pub struct RecoverStuckDelegation<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: handler verifies program ownership and an empty, recovered account.
     pub game: UncheckedAccount<'info>,
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
     pub escrow_pda: SystemAccount<'info>,
@@ -64,12 +65,16 @@ pub fn handler(ctx: Context<RecoverStuckDelegation>, game_id: u64) -> Result<()>
 
     let game_lamports = ctx.accounts.game.lamports();
     if game_lamports > 0 {
-        **ctx.accounts.game.try_borrow_mut_lamports()? -= game_lamports;
-        **ctx
-            .accounts
-            .treasury_vault
-            .to_account_info()
-            .try_borrow_mut_lamports()? += game_lamports;
+        let treasury = ctx.accounts.treasury_vault.to_account_info();
+        let mut source = ctx.accounts.game.try_borrow_mut_lamports()?;
+        let mut destination = treasury.try_borrow_mut_lamports()?;
+        let received = destination
+            .checked_add(game_lamports)
+            .ok_or(GameErrorCode::ArithmeticOverflow)?;
+        **source = source
+            .checked_sub(game_lamports)
+            .ok_or(GameErrorCode::ArithmeticOverflow)?;
+        **destination = received;
     }
 
     emit!(crate::events::StuckDelegationRecovered {

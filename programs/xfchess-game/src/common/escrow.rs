@@ -46,18 +46,26 @@ pub fn debit_program_pda<'info>(
         return Ok(());
     }
     let rent_min = Rent::get()?.minimum_balance(pda.data_len());
-    require!(
-        pda.lamports().saturating_sub(lamports) >= rent_min,
-        GameErrorCode::InsufficientFunds
-    );
-    **pda.try_borrow_mut_lamports()? -= lamports;
-    **to.try_borrow_mut_lamports()? += lamports;
+    let mut source = pda.try_borrow_mut_lamports()?;
+    let mut destination = to.try_borrow_mut_lamports()?;
+    let remaining = source
+        .checked_sub(lamports)
+        .ok_or(GameErrorCode::InsufficientFunds)?;
+    let received = destination
+        .checked_add(lamports)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
+    require!(remaining >= rent_min, GameErrorCode::InsufficientFunds);
+    **source = remaining;
+    **destination = received;
     Ok(())
 }
 
 pub fn require_rent_exempt_after(dest: &AccountInfo, added: u64) -> Result<()> {
     let rent = Rent::get()?;
-    let after = dest.lamports().saturating_add(added);
+    let after = dest
+        .lamports()
+        .checked_add(added)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
     require!(
         rent.is_exempt(after, dest.data_len()),
         GameErrorCode::InsufficientFunds

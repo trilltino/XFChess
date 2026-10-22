@@ -125,7 +125,6 @@ impl LinkageStore {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct GameOutcome {
     pub white: String,

@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use solana_client::rpc_client::RpcClient;
@@ -12,7 +11,7 @@ use solana_sdk::{
 
 use super::{redact_url, LatencyStats};
 
-const MEMO_PROGRAM_ID: &str = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+const MEMO_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 pub struct TxLandReport {
     pub name: String,
@@ -24,7 +23,7 @@ pub struct TxLandReport {
 
 pub fn run(name: &str, url: &str, payer: &Keypair, count: usize) -> TxLandReport {
     let rpc = RpcClient::new_with_commitment(url.to_string(), CommitmentConfig::confirmed());
-    let memo = Pubkey::from_str(MEMO_PROGRAM_ID).expect("valid memo program id");
+    let memo = MEMO_PROGRAM_ID;
 
     let mut report = TxLandReport {
         name: name.to_string(),
@@ -125,7 +124,7 @@ fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        s[..max].to_string()
+        s.chars().take(max).collect()
     }
 }
 

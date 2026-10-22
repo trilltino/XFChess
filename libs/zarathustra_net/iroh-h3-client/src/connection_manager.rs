@@ -1,3 +1,5 @@
+#[cfg(test)]
+use anyhow::Context as _;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -122,29 +124,22 @@ impl ConnectionManager {
         body: Body,
     ) -> Result<(), Error> {
         let mut body_stream = body.into_stream();
-        loop {
-            match body_stream.frame().await.transpose()? {
-                Some(frame) if frame.is_data() => {
-                    let mut data = frame
-                        .into_data()
-                        .expect("Non-data frame in a branch guarded by is_data");
+        while let Some(frame) = body_stream.frame().await.transpose()? {
+            match frame.into_data() {
+                Ok(mut data) => {
                     let buf = data.copy_to_bytes(data.remaining());
                     stream
                         .send_data(buf)
                         .await
                         .map_err(|err| Error::Transport(err.into()))?;
                 }
-                Some(frame) if frame.is_trailers() => {
-                    let trailers = frame
-                        .into_trailers()
-                        .expect("Non-trailers frame in a branch guarded by is_trailers");
-                    stream
+                Err(frame) => match frame.into_trailers() {
+                    Ok(trailers) => stream
                         .send_trailers(trailers)
                         .await
-                        .map_err(|err| Error::Transport(err.into()))?;
-                }
-                Some(_) => warn!("Unexpected frame type"),
-                None => break,
+                        .map_err(|err| Error::Transport(err.into()))?,
+                    Err(_) => warn!("Unexpected frame type"),
+                },
             }
         }
         Ok(())
@@ -201,10 +196,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn abandoning_a_cached_connection_setup_releases_the_cache() {
+    async fn abandoning_a_cached_connection_setup_releases_the_cache() -> anyhow::Result<()> {
         let endpoint = Endpoint::bind(iroh::endpoint::presets::Minimal)
             .await
-            .unwrap();
+            .context("required operation value")?;
         let manager = ConnectionManager::new(endpoint.clone(), b"test".to_vec());
         let cache = Arc::downgrade(&manager.sender_cache);
         let peer = iroh::SecretKey::generate().public();
@@ -217,5 +212,6 @@ mod tests {
             "cached setup retained its own cache"
         );
         endpoint.close().await;
+        Ok(())
     }
 }

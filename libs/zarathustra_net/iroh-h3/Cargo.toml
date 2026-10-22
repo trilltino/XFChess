@@ -16,4 +16,8 @@ h3 = "0.0.8"
 iroh.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

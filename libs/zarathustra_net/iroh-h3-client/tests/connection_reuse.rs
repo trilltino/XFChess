@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 #[path = "../../iroh-h3/tests/support/mod.rs"]
 mod support;
 use iroh_h3_axum::IrohAxum;
@@ -10,10 +11,10 @@ use axum::{Router, routing::post};
 const ALPN: &[u8] = b"iroh+h3";
 
 #[tokio::test]
-async fn many_requests_connection_reuse() {
+async fn many_requests_connection_reuse() -> anyhow::Result<()> {
     let discovery = MockDiscoveryMap::new();
-    let endpoint_1 = discovery.spawn_endpoint().await;
-    let endpoint_2 = discovery.spawn_endpoint().await;
+    let endpoint_1 = discovery.spawn_endpoint().await?;
+    let endpoint_2 = discovery.spawn_endpoint().await?;
 
     async fn ping() -> &'static str {
         "Pong!"
@@ -28,19 +29,33 @@ async fn many_requests_connection_reuse() {
     let uri = format!("iroh+h3://{}/ping", endpoint_1.id());
 
     for _ in 0..10 {
-        let res = client.post(&uri).send().await.unwrap();
-        assert_eq!(res.bytes().await.unwrap(), b"Pong!"[..]);
+        let res = client
+            .post(&uri)
+            .send()
+            .await
+            .context("required operation value")?;
+        assert_eq!(
+            res.bytes().await.context("required operation value")?,
+            b"Pong!"[..]
+        );
     }
 
     let instant = Instant::now();
     let mut set = JoinSet::new();
     for _ in 0..50 {
-        let request = client.post(&uri).build().unwrap();
+        let request = client
+            .post(&uri)
+            .build()
+            .context("required operation value")?;
         set.spawn(async move {
-            let response = request.send().await.unwrap();
-            response.bytes().await.unwrap();
+            let response = request.send().await.context("required operation value")?;
+            response.bytes().await.context("required operation value")?;
+            Ok::<_, anyhow::Error>(())
         });
     }
-    set.join_all().await;
+    while let Some(result) = set.join_next().await {
+        result??;
+    }
     println!("Burst processed in {:?}", instant.elapsed());
+    Ok(())
 }

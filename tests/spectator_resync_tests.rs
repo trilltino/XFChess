@@ -1,10 +1,10 @@
 #![cfg(feature = "solana")]
 
 use bevy::prelude::*;
-use xfchess::core::states::GameMode;
-use xfchess::game::events::NetworkMoveEvent;
-use xfchess::multiplayer::rollup::manager::RollupEvent;
-use xfchess::multiplayer::spectator::{apply_braid_resync_to_spectator, SpectatorSession};
+use xfchess_app::core::state::GameMode;
+use xfchess_app::game::events::NetworkMoveEvent;
+use xfchess_app::multiplayer::rollup::manager::RollupEvent;
+use xfchess_app::multiplayer::spectator::{apply_braid_resync_to_spectator, SpectatorSession};
 
 fn resynced_move(n: u32) -> RollupEvent {
     RollupEvent::ResyncedMove {

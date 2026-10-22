@@ -154,6 +154,7 @@ fn statements(script: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     fn listed(dir: &str, scripts: &[Script]) -> Vec<String> {
         let mut names: Vec<String> = scripts
@@ -164,32 +165,41 @@ mod tests {
         names
     }
 
-    fn on_disk(dir: &str) -> Vec<String> {
+    fn on_disk(dir: &str) -> anyhow::Result<Vec<String>> {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("migrations")
             .join(dir);
-        let mut names: Vec<String> = std::fs::read_dir(path)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|p| p.extension().is_some_and(|ext| ext == "sql"))
-            .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
-            .collect();
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(path)? {
+            let path = entry?.path();
+            if path.extension().is_some_and(|extension| extension == "sql") {
+                names.push(
+                    path.file_stem()
+                        .context("migration filename")?
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
         names.sort();
-        names
+        Ok(names)
     }
 
     #[test]
-    fn every_script_on_disk_is_run() {
-        assert_eq!(listed("session", SESSION_SCRIPTS), on_disk("session"));
-        assert_eq!(listed("vault", VAULT_SCRIPTS), on_disk("vault"));
+    fn every_script_on_disk_is_run() -> anyhow::Result<()> {
+        assert_eq!(listed("session", SESSION_SCRIPTS), on_disk("session")?);
+        assert_eq!(listed("vault", VAULT_SCRIPTS), on_disk("vault")?);
         let top_level = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"))
-            .unwrap()
-            .filter(|e| e.as_ref().unwrap().path().is_file())
+            .context("test setup failed")?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|entry| entry.path().is_file())
             .count();
         assert_eq!(
             top_level, 0,
             "only the session/ and vault/ folders live in migrations/"
         );
+        Ok(())
     }
 
     #[test]
@@ -202,18 +212,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scripts_can_run_on_every_start() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        migrate_session_db(&pool).await.unwrap();
-        migrate_session_db(&pool).await.unwrap();
-        let vault = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        migrate_vault_db(&vault).await.unwrap();
-        migrate_vault_db(&vault).await.unwrap();
+    async fn scripts_can_run_on_every_start() -> anyhow::Result<()> {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .context("test setup failed")?;
+        migrate_session_db(&pool)
+            .await
+            .context("test setup failed")?;
+        migrate_session_db(&pool)
+            .await
+            .context("test setup failed")?;
+        let vault = SqlitePool::connect("sqlite::memory:")
+            .await
+            .context("test setup failed")?;
+        migrate_vault_db(&vault)
+            .await
+            .context("test setup failed")?;
+        migrate_vault_db(&vault)
+            .await
+            .context("test setup failed")?;
+        Ok(())
     }
 
     #[tokio::test]
-    async fn an_older_database_gets_the_newer_columns() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn an_older_database_gets_the_newer_columns() -> anyhow::Result<()> {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .context("test setup failed")?;
         sqlx::raw_sql(
             "CREATE TABLE sessions (game_id INTEGER PRIMARY KEY, keypair BLOB NOT NULL, \
              wallet TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 0);
@@ -224,20 +249,30 @@ mod tests {
         )
         .execute(&pool)
         .await
-        .unwrap();
-        migrate_session_db(&pool).await.unwrap();
+        .context("test setup failed")?;
+        migrate_session_db(&pool)
+            .await
+            .context("test setup failed")?;
         let columns: Vec<String> =
             sqlx::query_scalar("SELECT name FROM pragma_table_info('sessions')")
                 .fetch_all(&pool)
                 .await
-                .unwrap();
+                .context("test setup failed")?;
         assert!(columns.ends_with(&["move_count".into(), "is_global".into(), "created_at".into()]));
         let retired: Option<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE name = 'idx_game_event_log_game'",
         )
         .fetch_optional(&pool)
         .await
-        .unwrap();
+        .context("test setup failed")?;
         assert_eq!(retired, None, "redundant indexes are dropped");
+        let columns: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM pragma_index_info('idx_game_event_log_version') ORDER BY seqno",
+        )
+        .fetch_all(&pool)
+        .await
+        .context("test setup failed")?;
+        assert_eq!(columns, ["game_id", "version_hash"]);
+        Ok(())
     }
 }

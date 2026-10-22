@@ -44,6 +44,19 @@ pub struct FriendManager {
     pool: SqlitePool,
 }
 
+type RequestRow = (
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+);
+type ContactRow = (String, String, Option<String>, String, Option<i64>, String);
+
 impl FriendManager {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
@@ -116,7 +129,7 @@ impl FriendManager {
         node_id: &str,
         pubkey: Option<&str>,
     ) -> Result<Vec<FriendRequest>> {
-        let rows: Vec<(String, String, Option<String>, String, Option<String>, Option<String>, Option<String>, String, String)> =
+        let rows: Vec<RequestRow> =
             sqlx::query_as(
                 r#"SELECT id, from_node_id, from_pubkey, from_display, to_node_id, to_pubkey, message, status, created_at
                    FROM friend_requests
@@ -222,14 +235,13 @@ impl FriendManager {
     }
 
     pub async fn get_contacts(&self, owner_node_id: &str) -> Result<Vec<Contact>> {
-        let rows: Vec<(String, String, Option<String>, String, Option<i64>, String)> =
-            sqlx::query_as(
-                r#"SELECT id, contact_node_id, contact_pubkey, contact_display, contact_elo, created_at
+        let rows: Vec<ContactRow> = sqlx::query_as(
+            r#"SELECT id, contact_node_id, contact_pubkey, contact_display, contact_elo, created_at
                    FROM contacts WHERE owner_node_id = ? ORDER BY contact_display"#,
-            )
-            .bind(owner_node_id)
-            .fetch_all(&self.pool)
-            .await?;
+        )
+        .bind(owner_node_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(rows
             .into_iter()

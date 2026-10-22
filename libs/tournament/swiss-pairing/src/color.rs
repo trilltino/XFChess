@@ -1,9 +1,9 @@
 use crate::{Color, SwissPlayer};
 
-pub fn calculate_balance(history: &[Color]) -> i8 {
-    let whites = history.iter().filter(|c| **c == Color::White).count() as i8;
-    let blacks = history.iter().filter(|c| **c == Color::Black).count() as i8;
-    blacks - whites
+pub fn calculate_balance(history: &[Color]) -> i64 {
+    history.iter().fold(0, |balance, color| {
+        balance + if *color == Color::Black { 1 } else { -1 }
+    })
 }
 
 pub fn had_same_color_twice(history: &[Color]) -> bool {
@@ -23,16 +23,16 @@ pub fn would_violate_three_in_row(history: &[Color], color: Color) -> bool {
 }
 
 pub fn should_swap_colors(
-    white_balance: i8,
-    black_balance: i8,
+    white_balance: i64,
+    black_balance: i64,
     white_history: &[Color],
     black_history: &[Color],
 ) -> bool {
     // If one player needs white significantly more
-    if white_balance > black_balance + 1 {
+    if white_balance > black_balance.saturating_add(1) {
         return false; // Keep current assignment
     }
-    if black_balance > white_balance + 1 {
+    if black_balance > white_balance.saturating_add(1) {
         return true; // Swap to give black player white
     }
 
@@ -68,7 +68,7 @@ pub fn validate_color_assignment(players: &[SwissPlayer]) -> bool {
         }
 
         // Check overall balance (should be within 1)
-        let balance = calculate_balance(history).abs();
+        let balance = calculate_balance(history).unsigned_abs();
         if balance > 1 {
             return false;
         }
@@ -92,6 +92,14 @@ pub fn preferred_color(player: &SwissPlayer) -> Option<Color> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_histories_and_extreme_balances_do_not_overflow() {
+        assert_eq!(calculate_balance(&vec![Color::White; 256]), -256);
+        assert_eq!(calculate_balance(&vec![Color::Black; 256]), 256);
+        assert!(!should_swap_colors(i64::MAX, i64::MIN, &[], &[]));
+        assert!(should_swap_colors(i64::MIN, i64::MAX, &[], &[]));
+    }
 
     #[test]
     fn test_calculate_balance() {

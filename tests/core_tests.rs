@@ -6,7 +6,7 @@ use bevy::state::{
     condition::in_state,
     state::{NextState, State},
 };
-use xfchess::core::{debug_current_gamestate, GameState};
+use xfchess_app::core::{debug_current_gamestate, GameState};
 
 #[derive(Resource, Default, Debug)]
 struct SystemExecutionTracker {
@@ -196,11 +196,11 @@ fn test_state_persistence_across_updates() {
 #[test]
 fn test_state_is_clonable() {
     let state1 = GameState::MainMenu;
-    let state2 = state1.clone();
+    let state2 = state1;
     assert_eq!(state1, state2);
 
     let state3 = GameState::InGame;
-    let state4 = state3.clone();
+    let state4 = state3;
     assert_eq!(state3, state4);
 }
 

@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Verify Rust source extraction policy
+        run: pwsh -NoProfile -File scripts/check_rust_safety.ps1 -InventoryOnly
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends \
@@ -46,6 +48,7 @@ jobs:
 
   clippy:
     name: Clippy
+    needs: tauri-apps-test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +56,18 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: tauri-wallet-ui-dist
+          path: tauri/wallet-ui/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: tauri-tournament-admin-dist
+          path: tauri/tournament-admin/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: tauri-viz-dist
+          path: tauri/viz/dist
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends \
@@ -65,7 +80,42 @@ jobs:
           cargo clippy -p xfchess --all-targets --features solana -- -D warnings
           cargo clippy -p backend -p xfchess-rules -p xfchess-stockfish --all-targets -- -D warnings
           cargo clippy -p xfchess-game -- -D warnings
-        continue-on-error: true
+      - name: Enforce Rust safety policy
+        run: pwsh -NoProfile -File scripts/check_rust_safety.ps1
+
+  rust-safety-windows:
+    name: Windows native Rust safety
+    needs: tauri-apps-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Expose bundled LLVM linker
+        shell: pwsh
+        run: |
+          $rustRoot = rustc --print sysroot
+          "$rustRoot/lib/rustlib/x86_64-pc-windows-msvc/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: tauri-wallet-ui-dist
+          path: tauri/wallet-ui/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: tauri-tournament-admin-dist
+          path: tauri/tournament-admin/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: tauri-viz-dist
+          path: tauri/viz/dist
+      - name: Check desktop and wallet platform paths
+        run: pwsh -NoProfile -File scripts/check_rust_safety.ps1 -PlatformOnly
+      - name: Test native wallet and benchmark safeguards
+        run: |
+          cargo test --locked -p xfchess-tauri --features production,wallet,tournament-admin
+          cargo test --locked -p xfchess-viz
 
   test:
     name: Test Suite
@@ -90,11 +140,11 @@ jobs:
       - name: Build on-chain program (.so for solana-program-test)
         run: |
           export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-          cargo build-sbf --manifest-path programs/xfchess-game/Cargo.toml
+          cargo build-sbf --arch v0 --manifest-path programs/xfchess-game-sbf/Cargo.toml
       - name: Application and engine tests (isolated from contract features)
         run: cargo test -p xfchess -p backend -p xfchess-rules -p xfchess-stockfish
       - name: Contract tests, including host-rules compatibility
-        run: cargo test -p xfchess-game
+        run: cargo test -p xfchess-game -- --test-threads=1
       - name: Remaining workspace tests
         run: cargo test --workspace --exclude xfchess --exclude backend --exclude xfchess-game --exclude xfchess-rules --exclude xfchess-stockfish
 
@@ -126,7 +176,7 @@ jobs:
 
   # Run the separate desktop UI unit suites; these do not exercise the native Tauri shell.
   tauri-apps-test:
-    name: Tauri Apps (unit tests)
+    name: Tauri Apps (tests and build)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -138,11 +188,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - name: Install deps
         run: npm ci
       - name: Test
         run: npm run test
+      - name: Build
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tauri-${{ matrix.app }}-dist
+          path: tauri/${{ matrix.app }}/dist
+          if-no-files-found: error
 
   # Web frontend: build gate + dependency audit (npm). Build is a hard gate; audit
   # is informative until triaged.

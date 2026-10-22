@@ -141,7 +141,7 @@ fn seat_banner(mut contexts: EguiContexts, mut seat: ResMut<SeatState>) {
         return;
     };
     egui::Panel::top("seat_superseded_banner").show(
-        &mut crate::ui::egui_ext::viewport_ui(&ctx, "seat_superseded_banner"),
+        &mut crate::ui::egui_ext::viewport_ui(ctx, "seat_superseded_banner"),
         |ui| {
             ui.horizontal(|ui| {
                 ui.colored_label(

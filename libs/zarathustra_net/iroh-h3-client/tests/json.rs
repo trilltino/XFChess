@@ -1,4 +1,5 @@
 #![cfg(feature = "json")]
+use anyhow::Context as _;
 use axum::{Json, Router, response::IntoResponse, routing::post};
 #[path = "../../iroh-h3/tests/support/mod.rs"]
 mod support;
@@ -19,10 +20,10 @@ const PING: &str = "Ping!";
 const PONG: &str = "Pong!";
 
 #[tokio::test]
-async fn json_request_response() {
+async fn json_request_response() -> anyhow::Result<()> {
     let discovery = MockDiscoveryMap::new();
-    let endpoint_1 = discovery.spawn_endpoint().await;
-    let endpoint_2 = discovery.spawn_endpoint().await;
+    let endpoint_1 = discovery.spawn_endpoint().await?;
+    let endpoint_2 = discovery.spawn_endpoint().await?;
 
     async fn ping(Json(msg): Json<Message>) -> impl IntoResponse {
         assert_eq!(msg.message, PING);
@@ -44,16 +45,22 @@ async fn json_request_response() {
         .json(&Message {
             message: PING.into(),
         })
-        .unwrap();
-    let res = req.send().await.unwrap();
+        .context("required operation value")?;
+    let res = req.send().await.context("required operation value")?;
 
-    assert_eq!(res.headers.get("Content-Type").unwrap(), "application/json");
+    assert_eq!(
+        res.headers
+            .get("Content-Type")
+            .context("required operation value")?,
+        "application/json"
+    );
 
-    let reply: Message = res.json().await.unwrap();
+    let reply: Message = res.json().await.context("required operation value")?;
     assert_eq!(
         reply,
         Message {
             message: PONG.into()
         }
     );
+    Ok(())
 }

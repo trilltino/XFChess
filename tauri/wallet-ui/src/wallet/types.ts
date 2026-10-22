@@ -7,11 +7,8 @@ export type WalletKind = 'phantom' | 'solflare' | 'privy';
 
 export type WalletSource = {
   kind: WalletKind;
-  /** Base58 public key. */
   pubkey: string;
-  /** Signs raw UTF-8 bytes of `msg`; returns a base58 signature. */
   signRaw: (msg: string) => Promise<string>;
-  /** Signs serialized transaction bytes; returns serialized signed bytes. */
   signTransaction: (tx: Uint8Array) => Promise<Uint8Array>;
   /**
    * Underlying extension provider; null for embedded wallets without a

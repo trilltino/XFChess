@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiClient } from "../services/api";
+import { startPolling } from "../services/poll";
 
 export default function MatchManagement() {
   const [sessions, setSessions] = useState<any[]>([]);
@@ -11,22 +12,27 @@ export default function MatchManagement() {
     setAbortMsg(`Game #${gameId}: force-abort isn't wired to an on-chain instruction. For a stuck/disputed game, use the Dashboard's dispute resolution instead.`);
   };
 
+  const mounted = useRef(false);
+  const pending = useRef(false);
   useEffect(() => {
-    loadSessions();
-    const interval = setInterval(loadSessions, 10000); // Auto-refresh active matches every 10s
-    return () => clearInterval(interval);
+    mounted.current = true;
+    const stop = startPolling(loadSessions, 10000);
+    return () => { mounted.current = false; stop(); };
   }, []);
 
-  const loadSessions = async () => {
+  const loadSessions = async (active: () => boolean = () => mounted.current) => {
+    if (pending.current) return;
+    pending.current = true;
     try {
       const response = await apiClient.getActiveSessions();
-      if (response.ok) {
+      if (active() && response.ok) {
         setSessions(response.data.sessions || []);
       }
     } catch (err) {
       console.error("Error loading sessions", err);
     } finally {
-      setLoading(false);
+      pending.current = false;
+      if (active()) setLoading(false);
     }
   };
 
@@ -39,7 +45,7 @@ export default function MatchManagement() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
           <div style={{ fontSize: "12px", color: "var(--primary)", fontWeight: "bold" }}>● {sessions.length} ACTIVE</div>
-          <button onClick={loadSessions} className="primary" style={{ padding: "0.6rem 1.5rem", borderRadius: "100px" }}>REFRESH</button>
+          <button onClick={() => void loadSessions()} className="primary" style={{ padding: "0.6rem 1.5rem", borderRadius: "100px" }}>REFRESH</button>
         </div>
       </div>
 

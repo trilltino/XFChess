@@ -59,6 +59,35 @@ impl Default for AcConfig {
 }
 
 impl AcConfig {
+    pub fn validate(&self) -> crate::error::AcResult<()> {
+        let valid = self.worker_count > 0
+            && self.queue_capacity > 0
+            && self.queue_capacity <= tokio::sync::Semaphore::MAX_PERMITS
+            && self.analysis_depth > 0
+            && self.movetime_ms > 0
+            && self.forced_delta_cp >= 0
+            && self.complex_delta_cp >= self.forced_delta_cp
+            && self.review_threshold.is_finite()
+            && self.flag_threshold.is_finite()
+            && (0.0..=1.0).contains(&self.review_threshold)
+            && (self.review_threshold..=1.0).contains(&self.flag_threshold)
+            && [
+                self.weight_timing,
+                self.weight_cpl_vs_elo,
+                self.weight_t1_rate,
+                self.weight_blur,
+            ]
+            .iter()
+            .all(|weight| weight.is_finite() && *weight >= 0.0)
+            && self.movetime_ms.checked_mul(3).is_some();
+        if !valid {
+            return Err(crate::error::AcError::InvalidInput(
+                "invalid analysis limits or scoring configuration".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
         if let Ok(p) = std::env::var("STOCKFISH_PATH") {

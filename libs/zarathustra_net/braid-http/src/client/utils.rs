@@ -2,6 +2,8 @@ use crate::client::parser::Message;
 use crate::error::{BraidError, Result};
 use crate::protocol;
 use crate::types::{ContentRange, Update};
+#[cfg(test)]
+use anyhow::Context as _;
 use std::time::Duration;
 
 pub fn parse_content_range(header: &str) -> Result<(String, String)> {
@@ -92,23 +94,31 @@ mod tests {
     use super::*;
     use crate::client::MessageParser;
     #[test]
-    fn conversion_preserves_binary_bodies_versions_and_patch_metadata() {
+    fn conversion_preserves_binary_bodies_versions_and_patch_metadata() -> anyhow::Result<()> {
         let mut parser = MessageParser::for_subscription();
-        let message = parser.feed(b"Version: \"a\", \"b\"\r\nParents: \"old\"\r\nContent-Type: application/json-patch+json\r\nContent-Length: 2\r\n\r\n\xff\xfe").unwrap().pop().unwrap();
-        let update = message_to_update(message).unwrap();
+        let message = parser.feed(b"Version: \"a\", \"b\"\r\nParents: \"old\"\r\nContent-Type: application/json-patch+json\r\nContent-Length: 2\r\n\r\n\xff\xfe").context("required operation value")?.pop().context("required operation value")?;
+        let update = message_to_update(message).context("required operation value")?;
         assert_eq!(update.version.len(), 2);
         assert_eq!(update.parents[0].to_string(), "old");
         assert_eq!(
             update.content_type.as_deref(),
             Some("application/json-patch+json")
         );
-        assert_eq!(update.body.unwrap().as_ref(), &[255, 254]);
+        assert_eq!(
+            update.body.context("required operation value")?.as_ref(),
+            &[255, 254]
+        );
+        Ok(())
     }
     #[test]
-    fn heartbeat_units_and_invalid_values() {
-        assert_eq!(parse_heartbeat("20ms").unwrap(), Duration::from_millis(20));
+    fn heartbeat_units_and_invalid_values() -> anyhow::Result<()> {
+        assert_eq!(
+            parse_heartbeat("20ms").context("required operation value")?,
+            Duration::from_millis(20)
+        );
         for value in ["-1", "NaN", "inf", "1e300"] {
             assert!(parse_heartbeat(value).is_err());
         }
+        Ok(())
     }
 }

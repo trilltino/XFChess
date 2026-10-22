@@ -62,7 +62,6 @@ pub struct SocialPollResponse {
     pub next_index: usize,
 }
 
-
 pub fn send_friend_request(
     from_node_id: &str,
     from_pubkey: Option<&str>,
@@ -156,7 +155,7 @@ pub fn remove_contact(owner_node_id: &str, contact_node_id: &str) -> Result<(), 
     Ok(())
 }
 
-pub fn update_presence(p: &Presence) -> Result<(), String> {
+pub fn update_presence(p: &Presence) -> Result<usize, String> {
     let resp = client()?
         .put(format!("{}/presence", vps_base()))
         .json(p)
@@ -165,7 +164,22 @@ pub fn update_presence(p: &Presence) -> Result<(), String> {
     if !resp.status().is_success() {
         return Err(format!("update_presence: HTTP {}", resp.status()));
     }
-    Ok(())
+    #[derive(Deserialize)]
+    struct HeartbeatResponse {
+        online_count: usize,
+    }
+    resp.json::<HeartbeatResponse>()
+        .map(|r| r.online_count)
+        .map_err(|e| format!("presence heartbeat parse: {e}"))
+}
+
+pub fn get_node_presence(node_id: &str) -> Result<Option<Presence>, String> {
+    client()?
+        .get(format!("{}/presence/{}", vps_base(), urlenc(node_id)))
+        .send()
+        .and_then(|r| r.error_for_status())
+        .and_then(|r| r.json())
+        .map_err(|e| format!("get_node_presence: {e}"))
 }
 
 pub fn get_online() -> Result<Vec<Presence>, String> {

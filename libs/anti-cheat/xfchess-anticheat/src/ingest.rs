@@ -1,5 +1,7 @@
 use crate::error::{AcError, AcResult};
 use crate::types::{GameContext, GameRecord, GameResult, MoveRecord, PlayerRef, TimeControl};
+#[cfg(test)]
+use anyhow::Context as _;
 
 pub struct MoveRow {
     pub move_number: i64,
@@ -49,18 +51,48 @@ pub fn build_game_record(rows: &[MoveRow], meta: &GameMeta) -> AcResult<GameReco
 
     let mut moves: Vec<MoveRecord> = Vec::with_capacity(rows.len());
     for (i, row) in rows.iter().enumerate() {
+        let ply = u32::try_from(i).map_err(|_| AcError::InvalidInput("too many moves".into()))?;
+        if row.move_number != i64::from(ply) + 1 {
+            return Err(AcError::InvalidInput(
+                "moves must be contiguous and start at one".into(),
+            ));
+        }
+        let player = if i % 2 == 0 {
+            &meta.player_white
+        } else {
+            &meta.player_black
+        };
+        if &row.player != player {
+            return Err(AcError::InvalidInput(format!(
+                "incorrect player for move {}",
+                row.move_number
+            )));
+        }
         let prev_ts = if i == 0 {
             row.timestamp
         } else {
             rows[i - 1].timestamp
         };
-        let latency_ms = ((row.timestamp - prev_ts).max(0) * 1000) as u32;
+        let timestamp_ms = u64::try_from(row.timestamp)
+            .ok()
+            .and_then(|timestamp| timestamp.checked_mul(1000))
+            .ok_or_else(|| AcError::InvalidInput("move timestamp is out of range".into()))?;
+        let elapsed = row
+            .timestamp
+            .checked_sub(prev_ts)
+            .filter(|elapsed| *elapsed >= 0)
+            .ok_or_else(|| AcError::InvalidInput("move timestamps must be ordered".into()))?;
+        let latency_ms = u64::try_from(elapsed)
+            .ok()
+            .and_then(|elapsed| elapsed.checked_mul(1000))
+            .map(|elapsed| u32::try_from(elapsed).unwrap_or(u32::MAX))
+            .ok_or_else(|| AcError::InvalidInput("move duration is out of range".into()))?;
 
         moves.push(MoveRecord {
-            ply: row.move_number as u32,
+            ply,
             move_uci: row.move_uci.clone(),
             fen_after: row.fen_after.clone().unwrap_or_default(),
-            signed_at_ms: (row.timestamp * 1000) as u64,
+            signed_at_ms: timestamp_ms,
             latency_ms,
             blurred: row.blurred,
             think_ms: row.think_ms,
@@ -85,7 +117,10 @@ pub fn build_game_record(rows: &[MoveRow], meta: &GameMeta) -> AcResult<GameReco
         start_fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".into(),
         moves,
         result,
-        ended_at_ms: meta.end_time.unwrap_or(0) as u64 * 1000,
+        ended_at_ms: u64::try_from(meta.end_time.unwrap_or(0))
+            .ok()
+            .and_then(|time| time.checked_mul(1000))
+            .ok_or_else(|| AcError::InvalidInput("game end timestamp is out of range".into()))?,
     })
 }
 
@@ -96,10 +131,15 @@ mod tests {
     fn meta(n_moves: usize) -> (Vec<MoveRow>, GameMeta) {
         let rows = (0..n_moves)
             .map(|i| MoveRow {
-                move_number: i as i64,
+                move_number: i as i64 + 1,
                 move_uci: "e2e4".into(),
                 fen_after: Some("startpos".into()),
-                player: "white".into(),
+                player: if i % 2 == 0 {
+                    "WHITE_PUBKEY"
+                } else {
+                    "BLACK_PUBKEY"
+                }
+                .into(),
                 timestamp: 1_700_000_000 + i as i64 * 3,
                 blurred: false,
                 think_ms: None,
@@ -123,17 +163,40 @@ mod tests {
     }
 
     #[test]
-    fn builds_correctly() {
+    fn builds_correctly() -> anyhow::Result<()> {
         let (rows, meta) = meta(40);
-        let rec = build_game_record(&rows, &meta).unwrap();
+        let rec = build_game_record(&rows, &meta).context("required operation value")?;
         assert_eq!(rec.moves.len(), 40);
         assert_eq!(rec.result, GameResult::WhiteWin);
         assert_eq!(rec.white.elo, 1500);
+        Ok(())
     }
 
     #[test]
     fn empty_rows_errors() {
         let (_, meta) = meta(0);
         assert!(build_game_record(&[], &meta).is_err());
+    }
+
+    #[test]
+    fn ingestion_normalizes_real_move_numbers_and_rejects_corrupt_rows() -> anyhow::Result<()> {
+        let (mut rows, metadata) = meta(4);
+        let record = build_game_record(&rows, &metadata)?;
+        assert_eq!(
+            record.moves.iter().map(|mv| mv.ply).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3]
+        );
+        assert_eq!(record.moves[1].latency_ms, 3_000);
+        rows[1].move_number = 1;
+        assert!(build_game_record(&rows, &metadata).is_err());
+        rows[1].move_number = 2;
+        rows[1].player = metadata.player_white.clone();
+        assert!(build_game_record(&rows, &metadata).is_err());
+        rows[1].player = metadata.player_black.clone();
+        rows[1].timestamp = -1;
+        assert!(build_game_record(&rows, &metadata).is_err());
+        rows[1].timestamp = i64::MAX;
+        assert!(build_game_record(&rows, &metadata).is_err());
+        Ok(())
     }
 }

@@ -110,11 +110,10 @@ mod tests {
     }
 
     #[test]
-    fn take_finished_waits_for_the_task() {
+    fn take_finished_waits_for_the_task() -> Result<(), Box<dyn std::error::Error>> {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
-            .build()
-            .unwrap();
+            .build()?;
         let mut slot = Some(rt.spawn(async { Ok::<_, String>(7) }));
         rt.block_on(async { tokio::task::yield_now().await });
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -128,5 +127,7 @@ mod tests {
         assert_eq!(result, Ok(7));
         assert!(slot.is_none());
         assert_eq!(take_finished::<u8>(&mut None), None);
+
+        Ok(())
     }
 }

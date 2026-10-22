@@ -22,7 +22,7 @@ export function useSolUsdRate(): number | null {
         const r = await apiClient.getExchangeRates();
         if (!cancelled && r.ok) {
           const usd = r.data?.rates?.usd;
-          if (typeof usd === "number") setRate(usd);
+          if (typeof usd === "number" && Number.isFinite(usd) && usd > 0) setRate(usd);
         }
       } catch { /* network error — keep polling */ }
       if (!cancelled) {

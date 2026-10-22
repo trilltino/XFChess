@@ -442,7 +442,7 @@ jobs:
           find /tmp/stockfish -type f -name 'stockfish-android-armv8' -exec cp {} mobile/app/src/main/jniLibs/arm64-v8a/libstockfish.so \;
           test -f mobile/app/src/main/jniLibs/arm64-v8a/libstockfish.so
 
-      - name: Build libxfchess.so (release, arm64-v8a)
+      - name: Build libxfchess_app.so (release, arm64-v8a)
         env:
           XFCHESS_RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: |
@@ -455,7 +455,7 @@ jobs:
       - name: Strip stray cdylib artifacts from jniLibs
         # Keep the game library and the executable Stockfish library.
         run: |
-          find mobile/app/src/main/jniLibs/arm64-v8a -name '*.so' ! -name 'libxfchess.so' ! -name 'libstockfish.so' -delete
+          find mobile/app/src/main/jniLibs/arm64-v8a -name '*.so' ! -name 'libxfchess_app.so' ! -name 'libstockfish.so' -delete
 
       - name: Assemble release APK
         working-directory: mobile
@@ -467,7 +467,7 @@ jobs:
         # Verify native-library extraction settings to catch runtime permission errors.
         run: |
           apk="mobile/app/build/outputs/apk/release/app-release-unsigned.apk"
-          for library in libxfchess.so libstockfish.so; do
+          for library in libxfchess_app.so libstockfish.so; do
             if ! unzip -l "$apk" | grep -q "lib/arm64-v8a/$library"; then
               echo "::error::$library missing from the built APK"
               exit 1

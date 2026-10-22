@@ -9,7 +9,6 @@ use braid_iroh::{BraidIrohConfig, BraidIrohNode, DiscoveryConfig};
 use futures_lite::StreamExt;
 use iroh::{EndpointId, SecretKey};
 use iroh_gossip::api::Event as IrohEvent;
-use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Instant;

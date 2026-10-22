@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use axum::{Router, extract::State, response::IntoResponse, routing::get};
 #[path = "../../iroh-h3/tests/support/mod.rs"]
 mod support;
@@ -9,10 +10,10 @@ use support::MockDiscoveryMap;
 const ALPN: &[u8] = b"iroh+h3";
 
 #[tokio::test]
-async fn remote_id_extraction() {
+async fn remote_id_extraction() -> anyhow::Result<()> {
     let discovery = MockDiscoveryMap::new();
-    let endpoint_1 = discovery.spawn_endpoint().await;
-    let endpoint_2 = discovery.spawn_endpoint().await;
+    let endpoint_1 = discovery.spawn_endpoint().await?;
+    let endpoint_2 = discovery.spawn_endpoint().await?;
 
     async fn handler(
         RemoteId(remote): RemoteId,
@@ -32,6 +33,14 @@ async fn remote_id_extraction() {
     let client = IrohH3Client::new(endpoint_2, ALPN.into());
     let uri = format!("iroh+h3://{}/whoami", endpoint_1.id());
 
-    let response = client.get(&uri).send().await.unwrap();
-    assert_eq!(response.bytes().await.unwrap(), b"ok"[..]);
+    let response = client
+        .get(&uri)
+        .send()
+        .await
+        .context("required operation value")?;
+    assert_eq!(
+        response.bytes().await.context("required operation value")?,
+        b"ok"[..]
+    );
+    Ok(())
 }

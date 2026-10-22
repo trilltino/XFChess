@@ -371,25 +371,27 @@ async fn create_tournament(
     let ix1 = initialize_tournament_ix(
         &program_id,
         &authority.pubkey(),
-        req.tournament_id,
-        &req.name,
-        entry_fee_lamports,
-        platform_fee_lamports,
-        req.max_players,
-        match format {
-            TournamentFormat::Swiss { .. } => 1,
-            _ => 0,
+        crate::signing::solana::TournamentInit {
+            tournament_id: req.tournament_id,
+            name: &req.name,
+            entry_fee: entry_fee_lamports,
+            platform_fee: platform_fee_lamports,
+            max_players: req.max_players,
+            tournament_type: match format {
+                TournamentFormat::Swiss { .. } => 1,
+                _ => 0,
+            },
+            swiss_rounds: match format {
+                TournamentFormat::Swiss { rounds } => rounds,
+                _ => 0,
+            },
+            elo_min: req.elo_min.unwrap_or(0),
+            elo_max: req.elo_max.unwrap_or(u32::MAX),
+            min_players: req.min_players.unwrap_or(req.max_players),
+            prize_shares,
+            winner_takes_all: req.winner_takes_all,
+            host_treasury: &authority.pubkey(),
         },
-        match format {
-            TournamentFormat::Swiss { rounds } => rounds,
-            _ => 0,
-        },
-        req.elo_min.unwrap_or(0),
-        req.elo_max.unwrap_or(u32::MAX),
-        req.min_players.unwrap_or(req.max_players),
-        prize_shares,
-        req.winner_takes_all,
-        &authority.pubkey(),
     );
     let ix2 = initialize_escrow_ix(&program_id, req.tournament_id, &authority.pubkey());
     let ix3 = initialize_shards_ix(
@@ -405,7 +407,7 @@ async fn create_tournament(
     let tournament_id = req.tournament_id;
     let expected_setup = req.clone();
     let already_complete = tokio::task::spawn_blocking(move || -> Result<bool, String> {
-        let rpc = crate::signing::solana::make_rpc(&rpc_url);
+        let rpc = crate::signing::solana::make_rpc(&rpc_url).map_err(|error| error.to_string())?;
         let account_exists = |pda: &Pubkey, kind: &str| -> Result<bool, String> {
             let account = rpc
                 .get_account_with_commitment(
@@ -1301,7 +1303,8 @@ async fn join_tournament(
         tournament.max_players,
         &state.vps_authority.pubkey(),
     );
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url)
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     // Wallet signing requires a finalized blockhash visible on the selected cluster.
     let blockhash = crate::signing::solana::wallet_signable_blockhash(&rpc)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1424,7 +1427,8 @@ async fn confirm_join(
         .map_err(|(status, _)| status)?;
     let player = Pubkey::from_str(&req.player).map_err(|_| StatusCode::BAD_REQUEST)?;
     let signature = Signature::from_str(&req.signature).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url)
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let transaction = landed_transaction(&rpc, &signature)?;
     let tournament_pda = Pubkey::find_program_address(
         &[crate::signing::solana::TOURNAMENT_SEED, &id.to_le_bytes()],
@@ -1589,7 +1593,8 @@ async fn build_leave_transaction(
         &player_pubkey,
     );
 
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url)
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     // Finalized so the player's wallet can confirm this is a devnet
     // transaction — see `solana::wallet_signable_blockhash`.
     let blockhash = crate::signing::solana::wallet_signable_blockhash(&rpc).map_err(|e| {
@@ -1638,7 +1643,12 @@ async fn leave_tournament(
         )
     })?;
 
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url).map_err(|_| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "RPC client unavailable".to_string(),
+        )
+    })?;
     let transaction = landed_transaction(&rpc, &signature).map_err(|status| {
         let message = match status {
             StatusCode::ACCEPTED => {
@@ -1889,7 +1899,8 @@ fn fetch_onchain_tournament_status(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let (tournament_pda, _) =
         Pubkey::find_program_address(&[b"tournament", &id.to_le_bytes()], &program_id);
-    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url);
+    let rpc = crate::signing::solana::make_rpc(&state.config.solana_rpc_url)
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
 
     let account = rpc.get_account(&tournament_pda).map_err(|e| {
         warn!(
@@ -1965,7 +1976,7 @@ async fn registration_reconciliation(
     // endpoint cannot pin an async worker for the client's full 30 s timeout.
     let rpc_url = state.config.solana_rpc_url.clone();
     let account = tokio::task::spawn_blocking(move || {
-        crate::signing::solana::make_rpc(&rpc_url).get_account(&pda)
+        crate::signing::solana::make_rpc(&rpc_url)?.get_account(&pda)
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -2282,6 +2293,7 @@ async fn tournament_session_join_game(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
     fn test_create_tournament_req_serialization() {
@@ -2390,7 +2402,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tournament_summary_has_fields_client_requires() {
+    fn test_tournament_summary_has_fields_client_requires() -> anyhow::Result<()> {
         let summary = TournamentSummary {
             tournament_id: 1,
             name: "Test".to_string(),
@@ -2409,7 +2421,8 @@ mod tests {
             // Exercise the populated variant of the field added to this struct.
             scheduled_at: Some(1_700_000_000),
         };
-        let json: serde_json::Value = serde_json::to_value(&summary).unwrap();
+        let json: serde_json::Value =
+            serde_json::to_value(&summary).context("test setup failed")?;
         for field in [
             "tournament_id",
             "name",
@@ -2430,6 +2443,7 @@ mod tests {
                  deserializer requires — this breaks the tournament list in the live game"
             );
         }
+        Ok(())
     }
 
     #[tokio::test]

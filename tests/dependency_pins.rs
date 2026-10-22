@@ -4,14 +4,14 @@
 
 use std::fs;
 
-fn read_workspace_file(name: &str) -> String {
+fn read_workspace_file(name: &str) -> anyhow::Result<String> {
     let path = format!("{}/{name}", env!("CARGO_MANIFEST_DIR"));
-    fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    Ok(fs::read_to_string(path)?)
 }
 
 /// The exact version pinned under `[workspace.dependencies]` (`name = "=X.Y.Z"`).
-fn workspace_pin(package_name: &str) -> String {
-    let manifest = read_workspace_file("Cargo.toml");
+fn workspace_pin(package_name: &str) -> anyhow::Result<String> {
+    let manifest = read_workspace_file("Cargo.toml")?;
     let mut in_workspace_deps = false;
     for line in manifest.lines().map(str::trim) {
         if line.starts_with('[') {
@@ -26,17 +26,16 @@ fn workspace_pin(package_name: &str) -> String {
         };
         if name.trim() == package_name {
             let pin = value.trim().trim_matches('"');
-            return pin
-                .strip_prefix('=')
-                .unwrap_or_else(|| panic!("`{package_name}` must be an exact `=` pin, got {pin}"))
-                .to_string();
+            return pin.strip_prefix('=').map(str::to_string).ok_or_else(|| {
+                anyhow::anyhow!("`{package_name}` must be an exact `=` pin, got {pin}")
+            });
         }
     }
-    panic!("`{package_name}` is not pinned in [workspace.dependencies]");
+    anyhow::bail!("`{package_name}` is not pinned in [workspace.dependencies]");
 }
 
-fn cargo_lock_versions(package_name: &str) -> Vec<String> {
-    let contents = read_workspace_file("Cargo.lock");
+fn cargo_lock_versions(package_name: &str) -> anyhow::Result<Vec<String>> {
+    let contents = read_workspace_file("Cargo.lock")?;
 
     let mut versions = Vec::new();
     let mut in_target_package = false;
@@ -61,26 +60,58 @@ fn cargo_lock_versions(package_name: &str) -> Vec<String> {
             }
         }
     }
-    versions
+    Ok(versions)
 }
 
-fn assert_single_pinned_version(package_name: &str) {
-    let pin = workspace_pin(package_name);
-    let versions = cargo_lock_versions(package_name);
+fn assert_single_pinned_version(package_name: &str) -> anyhow::Result<()> {
+    let pin = workspace_pin(package_name)?;
+    let versions = cargo_lock_versions(package_name)?;
     assert_eq!(
-        versions,
-        [pin.clone()],
+        versions.as_slice(),
+        std::slice::from_ref(&pin),
         "expected exactly one `{package_name}` in Cargo.lock, at the workspace pin \
          `={pin}` — a dependency (e.g. iroh-gossip) has drifted from it"
     );
+    Ok(())
 }
 
 #[test]
-fn exactly_one_iroh_version_resolves_workspace_wide() {
-    assert_single_pinned_version("iroh");
+fn exactly_one_iroh_version_resolves_workspace_wide() -> anyhow::Result<()> {
+    assert_single_pinned_version("iroh")
 }
 
 #[test]
-fn exactly_one_iroh_base_version_resolves_workspace_wide() {
-    assert_single_pinned_version("iroh-base");
+fn exactly_one_iroh_base_version_resolves_workspace_wide() -> anyhow::Result<()> {
+    assert_single_pinned_version("iroh-base")
+}
+
+fn contract_configuration(manifest: &str) -> Vec<&str> {
+    let mut selected = false;
+    let mut entries = Vec::new();
+    for line in manifest.lines() {
+        let line = line
+            .split_once('#')
+            .map_or(line, |(content, _)| content)
+            .trim();
+        if line.starts_with('[') {
+            selected = matches!(line, "[features]" | "[dependencies]");
+        }
+        if selected && !line.is_empty() {
+            entries.push(line);
+        }
+    }
+    entries.sort_unstable();
+    entries
+}
+
+#[test]
+fn host_and_sbf_contract_configuration_match() -> anyhow::Result<()> {
+    let host = read_workspace_file("programs/xfchess-game/Cargo.toml")?;
+    let sbf = read_workspace_file("programs/xfchess-game-sbf/Cargo.toml")?;
+    assert_eq!(
+        contract_configuration(&host),
+        contract_configuration(&sbf),
+        "Host tests and the deployed contract must use identical features and dependency pins"
+    );
+    Ok(())
 }

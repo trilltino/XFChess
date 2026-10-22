@@ -1,3 +1,6 @@
+mod admin_connection;
+use admin_connection::{abbreviate, is_insecure_remote, prefix};
+use anyhow::Context;
 use std::env;
 use std::io::{self, Write};
 
@@ -6,30 +9,36 @@ use serde::{Deserialize, Serialize};
 
 static SERVICE_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-fn server_url() -> String {
-    SERVICE_URL.get_or_init(resolve_service_url).clone()
+fn server_url() -> anyhow::Result<String> {
+    if let Some(url) = SERVICE_URL.get() {
+        return Ok(url.clone());
+    }
+    let url = resolve_service_url()?;
+    let _ = SERVICE_URL.set(url.clone());
+    Ok(url)
 }
 
-fn resolve_service_url() -> String {
+fn resolve_service_url() -> anyhow::Result<String> {
     if let Ok(url) = env::var("SIGNING_SERVICE_URL") {
         if is_insecure_remote(&url) {
-            panic!(
+            anyhow::bail!(
                 "SIGNING_SERVICE_URL={url} is plain http to a non-loopback host. \
                  Use https, or a loopback SSH-tunnel port (http://127.0.0.1:8091)."
             );
         }
-        return url;
+        return Ok(url);
     }
 
     println!("\nSelect environment:");
     println!("  1. LOCAL      http://127.0.0.1:8090");
     println!("  2. PRODUCTION http://127.0.0.1:8091  (requires an SSH tunnel)");
     print!("  Choice [1/2]: ");
-    io::stdout().flush().unwrap();
+    io::stdout().flush().context("terminal output failed")?;
     let mut buf = String::new();
-    io::stdin().read_line(&mut buf).unwrap();
-
-    match buf.trim() {
+    if io::stdin().read_line(&mut buf)? == 0 {
+        anyhow::bail!("terminal input closed");
+    }
+    Ok(match buf.trim() {
         "2" => {
             let url = "http://127.0.0.1:8091".to_string();
             if !health_ok(&url) {
@@ -42,15 +51,7 @@ fn resolve_service_url() -> String {
             url
         }
         _ => "http://127.0.0.1:8090".to_string(),
-    }
-}
-
-fn is_insecure_remote(url: &str) -> bool {
-    if let Some(rest) = url.strip_prefix("http://") {
-        let host = rest.split(['/', ':']).next().unwrap_or("");
-        return host != "127.0.0.1" && host != "localhost";
-    }
-    false
+    })
 }
 
 fn health_ok(url: &str) -> bool {
@@ -63,12 +64,12 @@ fn health_ok(url: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn api_key() -> String {
-    env::var("ADMIN_API_KEY").expect("ADMIN_API_KEY must be set")
+fn api_key() -> anyhow::Result<String> {
+    env::var("ADMIN_API_KEY").context("ADMIN_API_KEY must be set")
 }
 
-fn client() -> reqwest::blocking::Client {
-    let key = api_key();
+fn client() -> anyhow::Result<reqwest::blocking::Client> {
+    let key = api_key()?;
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         "Content-Type",
@@ -77,75 +78,71 @@ fn client() -> reqwest::blocking::Client {
     headers.insert(
         "X-API-Key",
         reqwest::header::HeaderValue::from_str(&key)
-            .expect("ADMIN_API_KEY contains invalid HTTP header characters"),
+            .context("ADMIN_API_KEY contains invalid HTTP header characters")?,
     );
     reqwest::blocking::Client::builder()
         .default_headers(headers)
         .timeout(std::time::Duration::from_secs(120))
         .build()
-        .expect("Failed to build HTTP client")
+        .context("Failed to build HTTP client")
 }
 
-fn prompt(label: &str) -> String {
+fn prompt(label: &str) -> anyhow::Result<String> {
     print!("  {}: ", label);
-    io::stdout().flush().unwrap();
+    io::stdout().flush().context("terminal output failed")?;
     let mut buf = String::new();
-    io::stdin().read_line(&mut buf).unwrap();
-    buf.trim().to_string()
+    if io::stdin().read_line(&mut buf)? == 0 {
+        anyhow::bail!("terminal input closed");
+    }
+    Ok(buf.trim().to_string())
 }
 
-fn prompt_default(label: &str, default: &str) -> String {
+fn prompt_default(label: &str, default: &str) -> anyhow::Result<String> {
     print!("  {} [{}]: ", label, default);
-    io::stdout().flush().unwrap();
+    io::stdout().flush().context("terminal output failed")?;
     let mut buf = String::new();
-    io::stdin().read_line(&mut buf).unwrap();
+    if io::stdin().read_line(&mut buf)? == 0 {
+        anyhow::bail!("terminal input closed");
+    }
     let s = buf.trim().to_string();
-    if s.is_empty() {
-        default.to_string()
-    } else {
-        s
-    }
+    Ok(if s.is_empty() { default.to_string() } else { s })
 }
 
-fn confirm(label: &str) -> bool {
-    let s = prompt_default(label, "N").to_lowercase();
-    s == "y" || s == "yes"
+fn confirm(label: &str) -> anyhow::Result<bool> {
+    let s = prompt_default(label, "N")?.to_lowercase();
+    Ok(s == "y" || s == "yes")
 }
 
-fn read_u64(label: &str) -> u64 {
+fn read_u64(label: &str) -> anyhow::Result<u64> {
     loop {
-        match prompt(label).parse::<u64>() {
-            Ok(n) => return n,
+        match prompt(label)?.parse::<u64>() {
+            Ok(n) => return Ok(n),
             Err(_) => println!("  [!] Not a valid number, try again."),
         }
     }
 }
 
-fn read_u16(label: &str) -> u16 {
+fn read_u16(label: &str) -> anyhow::Result<u16> {
     loop {
-        match prompt(label).parse::<u16>() {
-            Ok(n) => return n,
+        match prompt(label)?.parse::<u16>() {
+            Ok(n) => return Ok(n),
             Err(_) => println!("  [!] Not a valid number, try again."),
         }
     }
 }
 
-fn read_usize(label: &str) -> usize {
+fn read_usize(label: &str) -> anyhow::Result<usize> {
     loop {
-        match prompt(label).parse::<usize>() {
-            Ok(n) => return n,
+        match prompt(label)?.parse::<usize>() {
+            Ok(n) => return Ok(n),
             Err(_) => println!("  [!] Not a valid number, try again."),
         }
     }
 }
 
-fn read_u32_opt(label: &str) -> Option<u32> {
-    let s = prompt(&format!("{} (leave blank to skip)", label));
-    if s.is_empty() {
-        None
-    } else {
-        s.parse().ok()
-    }
+fn read_u32_opt(label: &str) -> anyhow::Result<Option<u32>> {
+    let s = prompt(&format!("{} (leave blank to skip)", label))?;
+    Ok(if s.is_empty() { None } else { s.parse().ok() })
 }
 
 fn parse_datetime(s: &str) -> Option<i64> {
@@ -158,14 +155,14 @@ fn parse_datetime(s: &str) -> Option<i64> {
     None
 }
 
-fn read_scheduled_at() -> Option<i64> {
+fn read_scheduled_at() -> anyhow::Result<Option<i64>> {
     println!("  Enter scheduled start time in UTC (format: YYYY-MM-DD HH:MM)");
     println!("  Leave blank to open tournament immediately.");
-    let s = prompt("Scheduled at (UTC)");
+    let s = prompt("Scheduled at (UTC)")?;
     if s.is_empty() {
-        return None;
+        return Ok(None);
     }
-    match parse_datetime(&s) {
+    Ok(match parse_datetime(&s) {
         Some(ts) => {
             let dt: DateTime<Utc> = DateTime::from_timestamp(ts, 0).unwrap_or_default();
             println!(
@@ -179,25 +176,25 @@ fn read_scheduled_at() -> Option<i64> {
             println!("  [!] Could not parse datetime — tournament will open immediately.");
             None
         }
-    }
+    })
 }
 
-fn read_max_players() -> u16 {
+fn read_max_players() -> anyhow::Result<u16> {
     println!("  For Single Elimination: must be a power of 2 (2, 4, 8, 16, 32, 64, 128, 256)");
     println!("  For Swiss: any value >= 2");
     loop {
-        let n = read_u16("Max entrants");
+        let n = read_u16("Max entrants")?;
         if n >= 2 {
-            return n;
+            return Ok(n);
         }
         println!("  [!] Minimum 2 players required.");
     }
 }
 
-fn read_prize_shares(max_players: u16, is_free: bool) -> [u16; 4] {
+fn read_prize_shares(max_players: u16, is_free: bool) -> anyhow::Result<[u16; 4]> {
     if is_free {
         println!("  [FREE] No monetary prizes.");
-        return [0, 0, 0, 0];
+        return Ok([0, 0, 0, 0]);
     }
     let default_shares = if max_players >= 16 {
         [5000u16, 3000, 1500, 500]
@@ -212,20 +209,20 @@ fn read_prize_shares(max_players: u16, is_free: bool) -> [u16; 4] {
         default_shares[3] as f32 / 100.0,
     );
     println!("  Default prize split: {}", default_label);
-    if !confirm("Customise prize shares?") {
-        return default_shares;
+    if !confirm("Customise prize shares?")? {
+        return Ok(default_shares);
     }
     println!("  Enter shares as basis points (10000 = 100%). Must sum to ≤ 10000.");
-    let first = read_u16("1st place (bps)");
-    let second = read_u16("2nd place (bps)");
-    let third = read_u16("3rd place (bps)");
-    let fourth = read_u16("4th place (bps)");
+    let first = read_u16("1st place (bps)")?;
+    let second = read_u16("2nd place (bps)")?;
+    let third = read_u16("3rd place (bps)")?;
+    let fourth = read_u16("4th place (bps)")?;
     let total = first as u32 + second as u32 + third as u32 + fourth as u32;
     if total > 10000 {
         println!("  [!] Total {} bps > 10000. Using defaults.", total);
-        return default_shares;
+        return Ok(default_shares);
     }
-    [first, second, third, fourth]
+    Ok([first, second, third, fourth])
 }
 
 #[derive(Debug, Deserialize)]
@@ -297,16 +294,10 @@ struct SetMatchGameIdReq {
 struct KycStatus {
     verified: bool,
     verified_at: Option<i64>,
-    #[allow(dead_code)]
-    requires_kyc: bool,
 }
 
-fn shorten(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…{}", &s[..max / 2], &s[s.len() - max / 2..])
-    }
+fn shorten(text: &str, length: usize) -> String {
+    abbreviate(text, length)
 }
 
 fn lamports_to_sol(l: u64) -> f64 {
@@ -319,10 +310,10 @@ fn fmt_timestamp(ts: i64) -> String {
         .unwrap_or_else(|| ts.to_string())
 }
 
-fn list_tournaments() {
+fn list_tournaments() -> anyhow::Result<()> {
     println!("\n[LIST] Fetching all tournaments…\n");
-    let url = format!("{}/api/tournaments", server_url());
-    match client().get(&url).send() {
+    let url = format!("{}/api/tournaments", server_url()?);
+    match client()?.get(&url).send() {
         Ok(r) if r.status().is_success() => match r.json::<Vec<TournamentSummary>>() {
             Ok(ts) if ts.is_empty() => println!("  No tournaments found."),
             Ok(ts) => {
@@ -339,7 +330,7 @@ fn list_tournaments() {
                         "│ {:<10} │ {:<23} │ {:<8} │ {:>3}/{:<3}     │ {:<13} │",
                         t.tournament_id,
                         shorten(&t.name, 23),
-                        &t.status[..t.status.len().min(8)],
+                        prefix(&t.status, 8),
                         t.registered,
                         t.max_players,
                         fee,
@@ -353,23 +344,24 @@ fn list_tournaments() {
         Ok(r) => println!("  [ERROR] HTTP {}", r.status()),
         Err(e) => println!("  [ERROR] {}", e),
     }
+    Ok(())
 }
 
-fn create_tournament() {
+fn create_tournament() -> anyhow::Result<()> {
     println!("\n[CREATE] New Tournament\n");
 
-    let tournament_id = read_u64("Tournament ID (unique number)");
-    let name = prompt("Tournament name");
+    let tournament_id = read_u64("Tournament ID (unique number)")?;
+    let name = prompt("Tournament name")?;
 
     println!("\n  Format options:");
     println!("    1  Single Elimination");
     println!("    2  Swiss");
     let (format_str, swiss_rounds) = loop {
-        match prompt("Format [1/2]").as_str() {
+        match prompt("Format [1/2]")?.as_str() {
             "1" | "" => break ("SingleElimination".to_string(), None),
             "2" => {
                 let rounds = loop {
-                    let r = read_u16("Number of Swiss rounds (e.g. 5)");
+                    let r = read_u16("Number of Swiss rounds (e.g. 5)")?;
                     if r >= 2 {
                         break r as u8;
                     }
@@ -382,13 +374,13 @@ fn create_tournament() {
     };
 
     println!();
-    let max_players = read_max_players();
+    let max_players = read_max_players()?;
 
     let min_players: Option<u16> = {
         let s = prompt(&format!(
             "Minimum players to start (leave blank for {})",
             max_players
-        ));
+        ))?;
         s.parse().ok()
     };
 
@@ -397,22 +389,22 @@ fn create_tournament() {
     println!("    10000000   = 0.01 SOL");
     println!("    100000000  = 0.1 SOL");
     println!("    500000000  = 0.5 SOL");
-    let entry_fee_lamports = read_u64("Entry fee (lamports)");
+    let entry_fee_lamports = read_u64("Entry fee (lamports)")?;
     let is_free = entry_fee_lamports == 0;
 
     println!();
-    let prize_shares = read_prize_shares(max_players, is_free);
+    let prize_shares = read_prize_shares(max_players, is_free)?;
 
     println!("\n  ELO gating (optional — leave blank to allow all ratings)");
-    let elo_min = read_u32_opt("Minimum ELO");
-    let elo_max = read_u32_opt("Maximum ELO");
+    let elo_min = read_u32_opt("Minimum ELO")?;
+    let elo_max = read_u32_opt("Maximum ELO")?;
 
     println!("\n  CACF KYC — require players to have completed identity verification?");
     println!("  (Players must register via /identity/register on the website or in-game)");
-    let kyc_required = confirm("Require KYC/CACF for all entrants?");
+    let kyc_required = confirm("Require KYC/CACF for all entrants?")?;
 
     println!();
-    let scheduled_at = read_scheduled_at();
+    let scheduled_at = read_scheduled_at()?;
 
     println!("\n  ┌── Tournament Summary ──────────────────────────────────┐");
     println!("  │ ID:        {:<44}│", tournament_id);
@@ -468,9 +460,9 @@ fn create_tournament() {
     );
     println!("  └────────────────────────────────────────────────────────┘");
 
-    if !confirm("\nConfirm creation?") {
+    if !confirm("\nConfirm creation?")? {
         println!("  Aborted.");
-        return;
+        return Ok(());
     }
 
     let req = CreateTournamentReq {
@@ -488,8 +480,8 @@ fn create_tournament() {
         kyc_required,
     };
 
-    let url = format!("{}/admin/tournament/create", server_url());
-    match client().post(&url).json(&req).send() {
+    let url = format!("{}/admin/tournament/create", server_url()?);
+    match client()?.post(&url).json(&req).send() {
         Ok(r) if r.status().is_success() => {
             println!(
                 "  [OK] Tournament '{}' (ID {}) created.",
@@ -503,12 +495,13 @@ fn create_tournament() {
         }
         Err(e) => println!("  [ERROR] {}", e),
     }
+    Ok(())
 }
 
-fn view_tournament() {
-    let id = read_u64("Tournament ID");
-    let url = format!("{}/api/tournament/{}", server_url(), id);
-    match client().get(&url).send() {
+fn view_tournament() -> anyhow::Result<()> {
+    let id = read_u64("Tournament ID")?;
+    let url = format!("{}/api/tournament/{}", server_url()?, id);
+    match client()?.get(&url).send() {
         Ok(r) if r.status().is_success() => match r.json::<TournamentDetail>() {
             Ok(t) => print_tournament_detail(&t),
             Err(e) => println!("  [ERROR] Parse error: {}", e),
@@ -517,6 +510,7 @@ fn view_tournament() {
         Ok(r) => println!("  [ERROR] HTTP {}", r.status()),
         Err(e) => println!("  [ERROR] {}", e),
     }
+    Ok(())
 }
 
 fn print_tournament_detail(t: &TournamentDetail) {
@@ -600,10 +594,10 @@ fn print_tournament_detail(t: &TournamentDetail) {
     println!("  └────────────────────────────────────────────────────────┘");
 }
 
-fn view_matches() {
-    let id = read_u64("Tournament ID");
-    let url = format!("{}/api/tournament/{}/bracket", server_url(), id);
-    match client().get(&url).send() {
+fn view_matches() -> anyhow::Result<()> {
+    let id = read_u64("Tournament ID")?;
+    let url = format!("{}/api/tournament/{}/bracket", server_url()?, id);
+    match client()?.get(&url).send() {
         Ok(r) if r.status().is_success() => {
             match r.json::<serde_json::Value>() {
                 Ok(v) => {
@@ -611,7 +605,7 @@ fn view_matches() {
                         Some(ms) => ms.clone(),
                         None => {
                             println!("  No bracket data.");
-                            return;
+                            return Ok(());
                         }
                     };
                     println!("\n  ┌── Matches ─────────────────────────────────────────────────────────┐");
@@ -660,21 +654,22 @@ fn view_matches() {
         Ok(r) => println!("  [ERROR] HTTP {}", r.status()),
         Err(e) => println!("  [ERROR] {}", e),
     }
+    Ok(())
 }
 
-fn record_result() {
+fn record_result() -> anyhow::Result<()> {
     println!("\n[RECORD RESULT]");
-    let tournament_id = read_u64("Tournament ID");
-    let match_index = read_usize("Match index");
-    let winner = prompt("Winner pubkey (base58)");
-    let loser = prompt("Loser pubkey (base58)");
+    let tournament_id = read_u64("Tournament ID")?;
+    let match_index = read_usize("Match index")?;
+    let winner = prompt("Winner pubkey (base58)")?;
+    let loser = prompt("Loser pubkey (base58)")?;
 
     let url = format!(
         "{}/admin/tournament/{}/record-result",
-        server_url(),
+        server_url()?,
         tournament_id
     );
-    match client()
+    match client()?
         .post(&url)
         .json(&RecordResultReq {
             match_index,
@@ -693,20 +688,21 @@ fn record_result() {
         }
         Err(e) => println!("  [ERROR] {}", e),
     }
+    Ok(())
 }
 
-fn set_match_game_id() {
+fn set_match_game_id() -> anyhow::Result<()> {
     println!("\n[SET GAME ID]");
-    let tournament_id = read_u64("Tournament ID");
-    let match_index = read_usize("Match index");
-    let game_id = read_u64("Solana game ID");
+    let tournament_id = read_u64("Tournament ID")?;
+    let match_index = read_usize("Match index")?;
+    let game_id = read_u64("Solana game ID")?;
 
     let url = format!(
         "{}/admin/tournament/{}/set-match-game-id",
-        server_url(),
+        server_url()?,
         tournament_id
     );
-    match client()
+    match client()?
         .post(&url)
         .json(&SetMatchGameIdReq {
             match_index,
@@ -724,13 +720,14 @@ fn set_match_game_id() {
         }
         Err(e) => println!("  [ERROR] {}", e),
     }
+    Ok(())
 }
 
-fn start_swiss() {
+fn start_swiss() -> anyhow::Result<()> {
     println!("\n[START SWISS]");
-    let id = read_u64("Tournament ID");
-    let url = format!("{}/admin/tournament/{}/initialize-swiss", server_url(), id);
-    match client().post(&url).json(&serde_json::json!({})).send() {
+    let id = read_u64("Tournament ID")?;
+    let url = format!("{}/admin/tournament/{}/initialize-swiss", server_url()?, id);
+    match client()?.post(&url).json(&serde_json::json!({})).send() {
         Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>() {
             Ok(v) => println!(
                 "  [OK] Swiss tournament started. Players: {}, Rounds: {}",
@@ -745,19 +742,20 @@ fn start_swiss() {
         }
         Err(e) => println!("  [ERROR] {}", e),
     }
+    Ok(())
 }
 
-fn check_kyc() {
+fn check_kyc() -> anyhow::Result<()> {
     println!("\n[KYC STATUS CHECK]");
     println!("  Check whether a player has completed CACF identity verification.");
-    let pubkey = prompt("Player wallet pubkey (base58)");
+    let pubkey = prompt("Player wallet pubkey (base58)")?;
     if pubkey.is_empty() {
         println!("  Aborted.");
-        return;
+        return Ok(());
     }
 
-    let url = format!("{}/identity/status/{}", server_url(), pubkey);
-    match client().get(&url).send() {
+    let url = format!("{}/identity/status/{}", server_url()?, pubkey);
+    match client()?.get(&url).send() {
         Ok(r) if r.status().is_success() => match r.json::<KycStatus>() {
             Ok(k) => {
                 let status = if k.verified {
@@ -783,14 +781,15 @@ fn check_kyc() {
         Ok(r) => println!("  [ERROR] HTTP {}", r.status()),
         Err(e) => println!("  [ERROR] {}", e),
     }
+    Ok(())
 }
 
-fn batch_kyc_check() {
+fn batch_kyc_check() -> anyhow::Result<()> {
     println!("\n[BATCH KYC CHECK]");
     println!("  Enter player pubkeys one per line. Empty line when done.");
     let mut pubkeys = Vec::new();
     loop {
-        let s = prompt("Pubkey");
+        let s = prompt("Pubkey")?;
         if s.is_empty() {
             break;
         }
@@ -798,15 +797,15 @@ fn batch_kyc_check() {
     }
     if pubkeys.is_empty() {
         println!("  No pubkeys entered.");
-        return;
+        return Ok(());
     }
 
     println!("\n  Checking {} wallet(s)…\n", pubkeys.len());
     let mut pass = 0usize;
     let mut fail = 0usize;
     for pk in &pubkeys {
-        let url = format!("{}/identity/status/{}", server_url(), pk);
-        match client().get(&url).send() {
+        let url = format!("{}/identity/status/{}", server_url()?, pk);
+        match client()?.get(&url).send() {
             Ok(r) if r.status().is_success() => match r.json::<KycStatus>() {
                 Ok(k) if k.verified => {
                     let when = k.verified_at.map(fmt_timestamp).unwrap_or_default();
@@ -834,12 +833,13 @@ fn batch_kyc_check() {
         "\n  Result: {} passed, {} failed / not verified.",
         pass, fail
     );
+    Ok(())
 }
 
-fn calculate_prizes() {
-    let id = read_u64("Tournament ID");
-    let url = format!("{}/api/tournament/{}", server_url(), id);
-    match client().get(&url).send() {
+fn calculate_prizes() -> anyhow::Result<()> {
+    let id = read_u64("Tournament ID")?;
+    let url = format!("{}/api/tournament/{}", server_url()?, id);
+    match client()?.get(&url).send() {
         Ok(r) if r.status().is_success() => match r.json::<TournamentDetail>() {
             Ok(t) => {
                 let is_free = t.entry_fee_lamports == 0;
@@ -883,6 +883,7 @@ fn calculate_prizes() {
         Ok(r) => println!("  [ERROR] HTTP {}", r.status()),
         Err(e) => println!("  [ERROR] {}", e),
     }
+    Ok(())
 }
 
 // Permissionless Swiss round recovery uses direct RPC when the backend is
@@ -890,7 +891,7 @@ fn calculate_prizes() {
 
 const DEFAULT_PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
-fn advance_tournament_round_directly() {
+fn advance_tournament_round_directly() -> anyhow::Result<()> {
     use sha2::{Digest, Sha256};
     use solana_sdk::{
         instruction::{AccountMeta, Instruction},
@@ -900,23 +901,32 @@ fn advance_tournament_round_directly() {
     };
     use std::str::FromStr;
 
-    let tournament_id = read_u64("Tournament ID");
+    let tournament_id = read_u64("Tournament ID")?;
     let rpc_url = prompt_default(
         "Solana RPC URL",
         &env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".into()),
-    );
-    let program_id = match Pubkey::from_str(&prompt_default("Program ID", DEFAULT_PROGRAM_ID)) {
+    )?;
+    let program_id = match Pubkey::from_str(&prompt_default("Program ID", DEFAULT_PROGRAM_ID)?) {
         Ok(p) => p,
-        Err(e) => return println!("  [ERROR] Invalid program ID: {e}"),
+        Err(e) => {
+            println!("  [ERROR] Invalid program ID: {e}");
+            return Ok(());
+        }
     };
-    let boards_in_round: u16 = match prompt("Boards paired in the current round").trim().parse() {
+    let boards_in_round: u16 = match prompt("Boards paired in the current round")?.trim().parse() {
         Ok(n) => n,
-        Err(e) => return println!("  [ERROR] Invalid board count: {e}"),
+        Err(e) => {
+            println!("  [ERROR] Invalid board count: {e}");
+            return Ok(());
+        }
     };
-    let keypair_path = prompt("Path to the tournament authority keypair JSON file");
+    let keypair_path = prompt("Path to the tournament authority keypair JSON file")?;
     let authority = match read_keypair_file(&keypair_path) {
         Ok(kp) => kp,
-        Err(e) => return println!("  [ERROR] Could not read keypair: {e}"),
+        Err(e) => {
+            println!("  [ERROR] Could not read keypair: {e}");
+            return Ok(());
+        }
     };
 
     let (tournament_pda, _) =
@@ -926,7 +936,8 @@ fn advance_tournament_round_directly() {
     // `tournament_id: u64` and `boards_in_round: u16` (borsh little-endian).
     let mut hasher = Sha256::new();
     hasher.update(b"global:advance_round");
-    let disc: [u8; 8] = hasher.finalize()[..8].try_into().unwrap();
+    let mut disc = [0u8; 8];
+    disc.copy_from_slice(&hasher.finalize()[..8]);
     let mut data = disc.to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend_from_slice(&boards_in_round.to_le_bytes());
@@ -945,7 +956,10 @@ fn advance_tournament_round_directly() {
     let rpc = solana_client::rpc_client::RpcClient::new(rpc_url);
     let blockhash = match rpc.get_latest_blockhash() {
         Ok(h) => h,
-        Err(e) => return println!("  [ERROR] Could not fetch blockhash: {e}"),
+        Err(e) => {
+            println!("  [ERROR] Could not fetch blockhash: {e}");
+            return Ok(());
+        }
     };
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -962,26 +976,28 @@ fn advance_tournament_round_directly() {
              the keypair is not the tournament authority)"
         ),
     }
+    Ok(())
 }
 
-fn print_header() {
+fn print_header() -> anyhow::Result<()> {
     println!("\n╔═══════════════════════════════════════════════════════════════════╗");
     println!("║         XFChess Tournament Admin CLI                              ║");
     println!("╚═══════════════════════════════════════════════════════════════════╝");
     // Require backend credentials per option; direct-RPC recovery works without the backend.
     match env::var("ADMIN_API_KEY") {
         Ok(key) => {
-            println!("  Server : {}", server_url());
-            println!("  API key: {}…\n", &key[..key.len().min(8)]);
+            println!("  Server : {}", server_url()?);
+            println!("  API key: {}…\n", key.chars().take(8).collect::<String>());
         }
         Err(_) => {
             println!("  [!] ADMIN_API_KEY not set — only option 11 (direct-RPC recovery,");
             println!("      no backend needed) will work.\n");
         }
     }
+    Ok(())
 }
 
-fn print_menu() {
+fn print_menu() -> anyhow::Result<()> {
     println!("┌── Tournaments ────────────────────────────────────────────────────┐");
     println!("│  1.  List all tournaments                                         │");
     println!("│  2.  Create new tournament                                        │");
@@ -1002,31 +1018,34 @@ fn print_menu() {
     println!("│  0.  Exit                                                         │");
     println!("└───────────────────────────────────────────────────────────────────┘");
     print!("\n  Choice: ");
-    io::stdout().flush().unwrap();
+    io::stdout().flush().context("terminal output failed")?;
+    Ok(())
 }
 
-fn main() {
-    print_header();
+fn main() -> anyhow::Result<()> {
+    print_header()?;
     loop {
-        print_menu();
+        print_menu()?;
         let choice = {
             let mut buf = String::new();
-            io::stdin().read_line(&mut buf).unwrap();
+            if io::stdin().read_line(&mut buf)? == 0 {
+                anyhow::bail!("terminal input closed");
+            }
             buf.trim().to_string()
         };
         println!();
         match choice.as_str() {
-            "1" => list_tournaments(),
-            "2" => create_tournament(),
-            "3" => view_tournament(),
-            "4" => view_matches(),
-            "5" => record_result(),
-            "6" => set_match_game_id(),
-            "7" => start_swiss(),
-            "8" => check_kyc(),
-            "9" => batch_kyc_check(),
-            "10" => calculate_prizes(),
-            "11" => advance_tournament_round_directly(),
+            "1" => list_tournaments()?,
+            "2" => create_tournament()?,
+            "3" => view_tournament()?,
+            "4" => view_matches()?,
+            "5" => record_result()?,
+            "6" => set_match_game_id()?,
+            "7" => start_swiss()?,
+            "8" => check_kyc()?,
+            "9" => batch_kyc_check()?,
+            "10" => calculate_prizes()?,
+            "11" => advance_tournament_round_directly()?,
             "0" | "q" | "quit" | "exit" => {
                 println!("  Goodbye.\n");
                 break;
@@ -1035,4 +1054,5 @@ fn main() {
         }
         println!();
     }
+    Ok(())
 }

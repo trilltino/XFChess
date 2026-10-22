@@ -87,7 +87,7 @@ impl ChessPublisher {
         message: ChessMessage,
     ) -> Result<(), BraidChessError> {
         let url = resource.to_url(&self.base_url);
-        let body = serde_json::to_vec(&message)?;
+        let body = serde_json::to_string(&message)?;
         let parent = self
             .versions
             .get(&resource.stream)
@@ -96,18 +96,11 @@ impl ChessPublisher {
         let version = Version::new(match &message {
             ChessMessage::Move(payload) => version_hash(&payload.fen_after, payload.move_number),
             // Include the resource and parent so repeated events remain distinct.
-            _ => version_hash(
-                &format!(
-                    "{}:{parent}:{}",
-                    resource.to_http_path(),
-                    std::str::from_utf8(&body).expect("JSON is UTF-8")
-                ),
-                0,
-            ),
+            _ => version_hash(&format!("{}:{parent}:{}", resource.to_http_path(), body), 0),
         });
         let request = BraidRequest::new()
             .with_method("PUT")
-            .with_body(body)
+            .with_body(body.into_bytes())
             .with_content_type("application/json")
             .with_version(version.clone())
             .with_parent(parent)

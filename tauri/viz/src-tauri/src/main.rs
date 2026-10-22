@@ -2,12 +2,38 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 //! Run native RPC benchmarks and stream results through bench-level.
-//! Tokens stay native and browser CORS does not apply.
+//! RPC calls run natively, outside browser CORS restrictions.
 
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
+
+const MAX_CONCURRENCY: u32 = 256;
+const MAX_LEVELS: usize = 16;
+const MAX_REQUESTS: u32 = 10_000;
+static RUNNING: AtomicBool = AtomicBool::new(false);
+
+fn validate_workload(levels: &[u32], requests: u32) -> Result<(), String> {
+  if levels.is_empty() || levels.len() > MAX_LEVELS {
+    return Err(format!("Choose 1 to {MAX_LEVELS} concurrency levels"));
+  }
+  if !(1..=MAX_REQUESTS).contains(&requests)
+    || levels
+      .iter()
+      .any(|level| !(1..=MAX_CONCURRENCY).contains(level))
+  {
+    return Err(format!(
+      "Use 1 to {MAX_REQUESTS} requests and concurrency 1 to {MAX_CONCURRENCY}"
+    ));
+  }
+  Ok(())
+}
+
+fn worker_requests(total: u32, workers: u32, worker: u32) -> u32 {
+  total / workers + u32::from(worker < total % workers)
+}
 
 const METHODS: [&str; 5] = [
   "getSlot",
@@ -40,6 +66,11 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
   sorted[rank.min(sorted.len() - 1)]
 }
 
+fn rpc_succeeded(body: &[u8]) -> bool {
+  serde_json::from_slice::<serde_json::Value>(body)
+    .is_ok_and(|message| message.get("result").is_some() && message.get("error").is_none())
+}
+
 /// Benchmark one (endpoint, concurrency) point with `total` requests split across
 /// `concurrency` workers sharing the connection pool.
 async fn bench_level(
@@ -48,30 +79,47 @@ async fn bench_level(
   url: String,
   concurrency: u32,
   total: u32,
-) -> LevelResult {
-  let per_worker = total.div_ceil(concurrency.max(1));
+) -> Result<LevelResult, String> {
+  let workers = concurrency.min(total);
   let mut set = tokio::task::JoinSet::new();
   let wall = Instant::now();
 
-  for w in 0..concurrency {
+  for worker in 0..workers {
     let client = client.clone();
     let url = url.clone();
     set.spawn(async move {
       let mut latencies: Vec<f64> = Vec::new();
       let mut throttled = 0u32;
       let mut errors = 0u32;
-      for i in 0..per_worker {
-        let method = METHODS[((w * per_worker + i) as usize) % METHODS.len()];
-        let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method });
+      let mut body = Vec::with_capacity(1024);
+      for request in 0..worker_requests(total, workers, worker) {
+        let method = METHODS[((worker + request) as usize) % METHODS.len()];
+        let payload = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method });
         let start = Instant::now();
-        match client.post(&url).json(&body).send().await {
-          Ok(resp) => {
+        match client.post(&url).json(&payload).send().await {
+          Ok(mut resp) => {
             let status = resp.status();
-            let _ = resp.bytes().await; // drain so the connection is reused
+            body.clear();
+            let drained = loop {
+              match resp.chunk().await {
+                Ok(Some(chunk)) => {
+                  if chunk.len() > (1024 * 1024) - body.len() {
+                    break false;
+                  }
+                  body.extend_from_slice(&chunk);
+                }
+                Ok(None) => break true,
+                Err(_) => break false,
+              }
+            };
+            if !drained {
+              errors += 1;
+              continue;
+            }
             let ms = start.elapsed().as_secs_f64() * 1000.0;
             if status.as_u16() == 429 {
               throttled += 1;
-            } else if status.is_success() {
+            } else if status.is_success() && rpc_succeeded(&body) {
               latencies.push(ms);
             } else {
               errors += 1;
@@ -88,17 +136,20 @@ async fn bench_level(
   let mut throttled = 0u32;
   let mut errors = 0u32;
   while let Some(res) = set.join_next().await {
-    if let Ok((l, t, e)) = res {
-      latencies.extend(l);
-      throttled += t;
-      errors += e;
+    match res {
+      Ok((samples, limited, failed)) => {
+        latencies.extend(samples);
+        throttled += limited;
+        errors += failed;
+      }
+      Err(error) => return Err(format!("Benchmark worker failed: {error}")),
     }
   }
 
   let secs = wall.elapsed().as_secs_f64().max(1e-6);
-  latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+  latencies.sort_by(f64::total_cmp);
 
-  LevelResult {
+  Ok(LevelResult {
     endpoint,
     concurrency,
     ok: latencies.len() as u32,
@@ -109,7 +160,7 @@ async fn bench_level(
     throttled,
     errors,
     rps: latencies.len() as f64 / secs,
-  }
+  })
 }
 
 /// Run the full ramp for both endpoints, emitting each level as it completes.
@@ -121,6 +172,27 @@ async fn run_read_load(
   levels: Vec<u32>,
   requests: u32,
 ) -> Result<(), String> {
+  validate_workload(&levels, requests)?;
+  for url in [&triton_url, &baseline_url] {
+    let url = reqwest::Url::parse(url).map_err(|_| "Invalid RPC endpoint URL")?;
+    if !matches!(url.scheme(), "https" | "http")
+      || url.host_str().is_none()
+      || !url.username().is_empty()
+      || url.password().is_some()
+    {
+      return Err("RPC endpoints must be HTTP(S) URLs without embedded credentials".into());
+    }
+  }
+  RUNNING
+    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+    .map_err(|_| "A benchmark is already running")?;
+  struct RunGuard;
+  impl Drop for RunGuard {
+    fn drop(&mut self) {
+      RUNNING.store(false, Ordering::Release);
+    }
+  }
+  let _run = RunGuard;
   let client = reqwest::Client::builder()
     .timeout(Duration::from_secs(20))
     .build()
@@ -135,7 +207,7 @@ async fn run_read_load(
       conc,
       requests,
     )
-    .await;
+    .await?;
     let _ = app.emit("bench-level", &t);
     let b = bench_level(
       client.clone(),
@@ -144,7 +216,7 @@ async fn run_read_load(
       conc,
       requests,
     )
-    .await;
+    .await?;
     let _ = app.emit("bench-level", &b);
   }
 
@@ -152,9 +224,54 @@ async fn run_read_load(
   Ok(())
 }
 
-fn main() {
+fn main() -> Result<(), tauri::Error> {
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![run_read_load])
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .run(tauri::generate_context!())?;
+  Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn rpc_errors_and_malformed_bodies_do_not_count_as_success() {
+    assert!(rpc_succeeded(br#"{"jsonrpc":"2.0","result":42,"id":1}"#));
+    assert!(!rpc_succeeded(
+      br#"{"jsonrpc":"2.0","error":{"code":-32601},"id":1}"#
+    ));
+    assert!(!rpc_succeeded(br#"{"jsonrpc":"2.0","id":1}"#));
+    assert!(!rpc_succeeded(b"not JSON"));
+  }
+
+  #[test]
+  fn workload_limits_reject_invalid_native_inputs() {
+    assert!(validate_workload(&[1, 8, 32, 64], 120).is_ok());
+    assert!(validate_workload(&[], 1).is_err());
+    assert!(validate_workload(&[1; MAX_LEVELS + 1], 1).is_err());
+    for (levels, total) in [
+      (vec![0], 1),
+      (vec![257], 1),
+      (vec![1], 0),
+      (vec![1], 10_001),
+    ] {
+      assert!(validate_workload(&levels, total).is_err());
+    }
+  }
+
+  #[test]
+  fn workers_issue_exactly_the_requested_count() {
+    for total in [1, 7, 120, MAX_REQUESTS] {
+      for concurrency in [1, 8, 64, MAX_CONCURRENCY] {
+        let workers = concurrency.min(total);
+        assert_eq!(
+          (0..workers)
+            .map(|worker| worker_requests(total, workers, worker))
+            .sum::<u32>(),
+          total
+        );
+      }
+    }
+  }
 }

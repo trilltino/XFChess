@@ -167,7 +167,7 @@ fn compute_plan(pgn: &str) -> Vec<AmbientStep> {
     let mut game = new_game();
     let mut steps = Vec::with_capacity(parsed.moves.len());
     for san in &parsed.moves {
-        let Ok((s, d, promo)) = san_to_move(&mut game, san) else {
+        let Ok((s, d, promo)) = san_to_move(&game, san) else {
             break;
         };
         let (su, du) = (s as usize, d as usize);
@@ -324,27 +324,6 @@ pub fn animate_ambient_board(
     anim.ply_index += 1;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn all_famous_games_parse_completely() {
-        for g in super::super::famous_games::FAMOUS_GAMES {
-            let parsed = xfchess_rules::parse_pgn(g.pgn).expect("pgn should parse");
-            let plan = compute_plan(g.pgn);
-            assert_eq!(
-                plan.len(),
-                parsed.moves.len(),
-                "{:?}: only resolved {}/{} plies",
-                g.caption,
-                plan.len(),
-                parsed.moves.len()
-            );
-        }
-    }
-}
-
 fn apply_ambient_step(commands: &mut Commands, anim: &mut BoardAnimator, step: AmbientStep) {
     let (sf, sr) = (step.from.0 as usize, step.from.1 as usize);
     let (df, dr) = (step.to.0 as usize, step.to.1 as usize);
@@ -389,5 +368,28 @@ fn apply_ambient_step(commands: &mut Commands, anim: &mut BoardAnimator, step: A
                 duration: 1.2,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_famous_games_parse_completely() -> Result<(), Box<dyn std::error::Error>> {
+        for g in super::super::famous_games::FAMOUS_GAMES {
+            let parsed = xfchess_rules::parse_pgn(g.pgn)?;
+            let plan = compute_plan(g.pgn);
+            assert_eq!(
+                plan.len(),
+                parsed.moves.len(),
+                "{:?}: only resolved {}/{} plies",
+                g.caption,
+                plan.len(),
+                parsed.moves.len()
+            );
+        }
+
+        Ok(())
     }
 }

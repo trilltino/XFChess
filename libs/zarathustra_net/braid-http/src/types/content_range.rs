@@ -106,10 +106,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_content_range_basic() {
+    fn test_content_range_basic() -> anyhow::Result<()> {
         let range = ContentRange::new("json", ".field");
         assert_eq!(range.to_header_value(), "json .field");
-        let parsed = ContentRange::from_header_value("json .field").unwrap();
+        let parsed = ContentRange::from_header_value("json .field").map_err(anyhow::Error::msg)?;
         assert_eq!(parsed, range);
+        Ok(())
     }
 }

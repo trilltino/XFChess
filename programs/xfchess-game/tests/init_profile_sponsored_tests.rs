@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use anchor_lang::{AccountDeserialize, InstructionData, Space, ToAccountMetas};
 use common::*;
@@ -47,7 +48,7 @@ fn init_profile_ix(
 }
 
 #[tokio::test]
-async fn sponsored_profile_is_owned_by_player_not_backend() {
+async fn sponsored_profile_is_owned_by_player_not_backend() -> anyhow::Result<()> {
     let ctx = start(vec![]).await;
 
     // The player has ZERO SOL — the whole point of sponsorship.
@@ -58,7 +59,10 @@ async fn sponsored_profile_is_owned_by_player_not_backend() {
         system_instruction::transfer(&ctx.payer.pubkey(), &backend.pubkey(), 10_000_000_000);
     let mut fund_tx = Transaction::new_with_payer(&[fund_backend], Some(&ctx.payer.pubkey()));
     fund_tx.sign(&[&ctx.payer], ctx.last_blockhash);
-    ctx.banks_client.process_transaction(fund_tx).await.unwrap();
+    ctx.banks_client
+        .process_transaction(fund_tx)
+        .await
+        .context("required operation value")?;
 
     let profile = profile_pda(&player.pubkey());
     let username = "sponsoredplayer";
@@ -81,21 +85,26 @@ async fn sponsored_profile_is_owned_by_player_not_backend() {
     ctx.banks_client
         .process_transaction(tx)
         .await
-        .expect("sponsored init_profile should succeed");
+        .context("sponsored init_profile should succeed")?;
 
     // The profile PDA belongs to the PLAYER, not the backend that paid for it.
     let acc = ctx
         .banks_client
         .get_account(profile)
         .await
-        .unwrap()
-        .expect("profile account missing");
-    let decoded = PlayerProfile::try_deserialize(&mut &acc.data[..]).unwrap();
+        .context("required operation value")?
+        .context("profile account missing")?;
+    let decoded =
+        PlayerProfile::try_deserialize(&mut &acc.data[..]).context("required operation value")?;
     assert_eq!(decoded.authority, player.pubkey());
     assert_eq!(decoded.username, username);
 
     // The zero-funded player receives and spends exactly the account-creation rent.
-    let player_balance = ctx.banks_client.get_balance(player.pubkey()).await.unwrap();
+    let player_balance = ctx
+        .banks_client
+        .get_balance(player.pubkey())
+        .await
+        .context("required operation value")?;
     assert_eq!(
         player_balance, 0,
         "player should not retain any of the sponsored funds"
@@ -107,9 +116,10 @@ async fn sponsored_profile_is_owned_by_player_not_backend() {
         .banks_client
         .get_balance(backend.pubkey())
         .await
-        .unwrap();
+        .context("required operation value")?;
     assert!(
         backend_balance < 10_000_000_000 - (profile_rent + username_rent),
         "backend must have paid the rent it fronted plus the tx fee"
     );
+    Ok(())
 }

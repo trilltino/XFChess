@@ -61,11 +61,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_plain_and_promotion_moves() {
-        let e = uci_to_event("e2e4").unwrap();
+    fn parses_plain_and_promotion_moves() -> Result<(), Box<dyn std::error::Error>> {
+        let e = uci_to_event("e2e4").ok_or("missing test value")?;
         assert_eq!((e.from, e.to, e.promotion), ((4, 1), (4, 3), None));
-        let p = uci_to_event("a7a8Q").unwrap();
+        let p = uci_to_event("a7a8Q").ok_or("missing test value")?;
         assert_eq!((p.from, p.to, p.promotion), ((0, 6), (0, 7), Some('q')));
+
+        Ok(())
     }
 
     #[test]

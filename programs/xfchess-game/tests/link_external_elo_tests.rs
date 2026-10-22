@@ -1,4 +1,5 @@
-mod common;
+use anyhow::Context as _;
+pub mod common;
 
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
@@ -18,16 +19,18 @@ fn lichess_username_record_pda(username: &str) -> Pubkey {
     .0
 }
 
-fn profile_account(authority: Pubkey) -> (Pubkey, solana_sdk::account::Account) {
-    let pda = profile_pda(&authority).0;
-    let profile = PlayerProfile {
-        authority,
-        ..Default::default()
-    };
-    (
-        pda,
-        program_account(&profile, 8 + PlayerProfile::INIT_SPACE),
-    )
+fn profile_account(authority: Pubkey) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    Ok({
+        let pda = profile_pda(&authority).0;
+        let profile = PlayerProfile {
+            authority,
+            ..Default::default()
+        };
+        (
+            pda,
+            program_account(&profile, 8 + PlayerProfile::INIT_SPACE)?,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -70,17 +73,18 @@ fn link_authority_keypair() -> Option<Keypair> {
 }
 
 #[tokio::test]
-async fn link_external_elo_rejects_a_second_wallet_claiming_the_same_lichess_username() {
+async fn link_external_elo_rejects_a_second_wallet_claiming_the_same_lichess_username(
+) -> anyhow::Result<()> {
     let Some(link_authority) = link_authority_keypair() else {
         eprintln!("skip: keys/link_authority.json not present");
-        return;
+        return Ok(());
     };
     let player_a = Keypair::new().pubkey();
     let player_b = Keypair::new().pubkey();
     let username = "MagnusCarlsenFan42";
 
-    let (profile_a_pda, profile_a_data) = profile_account(player_a);
-    let (profile_b_pda, profile_b_data) = profile_account(player_b);
+    let (profile_a_pda, profile_a_data) = profile_account(player_a)?;
+    let (profile_b_pda, profile_b_data) = profile_account(player_b)?;
 
     let mut ctx = start(vec![
         (profile_a_pda, profile_a_data),
@@ -99,9 +103,9 @@ async fn link_external_elo_rejects_a_second_wallet_claiming_the_same_lichess_use
     );
     send(&mut ctx, ix_a, &[&link_authority])
         .await
-        .expect("first link for a fresh Lichess username should succeed");
+        .context("first link for a fresh Lichess username should succeed")?;
 
-    let profile_a_after = fetch_profile(&mut ctx, &player_a).await;
+    let profile_a_after = fetch_profile(&mut ctx, &player_a).await?;
     assert_eq!(profile_a_after.lichess_username, username);
 
     // A DIFFERENT wallet claiming the SAME Lichess username must be rejected.
@@ -115,7 +119,8 @@ async fn link_external_elo_rejects_a_second_wallet_claiming_the_same_lichess_use
     );
     let err = send(&mut ctx, ix_b, &[&link_authority])
         .await
-        .expect_err("a second wallet must not be able to claim an already-linked Lichess username");
+        .err()
+        .context("a second wallet must not be able to claim an already-linked Lichess username")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::UsernameTaken)),
@@ -123,23 +128,25 @@ async fn link_external_elo_rejects_a_second_wallet_claiming_the_same_lichess_use
     );
 
     // Player B's profile must NOT have been mutated by the rejected attempt.
-    let profile_b_after = fetch_profile(&mut ctx, &player_b).await;
+    let profile_b_after = fetch_profile(&mut ctx, &player_b).await?;
     assert_ne!(
         profile_b_after.lichess_username, username,
         "a rejected claim must not have written the Lichess username onto the wrong profile"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn link_external_elo_allows_the_same_wallet_to_re_sync_its_own_username() {
+async fn link_external_elo_allows_the_same_wallet_to_re_sync_its_own_username() -> anyhow::Result<()>
+{
     let Some(link_authority) = link_authority_keypair() else {
         eprintln!("skip: keys/link_authority.json not present");
-        return;
+        return Ok(());
     };
     let player_a = Keypair::new().pubkey();
     let username = "SameWalletResync";
 
-    let (profile_a_pda, profile_a_data) = profile_account(player_a);
+    let (profile_a_pda, profile_a_data) = profile_account(player_a)?;
 
     let mut ctx = start(vec![
         (profile_a_pda, profile_a_data),
@@ -157,7 +164,7 @@ async fn link_external_elo_allows_the_same_wallet_to_re_sync_its_own_username() 
     );
     send(&mut ctx, ix_first, &[&link_authority])
         .await
-        .expect("first link should succeed");
+        .context("first link should succeed")?;
 
     // Re-syncing updated ratings for the SAME wallet + SAME username must
     // still succeed (idempotent re-link), not be rejected as "taken".
@@ -171,9 +178,10 @@ async fn link_external_elo_allows_the_same_wallet_to_re_sync_its_own_username() 
     );
     send(&mut ctx, ix_second, &[&link_authority])
         .await
-        .expect("the same wallet re-linking its own already-claimed username must succeed");
+        .context("the same wallet re-linking its own already-claimed username must succeed")?;
 
-    let profile_after = fetch_profile(&mut ctx, &player_a).await;
+    let profile_after = fetch_profile(&mut ctx, &player_a).await?;
     assert_eq!(profile_after.lichess_username, username);
     assert_eq!(profile_after.lichess_blitz, 160_000); // centiscale: 1600 * 100
+    Ok(())
 }

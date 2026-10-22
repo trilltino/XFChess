@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use xfchess_rules::Game;
 type Color = i8;
 use xfchess_game::chess_logic_on_chain::validation::is_move_legal;
@@ -31,29 +32,37 @@ fn coord_uci(src: i8, dst: i8, promo: &str) -> String {
 type UciSet = std::collections::BTreeSet<String>;
 type FromToSet = std::collections::BTreeSet<(i8, i8)>;
 
-fn engine_legal(fen: &str) -> (UciSet, FromToSet) {
-    let g = Game::from_fen(fen).unwrap();
-    let mut uci = UciSet::new();
-    let mut from_to = FromToSet::new();
-    for mv in g.legal_moves() {
-        let b = mv.as_bytes();
-        let src = ((b[1] - b'1') * 8 + b[0] - b'a') as i8;
-        let dst = ((b[3] - b'1') * 8 + b[2] - b'a') as i8;
-        from_to.insert((src, dst));
-        uci.insert(mv);
-    }
-    (uci, from_to)
+fn engine_legal(fen: &str) -> anyhow::Result<(UciSet, FromToSet)> {
+    Ok({
+        let g = Game::from_fen(fen)
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("required operation value")?;
+        let mut uci = UciSet::new();
+        let mut from_to = FromToSet::new();
+        for mv in g.legal_moves() {
+            let b = mv.as_bytes();
+            let src = ((b[1] - b'1') * 8 + b[0] - b'a') as i8;
+            let dst = ((b[3] - b'1') * 8 + b[2] - b'a') as i8;
+            from_to.insert((src, dst));
+            uci.insert(mv);
+        }
+        (uci, from_to)
+    })
 }
 
-fn from_squares(fen: &str) -> Vec<i8> {
-    let g = Game::from_fen(fen).unwrap();
-    let color = fen_color(fen);
-    (0..64i8)
-        .filter(|&sq| {
-            let p = g.board[sq as usize];
-            p != 0 && (p > 0) == (color > 0)
-        })
-        .collect()
+fn from_squares(fen: &str) -> anyhow::Result<Vec<i8>> {
+    Ok({
+        let g = Game::from_fen(fen)
+            .map_err(|error| anyhow::anyhow!("{error:?}"))
+            .context("required operation value")?;
+        let color = fen_color(fen);
+        (0..64i8)
+            .filter(|&sq| {
+                let p = g.board[sq as usize];
+                p != 0 && (p > 0) == (color > 0)
+            })
+            .collect()
+    })
 }
 
 const CORPUS: &[&str] = &[
@@ -72,13 +81,13 @@ const CORPUS: &[&str] = &[
 ];
 
 #[test]
-fn on_chain_validator_matches_engine() {
+fn on_chain_validator_matches_engine() -> anyhow::Result<()> {
     let promos = ["", "q", "r", "b", "n"];
     let mut false_rejects = Vec::new();
     let mut false_accepts = Vec::new();
 
     for fen in CORPUS {
-        let (legal_uci, legal_from_to) = engine_legal(fen);
+        let (legal_uci, legal_from_to) = engine_legal(fen)?;
 
         // No false rejects: every engine-legal move must be accepted on-chain.
         for uci in &legal_uci {
@@ -89,7 +98,7 @@ fn on_chain_validator_matches_engine() {
 
         // Every illegal (from, to) transition must be rejected for all promotion
         // suffixes; redundant suffixes on legal transitions are not false accepts.
-        for &src in &from_squares(fen) {
+        for &src in &from_squares(fen)? {
             for dst in 0..64i8 {
                 if src == dst || legal_from_to.contains(&(src, dst)) {
                     continue;
@@ -110,4 +119,5 @@ fn on_chain_validator_matches_engine() {
         false_accepts.join("\n    "),
         false_rejects.join("\n    "),
     );
+    Ok(())
 }

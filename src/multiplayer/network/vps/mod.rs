@@ -46,9 +46,9 @@ pub use session::{
     track_global_session_game, verify_global_session, SessionStatus,
 };
 pub use social::{
-    fetch_region, get_contacts, get_online, get_pending_requests, poll_social, push_lobby_invite,
-    remove_contact, respond_friend_request, send_friend_request, update_presence,
-    Contact as SocialContact, FriendRequest as SocialFriendRequest, LobbyInvite,
+    fetch_region, get_contacts, get_node_presence, get_online, get_pending_requests, poll_social,
+    push_lobby_invite, remove_contact, respond_friend_request, send_friend_request,
+    update_presence, Contact as SocialContact, FriendRequest as SocialFriendRequest, LobbyInvite,
     Presence as SocialPresence, SocialPollResponse,
 };
 pub use tournament::{

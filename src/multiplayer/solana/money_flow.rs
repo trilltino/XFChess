@@ -1,5 +1,6 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum MoneyFlowState {
+    #[default]
     Idle,
     Signing {
         action: String,
@@ -26,12 +27,6 @@ pub enum MoneyFlowState {
         signature: Option<String>,
         reason: String,
     },
-}
-
-impl Default for MoneyFlowState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl MoneyFlowState {

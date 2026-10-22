@@ -20,6 +20,14 @@ export interface ApiResponse<T = any> {
   ok: boolean;
 }
 
+function invalidMoney(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, amount]) =>
+    (key === "lamports" || key.endsWith("_lamports"))
+      ? typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0
+      : invalidMoney(amount));
+}
+
 class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
@@ -42,10 +50,31 @@ class ApiClient {
     this.token = null;
   }
 
+  async activateAdminToken(candidate: string, save: () => Promise<void>): Promise<void> {
+    if (!candidate.trim()) throw new Error("Enter a replacement admin key.");
+    const generation = this.generation;
+    const probe = new ApiClient(this.baseUrl);
+    probe.setCredentials(candidate, this.baseUrl);
+    // /health is public and cannot establish that the candidate authenticates.
+    const result = await probe.getAuditLog(1);
+    if (generation !== this.generation) throw new Error("Connection changed during verification.");
+    if (!result.ok) throw new Error(result.error?.message || "The backend rejected this key.");
+    await save();
+    if (generation !== this.generation) throw new Error("Connection changed before activation.");
+    this.setCredentials(candidate, this.baseUrl);
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
+    if (typeof options.body === "string") {
+      try {
+        if (invalidMoney(JSON.parse(options.body))) return { ok: false, error: { message: "Amounts must be finite whole lamports within the supported range.", code: "INVALID_AMOUNT" } };
+      } catch {
+        return { ok: false, error: { message: "Invalid JSON request body.", code: "INVALID_BODY" } };
+      }
+    }
     const url = `${this.baseUrl}${endpoint}`;
     const generation = this.generation;
     const controller = new AbortController();

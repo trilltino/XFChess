@@ -1,6 +1,8 @@
 use crate::errors::GameErrorCode;
 use crate::state::{DisputeRecord, DisputeStatus, Game, GameResult, GameStatus};
 use anchor_lang::prelude::*;
+#[cfg(test)]
+use anyhow::Context as _;
 
 pub const MAX_DISPUTE_TEXT_LEN: usize = 200;
 
@@ -110,20 +112,25 @@ mod tests {
     }
 
     #[test]
-    fn validate_resolution_none_is_a_draw() {
+    fn validate_resolution_none_is_a_draw() -> anyhow::Result<()> {
         let g = game(Pubkey::new_unique(), Pubkey::new_unique());
-        assert_eq!(validate_resolution(&g, None).unwrap(), GameResult::Draw);
+        assert_eq!(
+            validate_resolution(&g, None).context("required operation value")?,
+            GameResult::Draw
+        );
+        Ok(())
     }
 
     #[test]
-    fn validate_resolution_accepts_a_real_player_as_winner() {
+    fn validate_resolution_accepts_a_real_player_as_winner() -> anyhow::Result<()> {
         let white = Pubkey::new_unique();
         let black = Pubkey::new_unique();
         let g = game(white, black);
         assert_eq!(
-            validate_resolution(&g, Some(black)).unwrap(),
+            validate_resolution(&g, Some(black)).context("required operation value")?,
             GameResult::Winner(black)
         );
+        Ok(())
     }
 
     #[test]
@@ -133,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_resolution_updates_both_dispute_and_game() {
+    fn apply_resolution_updates_both_dispute_and_game() -> anyhow::Result<()> {
         let white = Pubkey::new_unique();
         let black = Pubkey::new_unique();
         let mut g = game(white, black);
@@ -148,7 +155,7 @@ mod tests {
             authority,
             500,
         )
-        .unwrap();
+        .context("required operation value")?;
 
         assert_eq!(d.status, DisputeStatus::Resolved);
         assert_eq!(d.resolution, "engine use confirmed");
@@ -157,6 +164,7 @@ mod tests {
         assert_eq!(g.result, GameResult::Winner(black));
         assert_eq!(g.status, GameStatus::Settled);
         assert_eq!(g.updated_at, 500);
+        Ok(())
     }
 
     #[test]

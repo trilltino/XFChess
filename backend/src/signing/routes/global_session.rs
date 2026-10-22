@@ -17,7 +17,6 @@ use tracing::{info, warn};
 use crate::signing::auth::RequireWallet;
 use crate::signing::AppState;
 
-
 pub fn global_session_public_routes() -> Router<AppState> {
     Router::new().route("/{wallet}/verify", axum::routing::get(verify))
 }
@@ -28,7 +27,6 @@ pub fn global_session_protected_routes() -> Router<AppState> {
         .route("/track-game", post(track_game))
         .route("/{wallet}", delete(revoke))
 }
-
 
 #[derive(Deserialize)]
 pub struct RegisterReq {

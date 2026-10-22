@@ -45,7 +45,8 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn late_resolution_cannot_consume_the_next_request() {
+  async fn late_resolution_cannot_consume_the_next_request(
+  ) -> Result<(), Box<dyn std::error::Error>> {
     let (pending, mut receiver, notify) = request();
     assert!(!finish(&pending, &notify, "stale", Ok(vec![2])));
     assert!(matches!(
@@ -53,17 +54,23 @@ mod tests {
       Err(tokio::sync::oneshot::error::TryRecvError::Empty)
     ));
     assert!(finish(&pending, &notify, "current", Ok(vec![3])));
-    assert_eq!(receiver.await.unwrap().unwrap(), vec![3]);
+    assert_eq!(receiver.await??, vec![3]);
     assert!(pending.lock().is_none());
     assert!(!finish(&pending, &notify, "current", Ok(vec![4])));
+    Ok(())
   }
 
   #[tokio::test]
-  async fn cancellation_releases_the_signer_and_notifies_late_subscribers() {
+  async fn cancellation_releases_the_signer_and_notifies_late_subscribers(
+  ) -> Result<(), Box<dyn std::error::Error>> {
     let (pending, receiver, notify) = request();
     assert!(finish(&pending, &notify, "current", Err("Closed".into())));
-    assert_eq!(receiver.await.unwrap().unwrap_err(), "Closed");
+    assert_eq!(
+      receiver.await?.err().ok_or("expected cancellation")?,
+      "Closed"
+    );
     assert!(pending.lock().is_none());
-    assert!(!notify.subscribe().has_changed().unwrap());
+    assert!(!notify.subscribe().has_changed()?);
+    Ok(())
   }
 }

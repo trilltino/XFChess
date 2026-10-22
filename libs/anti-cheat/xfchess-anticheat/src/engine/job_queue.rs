@@ -5,7 +5,7 @@ use tracing::{error, info, warn};
 use crate::analyse_game;
 use crate::config::AcConfig;
 use crate::error::AcResult;
-use crate::types::GameRecord;
+use crate::types::{AcReport, GameRecord};
 
 pub type JobId = String;
 
@@ -32,7 +32,8 @@ impl AnalysisQueue {
     }
 }
 
-pub fn spawn_workers(cfg: Arc<AcConfig>, pool: sqlx::SqlitePool) -> AnalysisQueue {
+pub fn spawn_workers(cfg: Arc<AcConfig>, pool: sqlx::SqlitePool) -> AcResult<AnalysisQueue> {
+    cfg.validate()?;
     let (tx, rx) = mpsc::channel::<AnalysisJob>(cfg.queue_capacity);
     let rx = Arc::new(tokio::sync::Mutex::new(rx));
 
@@ -72,16 +73,14 @@ pub fn spawn_workers(cfg: Arc<AcConfig>, pool: sqlx::SqlitePool) -> AnalysisQueu
                         }
                         match outcome {
                             Ok(report) => {
-                                if let Err(e) =
-                                    crate::report::store::save_report(&pool, &report, &cfg).await
-                                {
+                                if let Err(e) = save_and_complete(&pool, &report, &cfg).await {
                                     error!("[anticheat worker {worker_id}] save_report failed for {game_id}: {e}");
+                                    if let Err(error) = sqlx::query("UPDATE anticheat_queue SET attempts = attempts + 1, last_error = ? WHERE game_id = ?")
+                                        .bind(e.to_string()).bind(&game_id).execute(&pool).await {
+                                        error!("[anticheat worker {worker_id}] could not retain report failure for {game_id}: {error}");
+                                    }
+                                    continue;
                                 }
-                                let _ =
-                                    sqlx::query("DELETE FROM anticheat_queue WHERE game_id = ?")
-                                        .bind(&game_id)
-                                        .execute(&pool)
-                                        .await;
                             }
                             Err(e) => {
                                 warn!("[anticheat worker {worker_id}] analysis failed for {game_id}: {e}");
@@ -101,5 +100,18 @@ pub fn spawn_workers(cfg: Arc<AcConfig>, pool: sqlx::SqlitePool) -> AnalysisQueu
         });
     }
 
-    AnalysisQueue { tx }
+    Ok(AnalysisQueue { tx })
+}
+
+pub(crate) async fn save_and_complete(
+    pool: &sqlx::SqlitePool,
+    report: &AcReport,
+    cfg: &AcConfig,
+) -> AcResult<()> {
+    crate::report::store::save_report(pool, report, cfg).await?;
+    sqlx::query("DELETE FROM anticheat_queue WHERE game_id = ?")
+        .bind(&report.game_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }

@@ -1,4 +1,5 @@
 use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
+use anyhow::Context as _;
 use solana_program_test::{
     BanksClientError, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
 };
@@ -33,19 +34,23 @@ fn shard_pda(id: u64, shard: u8) -> (Pubkey, u8) {
     )
 }
 
-fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> Account {
-    let mut data = Vec::with_capacity(space);
-    value.try_serialize(&mut data).unwrap();
-    if data.len() < space {
-        data.resize(space, 0);
-    }
-    Account {
-        lamports: 10_000_000,
-        data,
-        owner: xfchess_game::ID,
-        executable: false,
-        rent_epoch: 0,
-    }
+fn serialize_padded<T: AccountSerialize>(value: &T, space: usize) -> anyhow::Result<Account> {
+    Ok({
+        let mut data = Vec::with_capacity(space);
+        value
+            .try_serialize(&mut data)
+            .context("required operation value")?;
+        if data.len() < space {
+            data.resize(space, 0);
+        }
+        Account {
+            lamports: 10_000_000,
+            data,
+            owner: xfchess_game::ID,
+            executable: false,
+            rent_epoch: 0,
+        }
+    })
 }
 
 fn tournament(authority: Pubkey, fee_payer: Pubkey, bump: u8, current_round: u8) -> Tournament {
@@ -181,22 +186,24 @@ async fn send(
     ctx: &mut ProgramTestContext,
     ix: Instruction,
     extra: &[&Keypair],
-) -> Result<(), TransactionError> {
-    let blockhash = ctx
-        .banks_client
-        .get_new_latest_blockhash(&ctx.last_blockhash)
-        .await
-        .expect("failed to get a fresh blockhash");
-    ctx.last_blockhash = blockhash;
-    let payer_pk = ctx.payer.pubkey();
-    let mut signers: Vec<&Keypair> = vec![&ctx.payer];
-    signers.extend_from_slice(extra);
-    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer_pk));
-    tx.sign(&signers, blockhash);
-    ctx.banks_client
-        .process_transaction(tx)
-        .await
-        .map_err(transaction_error)
+) -> anyhow::Result<Result<(), TransactionError>> {
+    Ok({
+        let blockhash = ctx
+            .banks_client
+            .get_new_latest_blockhash(&ctx.last_blockhash)
+            .await
+            .context("failed to get a fresh blockhash")?;
+        ctx.last_blockhash = blockhash;
+        let payer_pk = ctx.payer.pubkey();
+        let mut signers: Vec<&Keypair> = vec![&ctx.payer];
+        signers.extend_from_slice(extra);
+        let mut tx = Transaction::new_with_payer(&[ix], Some(&payer_pk));
+        tx.sign(&signers, blockhash);
+        ctx.banks_client
+            .process_transaction(tx)
+            .await
+            .map_err(transaction_error)
+    })
 }
 
 fn transaction_error(e: BanksClientError) -> TransactionError {
@@ -214,15 +221,17 @@ fn custom_code(err: &TransactionError) -> Option<u32> {
     }
 }
 
-async fn fetch_tournament(ctx: &mut ProgramTestContext) -> Tournament {
-    use anchor_lang::AccountDeserialize;
-    let acc = ctx
-        .banks_client
-        .get_account(tournament_pda(TOURNAMENT_ID).0)
-        .await
-        .unwrap()
-        .expect("tournament account missing");
-    Tournament::try_deserialize(&mut &acc.data[..]).unwrap()
+async fn fetch_tournament(ctx: &mut ProgramTestContext) -> anyhow::Result<Tournament> {
+    Ok({
+        use anchor_lang::AccountDeserialize;
+        let acc = ctx
+            .banks_client
+            .get_account(tournament_pda(TOURNAMENT_ID).0)
+            .await
+            .context("required operation value")?
+            .context("tournament account missing")?;
+        Tournament::try_deserialize(&mut &acc.data[..]).context("required operation value")?
+    })
 }
 
 struct Field {
@@ -233,39 +242,41 @@ struct Field {
     p4: Pubkey,
 }
 
-async fn setup(current_round: u8) -> (ProgramTestContext, Field) {
-    let field = Field {
-        authority: Keypair::new(),
-        p1: Pubkey::new_unique(),
-        p2: Pubkey::new_unique(),
-        p3: Pubkey::new_unique(),
-        p4: Pubkey::new_unique(),
-    };
-    let (_, t_bump) = tournament_pda(TOURNAMENT_ID);
-    let ctx = start(vec![
-        (
-            tournament_pda(TOURNAMENT_ID).0,
-            serialize_padded(
-                &tournament(field.authority.pubkey(), field.p1, t_bump, current_round),
-                8 + Tournament::INIT_SPACE,
+async fn setup(current_round: u8) -> anyhow::Result<(ProgramTestContext, Field)> {
+    Ok({
+        let field = Field {
+            authority: Keypair::new(),
+            p1: Pubkey::new_unique(),
+            p2: Pubkey::new_unique(),
+            p3: Pubkey::new_unique(),
+            p4: Pubkey::new_unique(),
+        };
+        let (_, t_bump) = tournament_pda(TOURNAMENT_ID);
+        let ctx = start(vec![
+            (
+                tournament_pda(TOURNAMENT_ID).0,
+                serialize_padded(
+                    &tournament(field.authority.pubkey(), field.p1, t_bump, current_round),
+                    8 + Tournament::INIT_SPACE,
+                )?,
             ),
-        ),
-        (
-            shard_pda(TOURNAMENT_ID, 0).0,
-            serialize_padded(
-                &shard0(field.p1, field.p2, field.p3, field.p4),
-                8 + TournamentPlayersShard::space_for(),
+            (
+                shard_pda(TOURNAMENT_ID, 0).0,
+                serialize_padded(
+                    &shard0(field.p1, field.p2, field.p3, field.p4),
+                    8 + TournamentPlayersShard::space_for(),
+                )?,
             ),
-        ),
-    ])
-    .await;
-    (ctx, field)
+        ])
+        .await;
+        (ctx, field)
+    })
 }
 
 #[tokio::test]
-async fn completes_with_authority_tiebreak_order() {
+async fn completes_with_authority_tiebreak_order() -> anyhow::Result<()> {
     // current_round == total_rounds: both rounds already advanced.
-    let (mut ctx, f) = setup(2).await;
+    let (mut ctx, f) = setup(2).await?;
 
     // p2 and p3 tie on score (2); the off-chain tiebreak puts p3 first, and the
     // program accepts any order that respects on-chain scores.
@@ -274,10 +285,10 @@ async fn completes_with_authority_tiebreak_order() {
         complete_swiss_tournament_ix(f.authority.pubkey(), vec![f.p1, f.p3, f.p2, f.p4]),
         &[&f.authority],
     )
-    .await
-    .expect("complete_swiss_tournament should succeed once all rounds are in");
+    .await?
+    .context("complete_swiss_tournament should succeed once all rounds are in")?;
 
-    let t = fetch_tournament(&mut ctx).await;
+    let t = fetch_tournament(&mut ctx).await?;
     assert_eq!(t.status, TournamentStatus::Completed);
     assert!(t.completed_at.is_some());
     assert_eq!(t.winner, Some(f.p1));
@@ -285,29 +296,32 @@ async fn completes_with_authority_tiebreak_order() {
     assert_eq!(t.third_place, Some(f.p2));
     assert_eq!(t.fourth_place, Some(f.p4));
     assert_eq!(t.fifth_place, None);
+    Ok(())
 }
 
 #[tokio::test]
-async fn rejects_completion_before_final_round_advances() {
+async fn rejects_completion_before_final_round_advances() -> anyhow::Result<()> {
     // Only round 0 of 2 has been advanced past.
-    let (mut ctx, f) = setup(1).await;
+    let (mut ctx, f) = setup(1).await?;
 
     let err = send(
         &mut ctx,
         complete_swiss_tournament_ix(f.authority.pubkey(), vec![f.p1, f.p2, f.p3, f.p4]),
         &[&f.authority],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::SwissTournamentNotFinished))
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn rejects_places_that_contradict_scores() {
-    let (mut ctx, f) = setup(2).await;
+async fn rejects_places_that_contradict_scores() -> anyhow::Result<()> {
+    let (mut ctx, f) = setup(2).await?;
 
     let bad_orders = [
         vec![f.p2, f.p1, f.p3, f.p4], // lower score above a higher one
@@ -321,19 +335,21 @@ async fn rejects_places_that_contradict_scores() {
             complete_swiss_tournament_ix(f.authority.pubkey(), places.clone()),
             &[&f.authority],
         )
-        .await
-        .unwrap_err();
+        .await?
+        .err()
+        .context("required operation value")?;
         assert_eq!(
             custom_code(&err),
             Some(ec(GameErrorCode::InvalidSwissPlaces)),
             "places {places:?}"
         );
     }
+    Ok(())
 }
 
 #[tokio::test]
-async fn rejects_completion_by_non_authority() {
-    let (mut ctx, f) = setup(2).await;
+async fn rejects_completion_by_non_authority() -> anyhow::Result<()> {
+    let (mut ctx, f) = setup(2).await?;
     let outsider = Keypair::new();
 
     let err = send(
@@ -341,16 +357,18 @@ async fn rejects_completion_by_non_authority() {
         complete_swiss_tournament_ix(outsider.pubkey(), vec![f.p1, f.p2, f.p3, f.p4]),
         &[&outsider],
     )
-    .await
-    .unwrap_err();
+    .await?
+    .err()
+    .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::NotTournamentAuthority))
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn rejects_completion_that_omits_a_required_shard() {
+async fn rejects_completion_that_omits_a_required_shard() -> anyhow::Result<()> {
     let authority = Keypair::new();
     let (p1, p2, p3, p4) = (
         Pubkey::new_unique(),
@@ -366,14 +384,14 @@ async fn rejects_completion_that_omits_a_required_shard() {
     let mut ctx = start(vec![
         (
             tournament_pda(TOURNAMENT_ID).0,
-            serialize_padded(&t, 8 + Tournament::INIT_SPACE),
+            serialize_padded(&t, 8 + Tournament::INIT_SPACE)?,
         ),
         (
             shard_pda(TOURNAMENT_ID, 0).0,
             serialize_padded(
                 &shard0(p1, p2, p3, p4),
                 8 + TournamentPlayersShard::space_for(),
-            ),
+            )?,
         ),
     ])
     .await;
@@ -383,14 +401,16 @@ async fn rejects_completion_that_omits_a_required_shard() {
         complete_swiss_tournament_ix(authority.pubkey(), vec![p1, p3, p2, p4]),
         &[&authority],
     )
-    .await
-    .expect_err("completion must see every shard the field occupies");
+    .await?
+    .err()
+    .context("completion must see every shard the field occupies")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::InvalidSwissPlaces))
     );
     assert_eq!(
-        fetch_tournament(&mut ctx).await.status,
+        fetch_tournament(&mut ctx).await?.status,
         TournamentStatus::Active
     );
+    Ok(())
 }

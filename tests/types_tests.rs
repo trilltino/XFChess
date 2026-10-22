@@ -1,5 +1,6 @@
-use xfchess::game::types::{Centipawns, File, Rank, Square};
-use xfchess::rendering::pieces::PieceType;
+use anyhow::Context;
+use xfchess_app::game::types::{Centipawns, File, Rank, Square};
+use xfchess_app::rendering::pieces::PieceType;
 
 // File tests
 
@@ -28,8 +29,8 @@ fn example_file_to_char() {
 // Rank tests
 
 #[test]
-fn example_rank_from_number() {
-    let rank = Rank::from_number(4).unwrap(); // Rank 3 (0-indexed)
+fn example_rank_from_number() -> anyhow::Result<()> {
+    let rank = Rank::from_number(4).context(concat!(file!(), ":", line!()))?; // Rank 3 (0-indexed)
     assert_eq!(rank.index(), 3);
 
     // Test boundaries
@@ -37,6 +38,7 @@ fn example_rank_from_number() {
     assert!(Rank::from_number(8).is_some());
     assert!(Rank::from_number(0).is_none());
     assert!(Rank::from_number(9).is_none());
+    Ok(())
 }
 
 #[test]
@@ -59,19 +61,20 @@ fn example_square_new() {
 }
 
 #[test]
-fn example_square_from_algebraic() {
-    let square = Square::from_algebraic("e4").unwrap();
+fn example_square_from_algebraic() -> anyhow::Result<()> {
+    let square = Square::from_algebraic("e4").context(concat!(file!(), ":", line!()))?;
     assert_eq!(square.file.index(), 4);
     assert_eq!(square.rank.index(), 3);
 
     // Test other squares
-    let a1 = Square::from_algebraic("a1").unwrap();
+    let a1 = Square::from_algebraic("a1").context(concat!(file!(), ":", line!()))?;
     assert_eq!(a1.file.index(), 0);
     assert_eq!(a1.rank.index(), 0);
 
-    let h8 = Square::from_algebraic("h8").unwrap();
+    let h8 = Square::from_algebraic("h8").context(concat!(file!(), ":", line!()))?;
     assert_eq!(h8.file.index(), 7);
     assert_eq!(h8.rank.index(), 7);
+    Ok(())
 }
 
 #[test]
