@@ -266,6 +266,15 @@ pub fn register_player_ix(
             shard_meta(&program_id, tournament_id, 3, max_players),
             AccountMeta::new(host_treasury, false),
             AccountMeta::new_readonly(system_program::id(), false),
+            // Pass accounts. The binding PDA is always required (empty and system-owned for a
+            // tournament without a pass); the three optional ones are passed as `None`.
+            AccountMeta::new_readonly(
+                Pubkey::find_program_address(&[b"t_pass", &tournament_id.to_le_bytes()], &program_id).0,
+                false,
+            ),
+            AccountMeta::new_readonly(program_id, false),
+            AccountMeta::new_readonly(program_id, false),
+            AccountMeta::new_readonly(program_id, false),
         ],
         data,
     })

@@ -177,7 +177,7 @@ fn fund_sol_prize_ix(operator: Pubkey, amount: u64) -> Instruction {
     }
 }
 
-fn register_ix(player: Pubkey, host_treasury: Pubkey, claimed_elo: u32) -> Instruction {
+fn register_ix(player: Pubkey, host_treasury: Pubkey, _claimed_elo: u32) -> Instruction {
     let accounts = xfchess_game::__client_accounts_register_player::RegisterPlayer {
         tournament: tournament_pda().0,
         player_profile: profile_pda(&player).0,
@@ -189,11 +189,14 @@ fn register_ix(player: Pubkey, host_treasury: Pubkey, claimed_elo: u32) -> Instr
         tournament_players_shard_3: None,
         host_treasury,
         system_program: solana_system_interface::program::ID,
+        pass_binding: Pubkey::find_program_address(&[b"t_pass", &TID.to_le_bytes()], &xfchess_game::ID).0,
+        pass_mint: None,
+        player_pass_account: None,
+        token_program_2022: None,
     }
     .to_account_metas(None);
     let data = xfchess_game::instruction::RegisterPlayer {
         tournament_id: TID,
-        elo: claimed_elo,
     }
     .data();
     Instruction {
@@ -257,6 +260,10 @@ async fn registration_rating_comes_from_the_profile_not_the_caller() -> anyhow::
         .err()
         .context("a claimed rating must not bypass the ELO range")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::EloOutOfRange)));
+
+    // The instruction carries no rating, so this transaction would be byte-identical to the
+    // rejected one; a fresh blockhash keeps the bank from replaying the first result.
+    ctx.last_blockhash = ctx.get_new_latest_blockhash().await?;
 
     // A genuinely 1600-rated player enters whatever the client sends, and is
     // seeded by the real rating.

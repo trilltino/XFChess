@@ -314,6 +314,30 @@ pub enum GameErrorCode {
 
     #[msg("Swiss places must be distinct registered players in non-increasing score order.")]
     InvalidSwissPlaces,
+    #[msg("This tournament requires a pass, but the pass accounts were not supplied.")]
+    PassRequired,
+    #[msg("The supplied mint is not this tournament's pass mint.")]
+    PassMintMismatch,
+    #[msg("The player does not hold a tournament pass.")]
+    PassNotHeld,
+    #[msg("A pass mint must be a zero-decimal Token-2022 mint hooked by the xfchess_pass program.")]
+    InvalidPassMint,
+    #[msg("A pass mint must have its mint authority revoked so the supply is fixed.")]
+    PassMintAuthorityActive,
+    #[msg("A pass mint's supply must not exceed the tournament's player limit.")]
+    PassSupplyExceedsPlayers,
+    #[msg("This player's pass eligibility was revoked and cannot be refreshed.")]
+    PassEligibilityRevoked,
+    #[msg("The player's profile is not KYC-verified, so it cannot be attested for a pass.")]
+    ProfileNotVerified,
+    #[msg("The player has no current eligibility record for this tournament's pass.")]
+    PassEligibilityMissing,
+    #[msg("The pass program's config for this mint is missing or does not match this tournament.")]
+    PassConfigInvalid,
+    #[msg("The pass config's registrar is not this program's pass registrar.")]
+    PassRegistrarMismatch,
+    #[msg("The pass policy's rating range does not cover the tournament's rating range.")]
+    PassPolicyMismatch,
 }
 
 pub use GameErrorCode as XfchessGameError;
