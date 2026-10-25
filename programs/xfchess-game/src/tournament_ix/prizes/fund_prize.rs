@@ -18,6 +18,7 @@ pub struct FundUsdcPrize<'info> {
         seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
+    /// CHECK: Canonical per-tournament PDA binds the recipient token escrow ATA; no account data is read.
     pub usdc_prize_escrow_authority: UncheckedAccount<'info>,
     #[account(
         mut,

@@ -45,10 +45,7 @@ fn u32_at(data: &[u8], offset: usize) -> Option<u32> {
 }
 
 pub fn parse_config(data: &[u8]) -> Option<PassConfigView> {
-    if data.len() != CONFIG_LEN
-        || data[..8] != CONFIG_DISCRIMINATOR
-        || data[8] != CONFIG_VERSION
-    {
+    if data.len() != CONFIG_LEN || data[..8] != CONFIG_DISCRIMINATOR || data[8] != CONFIG_VERSION {
         return None;
     }
     Some(PassConfigView {
@@ -144,12 +141,7 @@ pub fn check_record(
 mod tests {
     use super::*;
 
-    fn config_bytes(
-        mint: &Pubkey,
-        registrar: &Pubkey,
-        min_elo: u32,
-        max_elo: u32,
-    ) -> Vec<u8> {
+    fn config_bytes(mint: &Pubkey, registrar: &Pubkey, min_elo: u32, max_elo: u32) -> Vec<u8> {
         let mut data = CONFIG_DISCRIMINATOR.to_vec();
         data.extend_from_slice(&[CONFIG_VERSION, 255, 254]);
         data.extend_from_slice(mint.as_ref());

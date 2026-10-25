@@ -11,9 +11,18 @@ pub fn game_seed_bytes(game_id: u64) -> [u8; 8] {
 }
 
 pub fn default_delegate_config() -> DelegateConfig {
+    // The published local stack runs this identity; the production default routes
+    // to the Delegation Program's configured validator. Keep the test override
+    // confined to localnet so a local fixture cannot alter devnet routing.
+    #[cfg(feature = "localnet")]
+    let validator = Some(anchor_lang::pubkey!(
+        "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev"
+    ));
+    #[cfg(not(feature = "localnet"))]
+    let validator = None;
     DelegateConfig {
         commit_frequency_ms: ER_COMMIT_FREQUENCY_MS,
-        validator: None,
+        validator,
     }
 }
 

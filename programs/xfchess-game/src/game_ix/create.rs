@@ -16,6 +16,7 @@ pub struct CreateGame<'info> {
     )]
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: Canonical escrow PDA receives the player-signed native SOL transfer; no account data is read.
     pub escrow_pda: UncheckedAccount<'info>,
     #[account(mut)]
     pub player: Signer<'info>,

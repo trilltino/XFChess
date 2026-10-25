@@ -27,6 +27,7 @@ pub struct InitializeTournament<'info> {
         seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
+    /// CHECK: Canonical per-tournament PDA used only as the optional token escrow ATA authority.
     pub usdc_prize_escrow_authority: UncheckedAccount<'info>,
     #[account(
         init_if_needed,

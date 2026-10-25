@@ -11,6 +11,7 @@ pub struct JoinGame<'info> {
     #[account(mut, seeds = [PROFILE_SEED, player.key().as_ref()], bump)]
     pub player_profile: Account<'info, PlayerProfile>,
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: Canonical escrow PDA receives the joining player-signed native SOL transfer; no account data is read.
     pub escrow_pda: UncheckedAccount<'info>,
     #[account(seeds = [PROFILE_SEED, game.white.as_ref()], bump)]
     pub white_profile: Account<'info, PlayerProfile>,

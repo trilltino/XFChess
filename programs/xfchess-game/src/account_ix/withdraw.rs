@@ -10,6 +10,7 @@ pub struct WithdrawExpiredWager<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: Canonical escrow PDA; retained as the native SOL account or optional token-CPI signing authority.
     pub escrow_pda: UncheckedAccount<'info>,
     #[account(mut)]
     pub player: Signer<'info>,
@@ -32,7 +33,10 @@ pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> 
     );
     require!(game.white == player, GameErrorCode::NotGameCreator);
 
-    let expiration_time = game.created_at + 86400;
+    let expiration_time = game
+        .created_at
+        .checked_add(86400)
+        .ok_or(GameErrorCode::ArithmeticOverflow)?;
     require!(
         Clock::get()?.unix_timestamp > expiration_time,
         GameErrorCode::GameNotExpired

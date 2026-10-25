@@ -18,6 +18,7 @@ pub struct LinkExternalElo<'info> {
     )]
     pub player_profile: Account<'info, PlayerProfile>,
 
+    /// CHECK: Key-only profile seed; typed profile authority is checked against this key and the linking authority signs.
     pub player: UncheckedAccount<'info>,
 
     #[account(

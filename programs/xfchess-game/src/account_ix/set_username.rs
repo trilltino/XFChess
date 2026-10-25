@@ -25,6 +25,7 @@ pub struct SetUsername<'info> {
     #[account(mut)]
     pub player: Signer<'info>,
 
+    /// CHECK: Key is constrained by the typed profile has_one; the player also signs and determines the profile PDA.
     pub authority: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
