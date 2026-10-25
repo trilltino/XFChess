@@ -41,10 +41,7 @@ pub fn handler(
     } else {
         false
     };
-    require!(
-        is_white_turn == player_color,
-        GameErrorCode::NotYourTurn
-    );
+    require!(is_white_turn == player_color, GameErrorCode::NotYourTurn);
 
     let move_index = move_log.moves.len();
     if move_index < move_log.moves.capacity() {

@@ -236,9 +236,9 @@ fn tx_has_expected_instruction(
         &[usize],
         bool,
     ) = match action_type {
-        "cancel_game" => (true, 6, Some(1), &[2], true),
+        "cancel_game" => (true, 7, Some(1), &[2], true),
         "claim_timeout" => (true, 2, None, &[1], true),
-        "finalize_game" => (true, 9, Some(5), &[3, 4, 7], false),
+        "finalize_game" => (true, 10, Some(5), &[3, 4, 7], false),
         "leave_tournament" => (false, 8, Some(6), &[5], true),
         "cancel_tournament" => (false, 14, Some(9), &[11], true),
         "claim_prize" => (false, 10, Some(5), &[7], true),

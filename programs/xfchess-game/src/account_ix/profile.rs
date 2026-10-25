@@ -10,7 +10,8 @@ use anchor_lang::Discriminator;
 #[derive(Accounts)]
 #[instruction(username: String, country: String, date_of_birth: i64)]
 pub struct InitProfile<'info> {
-    #[account(mut)]
+    /// CHECK: canonical player PDA; manual initialization supports sponsored profiles.
+    #[account(mut, seeds = [PROFILE_SEED, player.key().as_ref()], bump)]
     pub player_profile: UncheckedAccount<'info>,
 
     #[account(
@@ -141,6 +142,7 @@ pub struct VerifyProfile<'info> {
     pub player_profile: Account<'info, PlayerProfile>,
     #[account(signer, address = crate::constants::kyc_authority::ID @ crate::errors::GameErrorCode::UnauthorizedAccess)]
     pub admin: Signer<'info>,
+    /// CHECK: Key-only seed for the typed canonical profile; the pinned KYC authority must sign.
     pub player: UncheckedAccount<'info>,
 }
 

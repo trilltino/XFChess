@@ -19,6 +19,7 @@ pub struct ClaimTournamentPrize<'info> {
         seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
+    /// CHECK: Canonical per-tournament PDA signs the checked token transfer from its constrained escrow ATA.
     pub usdc_prize_escrow_authority: UncheckedAccount<'info>,
     #[account(
         mut,
@@ -40,6 +41,7 @@ pub struct ClaimTournamentPrize<'info> {
         constraint = claimant_wallet.key() == claimant.key() @ GameErrorCode::UnauthorizedAccess,
         constraint = claimant_wallet.owner == &system_program::ID @ GameErrorCode::InvalidAccountOwner
     )]
+    /// CHECK: Key equals the claimant signer and owner is constrained to System before native SOL payment.
     pub claimant_wallet: UncheckedAccount<'info>,
     pub claimant: Signer<'info>,
     #[account(address = token::ID @ GameErrorCode::UnsupportedMintExtension)]
@@ -126,7 +128,7 @@ pub fn handler(ctx: Context<ClaimTournamentPrize>, tournament_id: u64) -> Result
         }
     }
 
-    // Pay the winner’s guaranteed SOL share independently of USDC prizes.
+    // Pay the winnerâ€™s guaranteed SOL share independently of USDC prizes.
     // Entry fees do not fund this pool.
     if tournament.prize_pool > 0 {
         let sol_prize = ledger::prize_amount(tournament.prize_pool, prize_share_bps)?;

@@ -23,12 +23,15 @@ pub struct GlobalCreateGame<'info> {
 
     pub session_signer: Signer<'info>,
 
+    /// CHECK: Key is bound to the typed session player; its registered session key must sign.
     pub player: UncheckedAccount<'info>,
 
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: Canonical fresh Game PDA is allocated, assigned, funded and serialized manually from the session vault.
     pub game: UncheckedAccount<'info>,
 
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: Canonical escrow PDA receives native SOL directly from the program-owned session vault.
     pub escrow_pda: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,

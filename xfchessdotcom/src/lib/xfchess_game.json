@@ -560,6 +560,186 @@
       ]
     },
     {
+      "name": "bind_tournament_pass",
+      "docs": [
+        "Organizer-only: requires a tournament pass for every later registration. The pass must",
+        "already be initialized with this program's pass registrar and a rating policy that covers",
+        "the tournament's range."
+      ],
+      "discriminator": [
+        183,
+        203,
+        70,
+        206,
+        35,
+        3,
+        5,
+        178
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pass_binding",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  112,
+                  97,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pass_mint"
+        },
+        {
+          "name": "pass_config",
+          "docs": [
+            "in the handler."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  115,
+                  115,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pass_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                57,
+                114,
+                33,
+                190,
+                147,
+                1,
+                47,
+                76,
+                169,
+                49,
+                251,
+                160,
+                60,
+                207,
+                199,
+                47,
+                251,
+                132,
+                80,
+                157,
+                147,
+                120,
+                35,
+                120,
+                13,
+                34,
+                221,
+                66,
+                219,
+                230,
+                229,
+                216
+              ]
+            }
+          }
+        },
+        {
+          "name": "registrar",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  115,
+                  115,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "block_user",
       "discriminator": [
         10,
@@ -692,6 +872,40 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -1087,6 +1301,40 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -1725,6 +1973,151 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "wager_amount",
+          "type": "u64"
+        },
+        {
+          "name": "match_type",
+          "type": {
+            "defined": {
+              "name": "MatchType"
+            }
+          }
+        },
+        {
+          "name": "platform_fee",
+          "type": "u64"
+        },
+        {
+          "name": "base_time_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "increment_seconds",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "create_game_v2",
+      "discriminator": [
+        90,
+        76,
+        151,
+        23,
+        129,
+        67,
+        237,
+        63
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "accounts": [
+            {
+              "name": "game",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      109,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "escrow_pda",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "player",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "fee_payer",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true
         }
       ],
       "args": [
@@ -2008,6 +2401,232 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "session_key",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "create_tournament_game_v2",
+      "discriminator": [
+        92,
+        12,
+        34,
+        22,
+        171,
+        2,
+        217,
+        0
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "accounts": [
+            {
+              "name": "tournament",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      116,
+                      111,
+                      117,
+                      114,
+                      110,
+                      97,
+                      109,
+                      101,
+                      110,
+                      116
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "tournament_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "tournament_players_shard_0"
+            },
+            {
+              "name": "tournament_players_shard_1",
+              "optional": true
+            },
+            {
+              "name": "tournament_players_shard_2",
+              "optional": true
+            },
+            {
+              "name": "tournament_players_shard_3",
+              "optional": true
+            },
+            {
+              "name": "game",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      109,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "white_session",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110,
+                      95,
+                      100,
+                      101,
+                      108,
+                      101,
+                      103,
+                      97,
+                      116,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "white"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "black_session",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110,
+                      95,
+                      100,
+                      101,
+                      108,
+                      101,
+                      103,
+                      97,
+                      116,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "black"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "white"
+            },
+            {
+              "name": "black"
+            },
+            {
+              "name": "authority",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true
         }
       ],
       "args": [
@@ -2092,6 +2711,95 @@
           "name": "fee_payer",
           "writable": true,
           "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "valid_until",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "delegate_game_v2",
+      "discriminator": [
+        153,
+        86,
+        166,
+        7,
+        54,
+        22,
+        81,
+        68
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "accounts": [
+            {
+              "name": "game",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      109,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "_game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "payer",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "owner_program",
+              "address": "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+            },
+            {
+              "name": "buffer",
+              "writable": true
+            },
+            {
+              "name": "delegation_record",
+              "writable": true
+            },
+            {
+              "name": "delegation_metadata",
+              "writable": true
+            },
+            {
+              "name": "delegation_program",
+              "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            },
+            {
+              "name": "fee_payer",
+              "writable": true,
+              "signer": true
+            }
+          ]
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true
         }
       ],
       "args": [
@@ -2419,6 +3127,40 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -2880,6 +3622,179 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "wager_amount",
+          "type": "u64"
+        },
+        {
+          "name": "match_type",
+          "type": {
+            "defined": {
+              "name": "MatchType"
+            }
+          }
+        },
+        {
+          "name": "platform_fee",
+          "type": "u64"
+        },
+        {
+          "name": "base_time_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "increment_seconds",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "global_create_game_v2",
+      "discriminator": [
+        221,
+        180,
+        136,
+        99,
+        4,
+        164,
+        8,
+        16
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "accounts": [
+            {
+              "name": "session_delegation",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      108,
+                      111,
+                      98,
+                      97,
+                      108,
+                      95,
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "player"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "session_signer",
+              "signer": true
+            },
+            {
+              "name": "player"
+            },
+            {
+              "name": "game",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      109,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "escrow_pda",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true
         }
       ],
       "args": [
@@ -3058,6 +3973,202 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "global_join_game_v2",
+      "discriminator": [
+        246,
+        214,
+        214,
+        60,
+        136,
+        35,
+        220,
+        15
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "accounts": [
+            {
+              "name": "session_delegation",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      108,
+                      111,
+                      98,
+                      97,
+                      108,
+                      95,
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "player"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "session_signer",
+              "signer": true
+            },
+            {
+              "name": "player"
+            },
+            {
+              "name": "game",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      109,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "player_profile",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      112,
+                      114,
+                      111,
+                      102,
+                      105,
+                      108,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "player"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "white_profile",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      112,
+                      114,
+                      111,
+                      102,
+                      105,
+                      108,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "game.white",
+                    "account": "Game"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "escrow_pda",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true
         }
       ],
       "args": [
@@ -3193,7 +4304,27 @@
       "accounts": [
         {
           "name": "player_profile",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
         },
         {
           "name": "username_record",
@@ -3946,6 +5077,283 @@
       ]
     },
     {
+      "name": "issue_pass_eligibility",
+      "docs": [
+        "Attests the player's profile rating to the tournament's pass program by CPI, issuing or",
+        "refreshing their eligibility so a pass can be transferred to them. Anyone may call it."
+      ],
+      "discriminator": [
+        154,
+        29,
+        92,
+        90,
+        228,
+        30,
+        57,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pass_binding",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  112,
+                  97,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "player_profile",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pass_mint"
+        },
+        {
+          "name": "pass_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  115,
+                  115,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pass_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                57,
+                114,
+                33,
+                190,
+                147,
+                1,
+                47,
+                76,
+                169,
+                49,
+                251,
+                160,
+                60,
+                207,
+                199,
+                47,
+                251,
+                132,
+                80,
+                157,
+                147,
+                120,
+                35,
+                120,
+                13,
+                34,
+                221,
+                66,
+                219,
+                230,
+                229,
+                216
+              ]
+            }
+          }
+        },
+        {
+          "name": "eligibility_record",
+          "docs": [
+            "the pass program."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  108,
+                  105,
+                  103,
+                  105,
+                  98,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pass_mint"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                57,
+                114,
+                33,
+                190,
+                147,
+                1,
+                47,
+                76,
+                169,
+                49,
+                251,
+                160,
+                60,
+                207,
+                199,
+                47,
+                251,
+                132,
+                80,
+                157,
+                147,
+                120,
+                35,
+                120,
+                13,
+                34,
+                221,
+                66,
+                219,
+                230,
+                229,
+                216
+              ]
+            }
+          }
+        },
+        {
+          "name": "registrar",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  115,
+                  115,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pass_program",
+          "address": "4sFBJCjU3QvoWZCfxdHJcGBCPjToTy2BzNK23wmRPaw9"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "join_game",
       "discriminator": [
         107,
@@ -4063,6 +5471,175 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "join_game_v2",
+      "discriminator": [
+        219,
+        31,
+        158,
+        109,
+        47,
+        39,
+        23,
+        148
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "accounts": [
+            {
+              "name": "game",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      109,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "player_profile",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      112,
+                      114,
+                      111,
+                      102,
+                      105,
+                      108,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "player"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "escrow_pda",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "white_profile",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      112,
+                      114,
+                      111,
+                      102,
+                      105,
+                      108,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "game.white",
+                    "account": "Game"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "player",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "fee_payer",
+              "writable": true,
+              "signer": true
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true
         }
       ],
       "args": [
@@ -4340,14 +5917,82 @@
           "writable": true
         },
         {
-          "name": "buffer"
+          "name": "buffer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101,
+                  45,
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "base_account"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                181,
+                183,
+                0,
+                225,
+                242,
+                87,
+                58,
+                192,
+                204,
+                6,
+                34,
+                1,
+                52,
+                74,
+                207,
+                151,
+                184,
+                53,
+                6,
+                235,
+                140,
+                229,
+                25,
+                152,
+                204,
+                98,
+                126,
+                24,
+                147,
+                128,
+                167,
+                62
+              ]
+            }
+          }
         },
         {
           "name": "payer",
           "writable": true
         },
         {
-          "name": "system_program"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -4773,7 +6418,129 @@
       ]
     },
     {
+      "name": "recover_stuck_delegation_v2",
+      "discriminator": [
+        0,
+        193,
+        81,
+        209,
+        144,
+        152,
+        100,
+        131
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "accounts": [
+            {
+              "name": "game",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      109,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "escrow_pda",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "treasury_vault",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      116,
+                      114,
+                      101,
+                      97,
+                      115,
+                      117,
+                      114,
+                      121,
+                      95,
+                      118,
+                      97,
+                      117,
+                      108,
+                      116
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "white_authority",
+              "writable": true
+            },
+            {
+              "name": "black_authority",
+              "writable": true
+            },
+            {
+              "name": "dispute_authority",
+              "signer": true
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "register_player",
+      "docs": [
+        "Registers the signer. The rating is read from the signer's `PlayerProfile`; when the",
+        "tournament has a pass binding, one pass is burned as the ticket and the signer's unrevoked",
+        "pass eligibility record must be the first remaining account."
+      ],
       "discriminator": [
         242,
         146,
@@ -4891,16 +6658,55 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "pass_binding",
+          "docs": [
+            "the organizer bound a pass mint to this tournament; `load_pass_binding` checks the rest."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  112,
+                  97,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pass_mint",
+          "docs": [
+            "Required only for tournaments with a pass binding; checked against it in the handler."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "player_pass_account",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program_2022",
+          "optional": true,
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
         }
       ],
       "args": [
         {
           "name": "tournament_id",
           "type": "u64"
-        },
-        {
-          "name": "elo",
-          "type": "u32"
         }
       ]
     },
@@ -5144,6 +6950,40 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -5214,6 +7054,253 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "revoke_pass_eligibility",
+      "docs": [
+        "Organizer-only: revokes a player's pass eligibility through the registrar PDA, so the",
+        "pass can no longer be transferred to them, and a pass they already hold can no longer be",
+        "redeemed to register. A revoked record is never refreshed."
+      ],
+      "discriminator": [
+        133,
+        120,
+        26,
+        101,
+        140,
+        187,
+        12,
+        81
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pass_binding",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  112,
+                  97,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "pass_mint"
+        },
+        {
+          "name": "pass_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  115,
+                  115,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pass_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                57,
+                114,
+                33,
+                190,
+                147,
+                1,
+                47,
+                76,
+                169,
+                49,
+                251,
+                160,
+                60,
+                207,
+                199,
+                47,
+                251,
+                132,
+                80,
+                157,
+                147,
+                120,
+                35,
+                120,
+                13,
+                34,
+                221,
+                66,
+                219,
+                230,
+                229,
+                216
+              ]
+            }
+          }
+        },
+        {
+          "name": "eligibility_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  108,
+                  105,
+                  103,
+                  105,
+                  98,
+                  105,
+                  108,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pass_mint"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                57,
+                114,
+                33,
+                190,
+                147,
+                1,
+                47,
+                76,
+                169,
+                49,
+                251,
+                160,
+                60,
+                207,
+                199,
+                47,
+                251,
+                132,
+                80,
+                157,
+                147,
+                120,
+                35,
+                120,
+                13,
+                34,
+                221,
+                66,
+                219,
+                230,
+                229,
+                216
+              ]
+            }
+          }
+        },
+        {
+          "name": "registrar",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  115,
+                  115,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "pass_program",
+          "address": "4sFBJCjU3QvoWZCfxdHJcGBCPjToTy2BzNK23wmRPaw9"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "revoke_session",
@@ -5709,6 +7796,232 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "wager_amount",
+          "type": "u64"
+        },
+        {
+          "name": "match_type",
+          "type": {
+            "defined": {
+              "name": "MatchType"
+            }
+          }
+        },
+        {
+          "name": "platform_fee",
+          "type": "u64"
+        },
+        {
+          "name": "base_time_seconds",
+          "type": "u64"
+        },
+        {
+          "name": "increment_seconds",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "session_create_game_v2",
+      "discriminator": [
+        99,
+        127,
+        39,
+        41,
+        19,
+        179,
+        141,
+        191
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "accounts": [
+            {
+              "name": "tournament",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      116,
+                      111,
+                      117,
+                      114,
+                      110,
+                      97,
+                      109,
+                      101,
+                      110,
+                      116
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "tournament_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "tournament_players_shard_0"
+            },
+            {
+              "name": "tournament_players_shard_1",
+              "optional": true
+            },
+            {
+              "name": "tournament_players_shard_2",
+              "optional": true
+            },
+            {
+              "name": "tournament_players_shard_3",
+              "optional": true
+            },
+            {
+              "name": "session_delegation",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      116,
+                      111,
+                      117,
+                      114,
+                      110,
+                      97,
+                      109,
+                      101,
+                      110,
+                      116,
+                      95,
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "tournament_id"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "player"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "session_signer",
+              "signer": true
+            },
+            {
+              "name": "player"
+            },
+            {
+              "name": "game",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      109,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "escrow_pda",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true
         }
       ],
       "args": [
@@ -5940,6 +8253,39 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "recovery_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -5950,6 +8296,401 @@
         {
           "name": "game_id",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "session_join_game_v2",
+      "discriminator": [
+        77,
+        80,
+        155,
+        208,
+        124,
+        135,
+        232,
+        214
+      ],
+      "accounts": [
+        {
+          "name": "legacy",
+          "accounts": [
+            {
+              "name": "tournament",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      116,
+                      111,
+                      117,
+                      114,
+                      110,
+                      97,
+                      109,
+                      101,
+                      110,
+                      116
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "tournament_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "tournament_players_shard_0"
+            },
+            {
+              "name": "tournament_players_shard_1",
+              "optional": true
+            },
+            {
+              "name": "tournament_players_shard_2",
+              "optional": true
+            },
+            {
+              "name": "tournament_players_shard_3",
+              "optional": true
+            },
+            {
+              "name": "session_delegation",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      116,
+                      111,
+                      117,
+                      114,
+                      110,
+                      97,
+                      109,
+                      101,
+                      110,
+                      116,
+                      95,
+                      115,
+                      101,
+                      115,
+                      115,
+                      105,
+                      111,
+                      110
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "tournament_id"
+                  },
+                  {
+                    "kind": "account",
+                    "path": "player"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "session_signer",
+              "signer": true
+            },
+            {
+              "name": "player"
+            },
+            {
+              "name": "game",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      103,
+                      97,
+                      109,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "escrow_pda",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      101,
+                      115,
+                      99,
+                      114,
+                      111,
+                      119
+                    ]
+                  },
+                  {
+                    "kind": "arg",
+                    "path": "game_id"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "white_profile",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      112,
+                      114,
+                      111,
+                      102,
+                      105,
+                      108,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "game.white",
+                    "account": "Game"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "player_profile",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      112,
+                      114,
+                      111,
+                      102,
+                      105,
+                      108,
+                      101
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "player"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_pass_paused",
+      "docs": [
+        "Organizer-only: pauses or resumes every transfer of the tournament's pass through the",
+        "registrar PDA. Redemption by registering is not affected."
+      ],
+      "discriminator": [
+        168,
+        121,
+        79,
+        106,
+        182,
+        88,
+        68,
+        107
+      ],
+      "accounts": [
+        {
+          "name": "tournament",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  117,
+                  114,
+                  110,
+                  97,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pass_binding",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  95,
+                  112,
+                  97,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "tournament_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pass_mint"
+        },
+        {
+          "name": "pass_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  115,
+                  115,
+                  45,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pass_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                57,
+                114,
+                33,
+                190,
+                147,
+                1,
+                47,
+                76,
+                169,
+                49,
+                251,
+                160,
+                60,
+                207,
+                199,
+                47,
+                251,
+                132,
+                80,
+                157,
+                147,
+                120,
+                35,
+                120,
+                13,
+                34,
+                221,
+                66,
+                219,
+                230,
+                229,
+                216
+              ]
+            }
+          }
+        },
+        {
+          "name": "registrar",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  115,
+                  115,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  97,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "pass_program",
+          "address": "4sFBJCjU3QvoWZCfxdHJcGBCPjToTy2BzNK23wmRPaw9"
+        }
+      ],
+      "args": [
+        {
+          "name": "tournament_id",
+          "type": "u64"
+        },
+        {
+          "name": "is_paused",
+          "type": "bool"
         }
       ]
     },
@@ -6429,6 +9170,40 @@
           "name": "token_program",
           "optional": true,
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "recovery_identity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121,
+                  95,
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -6659,6 +9434,19 @@
       ]
     },
     {
+      "name": "RecoveryIdentity",
+      "discriminator": [
+        254,
+        96,
+        191,
+        47,
+        223,
+        28,
+        151,
+        47
+      ]
+    },
+    {
       "name": "SessionDelegation",
       "discriminator": [
         22,
@@ -6711,6 +9499,19 @@
       ]
     },
     {
+      "name": "TournamentPassBinding",
+      "discriminator": [
+        194,
+        2,
+        121,
+        118,
+        0,
+        113,
+        104,
+        60
+      ]
+    },
+    {
       "name": "TournamentPlayersShard",
       "discriminator": [
         173,
@@ -6750,9 +9551,2101 @@
       ]
     }
   ],
-  "events": [
+  "types": [
+    {
+      "name": "AuthorizeGlobalSessionArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "duration_secs",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "spending_limit",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "max_wager",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "games",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "deposit_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorizeTournamentSessionArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "duration_secs",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "spending_limit",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "max_wager",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "deposit_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CancelTimeCheckArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "task_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CrankTimeCheckData",
+      "type": {
+        "kind": "struct",
+        "fields": []
+      }
+    },
+    {
+      "name": "DisputeRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "challenger",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "name": "evidence_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "DisputeStatus"
+              }
+            }
+          },
+          {
+            "name": "resolved_by",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "resolution",
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "resolved_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "bond_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DisputeStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Resolved"
+          },
+          {
+            "name": "Dismissed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FriendStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Accepted"
+          },
+          {
+            "name": "Blocked"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Friendship",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "requester",
+            "type": "pubkey"
+          },
+          {
+            "name": "addressee",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "FriendStatus"
+              }
+            }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "accepted_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Game",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "white",
+            "type": "pubkey"
+          },
+          {
+            "name": "black",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "GameStatus"
+              }
+            }
+          },
+          {
+            "name": "last_move_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "fees_advanced",
+            "type": "u64"
+          },
+          {
+            "name": "fee_payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "result",
+            "type": {
+              "defined": {
+                "name": "GameResult"
+              }
+            }
+          },
+          {
+            "name": "board_state",
+            "type": {
+              "array": [
+                "u8",
+                68
+              ]
+            }
+          },
+          {
+            "name": "move_count",
+            "type": "u16"
+          },
+          {
+            "name": "halfmove_clock",
+            "type": "u16"
+          },
+          {
+            "name": "turn",
+            "type": "u16"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "wager_amount",
+            "type": "u64"
+          },
+          {
+            "name": "wager_token",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "game_type",
+            "type": {
+              "defined": {
+                "name": "GameType"
+              }
+            }
+          },
+          {
+            "name": "match_type",
+            "type": {
+              "defined": {
+                "name": "MatchType"
+              }
+            }
+          },
+          {
+            "name": "country_fee",
+            "type": "u64"
+          },
+          {
+            "name": "base_time_seconds",
+            "type": "u64"
+          },
+          {
+            "name": "increment_seconds",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "is_delegated",
+            "type": "bool"
+          },
+          {
+            "name": "tournament_id",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "draw_offered_by",
+            "type": {
+              "option": "pubkey"
+            }
+          }
+        ]
+      }
+    },
     {
       "name": "GameCancelled",
+      "type": {
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "white",
+            "type": "pubkey"
+          },
+          {
+            "name": "black",
+            "type": "pubkey"
+          },
+          {
+            "name": "wager_amount",
+            "type": "u64"
+          },
+          {
+            "name": "black_has_joined",
+            "type": "bool"
+          },
+          {
+            "name": "already_cancelled",
+            "type": "bool"
+          },
+          {
+            "name": "refunded_white",
+            "type": "bool"
+          },
+          {
+            "name": "refunded_black",
+            "type": "bool"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "GameCancelledSettlement",
+      "type": {
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "white",
+            "type": "pubkey"
+          },
+          {
+            "name": "black",
+            "type": "pubkey"
+          },
+          {
+            "name": "wager_amount",
+            "type": "u64"
+          },
+          {
+            "name": "refunded_white",
+            "type": "bool"
+          },
+          {
+            "name": "refunded_black",
+            "type": "bool"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "GameFinalized",
+      "type": {
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "white",
+            "type": "pubkey"
+          },
+          {
+            "name": "black",
+            "type": "pubkey"
+          },
+          {
+            "name": "winner",
+            "type": "pubkey"
+          },
+          {
+            "name": "result_code",
+            "type": "u8"
+          },
+          {
+            "name": "wager_amount",
+            "type": "u64"
+          },
+          {
+            "name": "country_fee",
+            "type": "u64"
+          },
+          {
+            "name": "fees_advanced",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "GameResult",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Winner",
+            "fields": [
+              "pubkey"
+            ]
+          },
+          {
+            "name": "Draw"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "WaitingForOpponent"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Inactive"
+          },
+          {
+            "name": "Disputed"
+          },
+          {
+            "name": "Finished"
+          },
+          {
+            "name": "Settled"
+          },
+          {
+            "name": "Expired"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "PvP"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GlobalSessionDelegation",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "spending_limit",
+            "type": "u64"
+          },
+          {
+            "name": "total_spent",
+            "type": "u64"
+          },
+          {
+            "name": "max_wager",
+            "type": "u64"
+          },
+          {
+            "name": "games_remaining",
+            "type": "u16"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "InitializeConfigArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "treasury_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "vps_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "dispute_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "link_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "kyc_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_wager_amount",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "min_wager_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "max_platform_fee_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "er_session_fee_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "dispute_bond_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "dispute_ttl_secs",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "crank_max_slot_delay",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "crank_max_seconds_early",
+            "type": {
+              "option": "i64"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LichessUsernameRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MatchStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Completed"
+          },
+          {
+            "name": "Bye"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MatchType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Free"
+          },
+          {
+            "name": "Rated"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MoveEvent",
+      "type": {
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "move_uci",
+            "type": {
+              "array": [
+                "u8",
+                5
+              ]
+            }
+          },
+          {
+            "name": "move_number",
+            "type": "u16"
+          },
+          {
+            "name": "board_state",
+            "type": {
+              "array": [
+                "u8",
+                68
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "PayoutType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "LumpSum"
+          },
+          {
+            "name": "StreamingLinear"
+          },
+          {
+            "name": "StreamingCliff"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerProfile",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "country",
+            "type": "string"
+          },
+          {
+            "name": "wins",
+            "type": "u32"
+          },
+          {
+            "name": "losses",
+            "type": "u32"
+          },
+          {
+            "name": "draws",
+            "type": "u32"
+          },
+          {
+            "name": "games_played",
+            "type": "u32"
+          },
+          {
+            "name": "elo_rating",
+            "type": "f64"
+          },
+          {
+            "name": "rd",
+            "type": "f64"
+          },
+          {
+            "name": "volatility",
+            "type": "f64"
+          },
+          {
+            "name": "last_played",
+            "type": "i64"
+          },
+          {
+            "name": "win_streak",
+            "type": "u32"
+          },
+          {
+            "name": "best_streak",
+            "type": "u32"
+          },
+          {
+            "name": "tournament_wins",
+            "type": "u32"
+          },
+          {
+            "name": "ranked_games",
+            "type": "u32"
+          },
+          {
+            "name": "total_wagered",
+            "type": "u64"
+          },
+          {
+            "name": "total_won",
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "last_game_at",
+            "type": "i64"
+          },
+          {
+            "name": "date_of_birth",
+            "type": "i64"
+          },
+          {
+            "name": "is_verified",
+            "type": "bool"
+          },
+          {
+            "name": "annual_wins_gbp",
+            "type": "u64"
+          },
+          {
+            "name": "annual_wins_brl",
+            "type": "u64"
+          },
+          {
+            "name": "annual_wins_cad",
+            "type": "u64"
+          },
+          {
+            "name": "annual_wins_eur",
+            "type": "u64"
+          },
+          {
+            "name": "username",
+            "type": "string"
+          },
+          {
+            "name": "username_set",
+            "type": "bool"
+          },
+          {
+            "name": "lichess_username",
+            "type": "string"
+          },
+          {
+            "name": "lichess_verified",
+            "type": "bool"
+          },
+          {
+            "name": "lichess_blitz",
+            "type": "u32"
+          },
+          {
+            "name": "lichess_rapid",
+            "type": "u32"
+          },
+          {
+            "name": "lichess_bullet",
+            "type": "u32"
+          },
+          {
+            "name": "lichess_last_sync",
+            "type": "i64"
+          },
+          {
+            "name": "external_elo_source",
+            "type": "u8"
+          },
+          {
+            "name": "seeded_from_external",
+            "type": "bool"
+          },
+          {
+            "name": "elo_bullet",
+            "type": "f64"
+          },
+          {
+            "name": "elo_blitz",
+            "type": "f64"
+          },
+          {
+            "name": "elo_rapid",
+            "type": "f64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerSession",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "spending_limit",
+            "type": "u64"
+          },
+          {
+            "name": "total_spent",
+            "type": "u64"
+          },
+          {
+            "name": "max_wager",
+            "type": "u64"
+          },
+          {
+            "name": "can_create_games",
+            "type": "bool"
+          },
+          {
+            "name": "can_join_games",
+            "type": "bool"
+          },
+          {
+            "name": "can_claim_prizes",
+            "type": "bool"
+          },
+          {
+            "name": "games_played",
+            "type": "u32"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "Super-admin authority that can update this config."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury_authority",
+            "docs": [
+              "Recipient of platform fees and host treasury."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "vps_authority",
+            "docs": [
+              "Automated crank / time check authority."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "dispute_authority",
+            "docs": [
+              "Arbiter for resolving disputed games."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "link_authority",
+            "docs": [
+              "Signer for external rating / ELO link proofs."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "kyc_authority",
+            "docs": [
+              "KYC / CACF verification authority."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "max_wager_amount",
+            "docs": [
+              "Maximum allowed wager in lamports (e.g. 10 SOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_wager_lamports",
+            "docs": [
+              "Minimum allowed wager in lamports (e.g. 0.001 SOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_platform_fee_lamports",
+            "docs": [
+              "Maximum platform fee in lamports (e.g. 1 SOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "er_session_fee_lamports",
+            "docs": [
+              "MagicBlock / Ephemeral Rollup session fee in lamports."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "dispute_bond_lamports",
+            "docs": [
+              "Bond required to initiate a game dispute in lamports."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "dispute_ttl_secs",
+            "docs": [
+              "Time-to-live for open disputes before expiration in seconds."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "crank_max_slot_delay",
+            "docs": [
+              "Maximum slot lag tolerated for crank time checks."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "crank_max_seconds_early",
+            "docs": [
+              "Allowed clock jitter for early crank triggers in seconds."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for PDA derivation."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved space for zero-migration additions."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RecoveryIdentity",
+      "docs": [
+        "Permanent seat and wager binding. Never delegated, reassigned, or closed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "white",
+            "type": "pubkey"
+          },
+          {
+            "name": "black",
+            "type": "pubkey"
+          },
+          {
+            "name": "wager_amount",
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "RecoveryStatus"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RecoveryStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Waiting"
+          },
+          {
+            "name": "Ready"
+          },
+          {
+            "name": "Delegated"
+          },
+          {
+            "name": "Closed"
+          },
+          {
+            "name": "Recovered"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScheduleTimeCheckArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "task_id",
+            "type": "u64"
+          },
+          {
+            "name": "check_interval_millis",
+            "type": "u64"
+          },
+          {
+            "name": "iterations",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionDelegation",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "max_batch_len",
+            "type": "u16"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StuckDelegationRecovered",
+      "type": {
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "dispute_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "white_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "black_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "white_share",
+            "type": "u64"
+          },
+          {
+            "name": "black_share",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "SwissMatchResult",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "WhiteWin"
+          },
+          {
+            "name": "BlackWin"
+          },
+          {
+            "name": "Draw"
+          },
+          {
+            "name": "Bye"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwissStanding",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "score",
+            "type": "u8"
+          },
+          {
+            "name": "buchholz",
+            "type": "u16"
+          },
+          {
+            "name": "sonneborn",
+            "type": "u16"
+          },
+          {
+            "name": "color_balance",
+            "type": "i8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TimeoutClaimed",
+      "type": {
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "caller",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          },
+          {
+            "name": "winner",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Tournament",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "entry_fee",
+            "type": "u64"
+          },
+          {
+            "name": "platform_fee",
+            "type": "u64"
+          },
+          {
+            "name": "prize_pool",
+            "type": "u64"
+          },
+          {
+            "name": "max_players",
+            "type": "u16"
+          },
+          {
+            "name": "player_count",
+            "type": "u16"
+          },
+          {
+            "name": "num_registered_players",
+            "type": "u16"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "TournamentStatus"
+              }
+            }
+          },
+          {
+            "name": "start_time",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "end_time",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "fees_advanced",
+            "type": "u64"
+          },
+          {
+            "name": "fee_payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "tournament_type",
+            "type": {
+              "defined": {
+                "name": "TournamentType"
+              }
+            }
+          },
+          {
+            "name": "current_round",
+            "type": "u8"
+          },
+          {
+            "name": "total_rounds",
+            "type": "u8"
+          },
+          {
+            "name": "total_matches",
+            "type": "u16"
+          },
+          {
+            "name": "final_match_index",
+            "type": "u16"
+          },
+          {
+            "name": "elo_min",
+            "type": "u32"
+          },
+          {
+            "name": "elo_max",
+            "type": "u32"
+          },
+          {
+            "name": "min_players",
+            "type": "u16"
+          },
+          {
+            "name": "winner",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "second_place",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "third_place",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "fourth_place",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "fifth_place",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "sixth_place",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "seventh_place",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "eighth_place",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "ninth_place",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "tenth_place",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "prize_shares",
+            "type": {
+              "array": [
+                "u16",
+                10
+              ]
+            }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "started_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "completed_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "prizes_claimed",
+            "type": "u16"
+          },
+          {
+            "name": "platform_fee_pool",
+            "type": "u64"
+          },
+          {
+            "name": "usdc_prize_mint",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "usdc_prize_pool",
+            "type": "u64"
+          },
+          {
+            "name": "usdc_prize_funded",
+            "type": "bool"
+          },
+          {
+            "name": "host_treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "prize_token_mint",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "payout_type",
+            "type": {
+              "defined": {
+                "name": "PayoutType"
+              }
+            }
+          },
+          {
+            "name": "vesting_params",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "VestingParams"
+                }
+              }
+            }
+          },
+          {
+            "name": "base_time_seconds",
+            "type": "u64"
+          },
+          {
+            "name": "increment_seconds",
+            "type": "u16"
+          },
+          {
+            "name": "winner_takes_all",
+            "type": "bool"
+          },
+          {
+            "name": "round_boards_reported",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentCancelled",
+      "type": {
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "registered_players",
+            "type": "u32"
+          },
+          {
+            "name": "refund_amount_per_player",
+            "type": "u64"
+          },
+          {
+            "name": "sol_guarantee_returned",
+            "type": "u64"
+          },
+          {
+            "name": "usdc_prize_returned",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "TournamentEscrow",
+      "type": {
+        "kind": "struct",
+        "fields": []
+      }
+    },
+    {
+      "name": "TournamentLeft",
+      "type": {
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "refund_amount",
+            "type": "u64"
+          },
+          {
+            "name": "registered_players_after",
+            "type": "u16"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "TournamentMatch",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "match_index",
+            "type": "u16"
+          },
+          {
+            "name": "round",
+            "type": "u8"
+          },
+          {
+            "name": "player_white",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "player_black",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "winner",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "game_pda",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "game_id",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "MatchStatus"
+              }
+            }
+          },
+          {
+            "name": "next_match_for_winner",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "next_match_slot",
+            "type": "u8"
+          },
+          {
+            "name": "started_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "completed_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentPassBinding",
+      "docs": [
+        "Ties one tournament to its pass mint. A separate account keeps the deployed `Tournament`",
+        "layout unchanged. An empty, system-owned binding address means the tournament needs no pass."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "pass_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentPlayersShard",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "shard_id",
+            "type": "u8"
+          },
+          {
+            "name": "players",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "player_elos",
+            "type": {
+              "vec": "u32"
+            }
+          },
+          {
+            "name": "swiss_standings",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "SwissStanding"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentSessionDelegation",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tournament_id",
+            "type": "u64"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "spending_limit",
+            "type": "u64"
+          },
+          {
+            "name": "total_spent",
+            "type": "u64"
+          },
+          {
+            "name": "max_wager",
+            "type": "u64"
+          },
+          {
+            "name": "games_played",
+            "type": "u32"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Registration"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Completed"
+          },
+          {
+            "name": "Closed"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TournamentType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Swiss",
+            "fields": [
+              {
+                "name": "rounds",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "SingleElimination"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TreasuryWithdrawn",
+      "type": {
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "remaining",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "UpdateConfigArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "new_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "new_treasury_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "new_vps_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "new_dispute_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "new_link_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "new_kyc_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "new_max_wager_amount",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "new_min_wager_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "new_max_platform_fee_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "new_er_session_fee_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "new_dispute_bond_lamports",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "new_dispute_ttl_secs",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "new_crank_max_slot_delay",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "new_crank_max_seconds_early",
+            "type": {
+              "option": "i64"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "UsernameRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VestingParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "start_time",
+            "type": "i64"
+          },
+          {
+            "name": "duration_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "cliff_seconds",
+            "type": {
+              "option": "i64"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "events": [
+    {
       "discriminator": [
         113,
         20,
@@ -6762,10 +11655,10 @@
         35,
         9,
         241
-      ]
+      ],
+      "name": "GameCancelled"
     },
     {
-      "name": "GameCancelledSettlement",
       "discriminator": [
         222,
         224,
@@ -6775,10 +11668,10 @@
         37,
         201,
         110
-      ]
+      ],
+      "name": "GameCancelledSettlement"
     },
     {
-      "name": "GameFinalized",
       "discriminator": [
         29,
         161,
@@ -6788,10 +11681,10 @@
         34,
         220,
         48
-      ]
+      ],
+      "name": "GameFinalized"
     },
     {
-      "name": "MoveEvent",
       "discriminator": [
         121,
         74,
@@ -6801,10 +11694,10 @@
         193,
         169,
         237
-      ]
+      ],
+      "name": "MoveEvent"
     },
     {
-      "name": "StuckDelegationRecovered",
       "discriminator": [
         213,
         196,
@@ -6814,10 +11707,10 @@
         217,
         193,
         174
-      ]
+      ],
+      "name": "StuckDelegationRecovered"
     },
     {
-      "name": "TimeoutClaimed",
       "discriminator": [
         144,
         121,
@@ -6827,10 +11720,10 @@
         115,
         135,
         218
-      ]
+      ],
+      "name": "TimeoutClaimed"
     },
     {
-      "name": "TournamentCancelled",
       "discriminator": [
         118,
         92,
@@ -6840,10 +11733,10 @@
         72,
         81,
         120
-      ]
+      ],
+      "name": "TournamentCancelled"
     },
     {
-      "name": "TournamentLeft",
       "discriminator": [
         90,
         58,
@@ -6853,10 +11746,10 @@
         238,
         28,
         249
-      ]
+      ],
+      "name": "TournamentLeft"
     },
     {
-      "name": "TreasuryWithdrawn",
       "discriminator": [
         143,
         181,
@@ -6866,7 +11759,55 @@
         155,
         170,
         46
-      ]
+      ],
+      "name": "TreasuryWithdrawn"
+    }
+  ],
+  "constants": [
+    {
+      "name": "CONFIG_SEED",
+      "type": "bytes",
+      "value": "[99, 111, 110, 102, 105, 103]"
+    },
+    {
+      "name": "FRIENDSHIP_SEED",
+      "type": "bytes",
+      "value": "[102, 114, 105, 101, 110, 100, 115, 104, 105, 112]"
+    },
+    {
+      "name": "GAME_SEED",
+      "type": "bytes",
+      "value": "[103, 97, 109, 101]"
+    },
+    {
+      "name": "LICHESS_USERNAME_SEED",
+      "type": "bytes",
+      "value": "[108, 105, 99, 104, 101, 115, 115, 95, 117, 115, 101, 114, 110, 97, 109, 101]"
+    },
+    {
+      "name": "MOVE_LOG_SEED",
+      "type": "bytes",
+      "value": "[109, 111, 118, 101, 95, 108, 111, 103]"
+    },
+    {
+      "name": "PROFILE_SEED",
+      "type": "bytes",
+      "value": "[112, 114, 111, 102, 105, 108, 101]"
+    },
+    {
+      "name": "SESSION_DELEGATION_SEED",
+      "type": "bytes",
+      "value": "[115, 101, 115, 115, 105, 111, 110, 95, 100, 101, 108, 101, 103, 97, 116, 105, 111, 110]"
+    },
+    {
+      "name": "USERNAME_SEED",
+      "type": "bytes",
+      "value": "[117, 115, 101, 114, 110, 97, 109, 101]"
+    },
+    {
+      "name": "WAGER_ESCROW_SEED",
+      "type": "bytes",
+      "value": "[101, 115, 99, 114, 111, 119]"
     }
   ],
   "errors": [
@@ -7393,12 +12334,12 @@
     {
       "code": 6104,
       "name": "CrankTooEarly",
-      "msg": "Crank call arrived too early — game's inactivity window has not elapsed yet."
+      "msg": "Crank call arrived too early \u2014 game's inactivity window has not elapsed yet."
     },
     {
       "code": 6105,
       "name": "CrankTooLate",
-      "msg": "Crank call arrived too late — exceeded maximum slot delay from last update."
+      "msg": "Crank call arrived too late \u2014 exceeded maximum slot delay from last update."
     },
     {
       "code": 6106,
@@ -7429,2060 +12370,76 @@
       "code": 6111,
       "name": "InvalidSwissPlaces",
       "msg": "Swiss places must be distinct registered players in non-increasing score order."
-    }
-  ],
-  "types": [
-    {
-      "name": "AuthorizeGlobalSessionArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "session_key",
-            "type": "pubkey"
-          },
-          {
-            "name": "duration_secs",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "spending_limit",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "max_wager",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "games",
-            "type": {
-              "option": "u16"
-            }
-          },
-          {
-            "name": "deposit_lamports",
-            "type": "u64"
-          }
-        ]
-      }
     },
     {
-      "name": "AuthorizeTournamentSessionArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "session_key",
-            "type": "pubkey"
-          },
-          {
-            "name": "duration_secs",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "spending_limit",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "max_wager",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "deposit_lamports",
-            "type": "u64"
-          }
-        ]
-      }
+      "code": 6112,
+      "name": "PassRequired",
+      "msg": "This tournament requires a pass, but the pass accounts were not supplied."
     },
     {
-      "name": "CancelTimeCheckArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "task_id",
-            "type": "u64"
-          }
-        ]
-      }
+      "code": 6113,
+      "name": "PassMintMismatch",
+      "msg": "The supplied mint is not this tournament's pass mint."
     },
     {
-      "name": "CrankTimeCheckData",
-      "type": {
-        "kind": "struct",
-        "fields": []
-      }
+      "code": 6114,
+      "name": "PassNotHeld",
+      "msg": "The player does not hold a tournament pass."
     },
     {
-      "name": "DisputeRecord",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "game_id",
-            "type": "u64"
-          },
-          {
-            "name": "challenger",
-            "type": "pubkey"
-          },
-          {
-            "name": "reason",
-            "type": "string"
-          },
-          {
-            "name": "evidence_hash",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "status",
-            "type": {
-              "defined": {
-                "name": "DisputeStatus"
-              }
-            }
-          },
-          {
-            "name": "resolved_by",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "resolution",
-            "type": "string"
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          },
-          {
-            "name": "expires_at",
-            "type": "i64"
-          },
-          {
-            "name": "resolved_at",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "bond_amount",
-            "type": "u64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
+      "code": 6115,
+      "name": "InvalidPassMint",
+      "msg": "A pass mint must be a zero-decimal Token-2022 mint hooked by the xfchess_pass program."
     },
     {
-      "name": "DisputeStatus",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Pending"
-          },
-          {
-            "name": "Resolved"
-          },
-          {
-            "name": "Dismissed"
-          }
-        ]
-      }
+      "code": 6116,
+      "name": "PassMintAuthorityActive",
+      "msg": "A pass mint must have its mint authority revoked so the supply is fixed."
     },
     {
-      "name": "FriendStatus",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Pending"
-          },
-          {
-            "name": "Accepted"
-          },
-          {
-            "name": "Blocked"
-          }
-        ]
-      }
+      "code": 6117,
+      "name": "PassSupplyExceedsPlayers",
+      "msg": "A pass mint's supply must not exceed the tournament's player limit."
     },
     {
-      "name": "Friendship",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "requester",
-            "type": "pubkey"
-          },
-          {
-            "name": "addressee",
-            "type": "pubkey"
-          },
-          {
-            "name": "status",
-            "type": {
-              "defined": {
-                "name": "FriendStatus"
-              }
-            }
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          },
-          {
-            "name": "accepted_at",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
+      "code": 6118,
+      "name": "PassEligibilityRevoked",
+      "msg": "This player's pass eligibility was revoked and cannot be refreshed."
     },
     {
-      "name": "Game",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "game_id",
-            "type": "u64"
-          },
-          {
-            "name": "white",
-            "type": "pubkey"
-          },
-          {
-            "name": "black",
-            "type": "pubkey"
-          },
-          {
-            "name": "status",
-            "type": {
-              "defined": {
-                "name": "GameStatus"
-              }
-            }
-          },
-          {
-            "name": "last_move_timestamp",
-            "type": "i64"
-          },
-          {
-            "name": "fees_advanced",
-            "type": "u64"
-          },
-          {
-            "name": "fee_payer",
-            "type": "pubkey"
-          },
-          {
-            "name": "result",
-            "type": {
-              "defined": {
-                "name": "GameResult"
-              }
-            }
-          },
-          {
-            "name": "board_state",
-            "type": {
-              "array": [
-                "u8",
-                68
-              ]
-            }
-          },
-          {
-            "name": "move_count",
-            "type": "u16"
-          },
-          {
-            "name": "halfmove_clock",
-            "type": "u16"
-          },
-          {
-            "name": "turn",
-            "type": "u16"
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          },
-          {
-            "name": "updated_at",
-            "type": "i64"
-          },
-          {
-            "name": "wager_amount",
-            "type": "u64"
-          },
-          {
-            "name": "wager_token",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "game_type",
-            "type": {
-              "defined": {
-                "name": "GameType"
-              }
-            }
-          },
-          {
-            "name": "match_type",
-            "type": {
-              "defined": {
-                "name": "MatchType"
-              }
-            }
-          },
-          {
-            "name": "country_fee",
-            "type": "u64"
-          },
-          {
-            "name": "base_time_seconds",
-            "type": "u64"
-          },
-          {
-            "name": "increment_seconds",
-            "type": "u16"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "is_delegated",
-            "type": "bool"
-          },
-          {
-            "name": "tournament_id",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "nonce",
-            "type": "u64"
-          },
-          {
-            "name": "draw_offered_by",
-            "type": {
-              "option": "pubkey"
-            }
-          }
-        ]
-      }
+      "code": 6119,
+      "name": "ProfileNotVerified",
+      "msg": "The player's profile is not KYC-verified, so it cannot be attested for a pass."
     },
     {
-      "name": "GameCancelled",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "game_id",
-            "type": "u64"
-          },
-          {
-            "name": "player",
-            "type": "pubkey"
-          },
-          {
-            "name": "white",
-            "type": "pubkey"
-          },
-          {
-            "name": "black",
-            "type": "pubkey"
-          },
-          {
-            "name": "wager_amount",
-            "type": "u64"
-          },
-          {
-            "name": "black_has_joined",
-            "type": "bool"
-          },
-          {
-            "name": "already_cancelled",
-            "type": "bool"
-          },
-          {
-            "name": "refunded_white",
-            "type": "bool"
-          },
-          {
-            "name": "refunded_black",
-            "type": "bool"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
+      "code": 6120,
+      "name": "PassEligibilityMissing",
+      "msg": "The player has no current eligibility record for this tournament's pass."
     },
     {
-      "name": "GameCancelledSettlement",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "game_id",
-            "type": "u64"
-          },
-          {
-            "name": "white",
-            "type": "pubkey"
-          },
-          {
-            "name": "black",
-            "type": "pubkey"
-          },
-          {
-            "name": "wager_amount",
-            "type": "u64"
-          },
-          {
-            "name": "refunded_white",
-            "type": "bool"
-          },
-          {
-            "name": "refunded_black",
-            "type": "bool"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
+      "code": 6121,
+      "name": "PassConfigInvalid",
+      "msg": "The pass program's config for this mint is missing or does not match this tournament."
     },
     {
-      "name": "GameFinalized",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "game_id",
-            "type": "u64"
-          },
-          {
-            "name": "white",
-            "type": "pubkey"
-          },
-          {
-            "name": "black",
-            "type": "pubkey"
-          },
-          {
-            "name": "winner",
-            "type": "pubkey"
-          },
-          {
-            "name": "result_code",
-            "type": "u8"
-          },
-          {
-            "name": "wager_amount",
-            "type": "u64"
-          },
-          {
-            "name": "country_fee",
-            "type": "u64"
-          },
-          {
-            "name": "fees_advanced",
-            "type": "u64"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
+      "code": 6122,
+      "name": "PassRegistrarMismatch",
+      "msg": "The pass config's registrar is not this program's pass registrar."
     },
     {
-      "name": "GameResult",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "None"
-          },
-          {
-            "name": "Winner",
-            "fields": [
-              "pubkey"
-            ]
-          },
-          {
-            "name": "Draw"
-          }
-        ]
-      }
+      "code": 6123,
+      "name": "PassPolicyMismatch",
+      "msg": "The pass policy's rating range does not cover the tournament's rating range."
     },
     {
-      "name": "GameStatus",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Pending"
-          },
-          {
-            "name": "WaitingForOpponent"
-          },
-          {
-            "name": "Active"
-          },
-          {
-            "name": "Inactive"
-          },
-          {
-            "name": "Disputed"
-          },
-          {
-            "name": "Finished"
-          },
-          {
-            "name": "Settled"
-          },
-          {
-            "name": "Expired"
-          },
-          {
-            "name": "Cancelled"
-          }
-        ]
-      }
+      "code": 6124,
+      "name": "RecoveryIdentityUnavailable",
+      "msg": "Original players cannot be authenticated from wiped Game data; recovery preserves escrow."
     },
     {
-      "name": "GameType",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "PvP"
-          }
-        ]
-      }
-    },
-    {
-      "name": "GlobalSessionDelegation",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "player",
-            "type": "pubkey"
-          },
-          {
-            "name": "session_key",
-            "type": "pubkey"
-          },
-          {
-            "name": "expires_at",
-            "type": "i64"
-          },
-          {
-            "name": "spending_limit",
-            "type": "u64"
-          },
-          {
-            "name": "total_spent",
-            "type": "u64"
-          },
-          {
-            "name": "max_wager",
-            "type": "u64"
-          },
-          {
-            "name": "games_remaining",
-            "type": "u16"
-          },
-          {
-            "name": "enabled",
-            "type": "bool"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "InitializeConfigArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "treasury_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "vps_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "dispute_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "link_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "kyc_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "max_wager_amount",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "min_wager_lamports",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "max_platform_fee_lamports",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "er_session_fee_lamports",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "dispute_bond_lamports",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "dispute_ttl_secs",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "crank_max_slot_delay",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "crank_max_seconds_early",
-            "type": {
-              "option": "i64"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "LichessUsernameRecord",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "MatchStatus",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Pending"
-          },
-          {
-            "name": "Active"
-          },
-          {
-            "name": "Completed"
-          },
-          {
-            "name": "Bye"
-          }
-        ]
-      }
-    },
-    {
-      "name": "MatchType",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Free"
-          },
-          {
-            "name": "Rated"
-          }
-        ]
-      }
-    },
-    {
-      "name": "MoveEvent",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "game_id",
-            "type": "u64"
-          },
-          {
-            "name": "player",
-            "type": "pubkey"
-          },
-          {
-            "name": "move_uci",
-            "type": {
-              "array": [
-                "u8",
-                5
-              ]
-            }
-          },
-          {
-            "name": "move_number",
-            "type": "u16"
-          },
-          {
-            "name": "board_state",
-            "type": {
-              "array": [
-                "u8",
-                68
-              ]
-            }
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "PayoutType",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "LumpSum"
-          },
-          {
-            "name": "StreamingLinear"
-          },
-          {
-            "name": "StreamingCliff"
-          }
-        ]
-      }
-    },
-    {
-      "name": "PlayerProfile",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "country",
-            "type": "string"
-          },
-          {
-            "name": "wins",
-            "type": "u32"
-          },
-          {
-            "name": "losses",
-            "type": "u32"
-          },
-          {
-            "name": "draws",
-            "type": "u32"
-          },
-          {
-            "name": "games_played",
-            "type": "u32"
-          },
-          {
-            "name": "elo_rating",
-            "type": "f64"
-          },
-          {
-            "name": "rd",
-            "type": "f64"
-          },
-          {
-            "name": "volatility",
-            "type": "f64"
-          },
-          {
-            "name": "last_played",
-            "type": "i64"
-          },
-          {
-            "name": "win_streak",
-            "type": "u32"
-          },
-          {
-            "name": "best_streak",
-            "type": "u32"
-          },
-          {
-            "name": "tournament_wins",
-            "type": "u32"
-          },
-          {
-            "name": "ranked_games",
-            "type": "u32"
-          },
-          {
-            "name": "total_wagered",
-            "type": "u64"
-          },
-          {
-            "name": "total_won",
-            "type": "u64"
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          },
-          {
-            "name": "last_game_at",
-            "type": "i64"
-          },
-          {
-            "name": "date_of_birth",
-            "type": "i64"
-          },
-          {
-            "name": "is_verified",
-            "type": "bool"
-          },
-          {
-            "name": "annual_wins_gbp",
-            "type": "u64"
-          },
-          {
-            "name": "annual_wins_brl",
-            "type": "u64"
-          },
-          {
-            "name": "annual_wins_cad",
-            "type": "u64"
-          },
-          {
-            "name": "annual_wins_eur",
-            "type": "u64"
-          },
-          {
-            "name": "username",
-            "type": "string"
-          },
-          {
-            "name": "username_set",
-            "type": "bool"
-          },
-          {
-            "name": "lichess_username",
-            "type": "string"
-          },
-          {
-            "name": "lichess_verified",
-            "type": "bool"
-          },
-          {
-            "name": "lichess_blitz",
-            "type": "u32"
-          },
-          {
-            "name": "lichess_rapid",
-            "type": "u32"
-          },
-          {
-            "name": "lichess_bullet",
-            "type": "u32"
-          },
-          {
-            "name": "lichess_last_sync",
-            "type": "i64"
-          },
-          {
-            "name": "external_elo_source",
-            "type": "u8"
-          },
-          {
-            "name": "seeded_from_external",
-            "type": "bool"
-          },
-          {
-            "name": "elo_bullet",
-            "type": "f64"
-          },
-          {
-            "name": "elo_blitz",
-            "type": "f64"
-          },
-          {
-            "name": "elo_rapid",
-            "type": "f64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "PlayerSession",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "player",
-            "type": "pubkey"
-          },
-          {
-            "name": "session_key",
-            "type": "pubkey"
-          },
-          {
-            "name": "expires_at",
-            "type": "i64"
-          },
-          {
-            "name": "spending_limit",
-            "type": "u64"
-          },
-          {
-            "name": "total_spent",
-            "type": "u64"
-          },
-          {
-            "name": "max_wager",
-            "type": "u64"
-          },
-          {
-            "name": "can_create_games",
-            "type": "bool"
-          },
-          {
-            "name": "can_join_games",
-            "type": "bool"
-          },
-          {
-            "name": "can_claim_prizes",
-            "type": "bool"
-          },
-          {
-            "name": "games_played",
-            "type": "u32"
-          },
-          {
-            "name": "is_active",
-            "type": "bool"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "ProgramConfig",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "authority",
-            "docs": [
-              "Super-admin authority that can update this config."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "treasury_authority",
-            "docs": [
-              "Recipient of platform fees and host treasury."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "vps_authority",
-            "docs": [
-              "Automated crank / time check authority."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "dispute_authority",
-            "docs": [
-              "Arbiter for resolving disputed games."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "link_authority",
-            "docs": [
-              "Signer for external rating / ELO link proofs."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "kyc_authority",
-            "docs": [
-              "KYC / CACF verification authority."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "max_wager_amount",
-            "docs": [
-              "Maximum allowed wager in lamports (e.g. 10 SOL)."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "min_wager_lamports",
-            "docs": [
-              "Minimum allowed wager in lamports (e.g. 0.001 SOL)."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "max_platform_fee_lamports",
-            "docs": [
-              "Maximum platform fee in lamports (e.g. 1 SOL)."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "er_session_fee_lamports",
-            "docs": [
-              "MagicBlock / Ephemeral Rollup session fee in lamports."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "dispute_bond_lamports",
-            "docs": [
-              "Bond required to initiate a game dispute in lamports."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "dispute_ttl_secs",
-            "docs": [
-              "Time-to-live for open disputes before expiration in seconds."
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "crank_max_slot_delay",
-            "docs": [
-              "Maximum slot lag tolerated for crank time checks."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "crank_max_seconds_early",
-            "docs": [
-              "Allowed clock jitter for early crank triggers in seconds."
-            ],
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "docs": [
-              "Bump seed for PDA derivation."
-            ],
-            "type": "u8"
-          },
-          {
-            "name": "reserved",
-            "docs": [
-              "Reserved space for zero-migration additions."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                64
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "ScheduleTimeCheckArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "task_id",
-            "type": "u64"
-          },
-          {
-            "name": "check_interval_millis",
-            "type": "u64"
-          },
-          {
-            "name": "iterations",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "SessionDelegation",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "game_id",
-            "type": "u64"
-          },
-          {
-            "name": "player",
-            "type": "pubkey"
-          },
-          {
-            "name": "session_key",
-            "type": "pubkey"
-          },
-          {
-            "name": "expires_at",
-            "type": "i64"
-          },
-          {
-            "name": "max_batch_len",
-            "type": "u16"
-          },
-          {
-            "name": "enabled",
-            "type": "bool"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "StuckDelegationRecovered",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "game_id",
-            "type": "u64"
-          },
-          {
-            "name": "dispute_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "white_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "black_authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "white_share",
-            "type": "u64"
-          },
-          {
-            "name": "black_share",
-            "type": "u64"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "SwissMatchResult",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "WhiteWin"
-          },
-          {
-            "name": "BlackWin"
-          },
-          {
-            "name": "Draw"
-          },
-          {
-            "name": "Bye"
-          }
-        ]
-      }
-    },
-    {
-      "name": "SwissStanding",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "player",
-            "type": "pubkey"
-          },
-          {
-            "name": "score",
-            "type": "u8"
-          },
-          {
-            "name": "buchholz",
-            "type": "u16"
-          },
-          {
-            "name": "sonneborn",
-            "type": "u16"
-          },
-          {
-            "name": "color_balance",
-            "type": "i8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TimeoutClaimed",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "game_id",
-            "type": "u64"
-          },
-          {
-            "name": "caller",
-            "type": "pubkey"
-          },
-          {
-            "name": "status",
-            "type": "u8"
-          },
-          {
-            "name": "winner",
-            "type": "pubkey"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Tournament",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "tournament_id",
-            "type": "u64"
-          },
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "name",
-            "type": "string"
-          },
-          {
-            "name": "entry_fee",
-            "type": "u64"
-          },
-          {
-            "name": "platform_fee",
-            "type": "u64"
-          },
-          {
-            "name": "prize_pool",
-            "type": "u64"
-          },
-          {
-            "name": "max_players",
-            "type": "u16"
-          },
-          {
-            "name": "player_count",
-            "type": "u16"
-          },
-          {
-            "name": "num_registered_players",
-            "type": "u16"
-          },
-          {
-            "name": "status",
-            "type": {
-              "defined": {
-                "name": "TournamentStatus"
-              }
-            }
-          },
-          {
-            "name": "start_time",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "end_time",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "fees_advanced",
-            "type": "u64"
-          },
-          {
-            "name": "fee_payer",
-            "type": "pubkey"
-          },
-          {
-            "name": "tournament_type",
-            "type": {
-              "defined": {
-                "name": "TournamentType"
-              }
-            }
-          },
-          {
-            "name": "current_round",
-            "type": "u8"
-          },
-          {
-            "name": "total_rounds",
-            "type": "u8"
-          },
-          {
-            "name": "total_matches",
-            "type": "u16"
-          },
-          {
-            "name": "final_match_index",
-            "type": "u16"
-          },
-          {
-            "name": "elo_min",
-            "type": "u32"
-          },
-          {
-            "name": "elo_max",
-            "type": "u32"
-          },
-          {
-            "name": "min_players",
-            "type": "u16"
-          },
-          {
-            "name": "winner",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "second_place",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "third_place",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "fourth_place",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "fifth_place",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "sixth_place",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "seventh_place",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "eighth_place",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "ninth_place",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "tenth_place",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "prize_shares",
-            "type": {
-              "array": [
-                "u16",
-                10
-              ]
-            }
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          },
-          {
-            "name": "started_at",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "completed_at",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "prizes_claimed",
-            "type": "u16"
-          },
-          {
-            "name": "platform_fee_pool",
-            "type": "u64"
-          },
-          {
-            "name": "usdc_prize_mint",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "usdc_prize_pool",
-            "type": "u64"
-          },
-          {
-            "name": "usdc_prize_funded",
-            "type": "bool"
-          },
-          {
-            "name": "host_treasury",
-            "type": "pubkey"
-          },
-          {
-            "name": "prize_token_mint",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "payout_type",
-            "type": {
-              "defined": {
-                "name": "PayoutType"
-              }
-            }
-          },
-          {
-            "name": "vesting_params",
-            "type": {
-              "option": {
-                "defined": {
-                  "name": "VestingParams"
-                }
-              }
-            }
-          },
-          {
-            "name": "base_time_seconds",
-            "type": "u64"
-          },
-          {
-            "name": "increment_seconds",
-            "type": "u16"
-          },
-          {
-            "name": "winner_takes_all",
-            "type": "bool"
-          },
-          {
-            "name": "round_boards_reported",
-            "type": {
-              "array": [
-                "u8",
-                16
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "TournamentCancelled",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "tournament_id",
-            "type": "u64"
-          },
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "registered_players",
-            "type": "u32"
-          },
-          {
-            "name": "refund_amount_per_player",
-            "type": "u64"
-          },
-          {
-            "name": "sol_guarantee_returned",
-            "type": "u64"
-          },
-          {
-            "name": "usdc_prize_returned",
-            "type": "u64"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TournamentEscrow",
-      "type": {
-        "kind": "struct",
-        "fields": []
-      }
-    },
-    {
-      "name": "TournamentLeft",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "tournament_id",
-            "type": "u64"
-          },
-          {
-            "name": "player",
-            "type": "pubkey"
-          },
-          {
-            "name": "refund_amount",
-            "type": "u64"
-          },
-          {
-            "name": "registered_players_after",
-            "type": "u16"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TournamentMatch",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "tournament_id",
-            "type": "u64"
-          },
-          {
-            "name": "match_index",
-            "type": "u16"
-          },
-          {
-            "name": "round",
-            "type": "u8"
-          },
-          {
-            "name": "player_white",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "player_black",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "winner",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "game_pda",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "game_id",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "status",
-            "type": {
-              "defined": {
-                "name": "MatchStatus"
-              }
-            }
-          },
-          {
-            "name": "next_match_for_winner",
-            "type": {
-              "option": "u16"
-            }
-          },
-          {
-            "name": "next_match_slot",
-            "type": "u8"
-          },
-          {
-            "name": "started_at",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "completed_at",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TournamentPlayersShard",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "tournament_id",
-            "type": "u64"
-          },
-          {
-            "name": "shard_id",
-            "type": "u8"
-          },
-          {
-            "name": "players",
-            "type": {
-              "vec": "pubkey"
-            }
-          },
-          {
-            "name": "player_elos",
-            "type": {
-              "vec": "u32"
-            }
-          },
-          {
-            "name": "swiss_standings",
-            "type": {
-              "vec": {
-                "defined": {
-                  "name": "SwissStanding"
-                }
-              }
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "TournamentSessionDelegation",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "tournament_id",
-            "type": "u64"
-          },
-          {
-            "name": "player",
-            "type": "pubkey"
-          },
-          {
-            "name": "session_key",
-            "type": "pubkey"
-          },
-          {
-            "name": "expires_at",
-            "type": "i64"
-          },
-          {
-            "name": "spending_limit",
-            "type": "u64"
-          },
-          {
-            "name": "total_spent",
-            "type": "u64"
-          },
-          {
-            "name": "max_wager",
-            "type": "u64"
-          },
-          {
-            "name": "games_played",
-            "type": "u32"
-          },
-          {
-            "name": "enabled",
-            "type": "bool"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TournamentStatus",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Registration"
-          },
-          {
-            "name": "Active"
-          },
-          {
-            "name": "Completed"
-          },
-          {
-            "name": "Closed"
-          },
-          {
-            "name": "Cancelled"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TournamentType",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Swiss",
-            "fields": [
-              {
-                "name": "rounds",
-                "type": "u8"
-              }
-            ]
-          },
-          {
-            "name": "SingleElimination"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TreasuryWithdrawn",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "destination",
-            "type": "pubkey"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          },
-          {
-            "name": "remaining",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "UpdateConfigArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "new_authority",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "new_treasury_authority",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "new_vps_authority",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "new_dispute_authority",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "new_link_authority",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "new_kyc_authority",
-            "type": {
-              "option": "pubkey"
-            }
-          },
-          {
-            "name": "new_max_wager_amount",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "new_min_wager_lamports",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "new_max_platform_fee_lamports",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "new_er_session_fee_lamports",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "new_dispute_bond_lamports",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "new_dispute_ttl_secs",
-            "type": {
-              "option": "i64"
-            }
-          },
-          {
-            "name": "new_crank_max_slot_delay",
-            "type": {
-              "option": "u64"
-            }
-          },
-          {
-            "name": "new_crank_max_seconds_early",
-            "type": {
-              "option": "i64"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "UsernameRecord",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "VestingParams",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "start_time",
-            "type": "i64"
-          },
-          {
-            "name": "duration_seconds",
-            "type": "i64"
-          },
-          {
-            "name": "cliff_seconds",
-            "type": {
-              "option": "i64"
-            }
-          }
-        ]
-      }
-    }
-  ],
-  "constants": [
-    {
-      "name": "CONFIG_SEED",
-      "type": "bytes",
-      "value": "[99, 111, 110, 102, 105, 103]"
-    },
-    {
-      "name": "FRIENDSHIP_SEED",
-      "type": "bytes",
-      "value": "[102, 114, 105, 101, 110, 100, 115, 104, 105, 112]"
-    },
-    {
-      "name": "GAME_SEED",
-      "type": "bytes",
-      "value": "[103, 97, 109, 101]"
-    },
-    {
-      "name": "LICHESS_USERNAME_SEED",
-      "type": "bytes",
-      "value": "[108, 105, 99, 104, 101, 115, 115, 95, 117, 115, 101, 114, 110, 97, 109, 101]"
-    },
-    {
-      "name": "MOVE_LOG_SEED",
-      "type": "bytes",
-      "value": "[109, 111, 118, 101, 95, 108, 111, 103]"
-    },
-    {
-      "name": "PROFILE_SEED",
-      "type": "bytes",
-      "value": "[112, 114, 111, 102, 105, 108, 101]"
-    },
-    {
-      "name": "SESSION_DELEGATION_SEED",
-      "type": "bytes",
-      "value": "[115, 101, 115, 115, 105, 111, 110, 95, 100, 101, 108, 101, 103, 97, 116, 105, 111, 110]"
-    },
-    {
-      "name": "USERNAME_SEED",
-      "type": "bytes",
-      "value": "[117, 115, 101, 114, 110, 97, 109, 101]"
-    },
-    {
-      "name": "WAGER_ESCROW_SEED",
-      "type": "bytes",
-      "value": "[101, 115, 99, 114, 111, 119]"
+      "code": 6125,
+      "name": "RecoveryIdentityMismatch",
+      "msg": "The recovery identity does not match this game's original players, wager, or lifecycle."
     }
   ]
 }

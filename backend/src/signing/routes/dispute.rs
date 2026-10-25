@@ -11,6 +11,7 @@ use solana_sdk::signature::Signer;
 use std::env;
 use std::str::FromStr;
 use tracing::{error, info, warn};
+use xfchess_client_compat::prelude::*;
 
 use crate::db::repository::DisputeRepository;
 use crate::infrastructure::auth_middleware::constant_time_eq;
@@ -248,10 +249,13 @@ pub async fn recover_stuck_delegation(
         &[&authority],
         blockhash,
     );
-    let sig = rpc.send_and_confirm_transaction(&tx).await.map_err(|e| {
-        error!("[dispute] recover_stuck_delegation on-chain call failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let sig = rpc
+        .send_sdk_and_confirm_transaction(&tx)
+        .await
+        .map_err(|e| {
+            error!("[dispute] recover_stuck_delegation on-chain call failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     info!(
         "[dispute] game {} stuck-delegation escrow recovered — tx {}",
@@ -324,6 +328,14 @@ async fn submit_resolve_dispute_tx(
         AccountMeta::new(black, false),
         AccountMeta::new(treasury_vault, false),
         AccountMeta::new_readonly(solana_system_interface::program::id(), false),
+        AccountMeta::new(
+            Pubkey::find_program_address(
+                &[b"recovery_identity", &game_id.to_le_bytes()],
+                &program_id,
+            )
+            .0,
+            false,
+        ),
     ];
 
     let ix = Instruction {
@@ -340,7 +352,7 @@ async fn submit_resolve_dispute_tx(
         blockhash,
     );
 
-    let sig = rpc.send_and_confirm_transaction(&tx).await?;
+    let sig = rpc.send_sdk_and_confirm_transaction(&tx).await?;
     Ok(sig.to_string())
 }
 

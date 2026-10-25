@@ -34,6 +34,12 @@ pub fn handler<'info>(
         GameErrorCode::TournamentNotCompleted
     );
     require!(tournament.prize_pool > 0, GameErrorCode::NoPrizeToClaim);
+    // The shared place bit covers both pools. This SOL-only instruction cannot
+    // consume a USDC entitlement; individual claims transfer both atomically.
+    require!(
+        tournament.usdc_prize_pool == 0,
+        GameErrorCode::MissingTokenAccounts
+    );
     require!(
         tournament.payout_type == PayoutType::LumpSum,
         GameErrorCode::NoPrizeToClaim

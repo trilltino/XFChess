@@ -71,9 +71,11 @@ pub struct SessionCreateGame<'info> {
                 || tournament_players_shard_3.as_ref().is_some_and(|s| s.players.iter().any(|p| *p == player.key()))
         } @ XfchessGameError::UnauthorizedAccess,
     )]
+    /// CHECK: key belongs to the authenticated session and a canonical registered-player shard.
     pub player: UncheckedAccount<'info>,
 
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: canonical fresh Game PDA is manually allocated, assigned and funded from the session vault.
     pub game: UncheckedAccount<'info>,
 
     #[account(
@@ -81,6 +83,7 @@ pub struct SessionCreateGame<'info> {
         seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()],
         bump
     )]
+    /// CHECK: canonical escrow PDA receives the wager from the authenticated program-owned vault.
     pub escrow_pda: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,

@@ -71,7 +71,11 @@ pub fn handler(ctx: Context<SetPassPaused>, tournament_id: u64, is_paused: bool)
             ],
             data,
         },
-        &[config, registrar, ctx.accounts.pass_program.to_account_info()],
+        &[
+            config,
+            registrar,
+            ctx.accounts.pass_program.to_account_info(),
+        ],
         &[&[PASS_REGISTRAR_SEED, &bump]],
     )?;
     Ok(())

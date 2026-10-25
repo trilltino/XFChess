@@ -34,6 +34,8 @@ pub mod crank_ix;
 pub mod delegation_ix;
 pub mod elo;
 pub mod errors;
+pub mod recovery_ix;
+pub use recovery_ix::*;
 pub mod events;
 pub mod game_ix;
 pub mod governance_ix;
@@ -70,13 +72,13 @@ pub use governance_ix::{ClaimStaleDispute, DisputeGame, RecoverStuckDelegation, 
 pub use moves_ix::{GlobalRecordMove, RecordMove};
 pub use tournament_ix::{
     AdvanceRound, AdvanceWinner, AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx,
-    BindTournamentPass, IssuePassEligibility, RevokePassEligibility, SetPassPaused,
-    CancelTournament, ClaimTournamentPrize, CloseTournament, CompleteSwissTournament,
-    CreateTournamentGame, DistributeTournamentPrizes, FundSolPrize, FundUsdcPrize, InitializeMatch,
-    InitializeShardsMedium, InitializeShardsSmall, InitializeTournament,
-    InitializeTournamentEscrow, InitializeTournamentShards, LeaveTournament, RecordMatchResult,
-    RecordSwissResult, RegisterPlayer, RevokeTournamentSessionCtx, SessionCreateGame,
-    SessionJoinGame, StartTournament, SwissMatchResult,
+    BindTournamentPass, CancelTournament, ClaimTournamentPrize, CloseTournament,
+    CompleteSwissTournament, CreateTournamentGame, DistributeTournamentPrizes, FundSolPrize,
+    FundUsdcPrize, InitializeMatch, InitializeShardsMedium, InitializeShardsSmall,
+    InitializeTournament, InitializeTournamentEscrow, InitializeTournamentShards,
+    IssuePassEligibility, LeaveTournament, RecordMatchResult, RecordSwissResult, RegisterPlayer,
+    RevokePassEligibility, RevokeTournamentSessionCtx, SessionCreateGame, SessionJoinGame,
+    SetPassPaused, StartTournament, SwissMatchResult,
 };
 
 // Anchor-generated client account modules must be reachable from the crate
@@ -401,6 +403,7 @@ pub mod xfchess_game {
         base_time_seconds: u64,
         increment_seconds: u16,
     ) -> Result<()> {
+        crate::recovery_ix::require_legacy_identity_absent(ctx.remaining_accounts, game_id)?;
         crate::game_ix::create::handler(
             ctx,
             game_id,
@@ -413,7 +416,285 @@ pub mod xfchess_game {
     }
 
     pub fn join_game(ctx: Context<JoinGame>, game_id: u64) -> Result<()> {
+        crate::recovery_ix::require_legacy_identity_absent(ctx.remaining_accounts, game_id)?;
         crate::game_ix::join::handler(ctx, game_id)
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Preserves the create-game argument layout"
+    )]
+    pub fn create_game_v2<'info>(
+        ctx: Context<'info, CreateGameV2<'info>>,
+        game_id: u64,
+        wager_amount: u64,
+        match_type: state::MatchType,
+        platform_fee: u64,
+        base_time_seconds: u64,
+        increment_seconds: u16,
+    ) -> Result<()> {
+        let record = state::RecoveryIdentity::new(
+            game_id,
+            ctx.accounts.legacy.player.key(),
+            Pubkey::default(),
+            wager_amount,
+            crate::recovery_ix::require_identity_pda(
+                &ctx.accounts.recovery_identity.to_account_info(),
+                game_id,
+            )?,
+        )?;
+        crate::recovery_ix::initialize_identity(
+            &ctx.accounts.recovery_identity.to_account_info(),
+            &ctx.accounts.legacy.fee_payer.to_account_info(),
+            &ctx.accounts.legacy.system_program.to_account_info(),
+            &record,
+            false,
+        )?;
+        crate::game_ix::create::handler(
+            Context::new(
+                ctx.program_id,
+                &mut ctx.accounts.legacy,
+                ctx.remaining_accounts,
+                ctx.bumps.legacy,
+            ),
+            game_id,
+            wager_amount,
+            match_type,
+            platform_fee,
+            base_time_seconds,
+            increment_seconds,
+        )
+    }
+
+    pub fn join_game_v2<'info>(ctx: Context<'info, JoinGameV2<'info>>, game_id: u64) -> Result<()> {
+        crate::recovery_ix::require_identity_pda(
+            &ctx.accounts.recovery_identity.to_account_info(),
+            game_id,
+        )?;
+        ctx.accounts
+            .recovery_identity
+            .prepare_join(&ctx.accounts.legacy.game, ctx.accounts.legacy.player.key())?;
+        crate::game_ix::join::handler(
+            Context::new(
+                ctx.program_id,
+                &mut ctx.accounts.legacy,
+                ctx.remaining_accounts,
+                ctx.bumps.legacy,
+            ),
+            game_id,
+        )
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Preserves the global-create argument layout"
+    )]
+    pub fn global_create_game_v2<'info>(
+        ctx: Context<'info, GlobalCreateGameV2<'info>>,
+        game_id: u64,
+        wager_amount: u64,
+        match_type: state::MatchType,
+        platform_fee: u64,
+        base_time_seconds: u64,
+        increment_seconds: u16,
+    ) -> Result<()> {
+        let record = state::RecoveryIdentity::new(
+            game_id,
+            ctx.accounts.legacy.player.key(),
+            Pubkey::default(),
+            wager_amount,
+            crate::recovery_ix::require_identity_pda(
+                &ctx.accounts.recovery_identity.to_account_info(),
+                game_id,
+            )?,
+        )?;
+        crate::recovery_ix::initialize_identity(
+            &ctx.accounts.recovery_identity.to_account_info(),
+            &ctx.accounts.legacy.session_delegation.to_account_info(),
+            &ctx.accounts.legacy.system_program.to_account_info(),
+            &record,
+            true,
+        )?;
+        crate::game_ix::global_create::handler(
+            Context::new(
+                ctx.program_id,
+                &mut ctx.accounts.legacy,
+                ctx.remaining_accounts,
+                ctx.bumps.legacy,
+            ),
+            game_id,
+            wager_amount,
+            match_type,
+            platform_fee,
+            base_time_seconds,
+            increment_seconds,
+        )
+    }
+
+    pub fn global_join_game_v2<'info>(
+        ctx: Context<'info, GlobalJoinGameV2<'info>>,
+        game_id: u64,
+    ) -> Result<()> {
+        crate::recovery_ix::require_identity_pda(
+            &ctx.accounts.recovery_identity.to_account_info(),
+            game_id,
+        )?;
+        ctx.accounts
+            .recovery_identity
+            .prepare_join(&ctx.accounts.legacy.game, ctx.accounts.legacy.player.key())?;
+        crate::game_ix::global_join::handler(
+            Context::new(
+                ctx.program_id,
+                &mut ctx.accounts.legacy,
+                ctx.remaining_accounts,
+                ctx.bumps.legacy,
+            ),
+            game_id,
+        )
+    }
+
+    pub fn create_tournament_game_v2<'info>(
+        ctx: Context<'info, CreateTournamentGameV2<'info>>,
+        tournament_id: u64,
+        game_id: u64,
+        session_key: Pubkey,
+    ) -> Result<()> {
+        let record = state::RecoveryIdentity::new(
+            game_id,
+            ctx.accounts.legacy.white.key(),
+            ctx.accounts.legacy.black.key(),
+            0,
+            crate::recovery_ix::require_identity_pda(
+                &ctx.accounts.recovery_identity.to_account_info(),
+                game_id,
+            )?,
+        )?;
+        crate::recovery_ix::initialize_identity(
+            &ctx.accounts.recovery_identity.to_account_info(),
+            &ctx.accounts.legacy.authority.to_account_info(),
+            &ctx.accounts.legacy.system_program.to_account_info(),
+            &record,
+            false,
+        )?;
+        crate::tournament_ix::matches::create_tournament_game::handler(
+            Context::new(
+                ctx.program_id,
+                &mut ctx.accounts.legacy,
+                ctx.remaining_accounts,
+                ctx.bumps.legacy,
+            ),
+            tournament_id,
+            game_id,
+            session_key,
+        )
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Preserves the tournament-session argument layout"
+    )]
+    pub fn session_create_game_v2<'info>(
+        ctx: Context<'info, SessionCreateGameV2<'info>>,
+        tournament_id: u64,
+        game_id: u64,
+        wager_amount: u64,
+        match_type: state::MatchType,
+        platform_fee: u64,
+        base_time_seconds: u64,
+        increment_seconds: u16,
+    ) -> Result<()> {
+        let record = state::RecoveryIdentity::new(
+            game_id,
+            ctx.accounts.legacy.player.key(),
+            Pubkey::default(),
+            wager_amount,
+            crate::recovery_ix::require_identity_pda(
+                &ctx.accounts.recovery_identity.to_account_info(),
+                game_id,
+            )?,
+        )?;
+        crate::recovery_ix::initialize_identity(
+            &ctx.accounts.recovery_identity.to_account_info(),
+            &ctx.accounts.legacy.session_delegation.to_account_info(),
+            &ctx.accounts.legacy.system_program.to_account_info(),
+            &record,
+            true,
+        )?;
+        crate::tournament_ix::session::session_create_game::handler(
+            Context::new(
+                ctx.program_id,
+                &mut ctx.accounts.legacy,
+                ctx.remaining_accounts,
+                ctx.bumps.legacy,
+            ),
+            tournament_id,
+            game_id,
+            wager_amount,
+            match_type,
+            platform_fee,
+            base_time_seconds,
+            increment_seconds,
+        )
+    }
+
+    pub fn session_join_game_v2<'info>(
+        ctx: Context<'info, SessionJoinGameV2<'info>>,
+        tournament_id: u64,
+        game_id: u64,
+    ) -> Result<()> {
+        crate::recovery_ix::require_identity_pda(
+            &ctx.accounts.recovery_identity.to_account_info(),
+            game_id,
+        )?;
+        ctx.accounts
+            .recovery_identity
+            .prepare_join(&ctx.accounts.legacy.game, ctx.accounts.legacy.player.key())?;
+        crate::tournament_ix::session::session_join_game::handler(
+            Context::new(
+                ctx.program_id,
+                &mut ctx.accounts.legacy,
+                ctx.remaining_accounts,
+                ctx.bumps.legacy,
+            ),
+            tournament_id,
+            game_id,
+        )
+    }
+
+    pub fn delegate_game_v2<'info>(
+        ctx: Context<'info, DelegateGameV2<'info>>,
+        game_id: u64,
+        valid_until: i64,
+    ) -> Result<()> {
+        require_keys_eq!(
+            *ctx.accounts.legacy.game.owner,
+            crate::ID,
+            crate::errors::GameErrorCode::InvalidAccountOwner
+        );
+        let game =
+            state::Game::try_deserialize(&mut &ctx.accounts.legacy.game.try_borrow_data()?[..])?;
+        crate::recovery_ix::require_identity_pda(
+            &ctx.accounts.recovery_identity.to_account_info(),
+            game_id,
+        )?;
+        ctx.accounts.recovery_identity.mark_delegated(&game)?;
+        crate::delegation_ix::delegate::handler_delegate_game(
+            Context::new(
+                ctx.program_id,
+                &mut ctx.accounts.legacy,
+                ctx.remaining_accounts,
+                ctx.bumps.legacy,
+            ),
+            game_id,
+            valid_until,
+        )
+    }
+
+    pub fn recover_stuck_delegation_v2(
+        ctx: Context<RecoverStuckDelegationV2>,
+        game_id: u64,
+    ) -> Result<()> {
+        crate::recovery_ix::recover(ctx, game_id)
     }
 
     pub fn record_move(
@@ -457,6 +738,7 @@ pub mod xfchess_game {
     }
 
     pub fn finalize_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
+        crate::recovery_ix::close_identity(ctx.remaining_accounts, game_id)?;
         crate::game_ix::finalize::handler(ctx, game_id)
     }
 
@@ -477,10 +759,12 @@ pub mod xfchess_game {
     }
 
     pub fn withdraw_expired_wager(ctx: Context<WithdrawExpiredWager>, game_id: u64) -> Result<()> {
+        crate::recovery_ix::close_identity(ctx.remaining_accounts, game_id)?;
         crate::account_ix::withdraw::handler(ctx, game_id)
     }
 
     pub fn cancel_game(ctx: Context<CancelGame>, game_id: u64) -> Result<()> {
+        crate::recovery_ix::close_identity(ctx.remaining_accounts, game_id)?;
         crate::game_ix::cancel::handler(ctx, game_id)
     }
 
@@ -499,10 +783,12 @@ pub mod xfchess_game {
         resolution: String,
         winner: Option<Pubkey>,
     ) -> Result<()> {
+        crate::recovery_ix::close_identity(ctx.remaining_accounts, game_id)?;
         crate::governance_ix::resolve::handler(ctx, game_id, resolution, winner)
     }
 
     pub fn claim_stale_dispute(ctx: Context<ClaimStaleDispute>, game_id: u64) -> Result<()> {
+        crate::recovery_ix::close_identity(ctx.remaining_accounts, game_id)?;
         crate::governance_ix::claim_stale_dispute::handler(ctx, game_id)
     }
 
@@ -530,7 +816,9 @@ pub mod xfchess_game {
         game_id: u64,
         valid_until: i64,
     ) -> Result<()> {
-        crate::delegation_ix::delegate::handler_delegate_game(ctx, game_id, valid_until)
+        let _ = (ctx, game_id, valid_until);
+        // New delegation requires a durable binding through delegate_game_v2.
+        err!(crate::errors::GameErrorCode::RecoveryIdentityUnavailable)
     }
 
     pub fn undelegate_game(ctx: Context<UndelegateGameCtx>, game_id: u64) -> Result<()> {
@@ -555,19 +843,28 @@ pub mod xfchess_game {
         ctx: Context<InitializeAfterUndelegation>,
         account_seeds: Vec<Vec<u8>>,
     ) -> Result<()> {
-        let [delegated_account, buffer, payer, system_program] = [
-            &ctx.accounts.base_account,
-            &ctx.accounts.buffer,
-            &ctx.accounts.payer,
-            &ctx.accounts.system_program,
-        ];
+        require!(
+            account_seeds.len() == 2
+                && account_seeds[0].as_slice() == crate::constants::GAME_SEED
+                && account_seeds[1].len() == 8,
+            anchor_lang::error::ErrorCode::ConstraintSeeds
+        );
+        let (expected_game, _) = Pubkey::find_program_address(
+            &[crate::constants::GAME_SEED, account_seeds[1].as_slice()],
+            ctx.program_id,
+        );
+        require_keys_eq!(
+            ctx.accounts.base_account.key(),
+            expected_game,
+            anchor_lang::error::ErrorCode::ConstraintSeeds
+        );
         // The SDK undelegate_account CPI validates the canonical buffer PDA.
         undelegate_account(
-            delegated_account,
-            &id(),
-            buffer,
-            payer,
-            system_program,
+            &ctx.accounts.base_account.to_account_info(),
+            ctx.program_id,
+            &ctx.accounts.buffer.to_account_info(),
+            &ctx.accounts.payer.to_account_info(),
+            &ctx.accounts.system_program.to_account_info(),
             account_seeds,
         )?;
         Ok(())
@@ -679,20 +976,29 @@ pub mod xfchess_game {
     /// Organizer-only: requires a tournament pass for every later registration. The pass must
     /// already be initialized with this program's pass registrar and a rating policy that covers
     /// the tournament's range.
-    pub fn bind_tournament_pass(ctx: Context<BindTournamentPass>, tournament_id: u64) -> Result<()> {
+    pub fn bind_tournament_pass(
+        ctx: Context<BindTournamentPass>,
+        tournament_id: u64,
+    ) -> Result<()> {
         crate::tournament_ix::registration::bind_pass::handler(ctx, tournament_id)
     }
 
     /// Attests the player's profile rating to the tournament's pass program by CPI, issuing or
     /// refreshing their eligibility so a pass can be transferred to them. Anyone may call it.
-    pub fn issue_pass_eligibility(ctx: Context<IssuePassEligibility>, tournament_id: u64) -> Result<()> {
+    pub fn issue_pass_eligibility(
+        ctx: Context<IssuePassEligibility>,
+        tournament_id: u64,
+    ) -> Result<()> {
         crate::tournament_ix::registration::issue_pass_eligibility::handler(ctx, tournament_id)
     }
 
     /// Organizer-only: revokes a player's pass eligibility through the registrar PDA, so the
     /// pass can no longer be transferred to them, and a pass they already hold can no longer be
     /// redeemed to register. A revoked record is never refreshed.
-    pub fn revoke_pass_eligibility(ctx: Context<RevokePassEligibility>, tournament_id: u64) -> Result<()> {
+    pub fn revoke_pass_eligibility(
+        ctx: Context<RevokePassEligibility>,
+        tournament_id: u64,
+    ) -> Result<()> {
         crate::tournament_ix::registration::revoke_pass_eligibility::handler(ctx, tournament_id)
     }
 
@@ -822,6 +1128,7 @@ pub mod xfchess_game {
         game_id: u64,
         session_key: Pubkey,
     ) -> Result<()> {
+        crate::recovery_ix::require_legacy_identity_absent(ctx.remaining_accounts, game_id)?;
         crate::tournament_ix::matches::create_tournament_game::handler(
             ctx,
             tournament_id,
@@ -866,6 +1173,7 @@ pub mod xfchess_game {
         base_time_seconds: u64,
         increment_seconds: u16,
     ) -> Result<()> {
+        crate::recovery_ix::require_legacy_identity_absent(ctx.remaining_accounts, game_id)?;
         crate::tournament_ix::session::session_create_game::handler(
             ctx,
             tournament_id,
@@ -883,6 +1191,7 @@ pub mod xfchess_game {
         tournament_id: u64,
         game_id: u64,
     ) -> Result<()> {
+        crate::recovery_ix::require_legacy_identity_absent(ctx.remaining_accounts, game_id)?;
         crate::tournament_ix::session::session_join_game::handler(ctx, tournament_id, game_id)
     }
 
@@ -910,6 +1219,7 @@ pub mod xfchess_game {
         base_time_seconds: u64,
         increment_seconds: u16,
     ) -> Result<()> {
+        crate::recovery_ix::require_legacy_identity_absent(ctx.remaining_accounts, game_id)?;
         crate::game_ix::global_create::handler(
             ctx,
             game_id,
@@ -922,6 +1232,7 @@ pub mod xfchess_game {
     }
 
     pub fn global_join_game(ctx: Context<GlobalJoinGame>, game_id: u64) -> Result<()> {
+        crate::recovery_ix::require_legacy_identity_absent(ctx.remaining_accounts, game_id)?;
         crate::game_ix::global_join::handler(ctx, game_id)
     }
 
