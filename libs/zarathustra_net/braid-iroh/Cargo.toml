@@ -18,8 +18,8 @@ braid-http = { path = "../braid-http" }
 
 axum = { workspace = true, optional = true }
 tower = { version = "0.5", features = ["util"], optional = true }
-iroh-h3-axum = { path = "../iroh-h3-axum", optional = true }
-iroh-h3-client = { path = "../iroh-h3-client", optional = true }
+iroh-h3-axum = { version = "=0.4.0", optional = true }
+iroh-h3-client = { version = "=0.5.0", optional = true }
 http = "1"
 parking_lot.workspace = true
 

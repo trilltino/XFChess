@@ -8313,21 +8313,23 @@ dependencies = [
 
 [[package]]
 name = "iroh-h3"
-version = "0.1.0"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52b9c7c299ad24d562a6b4dad7e54d26486280e98c6a26d0276d2b3b708617a2"
 dependencies = [
- "anyhow",
  "bytes",
  "futures",
  "h3",
  "iroh",
- "tokio",
+ "tokio-util 0.7.20",
 ]
 
 [[package]]
 name = "iroh-h3-axum"
-version = "0.2.0"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f2946914aa9292d14c1ae06aa1b797d1e906a67451587f6947ec89075803027"
 dependencies = [
- "anyhow",
  "axum 0.8.9",
  "bytes",
  "futures-lite",
@@ -8336,7 +8338,6 @@ dependencies = [
  "http-body",
  "iroh",
  "iroh-h3",
- "iroh-h3-client",
  "n0-future",
  "tokio",
  "tower-service",
@@ -8344,11 +8345,12 @@ dependencies = [
 
 [[package]]
 name = "iroh-h3-client"
-version = "0.3.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f2f5901cdd6c85e022fc011be81665e4895a508b0ee3423c116bff41bf4237c"
 dependencies = [
- "anyhow",
- "axum 0.8.9",
  "bytes",
+ "cookie",
  "dashmap 6.1.0",
  "futures",
  "h3",
@@ -8357,11 +8359,8 @@ dependencies = [
  "http-body-util",
  "iroh",
  "iroh-h3",
- "iroh-h3-axum",
  "mockall 0.14.0",
  "n0-future",
- "serde",
- "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
