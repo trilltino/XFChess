@@ -80,6 +80,20 @@ fn default_headers() -> reqwest::header::HeaderMap {
     h
 }
 
+/// The headers every backend call carries (login token, relay secret), as name/value pairs
+/// for transports that build their own requests.
+pub fn auth_headers() -> Vec<(String, String)> {
+    default_headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect()
+}
+
 pub fn client() -> Result<reqwest::blocking::Client, String> {
     pooled_client(&NORMAL_CLIENT, 120)
 }

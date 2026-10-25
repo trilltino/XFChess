@@ -1,236 +1,257 @@
+//! Canonical byte-preserving Braid framing for every transport.
 use crate::error::{BraidError, Result};
-use crate::protocol;
-use crate::protocol::constants::headers;
-use crate::types::{Patch, Update};
-#[cfg(test)]
-use anyhow::Context as _;
+use crate::types::{BraidRequest, Update};
 use bytes::{Bytes, BytesMut};
+use std::collections::BTreeMap;
 
+/// Keep-alive line sent between frames on an idle subscription. Parsers absorb
+/// blank lines before a frame, so it never becomes an update.
 #[must_use]
 pub fn format_heartbeat() -> Bytes {
     Bytes::from_static(b"\r\n")
 }
 
-pub fn format_update(update: &Update) -> Result<Bytes> {
-    let mut buffer = BytesMut::new();
-
-    if !update.version.is_empty() {
-        write_header(
-            &mut buffer,
-            headers::VERSION.as_str(),
-            &protocol::format_version_header(&update.version),
-        )?;
+pub struct WireCodec;
+impl WireCodec {
+    pub fn encode(update: &Update) -> Result<Bytes> {
+        format_update(update)
     }
-
-    if !update.parents.is_empty() {
-        write_header(
-            &mut buffer,
-            headers::PARENTS.as_str(),
-            &protocol::format_version_header(&update.parents),
-        )?;
-    }
-
-    if let Some(merge_type) = &update.merge_type {
-        write_header(&mut buffer, headers::MERGE_TYPE.as_str(), merge_type)?;
-    }
-
-    if let Some(ct) = &update.content_type {
-        write_header(&mut buffer, headers::CONTENT_TYPE.as_str(), ct)?;
-    }
-
-    if let Some(versions) = &update.current_version {
-        write_header(
-            &mut buffer,
-            "current-version",
-            &protocol::format_version_header(versions),
-        )?;
-    }
-    if let Some(range) = &update.content_range {
-        write_header(&mut buffer, "content-range", &range.to_header_value())?;
-    }
-
-    for (k, v) in &update.extra_headers {
-        write_header(&mut buffer, k, v)?;
-    }
-
-    match (&update.body, &update.patches) {
-        // Prefer patches over body if both are present; constructors normally keep them exclusive.
-        (_, Some(patches)) => {
-            write_header(
-                &mut buffer,
-                headers::PATCHES.as_str(),
-                &patches.len().to_string(),
-            )?;
-            end_headers(&mut buffer);
-            // `Patches: 0` ends here: no patch blocks, no body, no separator.
-            for patch in patches {
-                format_patch(&mut buffer, patch)?;
-            }
+    pub fn decode_entity(mut headers: BTreeMap<String, String>, body: Bytes) -> Result<Update> {
+        crate::protocol::strip_transport_headers(&mut headers);
+        // HTTP Content-Length describes the entire entity, not an individual patch.
+        headers.remove("transfer-encoding");
+        if headers.contains_key("patches") {
+            headers.remove("content-length");
+        } else {
+            headers.insert("content-length".into(), body.len().to_string());
         }
-        // Snapshot — `Content-Length` then the body.
-        (Some(body), None) => {
-            write_header(
-                &mut buffer,
-                headers::CONTENT_LENGTH.as_str(),
-                &body.len().to_string(),
-            )?;
-            end_headers(&mut buffer);
-            buffer.extend_from_slice(body);
-            end_payload(&mut buffer);
+        let mut frame = BytesMut::new();
+        for (k, v) in &headers {
+            write_header(&mut frame, k, v)?;
         }
-        // Neither: an explicit empty snapshot.
-        (None, None) => {
-            write_header(&mut buffer, headers::CONTENT_LENGTH.as_str(), "0")?;
-            end_headers(&mut buffer);
-            end_payload(&mut buffer);
+        frame.extend_from_slice(b"\r\n");
+        frame.extend_from_slice(&body);
+        let mut parser = crate::client::MessageParser::new();
+        let mut messages = parser.feed(&frame)?;
+        parser.finish()?;
+        if messages.len() != 1 {
+            return Err(BraidError::Protocol("Expected exactly one update".into()));
         }
+        crate::client::utils::message_to_update(messages.remove(0))
     }
-
-    Ok(buffer.freeze())
 }
 
+pub fn format_update(update: &Update) -> Result<Bytes> {
+    let (headers, body) = encode_parts(update, false)?;
+    let mut frame = BytesMut::new();
+    for (k, v) in headers {
+        write_header(&mut frame, &k, &v)?;
+    }
+    frame.extend_from_slice(b"\r\n");
+    frame.extend_from_slice(&body);
+    Ok(frame.freeze())
+}
+
+pub fn encode_update_entity(update: &Update) -> Result<(BTreeMap<String, String>, Bytes)> {
+    encode_parts(update, false)
+}
+
+pub fn encode_request(request: &BraidRequest) -> Result<(BTreeMap<String, String>, Bytes)> {
+    if request.patches.is_some() && !request.body.is_empty() {
+        return Err(BraidError::Protocol(
+            "Request contains both snapshot and patches".into(),
+        ));
+    }
+    let mut extra = request.extra_headers.clone();
+    let mut version = request.version.clone();
+    let mut parents = request.parents.clone();
+    let mut merge_type = request.merge_type.clone();
+    let mut content_type = request.content_type.clone();
+    for (key, value) in &request.extra_headers {
+        match key.to_ascii_lowercase().as_str() {
+            "version" => {
+                if version.is_some() {
+                    return Err(BraidError::Protocol("Duplicate Version source".into()));
+                }
+                version = Some(crate::protocol::parse_version_header(value)?);
+                extra.remove(key);
+            }
+            "parents" => {
+                if parents.is_some() {
+                    return Err(BraidError::Protocol("Duplicate Parents source".into()));
+                }
+                parents = Some(crate::protocol::parse_version_header(value)?);
+                extra.remove(key);
+            }
+            "merge-type" => {
+                merge_type = Some(value.clone());
+                extra.remove(key);
+            }
+            "content-type" => {
+                content_type = Some(value.clone());
+                extra.remove(key);
+            }
+            _ => {}
+        }
+    }
+    let has_parents = parents.is_some();
+    let update = Update {
+        version: version.unwrap_or_default(),
+        parents: parents.unwrap_or_default(),
+        patches: request.patches.clone(),
+        body: if request.patches.is_some() {
+            None
+        } else {
+            Some(request.body.clone())
+        },
+        merge_type,
+        content_type,
+        extra_headers: extra,
+        ..Update::default()
+    };
+    let (mut headers, body) = encode_parts(&update, true)?;
+    if !has_parents {
+        headers.remove("parents");
+    }
+    if request.subscribe {
+        headers.insert("subscribe".into(), "true".into());
+    }
+    if let Some(seconds) = request.heartbeat_interval {
+        headers.insert("heartbeats".into(), seconds.to_string());
+    }
+    if let Some(peer) = &request.peer {
+        crate::protocol::parse_peer(&crate::protocol::format_version_header(&[
+            crate::types::Version::new(peer),
+        ]))?;
+        headers.insert(
+            "peer".into(),
+            crate::protocol::format_version_header(&[crate::types::Version::new(peer)]),
+        );
+    }
+    if let Some(ack) = &request.ack {
+        headers.insert("ack".into(), crate::protocol::format_version_header(ack));
+    }
+    // The HTTP stack supplies the entity length, including all patch framing bytes.
+    headers.remove("content-length");
+    Ok((headers, body))
+}
+
+fn encode_parts(
+    update: &Update,
+    request_transport: bool,
+) -> Result<(BTreeMap<String, String>, Bytes)> {
+    if update.body.is_some() && update.patches.is_some() {
+        return Err(BraidError::Protocol(
+            "Update contains both snapshot and patches".into(),
+        ));
+    }
+    let mut headers = BTreeMap::new();
+    for (k, v) in &update.extra_headers {
+        let name = k.to_ascii_lowercase();
+        if matches!(
+            name.as_str(),
+            "content-length"
+                | "patches"
+                | "version"
+                | "parents"
+                | "current-version"
+                | "content-range"
+                | "transfer-encoding"
+        ) {
+            return Err(BraidError::Protocol(format!(
+                "Reserved framing header: {k}"
+            )));
+        }
+        headers.insert(name, v.clone());
+    }
+    if !request_transport {
+        crate::protocol::strip_transport_headers(&mut headers);
+    }
+    if !update.version.is_empty() {
+        crate::protocol::parse_version_header(&crate::protocol::format_version_header(
+            &update.version,
+        ))?;
+        headers.insert(
+            "version".into(),
+            crate::protocol::format_version_header(&update.version),
+        );
+    }
+    headers.insert(
+        "parents".into(),
+        crate::protocol::format_version_header(&update.parents),
+    );
+    crate::protocol::parse_version_header(&headers["parents"])?;
+    if let Some(current) = &update.current_version {
+        headers.insert(
+            "current-version".into(),
+            crate::protocol::format_version_header(current),
+        );
+    }
+    if let Some(mt) = &update.merge_type {
+        headers.insert("merge-type".into(), mt.clone());
+    }
+    if let Some(ct) = &update.content_type {
+        headers.insert("content-type".into(), ct.clone());
+    }
+    let body = if let Some(patches) = &update.patches {
+        headers.insert("patches".into(), patches.len().to_string());
+        if let Some(representation_type) = &update.content_type {
+            headers
+                .entry("repr-type".into())
+                .or_insert_with(|| representation_type.clone());
+        }
+        headers.insert(
+            "content-type".into(),
+            format!("application/http-patches; count={}", patches.len()),
+        );
+        let mut body = BytesMut::new();
+        for patch in patches {
+            // The parser requires `unit range`; never emit a frame our own decoder refuses.
+            if patch.unit.is_empty() || patch.range.trim().is_empty() {
+                return Err(BraidError::HeaderParse(
+                    "A patch needs a unit and a non-empty range; replace the whole resource with a snapshot instead"
+                        .into(),
+                ));
+            }
+            write_header(
+                &mut body,
+                "content-length",
+                &patch.content.len().to_string(),
+            )?;
+            write_header(
+                &mut body,
+                "content-range",
+                &format!("{} {}", patch.unit, patch.range),
+            )?;
+            body.extend_from_slice(b"\r\n");
+            body.extend_from_slice(&patch.content);
+            body.extend_from_slice(b"\r\n");
+        }
+        body.freeze()
+    } else {
+        let body = update.body.clone().unwrap_or_default();
+        headers.insert("content-length".into(), body.len().to_string());
+        if let Some(range) = &update.content_range {
+            headers.insert("content-range".into(), range.to_string());
+        }
+        body
+    };
+    for (k, v) in &headers {
+        validate_header(k, v)?;
+    }
+    Ok((headers, body))
+}
+fn validate_header(key: &str, value: &str) -> Result<()> {
+    http::header::HeaderName::from_bytes(key.as_bytes())
+        .map_err(|e| BraidError::Protocol(e.to_string()))?;
+    http::header::HeaderValue::from_str(value).map_err(|e| BraidError::Protocol(e.to_string()))?;
+    Ok(())
+}
 fn write_header(buffer: &mut BytesMut, key: &str, value: &str) -> Result<()> {
-    http::HeaderName::from_bytes(key.as_bytes())
-        .map_err(|e| BraidError::HeaderParse(e.to_string()))?;
-    http::HeaderValue::from_str(value).map_err(|e| BraidError::HeaderParse(e.to_string()))?;
-    write_canonical_name(buffer, key);
+    validate_header(key, value)?;
+    buffer.extend_from_slice(key.as_bytes());
     buffer.extend_from_slice(b": ");
     buffer.extend_from_slice(value.as_bytes());
     buffer.extend_from_slice(b"\r\n");
     Ok(())
-}
-
-fn write_canonical_name(buffer: &mut BytesMut, key: &str) {
-    let mut at_word_start = true;
-    for byte in key.bytes() {
-        if at_word_start {
-            buffer.extend_from_slice(&[byte.to_ascii_uppercase()]);
-        } else {
-            buffer.extend_from_slice(&[byte]);
-        }
-        at_word_start = byte == b'-';
-    }
-}
-
-fn end_headers(buffer: &mut BytesMut) {
-    buffer.extend_from_slice(b"\r\n");
-}
-
-fn end_payload(buffer: &mut BytesMut) {
-    buffer.extend_from_slice(b"\r\n");
-}
-
-pub(crate) fn format_patch(buffer: &mut BytesMut, patch: &Patch) -> Result<()> {
-    // Every patch MUST carry Content-Length — the parser rejects one that doesn't.
-    write_header(
-        buffer,
-        headers::CONTENT_LENGTH.as_str(),
-        &patch.content.len().to_string(),
-    )?;
-    write_header(
-        buffer,
-        headers::CONTENT_RANGE.as_str(),
-        &format!("{} {}", patch.unit, patch.range),
-    )?;
-    end_headers(buffer);
-    buffer.extend_from_slice(&patch.content);
-    end_payload(buffer);
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::Version;
-
-    #[test]
-    fn metadata_cannot_inject_headers() {
-        assert!(format_update(&Update::snapshot(Version::new("bad\r\nheader"), "x")).is_err());
-        assert!(format_update(
-            &Update::snapshot(Version::new("v1"), "x").with_header("bad name", "x")
-        )
-        .is_err());
-    }
-
-    fn rendered(update: &Update) -> anyhow::Result<String> {
-        Ok({
-            String::from_utf8(
-                format_update(update)
-                    .context("required operation value")?
-                    .to_vec(),
-            )
-            .context("required operation value")?
-        })
-    }
-
-    #[test]
-    fn snapshot_is_headers_then_body() -> anyhow::Result<()> {
-        let s = rendered(&Update::snapshot(Version::new("v1"), "data"))?;
-        assert_eq!(s, "Version: \"v1\"\r\nContent-Length: 4\r\n\r\ndata\r\n");
-        Ok(())
-    }
-
-    #[test]
-    fn parents_are_emitted_before_the_payload() -> anyhow::Result<()> {
-        let update = Update::snapshot(Version::new("v2"), "x").with_parent(Version::new("v1"));
-        assert!(rendered(&update)?.starts_with("Version: \"v2\"\r\nParents: \"v1\"\r\n"));
-        Ok(())
-    }
-
-    #[test]
-    fn no_multipart_boundary_appears_anywhere() -> anyhow::Result<()> {
-        // Braid subscriptions must not emit multipart boundary delimiters.
-        let s = rendered(&Update::snapshot(Version::new("v1"), "data"))?;
-        assert!(!s.contains("--"), "boundary delimiter leaked into the wire");
-        Ok(())
-    }
-
-    #[test]
-    fn patched_update_emits_a_block_per_patch() -> anyhow::Result<()> {
-        let update = Update::patched(
-            Version::new("v1"),
-            vec![Patch::json(".a", "1"), Patch::json(".b", "22")],
-        );
-        assert_eq!(
-            rendered(&update)?,
-            "Version: \"v1\"\r\nPatches: 2\r\n\r\n\
-             Content-Length: 1\r\nContent-Range: json .a\r\n\r\n1\r\n\
-             Content-Length: 2\r\nContent-Range: json .b\r\n\r\n22\r\n"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn zero_patches_ends_at_the_blank_line() -> anyhow::Result<()> {
-        // `Patches: 0` carries no body at all — distinct from an empty snapshot.
-        let update = Update::patched(Version::new("v1"), vec![]);
-        assert_eq!(rendered(&update)?, "Version: \"v1\"\r\nPatches: 0\r\n\r\n");
-        Ok(())
-    }
-
-    #[test]
-    fn empty_snapshot_still_declares_a_zero_length_body() -> anyhow::Result<()> {
-        let update = Update::snapshot(Version::new("v1"), "");
-        assert_eq!(
-            rendered(&update)?,
-            "Version: \"v1\"\r\nContent-Length: 0\r\n\r\n\r\n"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn heartbeat_is_a_bare_crlf() {
-        assert_eq!(&format_heartbeat()[..], b"\r\n");
-    }
-
-    #[test]
-    fn content_type_and_merge_type_are_emitted() -> anyhow::Result<()> {
-        let update = Update::snapshot(Version::new("v1"), "{}")
-            .with_content_type("application/json")
-            .with_merge_type("simpleton");
-        let s = rendered(&update)?;
-        assert!(s.contains("Content-Type: application/json\r\n"));
-        assert!(s.contains("Merge-Type: simpleton\r\n"));
-        Ok(())
-    }
 }

@@ -106,10 +106,7 @@ mod tests {
                 .context("required operation value")?,
             "\"7\""
         );
-        let body = messages[0]
-            .body
-            .as_ref()
-            .context("required operation value")?;
+        let body = messages[0].body.as_ref();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(body)
                 .context("required operation value")?,

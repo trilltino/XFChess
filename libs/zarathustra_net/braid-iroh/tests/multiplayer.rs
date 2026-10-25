@@ -172,6 +172,7 @@ async fn remote_bridge_streams_over_http3_and_preserves_versions_and_binary_payl
         })
         .await
         .context("required operation value")?;
+        origin.update_access(|policy| policy.allow_write(bridge.node_id()));
         let client = BraidClient::new().context("required operation value")?;
         let url = format!(
             "http://{}/game/7/moves",
@@ -264,7 +265,7 @@ async fn remote_bridge_streams_over_http3_and_preserves_versions_and_binary_payl
                     BraidRequest::new().with_parent(Version::new("missing"))
                 )
                 .await,
-            Err(braid_http::BraidError::InvalidSubscriptionStatus(410))
+            Err(braid_http::BraidError::SubscriptionStatus { status: 410, .. })
         ));
         bridge
             .shutdown()

@@ -61,13 +61,8 @@ async fn lagging_subscribers_receive_a_snapshot_then_resume_with_correct_parents
             .context("required operation value")?,
         "application/json"
     );
-    let snapshot: serde_json::Value = serde_json::from_slice(
-        messages[0]
-            .body
-            .as_ref()
-            .context("required operation value")?,
-    )
-    .context("required operation value")?;
+    let snapshot: serde_json::Value =
+        serde_json::from_slice(messages[0].body.as_ref()).context("required operation value")?;
     assert_eq!(
         snapshot
             .as_array()

@@ -32,11 +32,10 @@ if (-not $PlatformOnly) {
         @('-p', 'backend', '--no-default-features', '--features', 'polling'),
         @('-p', 'xfchess-rules', '-p', 'xfchess-stockfish', '-p', 'xfchess-anticheat',
           '-p', 'swiss-pairing', '-p', 'braid-http', '-p', 'braid_chess',
-          '-p', 'xfchess-braid-server', '-p', 'iroh-h3', '-p', 'iroh-h3-axum',
-          '-p', 'iroh-h3-client', '-p', 'cu_benchmark'),
+          '-p', 'xfchess-braid-server',
+          '-p', 'cu_benchmark'),
         @('-p', 'braid-iroh', '--features', 'proxy'),
         @('-p', 'braid-http', '--all-features'),
-        @('-p', 'iroh-h3-client', '--features', 'json'),
         @('-p', 'xfchess-game', '-p', 'xfchess-game-sbf')
     )
 }

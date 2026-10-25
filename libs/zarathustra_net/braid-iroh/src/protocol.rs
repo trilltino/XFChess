@@ -9,13 +9,80 @@ use axum::{
 };
 use braid_http::{client::BraidHeaders, Update, Version};
 use bytes::Bytes;
-use iroh_h3_axum::IrohAxum;
-use std::{collections::HashMap, sync::Arc};
+use iroh::EndpointId;
+use iroh_h3_axum::{IrohAxum, RemoteId};
+use parking_lot::RwLock;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
+/// Which authenticated QUIC endpoints may read or write resources over H3.
+///
+/// The default policy denies everyone. Holding an endpoint ID, a gossip topic
+/// or a game URL never grants access; only an explicit grant does. This is
+/// transport authority only: chess player, wallet and seat authority stay in
+/// the application and backend.
+#[derive(Clone, Debug, Default)]
+pub struct AccessPolicy {
+    readers: HashSet<EndpointId>,
+    writers: HashSet<EndpointId>,
+    public_read: bool,
+}
+
+impl AccessPolicy {
+    pub fn deny_all() -> Self {
+        Self::default()
+    }
+
+    /// Let `peer` read (subscribe to) resources.
+    pub fn allow_read(&mut self, peer: EndpointId) {
+        self.readers.insert(peer);
+    }
+
+    /// Let `peer` read and write resources.
+    pub fn allow_write(&mut self, peer: EndpointId) {
+        self.writers.insert(peer);
+    }
+
+    /// Open reads to every authenticated endpoint (spectators). Writes stay explicit.
+    pub fn set_public_read(&mut self, public: bool) {
+        self.public_read = public;
+    }
+
+    pub fn revoke(&mut self, peer: &EndpointId) {
+        self.readers.remove(peer);
+        self.writers.remove(peer);
+    }
+
+    pub fn can_read(&self, peer: &EndpointId) -> bool {
+        self.public_read || self.readers.contains(peer) || self.writers.contains(peer)
+    }
+
+    pub fn can_write(&self, peer: &EndpointId) -> bool {
+        self.writers.contains(peer)
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct BraidAppState {
     pub subscriptions: Arc<SubscriptionManager>,
     pub resources: Arc<ResourceStore>,
+    /// This node. The loopback bridge acts as the node itself.
+    pub local_id: EndpointId,
+    pub access: Arc<RwLock<AccessPolicy>>,
+    /// Bumped whenever the policy changes so open subscriptions re-check it.
+    pub policy_changed: tokio::sync::watch::Sender<u64>,
+}
+
+impl BraidAppState {
+    fn can_read(&self, peer: &EndpointId) -> bool {
+        *peer == self.local_id || self.access.read().can_read(peer)
+    }
+
+    fn can_write(&self, peer: &EndpointId) -> bool {
+        *peer == self.local_id || self.access.read().can_write(peer)
+    }
 }
 
 pub(crate) fn build_protocol_handler(state: BraidAppState) -> IrohAxum {
@@ -32,8 +99,13 @@ async fn handle_get(
     State(state): State<BraidAppState>,
     Path(resource): Path<String>,
     Query(params): Query<HashMap<String, String>>,
+    RemoteId(peer): RemoteId,
     headers: HeaderMap,
 ) -> Response {
+    if !state.can_read(&peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let mut policy_changes = state.policy_changed.subscribe();
     let url = SubscriptionManager::normalize_url(&resource);
     if braid_http::server::wants_subscribe(|name| headers.get(name).and_then(|v| v.to_str().ok())) {
         let parsed = match BraidHeaders::from_header_map(&headers) {
@@ -55,9 +127,16 @@ async fn handle_get(
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 let event = tokio::select! {
+                    biased;
+                    changed = policy_changes.changed() => {
+                        // A revoked peer's open stream ends at the next policy change.
+                        if changed.is_err() || !state.can_read(&peer) { break; }
+                        continue;
+                    }
                     event = receiver.recv() => Some(event),
                     _ = interval.tick() => None,
                 };
+                if !state.can_read(&peer) { break; }
                 match event {
                     Some(Ok(update)) => yield braid_http::protocol::format_update(&update)?,
                     Some(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
@@ -116,9 +195,13 @@ async fn handle_get(
 async fn handle_put(
     State(state): State<BraidAppState>,
     Path(resource): Path<String>,
+    RemoteId(peer): RemoteId,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    if !state.can_write(&peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     let parsed = match BraidHeaders::from_header_map(&headers) {
         Ok(parsed) => parsed,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),

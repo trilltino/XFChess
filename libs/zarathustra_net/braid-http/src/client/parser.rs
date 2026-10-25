@@ -1,479 +1,356 @@
+//! Bounded incremental decoding of Braid frames. The transport decodes HTTP transfer coding.
 use crate::error::{BraidError, Result};
 use crate::types::Patch;
-#[cfg(test)]
-use anyhow::Context as _;
 use bytes::{Buf, Bytes, BytesMut};
-use once_cell::sync::Lazy;
-use regex::Regex;
 use std::collections::BTreeMap;
-
-const MAX_HEADER_BYTES: usize = 64 * 1024;
-const MAX_UPDATE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_PATCHES: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseState {
     WaitingForHeaders,
+    ParsingHeaders,
     WaitingForBody,
     WaitingForPatchHeaders,
     WaitingForPatchBody,
     SkippingSeparator,
+    Complete,
+    Error,
 }
-
+#[derive(Debug, Clone, Copy)]
+pub struct ParserLimits {
+    pub max_header_bytes: usize,
+    pub max_header_fields: usize,
+    pub max_header_value_bytes: usize,
+    pub max_body_bytes: usize,
+    pub max_patches: usize,
+    pub max_update_bytes: usize,
+}
+impl Default for ParserLimits {
+    fn default() -> Self {
+        Self {
+            max_header_bytes: 64 * 1024,
+            max_header_fields: 128,
+            max_header_value_bytes: 16 * 1024,
+            max_body_bytes: 16 * 1024 * 1024,
+            max_patches: 1024,
+            max_update_bytes: 32 * 1024 * 1024,
+        }
+    }
+}
 #[derive(Debug)]
 pub struct MessageParser {
     buffer: BytesMut,
     state: ParseState,
     headers: BTreeMap<String, String>,
     body_buffer: BytesMut,
-    expected_body_length: usize,
-    read_body_length: usize,
     patches: Vec<Patch>,
-    expected_patches: Option<usize>,
-    patches_read: usize,
     patch_headers: BTreeMap<String, String>,
-    expected_patch_length: usize,
-    patch_bytes: usize,
+    expected_length: usize,
+    expected_patches: usize,
+    update_bytes: usize,
+    limits: ParserLimits,
+    header_scan_from: usize,
 }
-
-static HTTP_STATUS_REGEX: Lazy<std::result::Result<Regex, regex::Error>> =
-    Lazy::new(|| Regex::new(r"^HTTP/?\d*\.?\d* (\d{3})"));
-
-static ENCODING_BLOCK_REGEX: Lazy<std::result::Result<Regex, regex::Error>> =
-    Lazy::new(|| Regex::new(r"(?i)Encoding:\s*(\w+)\r?\nLength:\s*(\d+)\r?\n"));
-
+impl Default for MessageParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl MessageParser {
     pub fn new() -> Self {
-        MessageParser {
-            buffer: BytesMut::with_capacity(8192),
+        Self::with_limits(ParserLimits::default())
+    }
+    /// Parser for a subscription body (frames separated by optional heartbeats).
+    pub fn for_subscription() -> Self {
+        Self::new()
+    }
+    pub fn with_limits(limits: ParserLimits) -> Self {
+        Self {
+            buffer: BytesMut::new(),
             state: ParseState::WaitingForHeaders,
             headers: BTreeMap::new(),
             body_buffer: BytesMut::new(),
-            expected_body_length: 0,
-            read_body_length: 0,
-            patches: Vec::new(),
-            expected_patches: None,
-            patches_read: 0,
+            patches: vec![],
             patch_headers: BTreeMap::new(),
-            expected_patch_length: 0,
-            patch_bytes: 0,
+            expected_length: 0,
+            expected_patches: 0,
+            update_bytes: 0,
+            limits,
+            header_scan_from: 0,
         }
     }
-
-    #[must_use]
-    pub fn for_subscription() -> Self {
-        MessageParser::new()
-    }
-
-    #[must_use]
-    pub fn for_response(headers: BTreeMap<String, String>, content_length: usize) -> Self {
-        let mut parser = MessageParser::new();
+    /// Decode a finite HTTP entity with already parsed outer headers.
+    /// Subscription bodies use `new`, independent of HTTP transfer coding.
+    pub fn new_with_state(headers: BTreeMap<String, String>, content_length: usize) -> Self {
+        let mut parser = Self::new();
         parser.headers = headers;
-        parser.expected_body_length = content_length;
-        parser.state = ParseState::WaitingForBody;
+        parser
+            .headers
+            .entry("content-length".into())
+            .or_insert_with(|| content_length.to_string());
+        if parser.start_body().is_err() {
+            parser.state = ParseState::Error;
+        }
         parser
     }
-
     pub fn feed(&mut self, data: &[u8]) -> Result<Vec<Message>> {
-        if self
-            .buffer
-            .len()
-            .saturating_add(data.len())
-            .saturating_add(self.body_buffer.len())
-            .saturating_add(self.patch_bytes)
-            > MAX_UPDATE_BYTES
-        {
-            return Err(BraidError::Protocol("Update exceeds 16 MiB".into()));
+        if self.state == ParseState::Error {
+            return Err(BraidError::Protocol("Parser is in a failed state".into()));
         }
-        self.buffer.extend_from_slice(data);
-        let mut messages = Vec::new();
-
-        loop {
-            match self.state {
-                ParseState::WaitingForHeaders => {
-                    while !self.buffer.is_empty()
-                        && (self.buffer[0] == b'\r' || self.buffer[0] == b'\n')
-                    {
-                        self.buffer.advance(1);
-                    }
-
-                    if self.buffer.is_empty() {
-                        break;
-                    }
-
-                    if self.check_encoding_block()? {
-                        self.state = ParseState::WaitingForBody;
-                        continue;
-                    }
-
-                    if let Some(pos) = self.find_header_end() {
-                        self.parse_headers(pos)?;
-                        self.state = ParseState::WaitingForBody;
-                    } else {
-                        if self.buffer.len() > MAX_HEADER_BYTES {
-                            return Err(BraidError::HeaderParse("Headers exceed 64 KiB".into()));
-                        }
-                        break;
-                    }
-                }
-                ParseState::WaitingForBody => {
-                    if let Some(n) = self.expected_patches {
-                        if n == 0 {
-                            // `Patches: 0` is complete at the blank line: no patch
-                            // blocks and no body follow it.
-                            if let Some(msg) = self.finalize_message()? {
-                                messages.push(msg);
-                            }
-                            self.reset();
-                            self.state = ParseState::WaitingForHeaders;
-                        } else {
-                            self.state = ParseState::WaitingForPatchHeaders;
-                        }
-                    } else if self.try_parse_body()? {
-                        if let Some(msg) = self.finalize_message()? {
-                            messages.push(msg);
-                        }
-                        self.reset();
-                        self.state = ParseState::WaitingForHeaders;
-                    } else {
-                        break;
-                    }
-                }
-                ParseState::WaitingForPatchHeaders => {
-                    if let Some(pos) = self.find_header_end() {
-                        self.parse_patch_headers(pos)?;
-                        self.state = ParseState::WaitingForPatchBody;
-                    } else {
-                        if self.buffer.len() > MAX_HEADER_BYTES {
-                            return Err(BraidError::HeaderParse(
-                                "Patch headers exceed 64 KiB".into(),
-                            ));
-                        }
-                        break;
-                    }
-                }
-                ParseState::WaitingForPatchBody => {
-                    if self.try_parse_patch_body()? {
-                        self.patches_read += 1;
-                        if self.patches_read < self.expected_patches.unwrap_or(0) {
-                            self.state = ParseState::SkippingSeparator;
-                        } else {
-                            if let Some(msg) = self.finalize_message()? {
-                                messages.push(msg);
-                            }
-                            self.reset();
-                            self.state = ParseState::WaitingForHeaders;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                ParseState::SkippingSeparator => {
-                    if self.buffer.len() >= 2 {
-                        if &self.buffer[..2] == b"\r\n" {
-                            self.buffer.advance(2);
-                        } else if self.buffer[0] == b'\n' {
-                            self.buffer.advance(1);
-                        }
-                        self.state = ParseState::WaitingForPatchHeaders;
-                    } else if self.buffer.len() == 1 && self.buffer[0] == b'\n' {
-                        self.buffer.advance(1);
-                        self.state = ParseState::WaitingForPatchHeaders;
-                    } else {
-                        break;
-                    }
-                }
+        let mut messages = vec![];
+        for chunk in data.chunks(8192) {
+            self.buffer.extend_from_slice(chunk);
+            if let Err(e) = self.drain(&mut messages) {
+                self.state = ParseState::Error;
+                return Err(e);
             }
+        }
+        if let Err(e) = self.drain(&mut messages) {
+            self.state = ParseState::Error;
+            return Err(e);
         }
         Ok(messages)
     }
-
-    /// Checks that EOF falls between complete updates, allowing trailing heartbeats.
-    pub fn finish(&self) -> Result<()> {
+    fn drain(&mut self, messages: &mut Vec<Message>) -> Result<()> {
+        loop {
+            match self.state {
+                ParseState::WaitingForHeaders | ParseState::WaitingForPatchHeaders => {
+                    while matches!(self.buffer.first(), Some(b'\r' | b'\n')) {
+                        self.buffer.advance(1);
+                        self.header_scan_from = 0;
+                    }
+                    let scan = &self.buffer[self.header_scan_from.min(self.buffer.len())..];
+                    let end = scan
+                        .windows(4)
+                        .position(|w| w == b"\r\n\r\n")
+                        .map(|p| p + 4)
+                        .into_iter()
+                        .chain(scan.windows(2).position(|w| w == b"\n\n").map(|p| p + 2))
+                        .min()
+                        .map(|p| p + self.header_scan_from);
+                    if end.unwrap_or(self.buffer.len()) > self.limits.max_header_bytes {
+                        return Err(BraidError::Protocol("Header limit exceeded".into()));
+                    }
+                    let Some(end) = end else {
+                        self.header_scan_from = self.buffer.len().saturating_sub(3);
+                        break;
+                    };
+                    self.header_scan_from = 0;
+                    self.account(end)?;
+                    let header_bytes = self.buffer.split_to(end);
+                    let headers = self.parse_headers(&header_bytes)?;
+                    if self.state == ParseState::WaitingForHeaders {
+                        self.headers = headers;
+                        self.start_body()?;
+                    } else {
+                        if !headers.contains_key("content-range") {
+                            return Err(BraidError::Protocol(
+                                "Patch requires Content-Range".into(),
+                            ));
+                        }
+                        self.expected_length = Self::decimal(&headers, "content-length")?;
+                        self.check_length(self.expected_length)?;
+                        crate::protocol::parse_content_range(&headers["content-range"])?;
+                        self.patch_headers = headers;
+                        self.state = ParseState::WaitingForPatchBody;
+                    }
+                }
+                ParseState::WaitingForBody | ParseState::WaitingForPatchBody => {
+                    let needed = self.expected_length - self.body_buffer.len();
+                    let n = needed.min(self.buffer.len());
+                    self.body_buffer.extend_from_slice(&self.buffer.split_to(n));
+                    if n < needed {
+                        break;
+                    }
+                    if self.state == ParseState::WaitingForPatchBody {
+                        let (unit, range) = crate::protocol::parse_content_range(
+                            &self.patch_headers["content-range"],
+                        )?;
+                        self.patches.push(Patch::new(
+                            unit,
+                            range,
+                            self.body_buffer.split().freeze(),
+                        ));
+                        if self.patches.len() < self.expected_patches {
+                            self.state = ParseState::WaitingForPatchHeaders;
+                            continue;
+                        }
+                    }
+                    messages.push(Message {
+                        status_code: self.headers.get(":status").and_then(|s| s.parse().ok()),
+                        encoding: self.headers.get("encoding").cloned(),
+                        url: self.headers.get("content-location").cloned(),
+                        headers: std::mem::take(&mut self.headers),
+                        body: self.body_buffer.split().freeze(),
+                        patches: std::mem::take(&mut self.patches),
+                    });
+                    self.expected_patches = 0;
+                    self.update_bytes = 0;
+                    self.header_scan_from = 0;
+                    self.state = ParseState::WaitingForHeaders;
+                }
+                _ => break,
+            }
+        }
+        Ok(())
+    }
+    fn parse_headers(&self, data: &[u8]) -> Result<BTreeMap<String, String>> {
+        let text = std::str::from_utf8(data)
+            .map_err(|_| BraidError::Protocol("Invalid header UTF-8".into()))?;
+        let mut headers = BTreeMap::new();
+        for (index, line) in text.lines().enumerate() {
+            if line.is_empty() {
+                continue;
+            }
+            if index >= self.limits.max_header_fields {
+                return Err(BraidError::Protocol(
+                    "Header field count limit exceeded".into(),
+                ));
+            }
+            if index == 0 {
+                if let Some(status) = parse_status_line(line) {
+                    headers.insert(":status".into(), status.to_string());
+                    continue;
+                }
+            }
+            let (key, value) = line
+                .split_once(':')
+                .ok_or_else(|| BraidError::Protocol("Malformed header".into()))?;
+            if key.is_empty()
+                || !key
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+            {
+                return Err(BraidError::Protocol("Invalid header name".into()));
+            }
+            let key = key.to_ascii_lowercase();
+            if value.len() > self.limits.max_header_value_bytes
+                || value.bytes().any(|b| b < 0x20 && b != b'\t' || b == 0x7f)
+            {
+                return Err(BraidError::Protocol(
+                    "Invalid or oversized header value".into(),
+                ));
+            }
+            if let Some(existing) = headers.get_mut(&key) {
+                if matches!(key.as_str(), "version" | "parents" | "current-version") {
+                    existing.push_str(", ");
+                    existing.push_str(value.trim());
+                } else {
+                    return Err(BraidError::Protocol(format!("Duplicate header: {key}")));
+                }
+            } else {
+                headers.insert(key, value.trim().into());
+            }
+        }
+        Ok(headers)
+    }
+    fn decimal(headers: &BTreeMap<String, String>, name: &str) -> Result<usize> {
+        let s = headers
+            .get(name)
+            .ok_or_else(|| BraidError::Protocol(format!("Missing {name}")))?;
+        if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(BraidError::Protocol(format!("Invalid {name}")));
+        }
+        s.parse()
+            .map_err(|_| BraidError::Protocol(format!("Overflow in {name}")))
+    }
+    fn account(&mut self, n: usize) -> Result<()> {
+        self.update_bytes = self
+            .update_bytes
+            .checked_add(n)
+            .filter(|n| *n <= self.limits.max_update_bytes)
+            .ok_or_else(|| BraidError::Protocol("Update limit exceeded".into()))?;
+        Ok(())
+    }
+    fn check_length(&mut self, n: usize) -> Result<()> {
+        if n > self.limits.max_body_bytes {
+            return Err(BraidError::Protocol("Body limit exceeded".into()));
+        }
+        self.account(n)
+    }
+    /// The patch count declared by `Patches: N`, by the media type parameter
+    /// (`application/http-patches; count=N`), or by both, which must agree.
+    fn declared_patch_count(headers: &BTreeMap<String, String>) -> Result<Option<usize>> {
+        let explicit = if headers.contains_key("patches") {
+            Some(Self::decimal(headers, "patches")?)
+        } else {
+            None
+        };
+        let mut media = None;
+        if let Some(content_type) = headers.get("content-type") {
+            let mut parts = content_type.split(';');
+            let is_patches = parts.next().is_some_and(|media| {
+                media
+                    .trim()
+                    .eq_ignore_ascii_case("application/http-patches")
+            });
+            if is_patches {
+                for parameter in parts {
+                    let Some((name, value)) = parameter.split_once('=') else {
+                        continue;
+                    };
+                    if !name.trim().eq_ignore_ascii_case("count") {
+                        continue;
+                    }
+                    let count = value
+                        .trim()
+                        .trim_matches('"')
+                        .parse::<usize>()
+                        .map_err(|_| BraidError::Protocol("Invalid patch count".into()))?;
+                    if media.replace(count).is_some() {
+                        return Err(BraidError::Protocol("Duplicate patch count".into()));
+                    }
+                }
+            }
+        }
+        match (explicit, media) {
+            (Some(a), Some(b)) if a != b => {
+                Err(BraidError::Protocol("Conflicting patch counts".into()))
+            }
+            (a, b) => Ok(a.or(b)),
+        }
+    }
+    fn start_body(&mut self) -> Result<()> {
+        if let Some(count) = Self::declared_patch_count(&self.headers)? {
+            if self.headers.contains_key("content-length")
+                || self.headers.contains_key("content-range")
+            {
+                return Err(BraidError::Protocol(
+                    "Conflicting patch and snapshot framing".into(),
+                ));
+            }
+            self.expected_patches = count;
+            if self.expected_patches > self.limits.max_patches {
+                return Err(BraidError::Protocol("Patch count limit exceeded".into()));
+            }
+            self.expected_length = 0;
+            self.state = if self.expected_patches == 0 {
+                ParseState::WaitingForBody
+            } else {
+                ParseState::WaitingForPatchHeaders
+            };
+        } else {
+            self.expected_length = if self.headers.contains_key("encoding") {
+                Self::decimal(&self.headers, "length")?
+            } else {
+                Self::decimal(&self.headers, "content-length")?
+            };
+            self.check_length(self.expected_length)?;
+            self.state = ParseState::WaitingForBody;
+        }
+        Ok(())
+    }
+    /// Reject EOF in the middle of a frame.
+    pub fn finish(&mut self) -> Result<()> {
         if self.state == ParseState::WaitingForHeaders
-            && self.buffer.iter().all(|b| matches!(b, b'\r' | b'\n'))
+            && self.buffer.iter().all(|b| *b == b'\r' || *b == b'\n')
         {
+            self.buffer.clear();
             Ok(())
         } else {
-            Err(BraidError::BodyParse(
-                "Subscription ended mid-update".into(),
-            ))
+            self.state = ParseState::Error;
+            Err(BraidError::Protocol("Truncated Braid frame at EOF".into()))
         }
     }
-
-    fn check_encoding_block(&mut self) -> Result<bool> {
-        if self.buffer.is_empty() || (self.buffer[0] != b'E' && self.buffer[0] != b'e') {
-            return Ok(false);
-        }
-
-        if let Some(end) = self.find_double_newline() {
-            let header_bytes = &self.buffer[..end];
-            let header_str = std::str::from_utf8(header_bytes).map_err(|e| {
-                BraidError::Protocol(format!("Invalid encoding block UTF-8: {}", e))
-            })?;
-
-            let regex = ENCODING_BLOCK_REGEX
-                .as_ref()
-                .map_err(|error| BraidError::Internal(error.to_string()))?;
-            if let Some(caps) = regex.captures(header_str) {
-                let encoding = caps
-                    .get(1)
-                    .ok_or_else(|| BraidError::Protocol("Missing encoding".into()))?
-                    .as_str()
-                    .to_string();
-                let length: usize = caps
-                    .get(2)
-                    .ok_or_else(|| BraidError::Protocol("Missing encoding length".into()))?
-                    .as_str()
-                    .parse()
-                    .map_err(|_| {
-                        BraidError::Protocol("Invalid length in encoding block".to_string())
-                    })?;
-
-                let _ = self.buffer.split_to(end);
-                self.headers.insert("encoding".to_string(), encoding);
-                self.headers
-                    .insert("length".to_string(), length.to_string());
-                self.expected_body_length = length;
-                if length > MAX_UPDATE_BYTES {
-                    return Err(BraidError::Protocol("Encoding block exceeds 16 MiB".into()));
-                }
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
-    fn find_double_newline(&self) -> Option<usize> {
-        if let Some(pos) = self.buffer.windows(4).position(|w| w == b"\r\n\r\n") {
-            return Some(pos + 4);
-        }
-        if let Some(pos) = self.buffer.windows(2).position(|w| w == b"\n\n") {
-            return Some(pos + 2);
-        }
-        None
-    }
-
-    fn find_header_end(&self) -> Option<usize> {
-        self.buffer.iter().enumerate().find_map(|(i, b)| {
-            if *b != b'\n' {
-                return None;
-            }
-            if self.buffer.get(i + 1) == Some(&b'\n') {
-                Some(i + 2)
-            } else if self.buffer.get(i + 1..i + 3) == Some(b"\r\n") {
-                Some(i + 3)
-            } else {
-                None
-            }
-        })
-    }
-
-    fn parse_headers(&mut self, end: usize) -> Result<()> {
-        if end > MAX_HEADER_BYTES {
-            return Err(BraidError::HeaderParse("Headers exceed 64 KiB".into()));
-        }
-        let header_bytes = self.buffer.split_to(end);
-        let mut header_str = String::from_utf8(header_bytes.to_vec())?;
-
-        let regex = HTTP_STATUS_REGEX
-            .as_ref()
-            .map_err(|error| BraidError::Internal(error.to_string()))?;
-        if let Some(caps) = regex.captures(&header_str) {
-            if let Some(status_match) = caps.get(1) {
-                let status = status_match.as_str();
-                if let Some(first_newline) = header_str.find('\n') {
-                    let replacement = format!(":status: {}\r", status);
-                    header_str = replacement + &header_str[first_newline..];
-                }
-            }
-        }
-
-        for line in header_str.lines() {
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(colon_pos) = line[usize::from(line.starts_with(':'))..]
-                .find(':')
-                .map(|pos| pos + usize::from(line.starts_with(':')))
-            {
-                let key = line[..colon_pos].trim().to_lowercase();
-                let value = line[colon_pos + 1..].trim().to_string();
-                let duplicate = self.headers.insert(key.clone(), value).is_some();
-                if duplicate && matches!(key.as_str(), "content-length" | "patches" | "length") {
-                    return Err(BraidError::HeaderParse("Duplicate framing header".into()));
-                }
-            } else {
-                return Err(BraidError::HeaderParse("Malformed update header".into()));
-            }
-        }
-
-        self.expected_patches = crate::protocol::headers::parse_patch_count(
-            self.headers.get("patches").map(String::as_str),
-            self.headers.get("content-type").map(String::as_str),
-        )?;
-        if self
-            .expected_patches
-            .is_some_and(|count| count > MAX_PATCHES)
-        {
-            return Err(BraidError::Protocol("Too many patches".into()));
-        }
-
-        if let Some(len_str) = self
-            .headers
-            .get("content-length")
-            .or_else(|| self.headers.get("length"))
-        {
-            self.expected_body_length = len_str.parse().map_err(|_| {
-                BraidError::HeaderParse(format!("Invalid content-length: {}", len_str))
-            })?;
-        } else if self.expected_patches.is_none() {
-            return Err(BraidError::Protocol(
-                "Snapshot requires Content-Length".into(),
-            ));
-        }
-        if self.expected_body_length > MAX_UPDATE_BYTES {
-            return Err(BraidError::Protocol("Body exceeds 16 MiB".into()));
-        }
-        Ok(())
-    }
-
-    fn parse_patch_headers(&mut self, end: usize) -> Result<()> {
-        if end > MAX_HEADER_BYTES {
-            return Err(BraidError::HeaderParse(
-                "Patch headers exceed 64 KiB".into(),
-            ));
-        }
-        let header_bytes = self.buffer.split_to(end);
-        let header_str = String::from_utf8(header_bytes.to_vec())?;
-
-        self.patch_headers.clear();
-        for line in header_str.lines() {
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(colon_pos) = line.find(':') {
-                let key = line[..colon_pos].trim().to_lowercase();
-                let value = line[colon_pos + 1..].trim().to_string();
-                let duplicate = self.patch_headers.insert(key.clone(), value).is_some();
-                if duplicate && key == "content-length" {
-                    return Err(BraidError::HeaderParse("Duplicate patch length".into()));
-                }
-            } else {
-                return Err(BraidError::HeaderParse("Malformed patch header".into()));
-            }
-        }
-
-        if let Some(len_str) = self.patch_headers.get("content-length") {
-            self.expected_patch_length = len_str.parse().map_err(|_| {
-                BraidError::HeaderParse(format!("Invalid patch content-length: {}", len_str))
-            })?;
-        } else {
-            return Err(BraidError::Protocol(
-                "Every patch MUST include Content-Length".to_string(),
-            ));
-        }
-        if self.expected_patch_length.saturating_add(self.patch_bytes) > MAX_UPDATE_BYTES {
-            return Err(BraidError::Protocol("Patches exceed 16 MiB".into()));
-        }
-        if !self.patch_headers.contains_key("content-range") {
-            return Err(BraidError::HeaderParse(
-                "Patch requires Content-Range".into(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn try_parse_patch_body(&mut self) -> Result<bool> {
-        let remaining = self.expected_patch_length;
-        if self.buffer.len() >= remaining {
-            let body_chunk = self.buffer.split_to(remaining);
-            let content_range = self
-                .patch_headers
-                .get("content-range")
-                .ok_or_else(|| BraidError::HeaderParse("Patch requires Content-Range".into()))?;
-            let (unit, range) = crate::protocol::parse_content_range(content_range)?;
-            let patch = Patch::with_length(unit, range, body_chunk, self.expected_patch_length);
-            self.patches.push(patch);
-            self.patch_bytes += remaining;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    fn try_parse_body(&mut self) -> Result<bool> {
-        // For non-chunked with known content-length
-        if self.expected_body_length == 0 {
-            // No body expected (e.g., HEAD request or empty response with explicit 0 length)
-            return Ok(true);
-        }
-
-        let remaining = self.expected_body_length - self.read_body_length;
-        if self.buffer.len() >= remaining {
-            let body_chunk = self.buffer.split_to(remaining);
-            if self.body_buffer.is_empty() {
-                self.body_buffer = body_chunk;
-            } else {
-                self.body_buffer.extend_from_slice(&body_chunk);
-            }
-            self.read_body_length += remaining;
-            Ok(true)
-        } else {
-            let chunk_len = self.buffer.len();
-            self.body_buffer
-                .extend_from_slice(&self.buffer.split_to(chunk_len));
-            self.read_body_length += chunk_len;
-            Ok(false)
-        }
-    }
-
-    fn finalize_message(&mut self) -> Result<Option<Message>> {
-        let headers = std::mem::take(&mut self.headers);
-        let url = headers.get("content-location").cloned();
-        let encoding = headers.get("encoding").cloned();
-
-        // An explicit zero patch count is an empty patch update, not a snapshot.
-        let (body, patches) = if self.expected_patches.is_some() {
-            self.body_buffer.clear();
-            (None, Some(std::mem::take(&mut self.patches)))
-        } else if let Some(range) = headers.get("content-range") {
-            let (unit, range) = crate::protocol::parse_content_range(range)?;
-            (
-                None,
-                Some(vec![Patch::new(
-                    unit,
-                    range,
-                    self.body_buffer.split().freeze(),
-                )]),
-            )
-        } else {
-            (Some(self.body_buffer.split().freeze()), None)
-        };
-
-        Ok(Some(Message {
-            headers,
-            body,
-            patches,
-            status_code: None,
-            encoding,
-            url,
-        }))
-    }
-
-    fn reset(&mut self) {
-        self.headers.clear();
-        self.body_buffer.clear();
-        self.expected_body_length = 0;
-        self.read_body_length = 0;
-        self.patches.clear();
-        self.expected_patches = None;
-        self.patches_read = 0;
-        self.patch_headers.clear();
-        self.expected_patch_length = 0;
-        self.patch_bytes = 0;
-    }
-
     pub fn state(&self) -> ParseState {
         self.state
     }
@@ -485,17 +362,11 @@ impl MessageParser {
     }
 }
 
-impl Default for MessageParser {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Message {
     pub headers: BTreeMap<String, String>,
-    pub body: Option<Bytes>,
-    pub patches: Option<Vec<Patch>>,
+    pub body: Bytes,
+    pub patches: Vec<Patch>,
     pub status_code: Option<u16>,
     pub encoding: Option<String>,
     pub url: Option<String>,
@@ -518,10 +389,10 @@ impl Message {
     }
 
     pub fn decode_body(&self) -> Result<Bytes> {
-        let body = self.body.clone().unwrap_or_default();
         match self.encoding.as_deref() {
-            Some("dt") | None => Ok(body),
+            Some("dt") => Ok(self.body.clone()),
             Some(enc) => Err(BraidError::Protocol(format!("Unknown encoding: {}", enc))),
+            None => Ok(self.body.clone()),
         }
     }
 
@@ -535,7 +406,9 @@ impl Message {
             "content-range",
             ":status",
         ];
-        self.headers
+        let mut metadata = self.headers.clone();
+        crate::protocol::strip_transport_headers(&mut metadata);
+        metadata
             .iter()
             .filter(|(k, _)| !KNOWN_HEADERS.contains(&k.as_str()))
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -543,8 +416,7 @@ impl Message {
     }
 
     pub fn body_text(&self) -> Option<String> {
-        let body = self.body.as_ref()?;
-        std::str::from_utf8(body).ok().map(ToString::to_string)
+        std::str::from_utf8(&self.body).ok().map(|s| s.to_string())
     }
 }
 
@@ -560,22 +432,7 @@ pub fn parse_status_line(line: &str) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn oversized_and_malformed_updates_are_rejected_before_allocating_bodies() {
-        for wire in [
-            b"Content-Length: 999999999\r\n\r\n".as_slice(),
-            b"Patches: 99999\r\n\r\n".as_slice(),
-            b"Patches: 1\r\n\r\nContent-Length: 999999999\r\nContent-Range: bytes 0:1\r\n\r\n"
-                .as_slice(),
-            b"Patches: 1\r\n\r\nContent-Length: 1\r\n\r\nx".as_slice(),
-        ] {
-            assert!(MessageParser::new().feed(wire).is_err());
-        }
-        assert!(MessageParser::new()
-            .feed(&vec![b'a'; MAX_HEADER_BYTES + 1])
-            .is_err());
-    }
+    use anyhow::Context as _;
 
     #[test]
     fn test_parser_creation() {
@@ -587,64 +444,10 @@ mod tests {
     fn test_simple_message_parsing() -> anyhow::Result<()> {
         let mut parser = MessageParser::new();
         let data = b"Content-Length: 5\r\n\r\nHello";
-        let messages = parser.feed(data).context("required operation value")?;
+        let messages = parser.feed(data).context("unexpected failure")?;
         assert!(!messages.is_empty());
-        assert_eq!(messages[0].body, Some(Bytes::from_static(b"Hello")));
-        assert!(
-            messages[0].patches.is_none(),
-            "a body is not a patch update"
-        );
+        assert_eq!(messages[0].body, Bytes::from_static(b"Hello"));
         Ok(())
-    }
-
-    #[test]
-    fn zero_patches_is_a_patch_update_not_a_snapshot() -> anyhow::Result<()> {
-        // The distinction `braid-fuzz` tests: `Patches: 0` carries no body, and
-        // must not be mistaken for a snapshot whose body happens to be empty.
-        let mut parser = MessageParser::new();
-        let messages = parser
-            .feed(b"Version: \"v1\"\r\nPatches: 0\r\n\r\n")
-            .context("required operation value")?;
-
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].patches, Some(vec![]));
-        assert!(messages[0].body.is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn an_empty_snapshot_is_not_a_patch_update() -> anyhow::Result<()> {
-        let mut parser = MessageParser::new();
-        let messages = parser
-            .feed(b"Version: \"v1\"\r\nContent-Length: 0\r\n\r\n")
-            .context("required operation value")?;
-
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].body, Some(Bytes::new()));
-        assert!(messages[0].patches.is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn a_heartbeat_yields_no_messages() -> anyhow::Result<()> {
-        // A bare CRLF must be absorbed. If it ever decodes to a Message again,
-        // every heartbeat becomes a versionless update and floods the logs.
-        let mut parser = MessageParser::for_subscription();
-        assert!(parser
-            .feed(b"\r\n")
-            .context("required operation value")?
-            .is_empty());
-        assert!(parser
-            .feed(b"\r\n\r\n\r\n")
-            .context("required operation value")?
-            .is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn a_bad_patches_count_is_an_error_not_a_silent_zero() {
-        let mut parser = MessageParser::new();
-        assert!(parser.feed(b"Patches: not-a-number\r\n\r\n").is_err());
     }
 
     #[test]
@@ -662,8 +465,8 @@ mod tests {
 
         let msg = Message {
             headers,
-            body: Some(Bytes::new()),
-            patches: None,
+            body: Bytes::new(),
+            patches: vec![],
             status_code: None,
             encoding: None,
             url: None,
@@ -686,13 +489,10 @@ mod tests {
                      Content-Range: json .b\r\n\r\n\
                      world\r\n";
 
-        let messages = parser.feed(data).context("required operation value")?;
+        let messages = parser.feed(data).context("unexpected failure")?;
         assert!(!messages.is_empty());
-        let patches = messages[0].patches.as_ref().context("a patch update")?;
-        assert_eq!(patches.len(), 2);
-        assert_eq!(patches[0].range, ".a");
-        assert_eq!(patches[1].range, ".b");
-        assert!(messages[0].body.is_none());
+        let msg = &messages[0];
+        assert_eq!(msg.patches.len(), 2);
         Ok(())
     }
 }

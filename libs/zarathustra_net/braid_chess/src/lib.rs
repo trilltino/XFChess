@@ -1,9 +1,11 @@
 pub mod error;
 pub mod message;
 pub mod move_auth;
+pub mod outbox;
 pub mod publisher;
 pub mod resource;
 pub mod subscriber;
+pub mod supervisor;
 pub mod tournament;
 mod version;
 
@@ -12,9 +14,11 @@ pub mod journal;
 
 pub use error::BraidChessError;
 pub use message::{ChatPayload, ChessMessage, ClockState, EngineHint, MovePayload};
+pub use outbox::{ChessOutbox, OutboxConfig, OutboxError, OutboxHooks};
 pub use publisher::ChessPublisher;
 pub use resource::{ChessResource, ChessStream};
 pub use subscriber::ChessSubscriber;
+pub use supervisor::{StreamCursor, StreamHandle, StreamState, SupervisorConfig};
 pub use tournament::{
     MatchResult, ResultEntry, ScheduleStatus, SwissMessage, SwissPairing, SwissStandingsEntry,
     TournamentResource,
