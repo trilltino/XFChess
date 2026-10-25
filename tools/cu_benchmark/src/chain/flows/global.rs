@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -46,7 +47,7 @@ pub async fn run_global_session_1v1_game_flow(
         let blockhash = base_rpc.get_latest_blockhash()?;
         let tx =
             Transaction::new_signed_with_payer(&ixs, Some(&payer.pubkey()), &[*payer], blockhash);
-        match with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await {
+        match with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await {
             Ok(sig) => logger.log(
                 ExecutionLayer::Solana,
                 "profile",
@@ -101,7 +102,7 @@ pub async fn run_global_session_1v1_game_flow(
         let blockhash = base_rpc.get_latest_blockhash()?;
         let tx =
             Transaction::new_signed_with_payer(&ixs, Some(&player.pubkey()), &[player], blockhash);
-        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
         logger.log(
             ExecutionLayer::Solana,
             "global_session_setup",
@@ -133,7 +134,7 @@ pub async fn run_global_session_1v1_game_flow(
         &[white, &session_white],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "game_setup",
@@ -165,7 +166,7 @@ pub async fn run_global_session_1v1_game_flow(
         &[black, &session_black],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "game_setup",
@@ -196,7 +197,7 @@ pub async fn run_global_session_1v1_game_flow(
             &[player],
             blockhash,
         );
-        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
         logger.log(
             ExecutionLayer::Solana,
             "delegation",
@@ -225,8 +226,8 @@ pub async fn run_global_session_1v1_game_flow(
         &[black],
         blockhash,
     );
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx_white)).await?;
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx_black)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx_white)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx_black)).await?;
 
     println!("   Step 6: Delegating game to ER...");
     let mut delegate_ixs = vec![ix::delegate_game_ix(
@@ -245,7 +246,7 @@ pub async fn run_global_session_1v1_game_flow(
         &[white],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "delegation",
@@ -296,7 +297,7 @@ pub async fn run_global_session_1v1_game_flow(
                 &[payer],
                 blockhash,
             );
-            er_rpc.send_and_confirm_transaction(&tx)
+            er_rpc.send_sdk_and_confirm_transaction(&tx)
         })
         .await?;
 
@@ -327,7 +328,7 @@ pub async fn run_global_session_1v1_game_flow(
         &[white],
         blockhash,
     );
-    let sig = with_retry(|| er_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| er_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Er,
         "delegation",
@@ -375,7 +376,7 @@ pub async fn run_global_session_1v1_game_flow(
     let tx =
         Transaction::new_signed_with_payer(&resign_ixs, Some(&white.pubkey()), &[white], blockhash);
     // Do not retry deterministic GameNotActive failures; preserve the original error.
-    match base_rpc.send_and_confirm_transaction(&tx) {
+    match base_rpc.send_sdk_and_confirm_transaction(&tx) {
         Ok(sig) => logger.log(
             ExecutionLayer::Solana,
             "game_setup",
@@ -422,7 +423,7 @@ pub async fn run_global_session_1v1_game_flow(
         &[master],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "game_setup",

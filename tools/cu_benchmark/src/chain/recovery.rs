@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -40,7 +41,7 @@ async fn setup_delegated_game(
         let blockhash = base_rpc.get_latest_blockhash()?;
         let tx =
             Transaction::new_signed_with_payer(&ixs, Some(&payer.pubkey()), &[payer], blockhash);
-        if let Err(e) = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await {
+        if let Err(e) = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await {
             let msg = e.to_string();
             if !(msg.contains("0x1773") || msg.contains("already") || msg.contains("AlreadyInUse"))
             {
@@ -64,7 +65,7 @@ async fn setup_delegated_game(
     let blockhash = base_rpc.get_latest_blockhash()?;
     let tx =
         Transaction::new_signed_with_payer(&create_ixs, Some(&white.pubkey()), &[white], blockhash);
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
 
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
@@ -84,7 +85,7 @@ async fn setup_delegated_game(
         &[black, white],
         blockhash,
     );
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
 
     let session_white = Keypair::new();
     let session_black = Keypair::new();
@@ -103,7 +104,7 @@ async fn setup_delegated_game(
             &[payer],
             blockhash,
         );
-        with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     }
 
     let blockhash = base_rpc.get_latest_blockhash()?;
@@ -123,8 +124,8 @@ async fn setup_delegated_game(
         &[black],
         blockhash,
     );
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx_white)).await?;
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx_black)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx_white)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx_black)).await?;
 
     let mut delegate_ixs = vec![ix::delegate_game_ix(
         program_id,
@@ -142,7 +143,7 @@ async fn setup_delegated_game(
         &[white],
         blockhash,
     );
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
 
     // Allow the ER validator to observe the delegation before sending moves.
     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
@@ -181,7 +182,7 @@ pub async fn run_crank_liveness_drill(
         &[&session_white],
         blockhash,
     );
-    with_retry(|| er_rpc.send_and_confirm_transaction(&tx)).await?;
+    with_retry(|| er_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
 
     println!("   [crank-drill] Waiting up to 90s for MagicBlock's scheduler to fire the crank on its own...");
     let start = std::time::Instant::now();
@@ -239,7 +240,7 @@ pub async fn run_stuck_delegation_drill(
     let blockhash = base_rpc.get_latest_blockhash()?;
     let tx =
         Transaction::new_signed_with_payer(&req_ixs, Some(&white.pubkey()), &[white], blockhash);
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
 
     println!("   [recovery-drill] Polling the UndelegationRequest PDA's expiry against the real clock (~60min - this is the real wait, not simulated)...");
     let undelegation_request = Pubkey::new_from_array(
@@ -270,7 +271,7 @@ pub async fn run_stuck_delegation_drill(
     let blockhash = base_rpc.get_latest_blockhash()?;
     let tx =
         Transaction::new_signed_with_payer(&force_ixs, Some(&white.pubkey()), &[white], blockhash);
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
 
     let wiped = base_rpc.get_account(&game_pda)?;
     if wiped.owner != program_id || !wiped.data.is_empty() {
@@ -300,7 +301,7 @@ pub async fn run_stuck_delegation_drill(
         &[dispute_authority],
         blockhash,
     );
-    with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
 
     let white_after = with_retry(|| base_rpc.get_balance(&white.pubkey())).await?;
     let black_after = with_retry(|| base_rpc.get_balance(&black.pubkey())).await?;

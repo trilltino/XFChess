@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use std::str::FromStr;
 
 use axum::{
@@ -817,7 +818,7 @@ async fn pay_sol(state: &AppState, to: &str, lamports: u64) -> anyhow::Result<St
             &[&*authority],
             bh,
         );
-        let sig = rpc.send_and_confirm_transaction(&tx)?;
+        let sig = rpc.send_sdk_and_confirm_transaction(&tx)?;
         Ok(sig.to_string())
     })
     .await??;

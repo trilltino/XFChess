@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
@@ -144,7 +145,7 @@ pub async fn fund_children(
             &[master],
             recent_blockhash,
         );
-        let sig = rpc.send_and_confirm_transaction(&tx)?;
+        let sig = rpc.send_sdk_and_confirm_transaction(&tx)?;
         println!(
             "   Funded child {}/{}: {} -> {} SOL (sig: {})",
             i + 1,
@@ -184,7 +185,7 @@ pub async fn reclaim_surplus(
             recent_blockhash,
         );
 
-        match rpc.send_and_confirm_transaction(&tx) {
+        match rpc.send_sdk_and_confirm_transaction(&tx) {
             Ok(sig) => {
                 total_reclaimed += reclaim_amount;
                 println!(

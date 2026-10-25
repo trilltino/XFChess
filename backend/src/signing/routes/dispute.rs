@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -248,7 +249,7 @@ pub async fn recover_stuck_delegation(
         &[&authority],
         blockhash,
     );
-    let sig = rpc.send_and_confirm_transaction(&tx).await.map_err(|e| {
+    let sig = rpc.send_sdk_and_confirm_transaction(&tx).await.map_err(|e| {
         error!("[dispute] recover_stuck_delegation on-chain call failed: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -324,6 +325,14 @@ async fn submit_resolve_dispute_tx(
         AccountMeta::new(black, false),
         AccountMeta::new(treasury_vault, false),
         AccountMeta::new_readonly(solana_system_interface::program::id(), false),
+        AccountMeta::new(
+            Pubkey::find_program_address(
+                &[b"recovery_identity", &game_id.to_le_bytes()],
+                &program_id,
+            )
+            .0,
+            false,
+        ),
     ];
 
     let ix = Instruction {
@@ -340,7 +349,7 @@ async fn submit_resolve_dispute_tx(
         blockhash,
     );
 
-    let sig = rpc.send_and_confirm_transaction(&tx).await?;
+    let sig = rpc.send_sdk_and_confirm_transaction(&tx).await?;
     Ok(sig.to_string())
 }
 

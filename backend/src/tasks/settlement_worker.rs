@@ -12,6 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
+use xfchess_client_compat::prelude::*;
 
 const SETTLEMENT_TICK: Duration = Duration::from_secs(30);
 
@@ -192,7 +193,7 @@ async fn fetch_accounts_batched(
         for chunk in pdas.chunks(RPC_BATCH_SIZE) {
             worker_metrics::SETTLEMENT_RPC_CALLS_TOTAL.fetch_add(1, Ordering::Relaxed);
             let started = std::time::Instant::now();
-            let result = rpc.get_multiple_accounts(chunk);
+            let result = rpc.get_multiple_sdk_accounts(chunk);
             metrics.record_solana_rpc_call(
                 "getMultipleAccounts",
                 result.is_ok(),
@@ -701,7 +702,7 @@ async fn redelegate_stale_game(state: &Arc<AppState>, game_id: u64, program_id: 
             &[&payer_kp, &session_kp],
             blockhash,
         );
-        rpc.send_and_confirm_transaction(&tx)
+        rpc.send_sdk_and_confirm_transaction(&tx)
     })
     .await;
 
@@ -879,7 +880,7 @@ pub async fn recover_game(
     let program = state.program_id;
     let pda = Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program).0;
     let rpc = state.solana_rpc.clone();
-    let account = tokio::task::spawn_blocking(move || rpc.get_account(&pda))
+    let account = tokio::task::spawn_blocking(move || rpc.get_sdk_account(&pda))
         .await
         .map_err(|e| format!("Chain lookup task failed: {e}"))?
         .map_err(|e| format!("Could not read game: {e}"))?;
@@ -891,7 +892,7 @@ pub async fn recover_game(
     if game.is_delegated || account.owner != program {
         let er_rpc = solana::routing::er_rpc_for_game(&state.config, game_id).await?;
         let er_url = er_rpc.url();
-        let er_account = tokio::task::spawn_blocking(move || er_rpc.get_account(&pda))
+        let er_account = tokio::task::spawn_blocking(move || er_rpc.get_sdk_account(&pda))
             .await
             .map_err(|e| format!("ER lookup task failed: {e}"))?
             .map_err(|e| format!("Could not read live game: {e}"))?;

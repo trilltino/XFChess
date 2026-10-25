@@ -204,7 +204,7 @@ pub fn delegate_game_ix(
     );
 
     let valid_until: i64 = 600;
-    let mut data = anchor_discriminator("delegate_game").to_vec();
+    let mut data = anchor_discriminator("delegate_game_v2").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&valid_until.to_le_bytes());
 
@@ -220,6 +220,14 @@ pub fn delegate_game_ix(
             AccountMeta::new_readonly(delegation_program_id, false),
             AccountMeta::new_readonly(solana_system_interface::program::id(), false),
             AccountMeta::new(*fee_payer, true),
+            AccountMeta::new(
+                Pubkey::find_program_address(
+                    &[b"recovery_identity", &game_id.to_le_bytes()],
+                    program_id,
+                )
+                .0,
+                false,
+            ),
         ],
         data,
     })
@@ -336,7 +344,7 @@ pub fn recover_stuck_delegation_ix(
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], program_id).0;
     let treasury_vault = Pubkey::find_program_address(&[b"treasury_vault"], program_id).0;
 
-    let mut data = anchor_discriminator("recover_stuck_delegation").to_vec();
+    let mut data = anchor_discriminator("recover_stuck_delegation_v2").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
 
     Instruction {
@@ -349,6 +357,14 @@ pub fn recover_stuck_delegation_ix(
             AccountMeta::new(*black, false),
             AccountMeta::new_readonly(*dispute_authority, true),
             AccountMeta::new_readonly(solana_system_interface::program::id(), false),
+            AccountMeta::new(
+                Pubkey::find_program_address(
+                    &[b"recovery_identity", &game_id.to_le_bytes()],
+                    program_id,
+                )
+                .0,
+                false,
+            ),
         ],
         data,
     }
@@ -484,6 +500,14 @@ pub fn finalize_game_ix(
             AccountMeta::new(treasury_vault, false),
             AccountMeta::new(*fee_payer, false),
             AccountMeta::new_readonly(solana_system_interface::program::id(), false),
+            AccountMeta::new(
+                Pubkey::find_program_address(
+                    &[b"recovery_identity", &game_id.to_le_bytes()],
+                    program_id,
+                )
+                .0,
+                false,
+            ),
         ],
         data,
     }
@@ -1185,7 +1209,7 @@ pub fn create_tournament_game_ix(
         )
         .0
     };
-    let mut data = anchor_discriminator("create_tournament_game").to_vec();
+    let mut data = anchor_discriminator("create_tournament_game_v2").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(session_key.as_ref());
@@ -1205,6 +1229,10 @@ pub fn create_tournament_game_ix(
         AccountMeta::new(*authority, true),
         AccountMeta::new_readonly(solana_system_interface::program::id(), false),
     ]);
+    accounts.push(AccountMeta::new(
+        Pubkey::find_program_address(&[b"recovery_identity", &game_id.to_le_bytes()], program_id).0,
+        false,
+    ));
     Instruction {
         program_id: *program_id,
         accounts,
