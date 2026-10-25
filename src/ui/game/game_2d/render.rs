@@ -1,6 +1,8 @@
 //! The 2D board: draws the squares, pieces and overlays with egui, records what
 //! the player did with the pointer and keyboard, then applies it as selections,
-//! moves and premoves through the same input helpers the 3D board uses.
+//! moves and premoves through the same input helpers the 3D board uses. Pieces
+//! mid-move are drawn from the shared `motion` timeline, which is advanced in
+//! `Update`, never here.
 
 use super::*;
 use crate::rendering::pieces::Piece;
@@ -14,20 +16,13 @@ pub fn render_2d_board(
     players: Res<Players>,
     current_turn: Res<CurrentTurn>,
     fading_captures: Query<&FadingCapture>,
+    motions: Query<&PieceMotion>,
     theme: Res<Board2DTheme>,
     mut extras: Board2DExtras,
     mut board_layout: ResMut<Board2DLayout>,
 ) {
     if *view_mode != ViewMode::Standard2D {
         return;
-    }
-
-    // Tick piece animation — independent of board layout.
-    if extras.anim.active {
-        extras.anim.elapsed += extras.time.delta_secs();
-        if extras.anim.elapsed >= PieceAnim2D::DURATION {
-            extras.anim.active = false;
-        }
     }
 
     // Resolved before ctx_mut() borrows the contexts.
@@ -42,9 +37,16 @@ pub fn render_2d_board(
         *game_mode,
         *theme,
         &fading_captures,
+        &motions,
         &extras,
         textures,
     );
+    if extras.drag.dragging
+        && view.pieces.get(&extras.drag.from).map(|p| (p.0, p.1)) != extras.drag.piece
+    {
+        extras.drag.dragging = false;
+        extras.drag.piece = None;
+    }
     let mut input = BoardInput::default();
 
     // Match the normal board footprint so switching 2D/3D views preserves alignment.
@@ -53,15 +55,15 @@ pub fn render_2d_board(
         |ui| draw_board_with_bars(ui, &view, &mut extras, &mut board_layout, &mut input),
     );
 
-    apply_input(&mut input_params, &mut extras, &current_turn, &view, input);
+    apply_input(&mut input_params, &mut extras, &view, input);
 }
 
 /// The board's place on screen and orientation.
 #[derive(Clone, Copy)]
-struct BoardGeom {
-    rect: egui::Rect,
-    square: f32,
-    black_view: bool,
+pub(crate) struct BoardGeom {
+    pub(crate) rect: egui::Rect,
+    pub(crate) square: f32,
+    pub(crate) black_view: bool,
 }
 
 impl BoardGeom {
@@ -74,6 +76,17 @@ impl BoardGeom {
 
     fn square_center(&self, file: u8, rank: u8) -> egui::Pos2 {
         self.square_rect(file, rank).center()
+    }
+
+    /// Screen position of a possibly fractional board position, recomputed from
+    /// the current geometry on every draw so resizing and flipping just work.
+    pub(crate) fn point_center(&self, position: Vec2) -> egui::Pos2 {
+        let (sx, sy) = if self.black_view {
+            (7.0 - position.x, position.y)
+        } else {
+            (position.x, 7.0 - position.y)
+        };
+        self.rect.min + egui::Vec2::new((sx + 0.5) * self.square, (sy + 0.5) * self.square)
     }
 
     /// The square under a screen position, if it's on the board.
@@ -93,6 +106,16 @@ impl BoardGeom {
     }
 }
 
+/// How much a piece grows per unit of lift.
+const LIFT_SCALE: f32 = 0.25;
+
+/// One sample of a piece's [`PieceMotion`], read without advancing it.
+struct MovingPiece {
+    position: Vec2,
+    lift: f32,
+    piece: (PieceType, PieceColor),
+}
+
 /// Everything the board shows this frame, gathered before drawing.
 struct BoardView {
     black_view: bool,
@@ -105,6 +128,8 @@ struct BoardView {
     theme: Board2DTheme,
     capture_flashes: HashMap<(u8, u8), f32>,
     pieces: HashMap<(u8, u8), (PieceType, PieceColor, Entity)>,
+    /// Pieces mid-move: drawn at the sampled position, not on their square.
+    moving: HashMap<Entity, MovingPiece>,
     selected: Option<(u8, u8)>,
     legal_moves: Vec<(u8, u8)>,
     is_selected: bool,
@@ -120,6 +145,7 @@ impl BoardView {
         game_mode: GameMode,
         theme: Board2DTheme,
         fading_captures: &Query<&FadingCapture>,
+        motions: &Query<&PieceMotion>,
         extras: &Board2DExtras,
         textures: HashMap<(PieceType, PieceColor), egui::TextureId>,
     ) -> Self {
@@ -140,6 +166,27 @@ impl BoardView {
             .iter()
             .map(|(e, p, _, _)| ((p.x, p.y), (p.piece_type, p.color, e)))
             .collect();
+        let moving = input_params
+            .pieces
+            .p1()
+            .iter()
+            .filter_map(|(e, p, _, _)| {
+                // Captured pieces are parked off the board while they fade.
+                if p.x >= 8 || p.y >= 8 {
+                    return None;
+                }
+                let motion = motions.get(e).ok()?;
+                let sample = motion.tx.sample();
+                Some((
+                    e,
+                    MovingPiece {
+                        position: sample.position2(motion.tx.from, motion.tx.to),
+                        lift: sample.lift,
+                        piece: (motion.drawn_type(p.piece_type), p.color),
+                    },
+                ))
+            })
+            .collect();
 
         Self {
             black_view: get_is_black_view(players, current_turn, game_mode),
@@ -158,6 +205,7 @@ impl BoardView {
             theme,
             capture_flashes,
             pieces,
+            moving,
             selected: input_params.selection.selected_position,
             legal_moves: input_params.selection.possible_moves.clone(),
             is_selected: input_params.selection.is_selected(),
@@ -288,7 +336,7 @@ fn draw_board(
             draw_square(ui, &painter, geom, file, rank, view, extras, input);
         }
     }
-    draw_moving_pieces(&painter, geom, view, extras);
+    draw_moving_pieces(&painter, geom, view, &*extras);
     draw_promotion_picker(ui, &painter, geom, view, extras, input);
     draw_arrows(&painter, geom, &board_resp, arrow_kind, extras);
     handle_keyboard_focus(view, extras, input);
@@ -400,7 +448,7 @@ fn draw_square(
         painter.rect_filled(sq_rect, 0.0, tint(90, 205, 210, 100));
     }
     // Premove highlight (cyan tint)
-    if extras.premove.from == Some(sq) || extras.premove.to == Some(sq) {
+    if extras.premove.marks(sq) {
         painter.rect_filled(sq_rect, 0.0, tint(100, 0, 200, 220));
     }
     // Check king tint (red glow on the king in check)
@@ -446,17 +494,19 @@ fn draw_square(
         }
     }
 
-    // The drag source and the animation destination are drawn separately.
-    let skip_piece = (extras.drag.dragging && extras.drag.from == sq)
-        || (extras.anim.active && extras.anim.to_sq == sq);
+    // The drag source and any piece mid-move are drawn separately; a moving
+    // piece already occupies this square on the board, so skip it here.
+    let skip_piece = extras.drag.dragging && extras.drag.from == sq;
     if !extras.settings.blindfold && !skip_piece {
-        if let Some((pt, pc, _)) = view.pieces.get(&sq) {
-            view.draw_piece(
-                painter,
-                (*pt, *pc),
-                sq_rect,
-                tint(view.piece_alpha, 255, 255, 255),
-            );
+        if let Some((pt, pc, entity)) = view.pieces.get(&sq) {
+            if !view.moving.contains_key(entity) {
+                view.draw_piece(
+                    painter,
+                    (*pt, *pc),
+                    sq_rect,
+                    tint(view.piece_alpha, 255, 255, 255),
+                );
+            }
         }
     }
 
@@ -512,34 +562,38 @@ fn draw_square(
     }
 }
 
-/// The piece sliding to its new square, and the piece under the cursor while
+/// Pieces sliding to their new squares, and the piece under the cursor while
 /// dragging.
 fn draw_moving_pieces(
     painter: &egui::Painter,
     geom: BoardGeom,
     view: &BoardView,
-    extras: &mut Board2DExtras,
+    extras: &Board2DExtras,
 ) {
     if extras.settings.blindfold {
         return;
     }
     let size = egui::Vec2::splat(geom.square);
-    if extras.anim.active {
-        if !extras.anim.pixels_ready {
-            extras.anim.from_px = geom.square_center(extras.anim.from_sq.0, extras.anim.from_sq.1);
-            extras.anim.to_px = geom.square_center(extras.anim.to_sq.0, extras.anim.to_sq.1);
-            extras.anim.pixels_ready = true;
-            // Fill piece identity from the board (the piece is already at to_sq).
-            if extras.anim.piece.is_none() {
-                if let Some(&(pt, pc, _)) = view.pieces.get(&extras.anim.to_sq) {
-                    extras.anim.piece = Some((pt, pc));
-                }
-            }
-        }
-        if let Some(piece) = extras.anim.piece {
-            let rect = egui::Rect::from_center_size(extras.anim.lerped_pos(), size);
-            view.draw_piece(painter, piece, rect, egui::Color32::WHITE);
-        }
+    // Raised pieces draw last so they pass over the ones still on the board.
+    let dragged = extras
+        .drag
+        .dragging
+        .then(|| view.pieces.get(&extras.drag.from).map(|p| p.2))
+        .flatten();
+    let mut moving: Vec<&MovingPiece> = view
+        .moving
+        .iter()
+        .filter(|(entity, _)| Some(**entity) != dragged)
+        .map(|(_, piece)| piece)
+        .collect();
+    moving.sort_by(|a, b| a.lift.total_cmp(&b.lift));
+    for piece in moving {
+        // The same lift the 3D view shows, as a slight enlargement.
+        let rect = egui::Rect::from_center_size(
+            geom.point_center(piece.position),
+            size * (1.0 + piece.lift * LIFT_SCALE),
+        );
+        view.draw_piece(painter, piece.piece, rect, egui::Color32::WHITE);
     }
     if extras.drag.dragging {
         if let Some(piece) = extras.drag.piece {
@@ -788,12 +842,11 @@ fn capture_on(input_params: &mut InputSystemParams, sq: (u8, u8)) -> Option<Capt
 }
 
 /// Applies what the player did on the board this frame: a promotion choice,
-/// drag-to-move, premoves (queued on the opponent's turn, fired on ours) and
-/// click-to-select / click-to-move.
+/// drag-to-move, premoves (queued here on the opponent's turn, played by
+/// `input::board::fire_premove` on ours) and click-to-select / click-to-move.
 fn apply_input(
     input_params: &mut InputSystemParams,
     extras: &mut Board2DExtras,
-    current_turn: &CurrentTurn,
     view: &BoardView,
     input: BoardInput,
 ) {
@@ -834,7 +887,7 @@ fn apply_input(
             extras.drag.piece = None;
             if to_sq != extras.drag.from && view.legal_moves.contains(&to_sq) {
                 let capture = capture_on(input_params, to_sq);
-                try_move_sequence(input_params, to_sq, capture, "2d_drag");
+                queue_board_move(input_params, to_sq, capture, "2d_drag");
             } else {
                 clear_selection_state(
                     &mut input_params.commands,
@@ -847,62 +900,13 @@ fn apply_input(
 
     if !view.is_human {
         if let Some(sq) = input.premove_click {
-            queue_premove(input_params, extras, current_turn, sq);
+            queue_premove_click(input_params, &mut extras.premove, &extras.epoch, sq);
         }
         return;
-    }
-    if fire_premove(input_params, extras) {
-        return; // the premove was the move — don't also process a click
     }
     if let Some(target) = input.clicked {
         click_square(input_params, extras, view, target);
     }
-}
-
-/// Premove clicks on the opponent's turn: own piece, then target; clicking the
-/// same square or a third time cancels.
-fn queue_premove(
-    input_params: &mut InputSystemParams,
-    extras: &mut Board2DExtras,
-    current_turn: &CurrentTurn,
-    sq: (u8, u8),
-) {
-    if extras.premove.from.is_none() {
-        // The local player's color is the opponent of whoever is currently moving.
-        let local_color = match current_turn.color {
-            PieceColor::White => PieceColor::Black,
-            PieceColor::Black => PieceColor::White,
-        };
-        if piece_on(input_params, sq).is_some_and(|(_, p)| p.color == local_color) {
-            extras.premove.from = Some(sq);
-        }
-    } else if extras.premove.to.is_none() && Some(sq) != extras.premove.from {
-        extras.premove.to = Some(sq);
-    } else {
-        extras.premove.clear();
-    }
-}
-
-/// Plays a queued premove now that it's our turn, if it's still legal. Returns
-/// whether a move was made.
-fn fire_premove(input_params: &mut InputSystemParams, extras: &mut Board2DExtras) -> bool {
-    let (Some(from), Some(to)) = (extras.premove.from, extras.premove.to) else {
-        return false;
-    };
-    extras.premove.clear();
-    let Some((entity, piece)) = piece_on(input_params, from) else {
-        return false;
-    };
-    if !can_move_color(input_params, piece.color) {
-        return false;
-    }
-    try_select_piece(input_params, entity, piece, true);
-    if !input_params.selection.possible_moves.contains(&to) {
-        return false;
-    }
-    let capture = capture_on(input_params, to);
-    try_move_sequence(input_params, to, capture, "2d_premove");
-    true
 }
 
 /// Click-to-move with a piece selected, otherwise click-to-select; an illegal
@@ -915,7 +919,7 @@ fn click_square(
 ) {
     if view.is_selected && view.legal_moves.contains(&target) {
         let capture = capture_on(input_params, target);
-        try_move_sequence(input_params, target, capture, "2d_board");
+        queue_board_move(input_params, target, capture, "2d_board");
         return;
     }
     match piece_on(input_params, target) {
@@ -938,5 +942,171 @@ fn click_square(
             );
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+    use crate::motion::{MotionStyle, MoveTransaction};
+
+    #[test]
+    fn egui_paints_each_moving_piece_once_including_creation_and_drag_frames() -> Result<(), String>
+    {
+        use bevy::ecs::system::SystemState;
+        let mut world = World::new();
+        world.init_resource::<EvalBarState>();
+        world.init_resource::<BoardArrows>();
+        world.init_resource::<ButtonInput<KeyCode>>();
+        world.init_resource::<crate::core::GameSettings>();
+        world.init_resource::<DragState2D>();
+        world.init_resource::<crate::game::resources::premove::Premove>();
+        world.init_resource::<crate::motion::BoardEpoch>();
+        world.init_resource::<crate::game::resources::PendingPromotion>();
+        world.init_resource::<Messages<crate::game::resources::PromotionSelected>>();
+        world.init_resource::<BoardFocus>();
+        world.init_resource::<CheckmateFlashState>();
+        world.init_resource::<BoardFadeState>();
+        world.init_resource::<crate::ui::game::player_bar::PlayerBarsCache>();
+        world.init_resource::<crate::ui::game::player_bar::PlayerBarLayoutCache>();
+        let knight = world.spawn_empty().id();
+        let rook = world.spawn_empty().id();
+        let mut state = SystemState::<Board2DExtras>::new(&mut world);
+        for elapsed in [0.0, 0.16, 0.4] {
+            for dragged in [false, true] {
+                let mut extras = state
+                    .get_mut(&mut world)
+                    .map_err(|error| error.to_string())?;
+                extras.drag.dragging = dragged;
+                extras.drag.from = (5, 2);
+                extras.drag.piece = Some((PieceType::Knight, PieceColor::White));
+                extras.drag.cursor_pos = egui::pos2(300.0, 300.0);
+                let mut moving = HashMap::new();
+                for (entity, kind, from, to) in [
+                    (
+                        knight,
+                        PieceType::Knight,
+                        Vec2::new(6.0, 0.0),
+                        Vec2::new(5.0, 2.0),
+                    ),
+                    (
+                        rook,
+                        PieceType::Rook,
+                        Vec2::new(7.0, 0.0),
+                        Vec2::new(5.0, 0.0),
+                    ),
+                ] {
+                    let sample = MotionStyle::GAMEPLAY.sample(elapsed, 0.4, from.distance(to));
+                    moving.insert(
+                        entity,
+                        MovingPiece {
+                            position: sample.position2(from, to),
+                            lift: sample.lift,
+                            piece: (kind, PieceColor::White),
+                        },
+                    );
+                }
+                let view = BoardView {
+                    black_view: false,
+                    is_human: false,
+                    game_over: false,
+                    piece_alpha: 255,
+                    in_check: false,
+                    check_color: PieceColor::Black,
+                    last_move: None,
+                    theme: Board2DTheme::default(),
+                    capture_flashes: HashMap::new(),
+                    pieces: HashMap::from([
+                        ((5, 2), (PieceType::Knight, PieceColor::White, knight)),
+                        ((5, 0), (PieceType::Rook, PieceColor::White, rook)),
+                    ]),
+                    moving,
+                    selected: None,
+                    legal_moves: Vec::new(),
+                    is_selected: false,
+                    textures: HashMap::from([
+                        (
+                            (PieceType::Knight, PieceColor::White),
+                            egui::TextureId::User(101),
+                        ),
+                        (
+                            (PieceType::Rook, PieceColor::White),
+                            egui::TextureId::User(102),
+                        ),
+                    ]),
+                };
+                let ctx = egui::Context::default();
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(800.0, 800.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let geom = BoardGeom {
+                            rect: egui::Rect::from_min_size(
+                                egui::pos2(30.0, 30.0),
+                                egui::vec2(400.0, 400.0),
+                            ),
+                            square: 50.0,
+                            black_view: false,
+                        };
+                        let painter = ui.painter().clone();
+                        let mut input = BoardInput::default();
+                        for (file, rank) in [(5, 2), (5, 0)] {
+                            draw_square(ui, &painter, geom, file, rank, &view, &extras, &mut input);
+                        }
+                        draw_moving_pieces(&painter, geom, &view, &extras);
+                    },
+                );
+                for texture in [101, 102] {
+                    let count = output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::epaint::Shape::Mesh(mesh) if mesh.texture_id == egui::TextureId::User(texture))).count();
+                    assert_eq!(
+                        count, 1,
+                        "piece {texture}, elapsed={elapsed}, dragged={dragged}"
+                    );
+                }
+                output.drop_without_applying_deltas();
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn resizing_and_flipping_reproject_the_same_sample_without_advancing_time() {
+        let mut tx = MoveTransaction::new(
+            Vec2::new(6.0, 0.0),
+            Vec2::new(5.0, 2.0),
+            crate::motion::GAMEPLAY_MOVE_SECONDS,
+            MotionStyle::GAMEPLAY,
+        );
+        tx.advance(0.16);
+        let before = tx;
+        let small = BoardGeom {
+            rect: egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 400.0)),
+            square: 50.0,
+            black_view: false,
+        };
+        let large = BoardGeom {
+            square: 100.0,
+            ..small
+        };
+        let flipped = BoardGeom {
+            black_view: true,
+            ..small
+        };
+        let position = tx.position();
+        let a = small.point_center(position) - small.rect.min;
+        let b = large.point_center(position) - large.rect.min;
+        let c = flipped.point_center(position) - flipped.rect.min;
+        assert_eq!(b, a * 2.0);
+        assert!((a.x + c.x - 400.0).abs() < 0.001);
+        assert!((a.y + c.y - 400.0).abs() < 0.001);
+        assert_eq!(tx, before);
+        let world = crate::motion::board_to_world(position);
+        assert_eq!(world.x, 7.0 - position.x);
+        assert_eq!(world.z, position.y);
     }
 }

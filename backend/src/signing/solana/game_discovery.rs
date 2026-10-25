@@ -52,8 +52,18 @@ pub fn discover_game_ids(rpc: &RpcClient, program: &Pubkey) -> Result<BTreeSet<u
             )
             .map_err(|e| format!("Game discovery failed for {owner}: {e}"))?;
         for (address, ui_account) in accounts {
-            let Some(account) = ui_account.decode::<Account>() else {
+            let Some(data) = ui_account.data.decode() else {
                 continue;
+            };
+            let Ok(owner) = ui_account.owner.parse() else {
+                continue;
+            };
+            let account = Account {
+                lamports: ui_account.lamports,
+                data,
+                owner,
+                executable: ui_account.executable,
+                rent_epoch: ui_account.rent_epoch,
             };
             let Some(game) = checked_game(program, &address, &account) else {
                 continue;

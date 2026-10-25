@@ -29,31 +29,6 @@ pub struct FadingCapture {
     pub tilt_axis: Vec3,
 }
 
-#[derive(Component, Debug, Reflect)]
-#[reflect(Component)]
-pub struct PieceMoveAnimation {
-    pub start: Vec3,
-    pub end: Vec3,
-    pub elapsed: f32,
-    pub duration: f32,
-}
-
-impl PieceMoveAnimation {
-    pub fn new(start: Vec3, end: Vec3, duration: f32) -> Self {
-        Self {
-            start,
-            end,
-            elapsed: 0.0,
-            duration: duration.max(f32::EPSILON),
-        }
-    }
-
-    pub fn progress(&self) -> f32 {
-        let t = (self.elapsed / self.duration).clamp(0.0, 1.0);
-        t * t * (3.0 - 2.0 * t)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,18 +168,5 @@ mod tests {
 
         assert!(debug_str.contains("HasMoved"));
         assert!(debug_str.contains("true") || debug_str.contains("7"));
-    }
-
-    #[test]
-    fn test_piece_move_animation_new() {
-        let start = Vec3::new(0.0, 0.0, 0.0);
-        let end = Vec3::new(1.0, 0.0, 1.0);
-        let anim = PieceMoveAnimation::new(start, end, 0.3);
-
-        assert_eq!(anim.start, start);
-        assert_eq!(anim.end, end);
-        assert_eq!(anim.elapsed, 0.0);
-        assert!(anim.duration > 0.0);
-        assert_eq!(anim.progress(), 0.0);
     }
 }

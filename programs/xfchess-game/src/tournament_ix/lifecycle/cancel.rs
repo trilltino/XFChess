@@ -40,6 +40,7 @@ pub struct CancelTournament<'info> {
         seeds = [TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()],
         bump
     )]
+    /// CHECK: Canonical per-tournament PDA used only as the token escrow ATA authority and CPI signer.
     pub usdc_prize_escrow_authority: UncheckedAccount<'info>,
     #[account(
         mut,

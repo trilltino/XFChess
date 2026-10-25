@@ -1,3 +1,5 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
@@ -72,7 +74,7 @@ fn crank_ix(white: Pubkey, black: Pubkey) -> Instruction {
     }
 }
 
-async fn at_er_slot() -> anyhow::Result<(solana_program_test::ProgramTestContext, i64)> {
+async fn at_er_slot() -> anyhow::Result<(crate::agave::ProgramTestContext, i64)> {
     Ok({
         let mut ctx = start(vec![]).await;
         ctx.warp_to_slot(ER_SLOT).context("warp")?;

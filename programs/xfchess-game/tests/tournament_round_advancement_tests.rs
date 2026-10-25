@@ -1,6 +1,8 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
 use anyhow::Context as _;
-use solana_program_test::{
+use crate::agave::{
     BanksClientError, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
 };
 use solana_sdk::{

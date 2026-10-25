@@ -36,8 +36,16 @@ pub fn reset_game_resources(
     mut turn_context: ResMut<TurnStateContext>,
     mut engine: ResMut<ChessEngine>,
     active_tc: Res<crate::game::resources::active_time_control::ActiveTimeControl>,
+    mut epoch: ResMut<crate::motion::BoardEpoch>,
+    mut premove: ResMut<crate::game::resources::premove::Premove>,
+    mut pending_turn: ResMut<crate::game::resources::PendingTurnAdvance>,
+    mut promotion: ResMut<crate::game::resources::PendingPromotion>,
 ) {
     info!("[GAME_INIT] Resetting all game resources for new game");
+    epoch.bump();
+    premove.clear();
+    *pending_turn = crate::game::resources::PendingTurnAdvance::default();
+    promotion.clear();
 
     // Reset turn state to White's turn, move 1
     *current_turn = CurrentTurn::default();
@@ -150,7 +158,7 @@ pub fn initialize_players(
             },
         };
         info!("[GAME_INIT] Puzzle players initialized: human={human:?}");
-    } else if let crate::core::state::GameMode::OnlineMultiplayer = *core_mode {
+    } else if crate::multiplayer::types::is_online_game_mode(*core_mode) {
         // Each instance only controls its assigned color; the other color is driven by the network.
         let my_color = p2p_conn
             .as_ref()

@@ -1,12 +1,14 @@
 //! Test both serialized instruction orderings against the real program.
 //! The losing instruction must leave state and lamports unchanged.
 
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
-use solana_program_test::ProgramTestContext;
+use crate::agave::ProgramTestContext;
 use solana_sdk::{
     account::AccountSharedData, clock::Clock, instruction::Instruction, pubkey::Pubkey,
     signature::Keypair, signer::Signer,
@@ -264,7 +266,7 @@ async fn join_wins_the_race_then_creator_cancel_refunds_both_and_names_no_winner
     assert_eq!(lamports(&mut ctx, escrow_pda(id)).await?, 2 * WAGER);
 
     // The creator's cancel arrives second: before any move it is the
-    // zero-move cancellation — both stakes back, no result.
+    // zero-move cancellation â€” both stakes back, no result.
     send(
         &mut ctx,
         cancel_ix(id, white.pubkey(), white.pubkey(), black.pubkey()),

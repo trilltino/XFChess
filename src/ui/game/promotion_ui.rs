@@ -4,6 +4,47 @@ use crate::ui::styles::*;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
+pub fn premove_promotion_ui(
+    mut contexts: EguiContexts,
+    mut premove: ResMut<crate::game::resources::premove::Premove>,
+    pieces: Query<&crate::rendering::pieces::Piece>,
+) {
+    let (Some(from), Some(to)) = (premove.from(), premove.to()) else {
+        return;
+    };
+    if !matches!(to.1, 0 | 7)
+        || !pieces
+            .iter()
+            .any(|piece| (piece.x, piece.y) == from && piece.piece_type == PieceType::Pawn)
+    {
+        return;
+    }
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+    egui::Window::new("Premove promotion")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -16.0])
+        .frame(StyledPanel::popup())
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                let chosen = premove.promotion().unwrap_or(PieceType::Queen);
+                for (kind, label) in [
+                    (PieceType::Queen, "Queen"),
+                    (PieceType::Rook, "Rook"),
+                    (PieceType::Bishop, "Bishop"),
+                    (PieceType::Knight, "Knight"),
+                ] {
+                    if ui.selectable_label(chosen == kind, label).clicked() {
+                        premove.choose_promotion(kind);
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    premove.clear();
+                }
+            });
+        });
+}
+
 pub fn promotion_ui_system(
     mut contexts: EguiContexts,
     pending_promotion: Res<PendingPromotion>,

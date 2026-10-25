@@ -9,6 +9,9 @@
 pub mod board;
 pub mod pointer;
 
+#[cfg(test)]
+mod premove_tests;
+
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 

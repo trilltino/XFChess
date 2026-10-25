@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use crate::signing::solana;
 use crate::signing::AppState;
 use axum::{
@@ -1132,7 +1133,7 @@ async fn broadcast_tx(
 
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
     let sig = tokio::task::spawn_blocking(move || {
-        rpc.send_and_confirm_transaction_with_spinner_and_config(
+        rpc.send_sdk_and_confirm_transaction_with_spinner_and_config(
             &tx,
             CommitmentConfig::confirmed(),
             RpcSendTransactionConfig {

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::{BTreeSet, HashMap};
+use xfchess_client_compat::prelude::*;
 
 use crate::signing::solana::{fetch_transaction_v1_aware, MAX_SUPPORTED_TX_VERSION};
 
@@ -185,7 +186,7 @@ pub async fn debug_transaction(
     let account_infos = if account_pubkeys.is_empty() {
         Vec::new()
     } else {
-        rpc.get_multiple_accounts(&account_pubkeys)
+        rpc.get_multiple_sdk_accounts(&account_pubkeys)
             .unwrap_or_default()
     };
 

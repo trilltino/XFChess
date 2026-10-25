@@ -1,3 +1,5 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
@@ -238,7 +240,7 @@ async fn process_undelegation_rejects_non_canonical_buffer() -> anyhow::Result<(
         vec![b"game".to_vec(), GAME_ID.to_le_bytes().to_vec()],
     );
     // Anchor does not mark bare AccountInfo as a signer. Set the buffer signer
-    // flag manually to exercise the SDK canonical-PDA check.
+    // flag manually; the Anchor canonical-PDA constraint now rejects before CPI.
     for meta in ix.accounts.iter_mut() {
         if meta.pubkey == spoofed_buffer {
             meta.is_signer = true;
@@ -253,11 +255,11 @@ async fn process_undelegation_rejects_non_canonical_buffer() -> anyhow::Result<(
         err,
         solana_sdk::transaction::TransactionError::InstructionError(
             0,
-            solana_sdk::instruction::InstructionError::InvalidSeeds
+            solana_sdk::instruction::InstructionError::Custom(
+                anchor_lang::error::ErrorCode::ConstraintSeeds as u32
+            )
         ),
-        "a buffer that isn't this account's canonical undelegate-buffer PDA must be rejected \
-         with InvalidSeeds (ephemeral_rollups_sdk::cpi::undelegate_account's own check) — \
-         GameErrorCode::InvalidUndelegationBuffer is unused dead code, not what actually fires"
+        "a noncanonical buffer must fail the Anchor seed constraint before the SDK CPI"
     );
     Ok(())
 }

@@ -6,12 +6,12 @@ use super::systems::*;
 use crate::core::schedule::GameSystems;
 use crate::core::{debug_current_gamestate, GameMode, GameState, InGameplay};
 use crate::engine::board_state::ChessEngine;
-use crate::game::components::{
-    FadingCapture, GamePhase, HasMoved, MoveRecord, PieceMoveAnimation, SelectedPiece,
-};
+use crate::game::components::{FadingCapture, GamePhase, HasMoved, MoveRecord, SelectedPiece};
+use crate::game::resources::premove::Premove;
 use crate::input::board::{
     confirm_exit_game, handle_escape_key, reset_in_game_exit_confirmation, toggle_fullscreen,
 };
+use crate::motion::{advance_piece_motions, present_piece_motion_3d, BoardEpoch};
 
 use crate::rendering::pieces::{Piece, PieceColor, PieceType};
 use crate::ui::game_2d::Board2DTheme;
@@ -50,6 +50,10 @@ impl Plugin for GamePlugin {
             .init_resource::<InGameHudVisibility>()
             .init_resource::<IncrementFlash>()
             .init_resource::<Board2DTheme>()
+            .init_resource::<BoardEpoch>()
+            .init_resource::<crate::motion::gameplay::MotionSettings>()
+            .init_resource::<crate::input::board::PendingBoardInput>()
+            .init_resource::<super::systems::board_snapshot::PendingBoardSnapshot>()
             .init_resource::<crate::input::board::InGameExitConfirmation>()
             .init_resource::<super::systems::network_move::PendingDrawOffer>()
             .init_resource::<super::systems::network_move::PendingRematchOffer>()
@@ -76,7 +80,6 @@ impl Plugin for GamePlugin {
             .register_type::<PieceColor>()
             .register_type::<PieceType>()
             .register_type::<HasMoved>()
-            .register_type::<PieceMoveAnimation>()
             .register_type::<FadingCapture>()
             .register_type::<SelectedPiece>()
             .register_type::<CameraController>()
@@ -124,41 +127,41 @@ impl Plugin for GamePlugin {
         );
         app.add_systems(
             OnEnter(GameState::GameOver),
-            |mut pending: ResMut<PendingGameOver>| pending.active = false,
+            |mut pending: ResMut<PendingGameOver>,
+             mut premove: ResMut<Premove>,
+             mut snapshot: ResMut<super::systems::board_snapshot::PendingBoardSnapshot>,
+             mut commands: Commands| {
+                pending.active = false;
+                premove.clear();
+                snapshot.0 = None;
+                commands.remove_resource::<crate::multiplayer::systems::PendingTrustedRecovery>();
+            },
         );
 
-        // Setup gameplay camera and board scene when entering InGame
+        // Register shared entry systems once. AI startup orders itself after
+        // clear_pending_ai_tasks; duplicating that system in mode-specific
+        // chains makes Bevy's ordering ambiguous even with exclusive run conditions.
         app.add_systems(
             OnEnter(GameState::InGame),
             (
                 super::ai::systems::clear_pending_ai_tasks,
                 purge_stale_board_visuals,
-                reset_game_resources,
-                initialize_players,
-                reset_in_game_hud_visibility,
-                reset_in_game_exit_confirmation,
+                (
+                    reset_game_resources,
+                    initialize_players,
+                    reset_in_game_hud_visibility,
+                    reset_in_game_exit_confirmation,
+                )
+                    .chain()
+                    .run_if(not(resource_equals(GameMode::PgnReplay))),
+                super::replay::setup_replay.run_if(resource_equals(GameMode::PgnReplay)),
                 setup_game_camera,
                 setup_game_scene,
-                super::systems::game_init::warmup_game_audio,
+                super::systems::game_init::warmup_game_audio
+                    .run_if(not(resource_equals(GameMode::PgnReplay))),
                 super::systems::game_init::spawn_game_lights,
             )
-                .chain()
-                .run_if(not(resource_equals(GameMode::PgnReplay))),
-        );
-
-        // Setup replay when entering InGame in PgnReplay mode
-        app.add_systems(
-            OnEnter(GameState::InGame),
-            (
-                super::ai::systems::clear_pending_ai_tasks,
-                purge_stale_board_visuals,
-                super::replay::setup_replay,
-                setup_game_camera,
-                setup_game_scene,
-                super::systems::game_init::spawn_game_lights,
-            )
-                .chain()
-                .run_if(resource_equals(GameMode::PgnReplay)),
+                .chain(),
         );
 
         // Frame order (configured in core::schedule): Input → Validation → Execution
@@ -194,6 +197,28 @@ impl Plugin for GamePlugin {
                 .in_set(GameSystems::Input),
         );
 
+        // A queued premove (made from the 2D or the 3D board) plays through the
+        // normal move path as soon as it is the local player's turn.
+        app.add_systems(
+            Update,
+            crate::input::board::fire_premove
+                .in_set(GameSystems::Execution)
+                .after(super::systems::board_snapshot::apply_board_snapshot)
+                .before(crate::input::board::apply_board_input),
+        );
+
+        // A new game or leaving the board retires every motion and premove made
+        // on the old one.
+        app.add_systems(
+            OnExit(InGameplay),
+            |mut epoch: ResMut<BoardEpoch>, mut premove: ResMut<Premove>,
+             mut snapshot: ResMut<super::systems::board_snapshot::PendingBoardSnapshot>| {
+                epoch.bump();
+                premove.clear();
+                snapshot.0 = None;
+            },
+        );
+
         // Replay playback feeds its moves in before the game logic runs.
         app.add_systems(
             Update,
@@ -202,6 +227,7 @@ impl Plugin for GamePlugin {
                 super::replay::replay_apply_move_system,
                 super::replay_shorts::load_pgn_annotations_system,
                 super::replay::replay_sync_engine_system,
+                super::replay::replay_advance_pieces_system,
                 super::replay::replay_spawn_pieces_system,
             )
                 .chain()
@@ -215,6 +241,8 @@ impl Plugin for GamePlugin {
         app.add_systems(
             Update,
             (
+                super::systems::board_snapshot::apply_board_snapshot,
+                crate::input::board::apply_board_input,
                 crate::game::systems::network_move::handle_network_moves,
                 apply_pawn_promotion.run_if(not_templeos),
                 detect_pawn_promotion.run_if(not_templeos),
@@ -259,9 +287,14 @@ impl Plugin for GamePlugin {
                 highlight_possible_moves
                     .run_if(|sel: Res<Selection>| sel.is_changed())
                     .run_if(not_templeos),
-                animate_piece_movement,
+                super::systems::visual::highlight_premove.run_if(resource_changed::<Premove>),
+                // One timeline for every view: advanced here once per frame, then
+                // written to 3D transforms; the 2D board only reads it.
+                advance_piece_motions,
+                present_piece_motion_3d,
+                crate::motion::gameplay::present_piece_types,
+                crate::ui::game::game_2d::reset_stale_drag,
                 animate_capture_fade.run_if(any_with_component::<FadingCapture>),
-                crate::ui::game::game_2d::trigger_piece_anim_2d,
                 crate::ui::game::game_2d::trigger_checkmate_flash,
                 crate::ui::game::game_2d::tick_checkmate_flash,
                 crate::ui::game::game_2d::board_fade_system,
@@ -306,6 +339,7 @@ impl Plugin for GamePlugin {
                 crate::ui::game::game_ui::rematch_offer_ui,
                 crate::ui::game_2d::render_2d_board,
                 crate::ui::game::promotion_ui::promotion_ui_system,
+                crate::ui::game::promotion_ui::premove_promotion_ui,
             )
                 .chain()
                 .run_if(in_state(GameState::InGame))
@@ -314,8 +348,7 @@ impl Plugin for GamePlugin {
         // 2D board arrow overlays, drag-to-move, premove, piece animation
         app.init_resource::<crate::ui::game::game_2d::BoardArrows>();
         app.init_resource::<crate::ui::game::game_2d::DragState2D>();
-        app.init_resource::<crate::ui::game::game_2d::PremoveState>();
-        app.init_resource::<crate::ui::game::game_2d::PieceAnim2D>();
+        app.init_resource::<crate::game::resources::premove::Premove>();
         app.init_resource::<crate::ui::game::game_2d::Board2DLayout>();
         app.init_resource::<crate::ui::game::game_2d::EvalBarState>();
         app.init_resource::<crate::ui::game::game_2d::EvalHistory>();

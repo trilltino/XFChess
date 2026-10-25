@@ -1,3 +1,4 @@
+use crate::game::systems::board_snapshot::verify_snapshot_history;
 use crate::multiplayer::systems::fen_ply;
 use bevy::prelude::*; // Events are in prelude
 use serde::{Deserialize, Serialize};
@@ -287,6 +288,7 @@ impl Plugin for EphemeralRollupPlugin {
 fn handle_rollup_events(
     mut rollup_manager: ResMut<EphemeralRollupManager>,
     mut rollup_events: MessageReader<RollupEvent>,
+    mut board: crate::game::systems::board_snapshot::RecoveryBoard,
 ) {
     for event in rollup_events.read() {
         match event {
@@ -305,8 +307,21 @@ fn handle_rollup_events(
                 next_fen,
                 ..
             } if *game_id == rollup_manager.game_id => {
-                // Recovered Braid moves may advance the baseline only to a strictly newer position.
-                if rollup_manager.accept_resynced_move(*game_id, next_fen) {
+                let verified = next_fen == &rollup_manager.committed_fen
+                    || xfchess_rules::Game::from_fen(&rollup_manager.committed_fen)
+                        .ok()
+                        .is_some_and(|mut position| {
+                            position.play_uci(move_uci).is_ok() && position.fen() == *next_fen
+                        });
+                if verified
+                    && (next_fen == &rollup_manager.committed_fen
+                        || rollup_manager.accept_resynced_move(*game_id, next_fen))
+                {
+                    // Spectators consume recovered plies through their existing
+                    // move dispatcher, including its delay and application ACKs.
+                    if !board.is_spectator() {
+                        board.queue(*game_id, next_fen);
+                    }
                     info!(
                         "[ROLLUP] ResyncedMove {} applied, turn now {}",
                         move_uci, rollup_manager.committed_turn
@@ -319,8 +334,15 @@ fn handle_rollup_events(
                 move_payloads,
                 head_version,
             } if *game_id == rollup_manager.game_id => {
+                let valid = verify_snapshot_history(
+                    &rollup_manager.committed_fen,
+                    fen,
+                    move_payloads,
+                    head_version,
+                );
                 let turn = move_payloads.len().min(u16::MAX as usize) as u16;
-                if rollup_manager.accept_peer_baseline(*game_id, fen, turn) {
+                if valid && rollup_manager.accept_peer_baseline(*game_id, fen, turn) {
+                    board.queue(*game_id, fen);
                     info!(
                         "[ROLLUP] SnapshotReceived: {} moves, head {}, fen set",
                         move_payloads.len(),
@@ -359,6 +381,197 @@ mod tests {
 
     fn manager() -> EphemeralRollupManager {
         EphemeralRollupManager::new(7, true, START.to_string())
+    }
+
+    fn snapshot(ucis: &[&str]) -> Result<(String, Vec<braid_chess::MovePayload>, String), String> {
+        let mut position = xfchess_rules::Game::default();
+        let mut moves = Vec::new();
+        for (index, uci) in ucis.iter().enumerate() {
+            position.play_uci(uci)?;
+            // The publisher numbers each player's own lane independently.
+            moves.push(braid_chess::MovePayload::from_uci(
+                *uci,
+                position.fen(),
+                index as u32 / 2 + 1,
+                "player",
+            ));
+        }
+        let head = moves
+            .last()
+            .map(|payload| braid_chess::version_hash(&payload.fen_after, payload.move_number))
+            .unwrap_or_else(|| "0".into());
+        Ok((position.fen(), moves, head))
+    }
+
+    fn recovery_app() -> App {
+        use crate::game::resources::*;
+        let mut app = App::new();
+        app.insert_resource(State::new(crate::core::GameState::InGame));
+        app.insert_resource(crate::core::GameMode::OnlineMultiplayer);
+        app.insert_resource(
+            crate::multiplayer::network::online_game_session::OnlineGameSession {
+                active: true,
+                game_id: "7".into(),
+                ..Default::default()
+            },
+        );
+        app.init_resource::<crate::engine::board_state::ChessEngine>()
+            .init_resource::<CurrentTurn>()
+            .init_resource::<PendingTurnAdvance>()
+            .init_resource::<Selection>()
+            .init_resource::<PendingPromotion>()
+            .init_resource::<crate::motion::BoardEpoch>()
+            .init_resource::<premove::Premove>();
+        app.insert_resource(crate::game::systems::board_snapshot::PendingBoardSnapshot(
+            Some(START.into()),
+        ));
+        app.add_message::<crate::game::events::MoveMadeEvent>();
+        app.add_plugins(EphemeralRollupPlugin);
+        app.insert_resource(manager());
+        crate::core::schedule::configure(&mut app);
+        app.add_systems(
+            Update,
+            crate::game::systems::board_snapshot::apply_board_snapshot
+                .in_set(crate::core::schedule::GameSystems::Execution),
+        );
+        app.update();
+        app
+    }
+
+    #[test]
+    fn accepted_snapshot_reconstructs_the_board_and_retires_motion_and_input() -> Result<(), String>
+    {
+        use crate::rendering::pieces::Piece;
+        use bevy::ecs::system::Command;
+        let mut app = recovery_app();
+        let old = app
+            .world_mut()
+            .query::<(Entity, &Piece)>()
+            .iter(app.world())
+            .find(|(_, piece)| (piece.x, piece.y) == (4, 1))
+            .map(|(entity, _)| entity)
+            .ok_or("missing pawn")?;
+        crate::motion::StartPieceMotion::gameplay(old, (4, 1), (4, 3)).apply(app.world_mut());
+        let epoch = app.world().resource::<crate::motion::BoardEpoch>().0;
+        app.world_mut()
+            .resource_mut::<crate::game::resources::premove::Premove>()
+            .click((4, 1), true, epoch);
+        let (fen, moves, head) = snapshot(&["e2e4", "e7e5"])?;
+        app.world_mut()
+            .write_message(RollupEvent::SnapshotReceived {
+                game_id: 7,
+                fen: fen.clone(),
+                move_payloads: moves,
+                head_version: head,
+            });
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<crate::engine::board_state::ChessEngine>()
+                .current_fen(),
+            fen
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::game::resources::CurrentTurn>()
+                .move_number,
+            2
+        );
+        assert!(app.world().get_entity(old).is_err());
+        assert_eq!(
+            app.world_mut()
+                .query::<&crate::motion::PieceMotion>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert!(!app
+            .world()
+            .resource::<crate::game::resources::premove::Premove>()
+            .is_active());
+        assert!(app
+            .world()
+            .resource::<Messages<crate::game::events::MoveMadeEvent>>()
+            .is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn trusted_rollup_baseline_repairs_a_same_ply_gameplay_conflict() -> Result<(), String> {
+        let mut app = recovery_app();
+        app.world_mut()
+            .resource_mut::<EphemeralRollupManager>()
+            .accept_peer_baseline(7, E4, 1);
+        app.world_mut()
+            .resource_mut::<crate::engine::board_state::ChessEngine>()
+            .set_from_fen(D4)?;
+        let (fen, moves, head) = snapshot(&["e2e4"])?;
+        app.world_mut()
+            .write_message(RollupEvent::SnapshotReceived {
+                game_id: 7,
+                fen: fen.clone(),
+                move_payloads: moves,
+                head_version: head,
+            });
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<crate::engine::board_state::ChessEngine>()
+                .current_fen(),
+            fen
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn snapshot_requires_legal_history_matching_the_anchor_and_head() -> Result<(), String> {
+        let (fen, moves, head) = snapshot(&["e2e4", "e7e5"])?;
+        assert!(verify_snapshot_history(E4, &fen, &moves, &head));
+        assert!(!verify_snapshot_history(D4, &fen, &moves, &head));
+        assert!(!verify_snapshot_history(START, &fen, &moves, "wrong-head"));
+        assert!(!verify_snapshot_history(START, E4, &moves, &head));
+        let mut illegal = moves.clone();
+        illegal[0].uci = "e2e4q".into();
+        assert!(!verify_snapshot_history(START, &fen, &illegal, &head));
+        Ok(())
+    }
+
+    #[test]
+    fn snapshot_cannot_rewind_gameplay_or_bypass_spectator_delay() -> Result<(), String> {
+        for delayed in [false, true] {
+            let mut app = recovery_app();
+            let expected = if delayed {
+                app.insert_resource(crate::core::GameMode::Spectator);
+                let mut session = crate::multiplayer::spectator::SpectatorSession::default();
+                session.game_id = Some("7".into());
+                session.delayed = true;
+                session.delay_checked = true;
+                app.insert_resource(session);
+                START.to_string()
+            } else {
+                let (fen, _, _) = snapshot(&["e2e4", "e7e5", "g1f3"])?;
+                app.world_mut()
+                    .resource_mut::<crate::engine::board_state::ChessEngine>()
+                    .set_from_fen(&fen)?;
+                fen
+            };
+            let (fen, moves, head) = snapshot(&["e2e4", "e7e5"])?;
+            app.world_mut()
+                .write_message(RollupEvent::SnapshotReceived {
+                    game_id: 7,
+                    fen,
+                    move_payloads: moves,
+                    head_version: head,
+                });
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<crate::engine::board_state::ChessEngine>()
+                    .current_fen(),
+                expected
+            );
+        }
+        Ok(())
     }
 
     #[test]

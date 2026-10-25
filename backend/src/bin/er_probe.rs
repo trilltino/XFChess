@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSendTransactionConfig;
 use solana_commitment_config::CommitmentConfig;
@@ -31,7 +32,7 @@ fn probe(label: &str, url: &str) {
         skip_preflight: true,
         ..Default::default()
     };
-    match rpc.send_transaction_with_config(&tx, cfg) {
+    match rpc.send_sdk_transaction_with_config(&tx, cfg) {
         Ok(sig) => println!("  sendTransaction accepted (sig {sig}) — blockhash OK"),
         Err(e) => {
             let msg = e.to_string();
@@ -82,7 +83,7 @@ fn probe_delegated(label: &str, url: &str, program_id: &str, game_pda: &str) {
         skip_preflight: true,
         ..Default::default()
     };
-    match rpc.send_transaction_with_config(&tx, cfg) {
+    match rpc.send_sdk_transaction_with_config(&tx, cfg) {
         Ok(sig) => println!("  accepted (sig {sig}) — blockhash + routing OK"),
         Err(e) => {
             let msg = e.to_string();

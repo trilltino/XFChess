@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSendTransactionConfig;
@@ -16,7 +17,7 @@ use tracing::{info, warn};
 
 fn send_and_poll(
     rpc: &RpcClient,
-    tx: &impl solana_client::rpc_client::SerializableTransaction,
+    tx: &impl xfchess_client_compat::SdkTransaction,
     deadline: Duration,
     context: &str,
 ) -> Result<Signature> {
@@ -25,7 +26,7 @@ fn send_and_poll(
         ..Default::default()
     };
     let sig = rpc
-        .send_transaction_with_config(tx, config)
+        .send_sdk_transaction_with_config(tx, config)
         .map_err(|e| anyhow!(e))?;
 
     poll_confirmation(rpc, sig, deadline, context)
@@ -271,7 +272,7 @@ pub fn cosign_and_submit_tx(
         ..Default::default()
     };
     let sig = rpc
-        .send_transaction_with_config(&tx, config)
+        .send_sdk_transaction_with_config(&tx, config)
         .map_err(|e| anyhow!(e))?;
 
     // Retain ix_summary on failure so setup transaction errors identify their instructions.

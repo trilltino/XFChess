@@ -1,17 +1,19 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
-use anchor_lang::{AnchorDeserialize, Discriminator, InstructionData, ToAccountMetas};
+use anchor_lang::{InstructionData, ToAccountMetas};
 use common::*;
 use solana_sdk::{
     account::Account,
     instruction::Instruction,
     pubkey::Pubkey,
-    signature::{read_keypair_file, Keypair, Signer},
+    signature::{Keypair, Signer},
 };
 use xfchess_game::errors::GameErrorCode;
-use xfchess_game::events::StuckDelegationRecovered;
 use xfchess_game::state::GameStatus;
+use xfchess_game::state::{RecoveryIdentity, RecoveryStatus};
 
 const GAME_ID: u64 = 42;
 
@@ -115,189 +117,8 @@ fn force_undelegate_after_timeout_ix(
     }
 }
 
-fn dispute_authority_keypair() -> Option<Keypair> {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../keys/dispute_authority.json"
-    );
-    read_keypair_file(path).ok()
-}
-
-fn find_event<T: AnchorDeserialize + Discriminator>(logs: &[String]) -> Option<T> {
-    use base64::Engine;
-    for log in logs {
-        let Some(b64) = log.strip_prefix("Program data: ") else {
-            continue;
-        };
-        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else {
-            continue;
-        };
-        if bytes.len() < 8 || &bytes[..8] != T::DISCRIMINATOR {
-            continue;
-        }
-        if let Ok(event) = T::try_from_slice(&bytes[8..]) {
-            return Some(event);
-        }
-    }
-    None
-}
-
-// Ignored tests require the real dispute authority key. Provision the
-// keyfile, then run cargo test -- --ignored.
-
-#[tokio::test]
-#[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
-async fn recover_stuck_delegation_splits_escrow_and_sweeps_game_rent() -> anyhow::Result<()> {
-    let Some(authority) = dispute_authority_keypair() else {
-        eprintln!("skip: keys/dispute_authority.json not present");
-        return Ok(());
-    };
-    let white = Pubkey::new_unique();
-    let black = Pubkey::new_unique();
-
-    let mut ctx = start(vec![
-        (game_pda(GAME_ID).0, wiped_game_account()),
-        (escrow_pda(GAME_ID).0, system_account(2_000_000_000)),
-        (treasury_vault_pda().0, system_account(0)),
-        (white, system_account(0)),
-        (black, system_account(0)),
-    ])
-    .await;
-
-    let ix = recover_stuck_delegation_ix(GAME_ID, white, black, authority.pubkey());
-    send(&mut ctx, ix, &[&authority])
-        .await
-        .context("required operation value")?;
-
-    let white_bal = ctx
-        .banks_client
-        .get_account(white)
-        .await
-        .context("required operation value")?
-        .context("required operation value")?
-        .lamports;
-    let black_bal = ctx
-        .banks_client
-        .get_account(black)
-        .await
-        .context("required operation value")?
-        .context("required operation value")?
-        .lamports;
-    let treasury_bal = ctx
-        .banks_client
-        .get_account(treasury_vault_pda().0)
-        .await
-        .context("required operation value")?
-        .context("required operation value")?
-        .lamports;
-    let game_after = ctx
-        .banks_client
-        .get_account(game_pda(GAME_ID).0)
-        .await
-        .context("required operation value")?;
-
-    assert_eq!(white_bal, 1_000_000_000, "white must get half the escrow");
-    assert_eq!(black_bal, 1_000_000_000, "black must get half the escrow");
-    assert_eq!(
-        treasury_bal, 890_880,
-        "the wiped game PDA's own rent must sweep to the treasury"
-    );
-    assert_eq!(
-        game_after.map(|a| a.lamports).unwrap_or(0),
-        0,
-        "the game PDA must be fully drained after recovery"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
-async fn recover_stuck_delegation_emits_audit_event() -> anyhow::Result<()> {
-    let Some(authority) = dispute_authority_keypair() else {
-        eprintln!("skip: keys/dispute_authority.json not present");
-        return Ok(());
-    };
-    let white = Pubkey::new_unique();
-    let black = Pubkey::new_unique();
-
-    let ctx = start(vec![
-        (game_pda(GAME_ID).0, wiped_game_account()),
-        (escrow_pda(GAME_ID).0, system_account(2_000_000_000)),
-        (treasury_vault_pda().0, system_account(0)),
-        (white, system_account(0)),
-        (black, system_account(0)),
-    ])
-    .await;
-
-    let ix = recover_stuck_delegation_ix(GAME_ID, white, black, authority.pubkey());
-    let blockhash = ctx.last_blockhash;
-    let payer_pk = ctx.payer.pubkey();
-    let mut tx = solana_sdk::transaction::Transaction::new_with_payer(&[ix], Some(&payer_pk));
-    tx.sign(&[&ctx.payer, &authority], blockhash);
-    let result = ctx
-        .banks_client
-        .process_transaction_with_metadata(tx)
-        .await
-        .context("transport-level failure")?;
-    result
-        .result
-        .context("recover_stuck_delegation should succeed")?;
-
-    let logs = result
-        .metadata
-        .context("metadata must be present")?
-        .log_messages;
-    let event: StuckDelegationRecovered =
-        find_event(&logs).context("StuckDelegationRecovered event must be emitted")?;
-
-    assert_eq!(event.game_id, GAME_ID);
-    assert_eq!(event.dispute_authority, authority.pubkey());
-    assert_eq!(event.white_authority, white);
-    assert_eq!(event.black_authority, black);
-    assert_eq!(event.white_share, 1_000_000_000);
-    assert_eq!(event.black_share, 1_000_000_000);
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore = "needs keys/dispute_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
-async fn recover_stuck_delegation_rejects_non_stuck_game() -> anyhow::Result<()> {
-    let Some(authority) = dispute_authority_keypair() else {
-        eprintln!("skip: keys/dispute_authority.json not present");
-        return Ok(());
-    };
-    let white = Pubkey::new_unique();
-    let black = Pubkey::new_unique();
-
-    let mut ctx = start(vec![
-        game_account(
-            GAME_ID,
-            white,
-            black,
-            start_board(),
-            1,
-            0,
-            GameStatus::Active,
-        )?,
-        (escrow_pda(GAME_ID).0, system_account(2_000_000_000)),
-        (treasury_vault_pda().0, system_account(0)),
-        (white, system_account(0)),
-        (black, system_account(0)),
-    ])
-    .await;
-
-    let ix = recover_stuck_delegation_ix(GAME_ID, white, black, authority.pubkey());
-    let err = send(&mut ctx, ix, &[&authority])
-        .await
-        .err()
-        .context("required operation value")?;
-    assert_eq!(
-        custom_code(&err),
-        Some(ec(GameErrorCode::GameNotStuckDelegation)),
-        "a live, populated Game account must not be treated as force-recovered"
-    );
-    Ok(())
-}
+// Authorized signer fixtures and fail-closed recovery are tested without keys
+// in account_security_tests; no private authority keyfile is needed.
 
 #[tokio::test]
 async fn recover_stuck_delegation_rejects_wrong_authority() -> anyhow::Result<()> {
@@ -324,6 +145,162 @@ async fn recover_stuck_delegation_rejects_wrong_authority() -> anyhow::Result<()
         Some(ec(GameErrorCode::UnauthorizedDisputeResolution)),
         "only the platform dispute authority may trigger recovery"
     );
+    Ok(())
+}
+
+fn recovery_identity_account(white: Pubkey, black: Pubkey) -> anyhow::Result<(Pubkey, Account)> {
+    use anchor_lang::Space;
+    let (key, bump) = Pubkey::find_program_address(
+        &[RecoveryIdentity::SEED, &GAME_ID.to_le_bytes()],
+        &xfchess_game::ID,
+    );
+    let record = RecoveryIdentity {
+        game_id: GAME_ID,
+        white,
+        black,
+        wager_amount: 1_000_000_000,
+        status: RecoveryStatus::Delegated,
+        bump,
+    };
+    Ok((
+        key,
+        program_account(&record, 8 + RecoveryIdentity::INIT_SPACE)?,
+    ))
+}
+
+// BanksServer's metadata execution calls Bank::process_transaction_with_metadata
+// without transaction signature verification (solana-banks-server 3.1.12).
+// Deliberately inject the fixed authority's signer role, without accessing any
+// authority secret. This tests SBF/CPI/account guards, NOT ed25519 authentication.
+async fn execute_authority_fixture(
+    ctx: &mut crate::agave::ProgramTestContext,
+    ix: Instruction,
+) -> anyhow::Result<solana_sdk::transaction::TransactionError> {
+    let mut tx =
+        solana_sdk::transaction::Transaction::new_with_payer(&[ix], Some(&ctx.payer.pubkey()));
+    tx.partial_sign(&[&ctx.payer], ctx.last_blockhash);
+    let result = ctx
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await?;
+    result
+        .result
+        .err()
+        .context("expected the recovery guard to reject this fixture")
+}
+
+#[tokio::test]
+async fn recovery_v2_authority_cannot_substitute_either_player() -> anyhow::Result<()> {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+    let impostor = Pubkey::new_unique();
+    let record = recovery_identity_account(white, black)?;
+    let mut ctx = start(vec![
+        (game_pda(GAME_ID).0, wiped_game_account()),
+        (escrow_pda(GAME_ID).0, system_account(2_001_000_000)),
+        (treasury_vault_pda().0, system_account(1_000_000)),
+        (white, system_account(1_000_000)),
+        (black, system_account(1_000_000)),
+        (impostor, system_account(1_000_000)),
+        (
+            xfchess_game::constants::dispute_authority::ID,
+            system_account(1_000_000),
+        ),
+        record.clone(),
+    ])
+    .await;
+    let keys = [
+        game_pda(GAME_ID).0,
+        escrow_pda(GAME_ID).0,
+        treasury_vault_pda().0,
+        white,
+        black,
+        impostor,
+        record.0,
+    ];
+    let mut before = Vec::new();
+    for key in keys {
+        before.push(ctx.banks_client.get_account(key).await?);
+    }
+    for (white_recipient, black_recipient) in [(impostor, black), (white, impostor)] {
+        let mut ix = recover_stuck_delegation_ix(
+            GAME_ID,
+            white_recipient,
+            black_recipient,
+            xfchess_game::constants::dispute_authority::ID,
+        );
+        ix.data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+        ix.accounts
+            .push(solana_sdk::instruction::AccountMeta::new(record.0, false));
+        let err = execute_authority_fixture(&mut ctx, ix).await?;
+        assert_eq!(
+            custom_code(&err),
+            Some(ec(GameErrorCode::RecoveryIdentityMismatch))
+        );
+        for (index, key) in keys.iter().enumerate() {
+            assert_eq!(ctx.banks_client.get_account(*key).await?, before[index]);
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn recovery_v2_pays_verified_wagers_and_preserves_extra_lamports() -> anyhow::Result<()> {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+    let record = recovery_identity_account(white, black)?;
+    let ctx = start(vec![
+        (game_pda(GAME_ID).0, wiped_game_account()),
+        (escrow_pda(GAME_ID).0, system_account(2_001_000_000)),
+        (treasury_vault_pda().0, system_account(1_000_000)),
+        (white, system_account(1_000_000)),
+        (black, system_account(1_000_000)),
+        (
+            xfchess_game::constants::dispute_authority::ID,
+            system_account(1_000_000),
+        ),
+        record.clone(),
+    ])
+    .await;
+    let mut ix = recover_stuck_delegation_ix(
+        GAME_ID,
+        white,
+        black,
+        xfchess_game::constants::dispute_authority::ID,
+    );
+    ix.data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+    ix.accounts
+        .push(solana_sdk::instruction::AccountMeta::new(record.0, false));
+    let mut tx =
+        solana_sdk::transaction::Transaction::new_with_payer(&[ix], Some(&ctx.payer.pubkey()));
+    tx.partial_sign(&[&ctx.payer], ctx.last_blockhash);
+    let result = ctx
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await?;
+    result
+        .result
+        .context("verified SBF recovery should pay the original players")?;
+    assert_eq!(ctx.banks_client.get_balance(white).await?, 1_001_000_000);
+    assert_eq!(ctx.banks_client.get_balance(black).await?, 1_001_000_000);
+    assert_eq!(
+        ctx.banks_client.get_balance(escrow_pda(GAME_ID).0).await?,
+        1_000_000
+    );
+    assert_eq!(
+        ctx.banks_client.get_balance(treasury_vault_pda().0).await?,
+        1_890_880
+    );
+    assert_eq!(ctx.banks_client.get_balance(game_pda(GAME_ID).0).await?, 0);
+    let record_after = ctx
+        .banks_client
+        .get_account(record.0)
+        .await?
+        .context("permanent record must survive")?;
+    use anchor_lang::AccountDeserialize;
+    let state = RecoveryIdentity::try_deserialize(&mut record_after.data.as_slice())?;
+    assert_eq!(state.status, RecoveryStatus::Recovered);
+    assert_eq!(record_after.lamports, record.1.lamports);
     Ok(())
 }
 

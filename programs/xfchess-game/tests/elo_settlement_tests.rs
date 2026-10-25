@@ -1,9 +1,11 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
-use solana_program_test::ProgramTestBanksClientExt;
+use crate::agave::ProgramTestBanksClientExt;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use xfchess_game::elo::calculate_elo_update;
 use xfchess_game::state::{Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile};
@@ -75,7 +77,7 @@ fn settlement_game_account(
 }
 
 async fn send_as_distinct_tx(
-    ctx: &mut solana_program_test::ProgramTestContext,
+    ctx: &mut crate::agave::ProgramTestContext,
     ix: Instruction,
     extra: &[&Keypair],
 ) -> anyhow::Result<Result<(), solana_sdk::transaction::TransactionError>> {
@@ -125,7 +127,7 @@ async fn start_with_profiles(
     black_elo: f64,
     result: GameResult,
     match_type: MatchType,
-) -> anyhow::Result<solana_program_test::ProgramTestContext> {
+) -> anyhow::Result<crate::agave::ProgramTestContext> {
     Ok({
         let (game_pda_key, game_account_data) =
             settlement_game_account(game_id, white, black, fee_payer, result, match_type)?;
@@ -307,7 +309,7 @@ async fn finalize_game_does_not_change_elo_for_a_free_match() -> anyhow::Result<
     assert_eq!(white_profile.ranked_games, 0, "Free games aren't ranked");
     assert_eq!(black_profile.ranked_games, 0, "Free games aren't ranked");
 
-    // Win/loss/games_played bookkeeping still applies to Free games — only
+    // Win/loss/games_played bookkeeping still applies to Free games â€” only
     // the rating and ranked-games counter are gated.
     assert_eq!(white_profile.wins, 1);
     assert_eq!(black_profile.losses, 1);
@@ -345,7 +347,7 @@ async fn finalize_game_cannot_be_replayed_to_double_apply_elo() -> anyhow::Resul
     let after_first = fetch_profile(&mut ctx, &white).await?;
     assert!(after_first.elo_rating > white_elo);
 
-    // The Game account is closed now — replaying the exact same instruction
+    // The Game account is closed now â€” replaying the exact same instruction
     // must fail (account no longer exists to load), not re-run settlement.
     let replay = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
     let err = send_as_distinct_tx(&mut ctx, replay, &[])

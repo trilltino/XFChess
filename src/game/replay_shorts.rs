@@ -94,7 +94,7 @@ pub fn replay_2d_annotation_system(
     mut annotations: ResMut<ReplayAnnotations>,
     game_mode: Res<GameMode>,
     view_mode: Res<ViewMode>,
-    pieces: Query<&Piece>,
+    pieces: Query<(&Piece, Option<&crate::motion::PieceMotion>)>,
     keyboard: Res<ButtonInput<KeyCode>>,
     puzzle: Res<PuzzleOverlay>,
     replay: Res<PgnReplayState>,
@@ -246,11 +246,26 @@ pub fn replay_2d_annotation_system(
                         );
                     }
 
-                    for piece in pieces.iter() {
-                        let off = b2s(piece.x, piece.y, sq);
-                        let center = board_rect.min + off + egui::Vec2::splat(sq * 0.5);
-                        let sym = piece_sym(piece.piece_type, piece.color);
-                        let font_size = (sq * 0.70).max(12.0);
+                    let geom = crate::ui::game::game_2d::BoardGeom {
+                        rect: board_rect,
+                        square: sq,
+                        black_view: false,
+                    };
+                    for (piece, motion) in &pieces {
+                        if piece.x >= 8 || piece.y >= 8 {
+                            continue;
+                        }
+                        let position = motion.map_or_else(
+                            || crate::motion::square_to_board((piece.x, piece.y)),
+                            |motion| motion.tx.position(),
+                        );
+                        let lift = motion.map_or(0.0, |motion| motion.tx.lift());
+                        let center = geom.point_center(position);
+                        let kind = motion.map_or(piece.piece_type, |motion| {
+                            motion.drawn_type(piece.piece_type)
+                        });
+                        let sym = piece_sym(kind, piece.color);
+                        let font_size = (sq * 0.70 * (1.0 + lift * 0.25)).max(12.0);
                         // Drop shadow
                         let shadow = if piece.color == PieceColor::White {
                             egui::Color32::from_rgba_unmultiplied(0, 0, 0, 70)

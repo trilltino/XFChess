@@ -50,6 +50,7 @@ pub struct StartTournament<'info> {
         constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess,
         constraint = host_treasury.owner == &system_program::ID @ GameErrorCode::InvalidAccountOwner
     )]
+    /// CHECK: Address equals the stored host treasury and owner is constrained to System before entry-fee payment.
     pub host_treasury: UncheckedAccount<'info>,
     #[account(mut)]
     pub authority: Signer<'info>,

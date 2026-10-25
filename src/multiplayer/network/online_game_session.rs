@@ -714,12 +714,22 @@ fn broadcast_snapshot_to_new_peer(
     }
 
     let committed_fen = rollup_manager.committed_fen.clone();
-    let head_version = session.last_published_move_version.clone();
     let msg_tx = network_state.message_sender.clone();
 
     crate::core::net_task::spawn_detached("online_game_session", move || {
         use crate::multiplayer::vps_client;
-        let moves = vps_client::fetch_move_log(game_id).unwrap_or_default();
+        let Ok(moves) = vps_client::fetch_move_log(game_id) else {
+            return;
+        };
+        // Snapshot FEN, history and head must describe the same durable position.
+        let fen = moves
+            .last()
+            .map(|payload| payload.fen_after.clone())
+            .unwrap_or(committed_fen);
+        let head_version = moves
+            .last()
+            .map(|payload| braid_chess::version_hash(&payload.fen_after, payload.move_number))
+            .unwrap_or_else(|| "0".into());
         let move_payloads: Vec<String> = moves
             .iter()
             .filter_map(|m| serde_json::to_string(m).ok())
@@ -734,7 +744,7 @@ fn broadcast_snapshot_to_new_peer(
         if let Some(tx) = msg_tx {
             let _ = tx.send(NetworkMessage::GameSnapshot {
                 game_id,
-                fen: committed_fen,
+                fen,
                 move_payloads,
                 head_version,
             });
@@ -754,4 +764,119 @@ pub fn make_move_payload(
         session.next_move_number.saturating_sub(1),
         player,
     )
+}
+
+#[cfg(test)]
+mod movement_publication_tests {
+    use super::*;
+    use crate::game::events::MoveMadeEvent;
+    use crate::multiplayer::network::{
+        braid_transport::{open_journal, BraidTransportState},
+        p2p::P2PConnectionState,
+    };
+    use crate::multiplayer::types::{CausalChainState, OnlineNetworkState};
+    use crate::rendering::pieces::{Piece, PieceColor, PieceType};
+    use std::fs::OpenOptions;
+    use std::time::Duration;
+
+    #[test]
+    fn one_gameplay_move_publishes_once_to_each_transport_despite_motion_and_view_changes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for (fps, enabled) in [(30, true), (60, true), (144, true), (60, false)] {
+            let base = "http://127.0.0.1:1".to_string();
+            let id = format!(
+                "movement-publication-{}-{}-{enabled}-{}",
+                std::process::id(),
+                fps,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_nanos()
+            );
+            let journal = open_journal(&base, &id)?;
+            // Exercise the real durable enqueue path. Holding the worker lock
+            // keeps this deterministic and prevents any HTTP publication.
+            let worker_lock = OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(journal.directory().join("publisher.moves.lock"))?;
+            worker_lock.try_lock()?;
+            let mut app = App::new();
+            app.init_resource::<Time>()
+                .init_resource::<crate::motion::BoardEpoch>()
+                .init_resource::<BraidTransportState>()
+                .init_resource::<P2PConnectionState>()
+                .init_resource::<CausalChainState>()
+                .init_resource::<crate::game::view_mode::ViewMode>();
+            app.insert_resource(crate::motion::gameplay::MotionSettings {
+                enabled,
+                ..Default::default()
+            });
+            app.insert_resource(OnlineGameSession {
+                base_url: base,
+                game_id: id,
+                active: true,
+                ..Default::default()
+            });
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            app.insert_resource(OnlineNetworkState {
+                message_sender: Some(tx),
+                ..Default::default()
+            });
+            app.add_message::<MoveMadeEvent>();
+            app.add_systems(
+                Update,
+                (crate::motion::advance_piece_motions, publish_local_move).chain(),
+            );
+            let entity = app
+                .world_mut()
+                .spawn((
+                    Piece::new(PieceColor::White, PieceType::Pawn, 4, 3),
+                    crate::game::components::HasMoved::default(),
+                ))
+                .id();
+            use bevy::ecs::system::Command;
+            crate::motion::StartPieceMotion::gameplay(entity, (4, 1), (4, 3))
+                .apply(app.world_mut());
+            let event = MoveMadeEvent {
+                from: (4, 1),
+                to: (4, 3),
+                player: "White".into(),
+                piece_type: PieceType::Pawn,
+                captured_piece: None,
+                promotion: None,
+                remote: false,
+                game_id: None,
+                next_fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1".into(),
+            };
+            app.world_mut().write_message(event.clone());
+            app.world_mut().write_message(MoveMadeEvent {
+                remote: true,
+                ..event
+            });
+            for frame in 0..fps {
+                if frame == fps / 4 {
+                    *app.world_mut()
+                        .resource_mut::<crate::game::view_mode::ViewMode>() =
+                        crate::game::view_mode::ViewMode::Standard2D;
+                }
+                app.world_mut()
+                    .resource_mut::<Time>()
+                    .advance_by(Duration::from_secs_f32(1.0 / fps as f32));
+                app.update();
+            }
+            assert!(
+                matches!(rx.try_recv()?, NetworkMessage::Move { ref move_uci, .. } if move_uci == "e2e4")
+            );
+            assert!(rx.try_recv().is_err());
+            assert_eq!(journal.pending()?.len(), 1);
+            assert_eq!(
+                app.world().resource::<OnlineGameSession>().next_move_number,
+                2
+            );
+            assert_eq!(app.world().resource::<OnlineGameSession>().next_nonce, 2);
+        }
+        Ok(())
+    }
 }

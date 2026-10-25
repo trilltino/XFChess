@@ -1,3 +1,4 @@
+use crate::motion::MotionStyle;
 use bevy::prelude::*;
 use std::sync::OnceLock;
 
@@ -72,12 +73,9 @@ pub fn animate_menu_pieces(
 ) {
     for (entity, mut transform, mut anim) in q.iter_mut() {
         anim.elapsed += time.delta_secs();
-        let t = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
-        let smooth_t = t * t * (3.0 - 2.0 * t);
-        let arc = (std::f32::consts::PI * t).sin() * 0.28;
-        transform.translation = anim.start.lerp(anim.end, smooth_t) + Vec3::new(0.0, arc, 0.0);
-        if t >= 1.0 {
-            transform.translation = anim.end;
+        let sample = MotionStyle::MENU.sample(anim.elapsed, anim.duration, 0.0);
+        transform.translation = sample.position3(anim.start, anim.end);
+        if sample.complete {
             commands.entity(entity).remove::<MenuBgPieceAnim>();
         }
     }
@@ -374,6 +372,111 @@ fn apply_ambient_step(commands: &mut Commands, anim: &mut BoardAnimator, step: A
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn showcase_castling_and_capture_keep_distinct_visual_tracks() -> Result<(), String> {
+        let mut world = World::new();
+        let king = world.spawn(Transform::default()).id();
+        let rook = world.spawn(Transform::default()).id();
+        let victim = world.spawn(Transform::default()).id();
+        let mut anim = BoardAnimator::default();
+        anim.board[0][4] = Some(king);
+        anim.board[0][7] = Some(rook);
+        apply_ambient_step(
+            &mut world.commands(),
+            &mut anim,
+            AmbientStep {
+                from: (4, 0),
+                to: (6, 0),
+                capture: false,
+                ep_capture: None,
+                castle_rook: Some((7, 5)),
+            },
+        );
+        world.flush();
+        assert_eq!(
+            world
+                .get::<MenuBgPieceAnim>(king)
+                .ok_or("no king")?
+                .duration,
+            world
+                .get::<MenuBgPieceAnim>(rook)
+                .ok_or("no rook")?
+                .duration
+        );
+        anim.board[2][5] = Some(victim);
+        apply_ambient_step(
+            &mut world.commands(),
+            &mut anim,
+            AmbientStep {
+                from: (5, 0),
+                to: (5, 2),
+                capture: true,
+                ep_capture: None,
+                castle_rook: None,
+            },
+        );
+        world.flush();
+        assert!(world.get::<MenuPieceFade>(victim).is_some());
+        assert!(world.get::<MenuBgPieceAnim>(rook).is_some());
+        assert_eq!(anim.board[2][5], Some(rook));
+        request_game_nav(&mut anim, -1);
+        assert!(matches!(anim.reset, ResetPhase::Hang(_)));
+        assert!(anim.game_index_override.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn showcase_moves_use_the_shared_sampler_and_land_exactly(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.add_systems(Update, animate_menu_pieces);
+        let (start, end) = (sq_world(4, 1), sq_world(4, 3));
+        let piece = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(start),
+                MenuBgPieceAnim {
+                    start,
+                    end,
+                    elapsed: 0.0,
+                    duration: 1.2,
+                },
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs_f32(0.6));
+        app.update();
+        let mid = app
+            .world()
+            .get::<Transform>(piece)
+            .ok_or("missing transform")?
+            .translation;
+        assert_eq!(
+            mid,
+            MotionStyle::MENU
+                .sample(0.6, 1.2, 0.0)
+                .position3(start, end)
+        );
+        assert!(mid.y > start.y);
+
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs_f32(2.0));
+        app.update();
+        app.update();
+        let landed = app
+            .world()
+            .get::<Transform>(piece)
+            .ok_or("missing transform")?
+            .translation;
+        assert_eq!(landed, end);
+        assert!(app.world().get::<MenuBgPieceAnim>(piece).is_none());
+        Ok(())
+    }
 
     #[test]
     fn all_famous_games_parse_completely() -> Result<(), Box<dyn std::error::Error>> {

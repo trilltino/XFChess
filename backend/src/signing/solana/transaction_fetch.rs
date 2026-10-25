@@ -7,7 +7,7 @@ use solana_sdk::{
     signature::Signature,
     transaction::{TransactionVersion, VersionedTransaction},
 };
-use solana_transaction_status::{
+use xfchess_client_compat::transaction_status::{
     EncodedConfirmedTransactionWithStatusMeta, UiLoadedAddresses, UiTransactionEncoding,
 };
 
@@ -101,15 +101,14 @@ pub fn fetch_transaction_v1_aware(
         })
         .with_context(|| format!("transaction fetch failed for {signature}"))?;
 
-    let decoded = confirmed
-        .transaction
-        .transaction
-        .decode()
-        .ok_or_else(|| anyhow!("transaction could not be decoded"))?;
+    let decoded =
+        xfchess_client_compat::sdk_decoded_transaction(&confirmed.transaction.transaction)?;
 
     let version = transaction_version_label(decoded.version());
     let static_account_keys = decoded.message.static_account_keys().to_vec();
-    let transaction_size_bytes = bincode::serialize(&decoded).ok().map(|bytes| bytes.len());
+    let transaction_size_bytes = xfchess_client_compat::wincode::serialize(&decoded)
+        .ok()
+        .map(|bytes| bytes.len());
     let (loaded_writable_accounts, loaded_readonly_accounts) = loaded_address_lists(&confirmed);
 
     Ok(FetchedSolanaTransaction {
