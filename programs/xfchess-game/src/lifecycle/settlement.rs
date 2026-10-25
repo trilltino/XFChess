@@ -170,6 +170,12 @@ pub fn settle_finished_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> {
             }
             _ => {}
         }
+        escrow::sweep_sub_rent_dust(
+            &ctx.accounts.escrow_pda.to_account_info(),
+            &ctx.accounts.treasury_vault.to_account_info(),
+            game_id,
+            bump,
+        )?;
     }
 
     let winner = match result {
@@ -238,6 +244,12 @@ pub fn settle_cancelled_game(ctx: Context<EndGame>, game_id: u64) -> Result<()> 
             )?;
             refunded_black = true;
         }
+        escrow::sweep_sub_rent_dust(
+            &ctx.accounts.escrow_pda.to_account_info(),
+            &ctx.accounts.treasury_vault.to_account_info(),
+            game_id,
+            bump,
+        )?;
     }
 
     ctx.accounts.game.status = GameStatus::Settled;

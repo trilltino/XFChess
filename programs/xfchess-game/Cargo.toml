@@ -192,6 +192,8 @@ solana-system-interface = { version = "=3.3.0", features = ["bincode"] }
 base64 = { workspace = true }
 # Contract tests exercise the same no_std validator as deployed builds.
 nimzovich_engine = { workspace = true }
+# Builds Delegation Program fixture accounts for rollback recipient tests.
+dlp-api = { package = "magicblock-delegation-program-api", version = "=3.1.0", default-features = false }
 
 [[test]]
 name = "account_security_tests"
@@ -223,6 +225,43 @@ required-features = ["move-validation"]
 name = "chess_logic_differential"
 path = "tests/chess_logic_differential.rs"
 required-features = ["move-validation"]
+
+# Session and turn authentication for record_move; rejected moves must not mutate.
+[[test]]
+name = "move_authorization_tests"
+path = "tests/move_authorization_tests.rs"
+
+# Shard visibility and seat placement during registration.
+[[test]]
+name = "tournament_registration_shard_tests"
+path = "tests/tournament_registration_shard_tests.rs"
+
+# Seeded property tests for prize, pot and session-budget arithmetic.
+[[test]]
+name = "balance_property_tests"
+path = "tests/balance_property_tests.rs"
+
+# Seeded fuzzing of the on-chain move validator (reproduce with ENGINE_FUZZ_SEED).
+[[test]]
+name = "engine_fuzz_tests"
+path = "tests/engine_fuzz_tests.rs"
+required-features = ["move-validation"]
+
+# Public instruction ABI snapshot (names, discriminators, account metas, args).
+[[test]]
+name = "abi_snapshot_tests"
+path = "tests/abi_snapshot_tests.rs"
+
+# Instruction-by-status transition matrix; see docs/security/state-machine-20261025.md.
+[[test]]
+name = "state_machine_tests"
+path = "tests/state_machine_tests.rs"
+
+# Runs the rollback-after-timeout CPI against the deployed Delegation Program
+# binary (target/deploy/dlp.so) with substituted recipient accounts.
+[[test]]
+name = "rollback_recipient_tests"
+path = "tests/rollback_recipient_tests.rs"
 
 [lints]
 workspace = true

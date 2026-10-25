@@ -172,3 +172,326 @@ async fn profile_substitution_cannot_overwrite_game_or_create_username() -> anyh
     );
     Ok(())
 }
+
+fn existing_profile(authority: Pubkey) -> PlayerProfile {
+    PlayerProfile {
+        authority,
+        wins: 5,
+        games_played: 9,
+        elo_rating: 1_750.0,
+        elo_bullet: 1_700.0,
+        elo_blitz: 1_720.0,
+        elo_rapid: 1_740.0,
+        is_verified: true,
+        created_at: 77,
+        ..PlayerProfile::default()
+    }
+}
+
+#[tokio::test]
+async fn foreign_owned_profile_with_genuine_discriminator_is_rejected() -> anyhow::Result<()> {
+    let player = Keypair::new();
+    let target = profile_pda(&player.pubkey());
+    let mut forged = program_account(
+        &existing_profile(player.pubkey()),
+        8 + PlayerProfile::INIT_SPACE,
+    )?;
+    forged.owner = Pubkey::new_unique();
+    let mut ctx = start(vec![
+        (target, forged.clone()),
+        (player.pubkey(), system_account(1_000_000_000)),
+    ])
+    .await;
+    let username = "foreignowned";
+    let ix = init_profile_ix(&player.pubkey(), username, "GB", 631_152_000);
+    let err = send(&mut ctx, ix, &[&player])
+        .await
+        .err()
+        .context("foreign-owned profile must be rejected")?;
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(xfchess_game::errors::GameErrorCode::UnauthorizedAccess))
+    );
+    assert_eq!(
+        ctx.banks_client
+            .get_account(target)
+            .await?
+            .context("account must remain")?,
+        forged
+    );
+    assert!(ctx
+        .banks_client
+        .get_account(username_record_pda(username))
+        .await?
+        .is_none());
+    assert_eq!(
+        ctx.banks_client.get_balance(player.pubkey()).await?,
+        1_000_000_000
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn wrong_player_cannot_initialise_another_players_profile() -> anyhow::Result<()> {
+    let victim = Keypair::new();
+    let attacker = Keypair::new();
+    let target = profile_pda(&victim.pubkey());
+    let original = program_account(
+        &existing_profile(victim.pubkey()),
+        8 + PlayerProfile::INIT_SPACE,
+    )?;
+    let mut ctx = start(vec![
+        (target, original.clone()),
+        (attacker.pubkey(), system_account(1_000_000_000)),
+    ])
+    .await;
+    let username = "attackername";
+    let mut ix = init_profile_ix(&attacker.pubkey(), username, "GB", 631_152_000);
+    ix.accounts[0].pubkey = target;
+    let err = send(&mut ctx, ix, &[&attacker])
+        .await
+        .err()
+        .context("signer/profile mismatch must fail")?;
+    assert_eq!(
+        custom_code(&err),
+        Some(anchor_lang::error::ErrorCode::ConstraintSeeds as u32)
+    );
+    assert_eq!(
+        ctx.banks_client
+            .get_account(target)
+            .await?
+            .context("profile must remain")?,
+        original
+    );
+    assert!(ctx
+        .banks_client
+        .get_account(username_record_pda(username))
+        .await?
+        .is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn profile_with_other_authority_at_canonical_pda_is_rejected() -> anyhow::Result<()> {
+    let player = Keypair::new();
+    let target = profile_pda(&player.pubkey());
+    let original = program_account(
+        &existing_profile(Pubkey::new_unique()),
+        8 + PlayerProfile::INIT_SPACE,
+    )?;
+    let mut ctx = start(vec![
+        (target, original.clone()),
+        (player.pubkey(), system_account(1_000_000_000)),
+    ])
+    .await;
+    let ix = init_profile_ix(&player.pubkey(), "otherauthority", "GB", 631_152_000);
+    let err = send(&mut ctx, ix, &[&player])
+        .await
+        .err()
+        .context("authority mismatch must fail")?;
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(xfchess_game::errors::GameErrorCode::UnauthorizedAccess))
+    );
+    assert_eq!(
+        ctx.banks_client
+            .get_account(target)
+            .await?
+            .context("profile must remain")?,
+        original
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn malformed_profile_bytes_with_genuine_discriminator_fail_without_mutation(
+) -> anyhow::Result<()> {
+    use anchor_lang::Discriminator;
+    let player = Keypair::new();
+    let target = profile_pda(&player.pubkey());
+    let mut data = PlayerProfile::DISCRIMINATOR.to_vec();
+    data.extend_from_slice(&[0xFF; 24]);
+    let malformed = solana_sdk::account::Account {
+        lamports: 1_000_000_000,
+        data,
+        owner: xfchess_game::ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    let mut ctx = start(vec![
+        (target, malformed.clone()),
+        (player.pubkey(), system_account(1_000_000_000)),
+    ])
+    .await;
+    let username = "malformedbytes";
+    let ix = init_profile_ix(&player.pubkey(), username, "GB", 631_152_000);
+    send(&mut ctx, ix, &[&player])
+        .await
+        .err()
+        .context("malformed profile must fail")?;
+    assert_eq!(
+        ctx.banks_client
+            .get_account(target)
+            .await?
+            .context("account must remain")?,
+        malformed
+    );
+    assert!(ctx
+        .banks_client
+        .get_account(username_record_pda(username))
+        .await?
+        .is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn existing_profile_update_preserves_stats_and_verification() -> anyhow::Result<()> {
+    let player = Keypair::new();
+    let target = profile_pda(&player.pubkey());
+    let original = program_account(
+        &existing_profile(player.pubkey()),
+        8 + PlayerProfile::INIT_SPACE,
+    )?;
+    let mut ctx = start(vec![
+        (target, original),
+        (player.pubkey(), system_account(1_000_000_000)),
+    ])
+    .await;
+    let ix = init_profile_ix(&player.pubkey(), "renamedplayer", "DE", 631_152_000);
+    send(&mut ctx, ix, &[&player])
+        .await
+        .context("existing profile update should succeed")?;
+    let after = fetch_profile(&mut ctx, &player.pubkey()).await?;
+    assert_eq!(after.authority, player.pubkey());
+    assert_eq!(after.username, "renamedplayer");
+    assert_eq!(after.country, "DE");
+    assert!(after.is_verified);
+    assert_eq!(
+        (after.wins, after.games_played, after.created_at),
+        (5, 9, 77)
+    );
+    assert_eq!(after.elo_rating, 1_750.0);
+    Ok(())
+}
+
+/// A third party can pre-fund the profile PDA address with a plain transfer
+/// (no signature from the recipient is required).
+#[tokio::test]
+async fn prefunded_empty_profile_pda_does_not_block_creation() -> anyhow::Result<()> {
+    let player = Keypair::new();
+    let target = profile_pda(&player.pubkey());
+    let mut ctx = start(vec![
+        (target, system_account(1)),
+        (player.pubkey(), system_account(1_000_000_000)),
+    ])
+    .await;
+    let ix = init_profile_ix(&player.pubkey(), "prefundedpda", "GB", 631_152_000);
+    send(&mut ctx, ix, &[&player])
+        .await
+        .context("pre-funded PDA must not block profile creation")?;
+    let after = fetch_profile(&mut ctx, &player.pubkey()).await?;
+    assert_eq!(after.authority, player.pubkey());
+    Ok(())
+}
+
+#[tokio::test]
+async fn age_gate_is_exact_at_the_boundary_and_safe_at_signed_extremes() -> anyhow::Result<()> {
+    use solana_sdk::clock::Clock;
+    const NOW: i64 = 1_800_000_000;
+    const EIGHTEEN_YEARS: i64 = 567_648_000;
+    let cases: [(i64, bool); 8] = [
+        (NOW - EIGHTEEN_YEARS, true),
+        (NOW - EIGHTEEN_YEARS + 1, false),
+        (1, true),
+        (0, false),
+        (-1, false),
+        (i64::MIN, false),
+        (i64::MAX, false),
+        (NOW, false),
+    ];
+    for (dob, accepted) in cases {
+        let player = Keypair::new();
+        let mut ctx = start(vec![(player.pubkey(), system_account(1_000_000_000))]).await;
+        ctx.set_sysvar(&Clock {
+            unix_timestamp: NOW,
+            ..Clock::default()
+        });
+        let username = "agegateplayer";
+        let result = send(
+            &mut ctx,
+            init_profile_ix(&player.pubkey(), username, "GB", dob),
+            &[&player],
+        )
+        .await;
+        if accepted {
+            result.with_context(|| format!("dob {dob} is 18+"))?;
+        } else {
+            let err = result.err().context("underage must fail")?;
+            assert_eq!(
+                custom_code(&err),
+                Some(ec(xfchess_game::errors::GameErrorCode::UnderagePlayer)),
+                "dob {dob}"
+            );
+            assert!(ctx
+                .banks_client
+                .get_account(profile_pda(&player.pubkey()))
+                .await?
+                .is_none());
+            assert!(ctx
+                .banks_client
+                .get_account(username_record_pda(username))
+                .await?
+                .is_none());
+            assert_eq!(
+                ctx.banks_client.get_balance(player.pubkey()).await?,
+                1_000_000_000
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_username_owned_by_someone_else_is_rejected_without_creating_a_profile(
+) -> anyhow::Result<()> {
+    use xfchess_game::state::UsernameRecord;
+    let player = Keypair::new();
+    let username = "alreadytaken";
+    let taken = program_account(
+        &UsernameRecord {
+            owner: Pubkey::new_unique(),
+            created_at: 5,
+        },
+        8 + UsernameRecord::LEN,
+    )?;
+    let mut ctx = start(vec![
+        (username_record_pda(username), taken.clone()),
+        (player.pubkey(), system_account(1_000_000_000)),
+    ])
+    .await;
+    let err = send(
+        &mut ctx,
+        init_profile_ix(&player.pubkey(), username, "GB", 631_152_000),
+        &[&player],
+    )
+    .await
+    .err()
+    .context("taken username must fail")?;
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(xfchess_game::errors::GameErrorCode::UsernameTaken))
+    );
+    assert_eq!(
+        ctx.banks_client
+            .get_account(username_record_pda(username))
+            .await?
+            .context("record must remain")?,
+        taken
+    );
+    assert!(ctx
+        .banks_client
+        .get_account(profile_pda(&player.pubkey()))
+        .await?
+        .is_none());
+    Ok(())
+}

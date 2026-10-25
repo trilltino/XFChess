@@ -655,3 +655,89 @@ async fn global_join_game_funds_wager_from_session_vault() -> anyhow::Result<()>
     assert_eq!(session.games_remaining, 199);
     Ok(())
 }
+
+fn session_with_spend(
+    player: Pubkey,
+    session_key: Pubkey,
+    spending_limit: u64,
+    total_spent: u64,
+    max_wager: u64,
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    let (pda, bump) = global_session_pda(&player);
+    let session = GlobalSessionDelegation {
+        player,
+        session_key,
+        expires_at: i64::MAX / 2,
+        spending_limit,
+        total_spent,
+        max_wager,
+        games_remaining: 200,
+        enabled: true,
+        bump,
+    };
+    Ok((
+        pda,
+        program_account(&session, 8 + GlobalSessionDelegation::INIT_SPACE)?,
+    ))
+}
+
+#[tokio::test]
+async fn global_create_game_spend_is_capped_exactly_at_the_limit() -> anyhow::Result<()> {
+    let wager = 10_000_000u64;
+    // (limit, already spent, max wager, accepted?)
+    let cases: [(u64, u64, u64, bool); 4] = [
+        (100_000_000, 90_000_000, 20_000_000, true),
+        (100_000_000, 90_000_001, 20_000_000, false),
+        // total_spent + wager would wrap u64; it must be rejected, not wrapped.
+        (u64::MAX, u64::MAX - 5, u64::MAX, false),
+        (u64::MAX, u64::MAX - wager, u64::MAX, true),
+    ];
+    for (limit, spent, max_wager, accepted) in cases {
+        let player = Pubkey::new_unique();
+        let signer = Keypair::new();
+        let (session_pda, session_account) =
+            session_with_spend(player, signer.pubkey(), limit, spent, max_wager)?;
+        let mut ctx = start(vec![(session_pda, session_account.clone())]).await;
+        let ix = global_create_game_ix(
+            session_pda,
+            signer.pubkey(),
+            player,
+            7,
+            wager,
+            MatchType::Rated,
+            0,
+            300,
+            0,
+        );
+        let result = send(&mut ctx, ix, &[&signer]).await;
+        if accepted {
+            result.context("spend within the cap must succeed")?;
+            let after = ctx
+                .banks_client
+                .get_account(session_pda)
+                .await?
+                .context("session missing")?;
+            let after = GlobalSessionDelegation::try_deserialize(&mut after.data.as_slice())?;
+            assert_eq!(after.total_spent, spent + wager);
+            assert!(after.total_spent <= after.spending_limit);
+        } else {
+            let err = result.err().context("spend over the cap must fail")?;
+            assert_eq!(
+                custom_code(&err),
+                Some(ec(
+                    xfchess_game::errors::GameErrorCode::GlobalSessionSpendingLimitExceeded
+                ))
+            );
+            assert_eq!(
+                ctx.banks_client
+                    .get_account(session_pda)
+                    .await?
+                    .context("session missing")?,
+                session_account
+            );
+            assert!(ctx.banks_client.get_account(game_pda(7).0).await?.is_none());
+            assert_eq!(ctx.banks_client.get_balance(escrow_pda(7)).await?, 0);
+        }
+    }
+    Ok(())
+}

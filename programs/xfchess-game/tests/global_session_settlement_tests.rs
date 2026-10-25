@@ -508,3 +508,152 @@ async fn finalize_game_rejects_spoofed_black_authority() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// Every lamport that leaves the escrow lands somewhere accountable, and
+/// lamports donated to the escrow beyond the pot are never paid out.
+#[tokio::test]
+async fn finalize_game_conserves_lamports_and_never_pays_out_escrow_donations() -> anyhow::Result<()>
+{
+    use anchor_lang::{AccountDeserialize, AccountSerialize};
+    for (draw, country_fee) in [(false, 450_000u64), (true, 450_001u64)] {
+        let white = Pubkey::new_unique();
+        let black = Pubkey::new_unique();
+        let fee_payer = Keypair::new();
+        let (game_id, wager) = (4046u64, 10_000_000u64);
+        let donation = 890_880u64; // rent-exempt minimum: see the S5 test below for smaller donations
+
+        let (game_key, mut game_acc) = finished_game_account(
+            game_id,
+            white,
+            black,
+            fee_payer.pubkey(),
+            wager,
+            country_fee,
+        )?;
+        if draw {
+            let mut game = Game::try_deserialize(&mut game_acc.data.as_slice())?;
+            game.result = GameResult::Draw;
+            let mut data = Vec::new();
+            game.try_serialize(&mut data)?;
+            data.resize(game_acc.data.len(), 0);
+            game_acc.data = data;
+        }
+        let (wp, wp_acc) = profile_account(white)?;
+        let (bp, bp_acc) = profile_account(black)?;
+        let escrow = escrow_pda(game_id);
+        let treasury = treasury_vault_pda();
+        let mut ctx = start(vec![
+            (game_key, game_acc),
+            (wp, wp_acc),
+            (bp, bp_acc),
+            (escrow, system_account(wager * 2 + donation)),
+            (treasury, system_account(1_000_000)),
+            (fee_payer.pubkey(), system_account(1_000_000)),
+            (white, system_account(1_000_000)),
+            (black, system_account(1_000_000)),
+        ])
+        .await;
+        let tracked = [
+            game_key,
+            wp,
+            bp,
+            escrow,
+            treasury,
+            fee_payer.pubkey(),
+            white,
+            black,
+        ];
+        let mut before = Vec::new();
+        for key in tracked {
+            before.push(ctx.banks_client.get_balance(key).await?);
+        }
+
+        send(
+            &mut ctx,
+            finalize_game_ix(game_id, white, black, fee_payer.pubkey()),
+            &[],
+        )
+        .await
+        .context("finalize")?;
+
+        let mut after = Vec::new();
+        for key in tracked {
+            after.push(ctx.banks_client.get_balance(key).await?);
+        }
+        assert_eq!(
+            before.iter().sum::<u64>(),
+            after.iter().sum::<u64>(),
+            "draw={draw}: lamports must be conserved across finalize"
+        );
+        assert_eq!(after[3], donation, "draw={draw}: only the donation stays");
+        assert!(ctx.banks_client.get_account(game_key).await?.is_none());
+        let (white_gain, black_gain) = (after[6] - before[6], after[7] - before[7]);
+        if draw {
+            assert!(white_gain.abs_diff(black_gain) <= 1, "draw split is even");
+        } else {
+            assert!(white_gain > black_gain, "winner takes the pot");
+        }
+
+        // A second finalize has no Game left to settle.
+        ctx.last_blockhash = ctx.banks_client.get_latest_blockhash().await?;
+        let again = send(
+            &mut ctx,
+            finalize_game_ix(game_id, white, black, fee_payer.pubkey()),
+            &[],
+        )
+        .await;
+        assert!(again.is_err(), "draw={draw}: replay must fail");
+        assert_eq!(ctx.banks_client.get_balance(escrow).await?, donation);
+    }
+    Ok(())
+}
+
+/// S5: anyone can send lamports to a game's escrow PDA. A payout that leaves a
+/// sub-rent balance behind is rejected by the runtime, so settlement sweeps
+/// that dust to the treasury. Balances at or above the rent minimum stay put.
+#[tokio::test]
+async fn settlement_sweeps_sub_rent_escrow_donations_to_the_treasury() -> anyhow::Result<()> {
+    for cancelled in [false, true] {
+        for donation in [1u64, 890_879] {
+            let white = Pubkey::new_unique();
+            let black = Pubkey::new_unique();
+            let fee_payer = Keypair::new();
+            let (game_id, wager) = (4047u64, 10_000_000u64);
+            let (game_key, game_acc) = if cancelled {
+                cancelled_game_account(game_id, white, black, fee_payer.pubkey(), wager)?
+            } else {
+                finished_game_account(game_id, white, black, fee_payer.pubkey(), wager, 450_000)?
+            };
+            let (wp, wp_acc) = profile_account(white)?;
+            let (bp, bp_acc) = profile_account(black)?;
+            let escrow = escrow_pda(game_id);
+            let treasury = treasury_vault_pda();
+            let mut ctx = start(vec![
+                (game_key, game_acc),
+                (wp, wp_acc),
+                (bp, bp_acc),
+                (escrow, system_account(wager * 2 + donation)),
+                (treasury, system_account(1_000_000)),
+                (fee_payer.pubkey(), system_account(1_000_000)),
+                (white, system_account(1_000_000)),
+                (black, system_account(1_000_000)),
+            ])
+            .await;
+            let treasury_before = ctx.banks_client.get_balance(treasury).await?;
+            send(
+                &mut ctx,
+                finalize_game_ix(game_id, white, black, fee_payer.pubkey()),
+                &[],
+            )
+            .await
+            .context("a sub-rent donation must not block settlement")?;
+            assert_eq!(ctx.banks_client.get_balance(escrow).await?, 0);
+            let gained = ctx.banks_client.get_balance(treasury).await? - treasury_before;
+            assert!(
+                gained >= donation,
+                "cancelled={cancelled} donation={donation}: dust reaches the treasury"
+            );
+        }
+    }
+    Ok(())
+}

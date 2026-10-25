@@ -793,17 +793,31 @@ fn ordinary_settlement_must_supply_canonical_record_and_disables_recovery() -> a
 }
 
 #[test]
-fn recovery_with_subrent_excess_fails_before_all_payments() -> anyhow::Result<()> {
+fn recovery_sweeps_sub_rent_excess_to_treasury_instead_of_failing() -> anyhow::Result<()> {
     with_sbf_runtime(|| {
         let mut accounts = recovery_v2_accounts(100_000_000)?;
         accounts[1].lamports = 200_000_001;
-        let before = accounts.clone();
-        let data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
-        assert_eq!(
-            dispatch(&mut accounts, &data)?,
-            Err(code(GameErrorCode::RecoveryIdentityMismatch))
+        let (white, black, treasury) = (
+            accounts[3].lamports,
+            accounts[4].lamports,
+            accounts[2].lamports,
         );
-        assert_eq!(accounts, before);
+        let game_rent = accounts[0].lamports;
+        let total_before: u64 = accounts.iter().map(|a| a.lamports).sum();
+        let data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+        dispatch(&mut accounts, &data)??;
+        assert_eq!(
+            accounts[1].lamports, 0,
+            "escrow ends empty, not rent-paying"
+        );
+        assert_eq!(accounts[3].lamports, white + 100_000_000);
+        assert_eq!(accounts[4].lamports, black + 100_000_000);
+        assert_eq!(accounts[2].lamports, treasury + 1 + game_rent);
+        assert_eq!(
+            accounts.iter().map(|a| a.lamports).sum::<u64>(),
+            total_before,
+            "lamports are conserved"
+        );
         Ok(())
     })
 }
@@ -885,4 +899,70 @@ fn legacy_lifecycle_cannot_omit_or_reuse_a_v2_identity() -> anyhow::Result<()> {
             .is_err()
     );
     Ok(())
+}
+
+#[test]
+fn global_session_withdraw_never_takes_rent_and_requires_the_owning_wallet() -> anyhow::Result<()> {
+    with_sbf_runtime(|| {
+        let player = Pubkey::new_unique();
+        let data = xfchess_game::instruction::WithdrawGlobalSession {}.data();
+        let rent_min = {
+            let mut accounts = session_accounts(player, Pubkey::new_unique(), NOW + 1, 1, true)?;
+            Rent::default().minimum_balance(accounts.remove(0).data.len())
+        };
+
+        // A different wallet cannot reach the vault.
+        let mut accounts = session_accounts(player, Pubkey::new_unique(), NOW + 1, 1, true)?;
+        accounts.pop();
+        accounts[1].key = Pubkey::new_unique();
+        let before = accounts.clone();
+        assert_eq!(dispatch(&mut accounts, &data)?, Err(seeds_error()));
+        assert_eq!(accounts, before);
+
+        // The owner recovers everything above rent, exactly once.
+        let mut accounts = session_accounts(player, Pubkey::new_unique(), NOW + 1, 1, true)?;
+        accounts.pop();
+        let (vault_before, wallet_before) = (accounts[0].lamports, accounts[1].lamports);
+        dispatch(&mut accounts, &data)??;
+        assert_eq!(accounts[0].lamports, rent_min);
+        assert_eq!(
+            accounts[1].lamports,
+            wallet_before + (vault_before - rent_min)
+        );
+        let after_first = accounts.clone();
+        dispatch(&mut accounts, &data)??;
+        assert_eq!(accounts, after_first, "second withdrawal moves nothing");
+        Ok(())
+    })
+}
+
+#[test]
+fn recovery_only_runs_for_a_delegated_identity_and_never_twice() -> anyhow::Result<()> {
+    with_sbf_runtime(|| {
+        let data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+        for status in [
+            RecoveryStatus::Waiting,
+            RecoveryStatus::Ready,
+            RecoveryStatus::Closed,
+            RecoveryStatus::Recovered,
+        ] {
+            let mut accounts = recovery_v2_accounts(100_000_000)?;
+            let record_index = accounts.len() - 1;
+            let mut record =
+                RecoveryIdentity::try_deserialize(&mut accounts[record_index].data.as_slice())?;
+            record.status = status;
+            let mut bytes = Vec::new();
+            record.try_serialize(&mut bytes)?;
+            bytes.resize(accounts[record_index].data.len(), 0);
+            accounts[record_index].data = bytes;
+            let before = accounts.clone();
+            assert_eq!(
+                dispatch(&mut accounts, &data)?,
+                Err(code(GameErrorCode::RecoveryIdentityMismatch)),
+                "{status:?}"
+            );
+            assert_eq!(accounts, before, "{status:?}: nothing may move");
+        }
+        Ok(())
+    })
 }

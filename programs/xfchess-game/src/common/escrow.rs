@@ -72,3 +72,32 @@ pub fn require_rent_exempt_after(dest: &AccountInfo, added: u64) -> Result<()> {
     );
     Ok(())
 }
+
+/// Anyone can send lamports to a game's escrow address. A payout that leaves
+/// 0 < balance < rent-exempt minimum behind is rejected by the runtime, so a
+/// 1-lamport donation would block settlement. Sub-rent dust is swept to `to`;
+/// balances of zero or at least the rent minimum are left untouched.
+pub fn sweep_sub_rent_dust<'info>(
+    escrow: &AccountInfo<'info>,
+    to: &AccountInfo<'info>,
+    game_id: u64,
+    escrow_bump: u8,
+) -> Result<()> {
+    let dust = escrow.lamports();
+    if dust == 0 || Rent::get()?.is_exempt(dust, escrow.data_len()) {
+        return Ok(());
+    }
+    let game_id_bytes = game_id.to_le_bytes();
+    let signer: &[&[&[u8]]] = &[&[WAGER_ESCROW_SEED, &game_id_bytes, &[escrow_bump]]];
+    system_program::transfer(
+        CpiContext::new_with_signer(
+            System::id(),
+            Transfer {
+                from: escrow.clone(),
+                to: to.clone(),
+            },
+            signer,
+        ),
+        dust,
+    )
+}

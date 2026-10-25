@@ -78,7 +78,11 @@ pub fn handler(
     require!(elo_min <= elo_max, GameErrorCode::InvalidGameStatus);
     require!(min_players <= max_players, GameErrorCode::InvalidGameStatus);
 
-    let total_shares: u16 = prize_shares.iter().sum();
+    // A wrapping sum could pass the cap, so an overflow is rejected like any other excess.
+    let total_shares = prize_shares
+        .iter()
+        .try_fold(0u16, |total, share| total.checked_add(*share))
+        .ok_or(GameErrorCode::InvalidGameStatus)?;
     require!(total_shares <= 10000, GameErrorCode::InvalidGameStatus);
 
     if ctx.accounts.usdc_prize_escrow.is_some() {
