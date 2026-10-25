@@ -1,0 +1,9 @@
+{
+  "artifact": "C:\\Users\\isich\\AppData\\Local\\Temp\\xfchess-contracts-release-20261024\\target\\deploy\\xfchess_game.so",
+  "sha256": "3fa28e585f89c9938fa54168623385f9d9d59d755dca577515b07bbf4a622ff6",
+  "direct_frame_accesses": 34310,
+  "minimum_offset": -4096,
+  "maximum_offset": -1,
+  "out_of_frame_accesses": [],
+  "scope": "Direct r10-relative memory accesses only; not a full verifier"
+}

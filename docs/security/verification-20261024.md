@@ -54,7 +54,7 @@ to avoid verifying an obsolete graph. Test compilation now uses the updated grap
 | Latest-stack local base-chain/ER round trip | Passed, including schedule/cancel task CPIs; localnet-only routing and SDK 5 signed transactions |
 | Latest client/backend integration checks | Passed: backend all targets (including CU benchmark dependency); three wire-boundary and eight rules tests |
 | Devnet upgrade and independent ProgramData hash verification | Finalized at slot 514786564; exact code hash and zero padding independently verified |
-| Contracts source/IDL synchronization and main push | Full source, clients, IDL and dependencies pushed to [568b153](https://github.com/trilltino/xfchess-contracts/commit/568b15365965455785fbe65af07b4f0157d78bf8); independent extraction rebuild/tests pending |
+| Contracts source/IDL synchronization and main push | Full source, clients, IDL and dependencies pushed to [568b153](https://github.com/trilltino/xfchess-contracts/commit/568b15365965455785fbe65af07b4f0157d78bf8); independent extraction SBF and 263 tests passed |
 | XFChess PR | [Draft #52](https://github.com/trilltino/XFChess/pull/52) |
 
 The local ER test uses fixed loopback RPCs and freshly generated in-memory keys.
@@ -141,3 +141,5 @@ Final follow-up: strict actual-workspace Clippy passed with warnings denied. The
 Final backend `cargo check -p backend --all-targets --locked` passed. Current APIs now decode UI-account data explicitly, copy the five RPC account fields at the SDK boundary, use the split status-client types and preserve lowercase SHA-256 hex output. Client tests now check both directions of legacy/v0 wire conversion and malformed-header rejection. Rules suite: eight passed.
 
 Authorized deployment finalized on 25 October 2026: [3u4N77sN31qvdzx8PFHuRuDp1LGyMGKw7wQc62qmc4iXoCkhJsLq5j9nShjeQju8ZrVVnmudum1APmjyDL7u4FSj](https://explorer.solana.com/tx/3u4N77sN31qvdzx8PFHuRuDp1LGyMGKw7wQc62qmc4iXoCkhJsLq5j9nShjeQju8ZrVVnmudum1APmjyDL7u4FSj?cluster=devnet), slot 514786564. ProgramData code SHA-256 matches the reviewed artifact exactly; authority unchanged. Upload resumed in its existing buffer after public RPC rate limiting, with an independent buffer hash check before upgrade. The buffer closed automatically. Net payer spend: 5,710,000 lamports (0.00571 devnet SOL). Source commit: fb168600806aca161ff423610bc9a6457476b494.
+
+Final standalone extraction checks passed: locked SBF build, all 82 instruction discriminators, direct frame bounds and 263 program/client tests (zero failures, four ignored). Its local-engine/workspace artifact is 1,152,920 bytes, SHA-256 3fa28e585f89c9938fa54168623385f9d9d59d755dca577515b07bbf4a622ff6. It differs by 520 bytes from the deployed XFChess artifact; the complete difference is not attributed and byte-identical reproduction is not claimed. Both actual source trees were compared and tested. See extraction-verification-20261025.json.
