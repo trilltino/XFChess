@@ -67,11 +67,29 @@ pub fn handle_resync_response(
     mut network_events: MessageReader<NetworkEvent>,
     mut engine: ResMut<crate::engine::board_state::ChessEngine>,
     mut selection: ResMut<crate::game::resources::Selection>,
+    mut snapshot: ResMut<crate::game::systems::board_snapshot::PendingBoardSnapshot>,
     session: Res<crate::multiplayer::network::online_game_session::OnlineGameSession>,
+    checkpoint: Option<Res<crate::game::systems::board_snapshot::VerifiedBoardPosition>>,
+    epoch: Option<Res<crate::motion::BoardEpoch>>,
+    pending: Option<Res<PendingTrustedRecovery>>,
+    mut commands: Commands,
+    state: Option<Res<State<crate::core::GameState>>>,
+    mode: Option<Res<crate::core::GameMode>>,
     #[cfg(feature = "solana")] game_sync: Option<
         Res<crate::multiplayer::solana::addon::SolanaGameSync>,
     >,
 ) {
+    if state
+        .as_ref()
+        .is_some_and(|state| *state.get() != crate::core::GameState::InGame)
+        || mode
+            .as_ref()
+            .is_some_and(|mode| !crate::multiplayer::types::is_online_game_mode(**mode))
+    {
+        network_events.clear();
+        return;
+    }
+    let mut recovery_requested = pending.is_some();
     for event in network_events.read() {
         if let NetworkEvent::MessageReceived(NetworkMessage::ResyncResponse {
             game_id,
@@ -106,9 +124,78 @@ pub fn handle_resync_response(
                 warn!("[NET] Ignoring malformed resync FEN for game {game_id}");
                 continue;
             };
+            let verified = checkpoint.as_ref().is_some_and(|checkpoint| {
+                epoch
+                    .as_ref()
+                    .is_some_and(|epoch| checkpoint.matches(*game_id, epoch.0, committed_fen))
+            });
             if incoming_ply < current_ply
-                || (incoming_ply == current_ply && committed_fen != engine.current_fen())
+                || (incoming_ply == current_ply
+                    && committed_fen != engine.current_fen()
+                    && !verified)
             {
+                if incoming_ply == current_ply && session.is_configured() && !recovery_requested {
+                    recovery_requested = true;
+                    // Conflicting peer claims are only hints. Fetch the durable
+                    // log from our configured backend, then verify every move.
+                    let game_id = *game_id;
+                    let base_url = session.base_url.clone();
+                    let session_id = session.game_id.clone();
+                    let board_epoch = epoch.as_ref().map(|epoch| epoch.0).unwrap_or_default();
+                    let previous_fen = engine.current_fen().to_string();
+                    commands.insert_resource(PendingTrustedRecovery {
+                        game_id,
+                        epoch: board_epoch,
+                        previous_fen,
+                        task: crate::core::net_task::Pending::spawn(
+                            "position-recovery",
+                            move || {
+                                let response = crate::multiplayer::network::vps::client()?
+                                    .get(format!(
+                                        "{}/game/{}/moves",
+                                        base_url.trim_end_matches('/'),
+                                        session_id
+                                    ))
+                                    .send()
+                                    .and_then(reqwest::blocking::Response::error_for_status)
+                                    .map_err(|error| error.to_string())?;
+                                let events: Vec<braid_chess::ChessMessage> =
+                                    response.json().map_err(|error| error.to_string())?;
+                                let moves: Vec<_> = events
+                                    .into_iter()
+                                    .filter_map(|event| match event {
+                                        braid_chess::ChessMessage::Move(payload) => Some(payload),
+                                        _ => None,
+                                    })
+                                    .collect();
+                                let fen = moves
+                                    .last()
+                                    .map(|payload| payload.fen_after.clone())
+                                    .unwrap_or_else(|| xfchess_rules::STARTING_FEN.into());
+                                let head = moves
+                                    .last()
+                                    .map(|payload| {
+                                        braid_chess::version_hash(
+                                            &payload.fen_after,
+                                            payload.move_number,
+                                        )
+                                    })
+                                    .unwrap_or_else(|| "0".into());
+                                if !crate::game::systems::board_snapshot::verify_snapshot_history(
+                                    xfchess_rules::STARTING_FEN,
+                                    &fen,
+                                    &moves,
+                                    &head,
+                                ) {
+                                    return Err(
+                                        "backend recovery history failed chess validation".into()
+                                    );
+                                }
+                                Ok(fen)
+                            },
+                        ),
+                    });
+                }
                 warn!("[NET] Ignoring stale or conflicting resync for game {game_id}");
                 continue;
             }
@@ -116,9 +203,145 @@ pub fn handle_resync_response(
                 "[NET] Applying ResyncResponse — overwriting local engine with FEN: {}",
                 committed_fen
             );
-            let _ = engine.set_from_fen(committed_fen);
+            if engine.set_from_fen(committed_fen).is_err() {
+                continue;
+            }
             *selection = crate::game::resources::Selection::default();
+            // The board was replaced: retire animations and premoves made on the old one.
+            snapshot.0 = Some(committed_fen.clone());
         }
+    }
+}
+
+#[derive(Resource)]
+pub struct PendingTrustedRecovery {
+    game_id: u64,
+    epoch: u64,
+    previous_fen: String,
+    task: crate::core::net_task::Pending<Result<String, String>>,
+}
+
+pub fn poll_trusted_recovery(
+    recovery: Option<Res<PendingTrustedRecovery>>,
+    session: Res<crate::multiplayer::network::online_game_session::OnlineGameSession>,
+    epoch: Res<crate::motion::BoardEpoch>,
+    engine: Res<crate::engine::board_state::ChessEngine>,
+    mut snapshot: ResMut<crate::game::systems::board_snapshot::PendingBoardSnapshot>,
+    mut commands: Commands,
+    state: Option<Res<State<crate::core::GameState>>>,
+) {
+    let Some(recovery) = recovery else { return };
+    if !session.active
+        || state
+            .as_ref()
+            .is_some_and(|state| *state.get() != crate::core::GameState::InGame)
+        || recovery.game_id
+            != crate::multiplayer::network::online_game_session::numeric_game_id(&session.game_id)
+        || recovery.epoch != epoch.0
+        || recovery.previous_fen != engine.current_fen()
+    {
+        commands.remove_resource::<PendingTrustedRecovery>();
+        return;
+    }
+    match recovery.task.poll() {
+        crate::core::net_task::Poll::Running => return,
+        crate::core::net_task::Poll::Ready(Ok(fen)) => {
+            if fen_ply(&fen)
+                .zip(fen_ply(engine.current_fen()))
+                .is_some_and(|(incoming, current)| incoming >= current)
+            {
+                snapshot.0 = Some(fen);
+            }
+        }
+        crate::core::net_task::Poll::Ready(Err(error)) => {
+            warn!("[NET] Trusted position recovery failed: {error}")
+        }
+        crate::core::net_task::Poll::Lost => {
+            warn!("[NET] Trusted position recovery worker stopped")
+        }
+    }
+    commands.remove_resource::<PendingTrustedRecovery>();
+}
+
+#[cfg(test)]
+mod trusted_recovery_tests {
+    use super::*;
+    use crate::game::resources::*;
+    use crate::game::systems::board_snapshot::{apply_board_snapshot, PendingBoardSnapshot};
+    use crate::motion::BoardEpoch;
+    use crate::multiplayer::network::online_game_session::OnlineGameSession;
+
+    const D4: &str = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 1";
+    const E4: &str = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+
+    #[test]
+    fn trusted_log_result_repairs_same_ply_but_cannot_cross_a_board_or_game_change(
+    ) -> Result<(), String> {
+        for stale in [0, 1, 2, 3] {
+            let mut app = App::new();
+            app.init_resource::<crate::engine::board_state::ChessEngine>()
+                .init_resource::<CurrentTurn>()
+                .init_resource::<PendingTurnAdvance>()
+                .init_resource::<Selection>()
+                .init_resource::<PendingPromotion>()
+                .init_resource::<BoardEpoch>()
+                .init_resource::<premove::Premove>();
+            app.insert_resource(OnlineGameSession {
+                active: true,
+                game_id: "42".into(),
+                ..Default::default()
+            });
+            app.insert_resource(PendingBoardSnapshot(Some(D4.into())));
+            app.add_systems(
+                Update,
+                (poll_trusted_recovery, apply_board_snapshot).chain(),
+            );
+            app.update();
+            let epoch = app.world().resource::<BoardEpoch>().0;
+            app.insert_resource(PendingTrustedRecovery {
+                game_id: 42,
+                epoch,
+                previous_fen: D4.into(),
+                task: crate::core::net_task::Pending::spawn("test-trusted-recovery", || {
+                    Ok(E4.into())
+                }),
+            });
+            let expected = match stale {
+                1 => {
+                    app.world_mut().resource_mut::<BoardEpoch>().bump();
+                    D4.to_string()
+                }
+                2 => {
+                    app.world_mut().resource_mut::<OnlineGameSession>().game_id = "43".into();
+                    D4.to_string()
+                }
+                3 => {
+                    let mut position = xfchess_rules::Game::from_fen(D4)?;
+                    position.play_uci("e7e5")?;
+                    let fen = position.fen();
+                    app.world_mut()
+                        .resource_mut::<crate::engine::board_state::ChessEngine>()
+                        .set_from_fen(&fen)?;
+                    fen
+                }
+                _ => E4.to_string(),
+            };
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while app.world().contains_resource::<PendingTrustedRecovery>()
+                && std::time::Instant::now() < deadline
+            {
+                app.update();
+                std::thread::yield_now();
+            }
+            assert!(!app.world().contains_resource::<PendingTrustedRecovery>());
+            assert_eq!(
+                app.world()
+                    .resource::<crate::engine::board_state::ChessEngine>()
+                    .current_fen(),
+                expected
+            );
+        }
+        Ok(())
     }
 }
 

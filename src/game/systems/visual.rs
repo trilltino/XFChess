@@ -1,6 +1,6 @@
-use crate::game::components::{FadingCapture, PieceMoveAnimation};
+use crate::game::components::FadingCapture;
 use crate::game::resources::{CurrentTurn, GameTimer, PendingTurnAdvance, Selection};
-use crate::rendering::pieces::{Piece, PIECE_ON_BOARD_Y};
+use crate::rendering::pieces::PIECE_ON_BOARD_Y;
 use crate::rendering::utils::{Square, SquareMaterials};
 use bevy::prelude::*;
 
@@ -9,7 +9,7 @@ pub fn flush_pending_turn(
     mut current_turn: ResMut<CurrentTurn>,
     mut game_timer: ResMut<GameTimer>,
 ) {
-    if let Some(pending) = pending_turn.take() {
+    while let Some(pending) = pending_turn.take() {
         let before = (current_turn.color, current_turn.move_number);
         game_timer.apply_increment(pending.mover);
         current_turn.switch();
@@ -26,6 +26,35 @@ pub struct SelectedBorder;
 
 #[derive(Component)]
 pub struct MoveHint;
+
+#[derive(Component)]
+pub struct PremoveHint;
+
+pub fn highlight_premove(
+    premove: Res<crate::game::resources::premove::Premove>,
+    materials: Res<SquareMaterials>,
+    old: Query<Entity, With<PremoveHint>>,
+    mut commands: Commands,
+) {
+    for entity in &old {
+        commands.entity(entity).despawn();
+    }
+    for square in [premove.from(), premove.to()].into_iter().flatten() {
+        let mut position = crate::motion::board_to_world(crate::motion::square_to_board(square));
+        position.y = 0.06;
+        commands.spawn((
+            Mesh3d(materials.highlight_mesh.clone()),
+            MeshMaterial3d(materials.hover_matl.clone()),
+            Transform::from_translation(position),
+            PremoveHint,
+            crate::core::game_scene(),
+            bevy::picking::Pickable::IGNORE,
+            bevy::camera::visibility::RenderLayers::layer(
+                crate::game::systems::camera::BOARD_LAYER,
+            ),
+        ));
+    }
+}
 
 pub fn highlight_possible_moves(
     selection: Res<Selection>,
@@ -71,48 +100,6 @@ pub fn highlight_possible_moves(
                     crate::game::systems::camera::BOARD_LAYER,
                 ),
             ));
-        }
-    }
-}
-
-pub fn animate_piece_movement(
-    time: Res<Time>,
-    mut commands: Commands,
-    mut query: Query<(
-        Entity,
-        &mut Transform,
-        &Piece,
-        Option<&mut PieceMoveAnimation>,
-    )>,
-) {
-    let dt = time.delta_secs();
-    for (entity, mut transform, piece, animation) in query.iter_mut() {
-        if let Some(mut anim) = animation {
-            anim.elapsed += dt;
-
-            if anim.elapsed >= anim.duration {
-                // Animation complete — snap to exact destination.
-                transform.translation = anim.end;
-                commands.entity(entity).remove::<PieceMoveAnimation>();
-            } else {
-                // Smooth-step t for horizontal slide (ease in-out).
-                let t_smooth = anim.progress();
-                // Linear t for the arc so the peak is always at the midpoint.
-                let t_linear = (anim.elapsed / anim.duration).clamp(0.0, 1.0);
-
-                let base = anim.start.lerp(anim.end, t_smooth);
-                // Arc height scales with board distance so short moves look natural.
-                let dist = (anim.end - anim.start).length();
-                let arc_height = (dist * 0.18).clamp(0.15, 0.55);
-                let arc_y = arc_height * 4.0 * t_linear * (1.0 - t_linear);
-
-                transform.translation = Vec3::new(base.x, base.y + arc_y, base.z);
-            }
-        } else {
-            let target = Vec3::new(7.0 - piece.x as f32, PIECE_ON_BOARD_Y, piece.y as f32);
-            if (transform.translation - target).length() > 0.01 {
-                transform.translation = target;
-            }
         }
     }
 }

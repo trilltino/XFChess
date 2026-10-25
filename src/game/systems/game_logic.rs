@@ -1,6 +1,7 @@
 use crate::engine::board_state::ChessEngine;
-use crate::game::components::{FadingCapture, GamePhase, PieceMoveAnimation};
+use crate::game::components::{FadingCapture, GamePhase};
 use crate::game::resources::*;
+use crate::motion::PieceMotion;
 use crate::rendering::pieces::PieceColor;
 use bevy::prelude::*;
 
@@ -34,7 +35,9 @@ pub fn update_game_phase(
     // Reuse the legal-move cache until the turn changes.
     if engine.synced_this_move {
         engine.synced_this_move = false;
-        engine.rebuild_legal_move_cache();
+        if !engine.move_cache_valid {
+            engine.rebuild_legal_move_cache();
+        }
     } else if !engine.move_cache_valid {
         // Initial build: pieces just spawned but no move has been made yet.
         engine.sync_ecs_to_engine(&pieces_query);
@@ -204,7 +207,7 @@ pub fn check_game_over_state(
     game_over: Res<GameOverState>,
     state: Res<State<crate::core::GameState>>,
     mut pending: ResMut<PendingGameOver>,
-    animations: Query<(), (With<PieceMoveAnimation>, Without<FadingCapture>)>,
+    animations: Query<(), (With<PieceMotion>, Without<FadingCapture>)>,
     fades: Query<(), With<FadingCapture>>,
     game_mode: Res<crate::core::GameMode>,
 ) {
@@ -296,5 +299,50 @@ mod tests {
         ];
         assert_eq!(evaluate(&pieces, 99), GameOverState::Playing);
         assert_eq!(evaluate(&pieces, 100), GameOverState::FiftyMoveRule);
+    }
+}
+
+#[cfg(test)]
+mod game_over_prompt_tests {
+    use super::*;
+    use crate::motion::{MotionStyle, MoveTransaction, PieceMotion};
+    use bevy::math::Vec2;
+
+    fn app_with_game_over() -> App {
+        let mut app = App::new();
+        app.insert_resource(GameOverState::WhiteWon);
+        app.insert_resource(State::new(crate::core::GameState::InGame));
+        app.init_resource::<PendingGameOver>();
+        app.insert_resource(crate::core::GameMode::SinglePlayer);
+        app.add_systems(Update, check_game_over_state);
+        app
+    }
+
+    #[test]
+    fn the_prompt_waits_for_the_final_move_to_finish_drawing() -> Result<(), String> {
+        let mut app = app_with_game_over();
+        let mover = app
+            .world_mut()
+            .spawn(PieceMotion {
+                tx: MoveTransaction::new(
+                    Vec2::new(0.0, 0.0),
+                    Vec2::new(0.0, 2.0),
+                    0.4,
+                    MotionStyle::GAMEPLAY,
+                ),
+                epoch: 0,
+                promoted_from: None,
+                started_at: Default::default(),
+            })
+            .id();
+        app.update();
+        // Game over is already authoritative; only the prompt is held back.
+        assert!(app.world().resource::<GameOverState>().is_game_over());
+        assert!(!app.world().resource::<PendingGameOver>().active);
+
+        app.world_mut().entity_mut(mover).remove::<PieceMotion>();
+        app.update();
+        assert!(app.world().resource::<PendingGameOver>().active);
+        Ok(())
     }
 }

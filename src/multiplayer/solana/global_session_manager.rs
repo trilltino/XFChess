@@ -318,7 +318,7 @@ pub fn build_global_create_game_ix(
     base_time_seconds: u64,
     increment_seconds: u16,
 ) -> solana_sdk::instruction::Instruction {
-    let discriminator = anchor_discriminator("global_create_game");
+    let discriminator = anchor_discriminator("global_create_game_v2");
 
     let mut data = Vec::with_capacity(128);
     data.extend_from_slice(&discriminator);
@@ -337,6 +337,14 @@ pub fn build_global_create_game_ix(
         AccountMeta::new(*game_pda, false),
         AccountMeta::new(*escrow_pda, false),
         AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new(
+            Pubkey::find_program_address(
+                &[b"recovery_identity", &game_id.to_le_bytes()],
+                program_id,
+            )
+            .0,
+            false,
+        ),
     ];
 
     solana_sdk::instruction::Instruction {
@@ -357,7 +365,7 @@ pub fn build_global_join_game_ix(
     escrow_pda: &Pubkey,
     game_id: u64,
 ) -> solana_sdk::instruction::Instruction {
-    let discriminator = anchor_discriminator("global_join_game");
+    let discriminator = anchor_discriminator("global_join_game_v2");
 
     let mut data = Vec::with_capacity(16);
     data.extend_from_slice(&discriminator);
@@ -372,6 +380,14 @@ pub fn build_global_join_game_ix(
         AccountMeta::new_readonly(*white_profile_pda, false),
         AccountMeta::new(*escrow_pda, false),
         AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new(
+            Pubkey::find_program_address(
+                &[b"recovery_identity", &game_id.to_le_bytes()],
+                program_id,
+            )
+            .0,
+            false,
+        ),
     ];
 
     solana_sdk::instruction::Instruction {
@@ -499,7 +515,7 @@ mod tests {
             5,
             6,
         );
-        let expected = xfchess_game::instruction::GlobalCreateGame {
+        let expected = xfchess_game::instruction::GlobalCreateGameV2 {
             game_id: 1,
             wager_amount: 2,
             match_type: xfchess_game::state::MatchType::Rated,
@@ -521,7 +537,7 @@ mod tests {
             &escrow_pda,
             7,
         );
-        let expected = xfchess_game::instruction::GlobalJoinGame { game_id: 7 }.data();
+        let expected = xfchess_game::instruction::GlobalJoinGameV2 { game_id: 7 }.data();
         assert_eq!(ix.data, expected);
     }
 

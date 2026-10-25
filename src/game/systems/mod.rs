@@ -2,6 +2,7 @@
 //! promotion, network-move application, and visual feedback. Board input lives in
 //! [`crate::input`].
 
+pub mod board_snapshot;
 pub mod camera;
 pub mod debug_visuals;
 pub mod first_move_timer;

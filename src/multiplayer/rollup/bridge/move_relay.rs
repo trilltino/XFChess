@@ -1,4 +1,5 @@
 use super::*;
+use crate::multiplayer::systems::fen_ply;
 
 #[derive(Resource, Default, Clone)]
 pub struct RecentTransactions {
@@ -251,6 +252,7 @@ pub(super) fn handle_network_to_rollup_events(
     mut bridge: ResMut<RollupNetworkBridge>,
     magicblock_resolver: Res<MagicBlockResolver>,
     solana_state: Option<Res<SolanaIntegrationState>>,
+    mut board: crate::game::systems::board_snapshot::RecoveryBoard,
 ) {
     let er_endpoint = magicblock_resolver.er_endpoint().to_string();
     let white_black = resolve_white_black(rollup_manager.is_creator, solana_state.as_deref());
@@ -409,10 +411,36 @@ pub(super) fn handle_network_to_rollup_events(
                 committed_fen,
                 committed_turn,
             } => {
-                if rollup_manager.accept_peer_baseline(*game_id, committed_fen, *committed_turn) {
+                // An unauthenticated replacement must not choose a new branch.
+                // Repair only a baseline already accepted here or a local rules
+                // checkpoint; otherwise request the missing legal move history.
+                let known = committed_fen == &rollup_manager.committed_fen;
+                let checkpoint = board.has_checkpoint(*game_id, committed_fen);
+                if *game_id == rollup_manager.game_id
+                    && (known || checkpoint)
+                    && fen_ply(committed_fen)
+                        .zip(fen_ply(&rollup_manager.committed_fen))
+                        .is_some_and(|(incoming, current)| incoming >= current)
+                {
+                    if checkpoint && !known {
+                        rollup_manager.committed_fen = committed_fen.clone();
+                        rollup_manager.committed_turn = fen_ply(committed_fen)
+                            .unwrap_or_default()
+                            .min(u16::MAX as u64)
+                            as u16;
+                    }
+                    board.queue(*game_id, committed_fen);
                     info!(
                         "Resynced game {} from peer, turn {}",
                         game_id, committed_turn
+                    );
+                } else if *game_id == rollup_manager.game_id {
+                    send_network_msg(
+                        &network_state,
+                        NetworkMessage::BraidResyncRequest {
+                            game_id: *game_id,
+                            since_version: "0".into(),
+                        },
                     );
                 }
             }
@@ -439,13 +467,20 @@ pub(super) fn handle_network_to_rollup_events(
                     let all_moves: Vec<MovePayload> =
                         vps_client::fetch_move_log(gid).unwrap_or_default();
 
-                    let since_ver = since.clone();
+                    let start = if since.is_empty() || since == "0" {
+                        Some(0)
+                    } else {
+                        all_moves
+                            .iter()
+                            .position(|m| {
+                                braid_chess::version_hash(&m.fen_after, m.move_number) == since
+                            })
+                            .map(|index| index + 1)
+                    };
+                    let Some(start) = start else { return };
                     let missed: Vec<String> = all_moves
                         .iter()
-                        .skip_while(|m| {
-                            braid_chess::version_hash(&m.fen_after, m.move_number) != since_ver
-                        })
-                        .skip(1) // skip the matching entry itself
+                        .skip(start)
                         .filter_map(|m| serde_json::to_string(m).ok())
                         .collect();
 
@@ -514,13 +549,18 @@ pub(super) fn handle_network_to_rollup_events(
                     );
                     // Emit a full-state resync event so the game layer can
                     // reconstruct position from the authoritative FEN.
+                    let Ok(payloads) = move_payloads
+                        .iter()
+                        .map(|json| serde_json::from_str::<MovePayload>(json))
+                        .collect::<Result<Vec<_>, _>>()
+                    else {
+                        warn!("[SNAPSHOT] Rejected malformed move history for game {gid}");
+                        continue;
+                    };
                     rollup_events.write(RollupEvent::SnapshotReceived {
                         game_id: gid,
                         fen: fen.clone(),
-                        move_payloads: move_payloads
-                            .iter()
-                            .filter_map(|j| serde_json::from_str::<MovePayload>(j).ok())
-                            .collect(),
+                        move_payloads: payloads,
                         head_version: head_version.clone(),
                     });
                 }

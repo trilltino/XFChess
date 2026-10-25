@@ -5,6 +5,7 @@ pub mod core;
 pub mod engine;
 pub mod game;
 pub mod input;
+pub mod motion;
 pub mod multiplayer;
 pub mod presentation;
 pub mod puzzle;

@@ -1,11 +1,10 @@
 use crate::engine::board_state::ChessEngine;
-use crate::game::components::{
-    FadingCapture, HasMoved, MoveRecord, Piece, PieceColor, PieceMoveAnimation, PieceType,
-};
+use crate::game::components::{FadingCapture, HasMoved, MoveRecord, Piece, PieceColor, PieceType};
 use crate::game::events::MoveMadeEvent;
 use crate::game::resources::turn::CurrentTurn;
 use crate::game::resources::{CapturedPieces, MoveHistory, PendingTurnAdvance};
 use crate::game::sync::board_state::{BoardMove, BoardStateSync, ChessEngineExt};
+use crate::motion::{PieceMotion, StartPieceMotion};
 use crate::rendering::pieces::PIECE_ON_BOARD_Y;
 use bevy::audio::AudioSource;
 use bevy::prelude::*;
@@ -74,11 +73,28 @@ pub fn apply_capture(
     // The tilt axis should be perpendicular to the knockback to make the piece 'lean' back
     let tilt_axis = Vec3::new(knockback.z, 0.0, -knockback.x).normalize();
 
-    commands.entity(target.entity).insert(FadingCapture {
-        timer: bevy::time::Timer::from_seconds(0.75, bevy::time::TimerMode::Once),
-        initial_pos: current_pos,
-        knockback_dir: knockback,
-        tilt_axis,
+    // A captured piece fades out; it must not also keep travelling.
+    commands.queue(move |world: &mut World| {
+        let epoch = world
+            .get_resource::<crate::motion::BoardEpoch>()
+            .copied()
+            .unwrap_or_default();
+        let drawn = world
+            .get::<PieceMotion>(target.entity)
+            .filter(|motion| motion.epoch == epoch.0)
+            .map(|motion| {
+                crate::motion::board_to_world(motion.tx.position()) + Vec3::Y * motion.tx.lift()
+            })
+            .unwrap_or(current_pos);
+        let Ok(mut entity) = world.get_entity_mut(target.entity) else {
+            return;
+        };
+        entity.remove::<PieceMotion>().insert(FadingCapture {
+            timer: bevy::time::Timer::from_seconds(0.75, bevy::time::TimerMode::Once),
+            initial_pos: drawn,
+            knockback_dir: knockback,
+            tilt_axis,
+        });
     });
 }
 
@@ -127,12 +143,12 @@ pub fn update_piece_state(
     move_history.add_move_with_san(move_record, san);
     piece_component.x = target.0;
     piece_component.y = target.1;
-    // Keep animation height aligned with piece spawning and the board surface.
-    commands.entity(entity).insert(PieceMoveAnimation::new(
-        Vec3::new(7.0 - from_pos.0 as f32, PIECE_ON_BOARD_Y, from_pos.1 as f32),
-        Vec3::new(7.0 - target.0 as f32, PIECE_ON_BOARD_Y, target.1 as f32),
-        0.4,
-    ));
+    // Visual only: the piece is already on `target`; this just draws it travelling.
+    let promoted_from = promotion
+        .filter(|_| original_type == PieceType::Pawn)
+        .map(|_| original_type);
+    commands
+        .queue(StartPieceMotion::gameplay(entity, from_pos, target).promoting_from(promoted_from));
 
     has_moved.moved = true;
     has_moved.move_count += 1;
@@ -190,15 +206,8 @@ fn apply_castling_rook_move(
         rook_has_moved.moved = true;
         rook_has_moved.move_count += 1;
 
-        commands.entity(rook_entity).insert(PieceMoveAnimation::new(
-            Vec3::new(
-                7.0 - rook_from.0 as f32,
-                PIECE_ON_BOARD_Y,
-                rook_from.1 as f32,
-            ),
-            Vec3::new(7.0 - rook_to.0 as f32, PIECE_ON_BOARD_Y, rook_to.1 as f32),
-            0.25,
-        ));
+        // Same duration as the king so both pieces land together.
+        commands.queue(StartPieceMotion::gameplay(rook_entity, rook_from, rook_to));
 
         debug!(
             "[SHARED] castling rook moved from {:?} to {:?} (entity {:?}, piece {:?})",
@@ -281,6 +290,20 @@ pub fn execute_move(
 
     // Derive from_pos early — needed by both the capture and update steps.
     let from_pos = (ctx.piece.x, ctx.piece.y);
+    // Keep an independently evaluated checkpoint for trusted same-ply repair.
+    // It is derived before ECS mutation, never from rendered transforms.
+    let promotion = ctx.promotion.map(|kind| match kind {
+        PieceType::Queen => 'q',
+        PieceType::Rook => 'r',
+        PieceType::Bishop => 'b',
+        PieceType::Knight => 'n',
+        _ => '?',
+    });
+    let verified = ChessEngine::move_uci(from_pos, ctx.target, promotion).and_then(|uci| {
+        let mut position = xfchess_rules::Game::from_fen(engine.current_fen()).ok()?;
+        position.play_uci(&uci).ok()?;
+        Some(position.fen())
+    });
     let en_passant_capture = find_en_passant_capture(ctx, from_pos, engine, pieces_query);
     let (resolved_capture, capture_square, is_en_passant) =
         if let Some((target, square)) = en_passant_capture {
@@ -329,7 +352,7 @@ pub fn execute_move(
         return false;
     }
 
-    pending_turn.request(ctx.piece.color);
+    pending_turn.record_accepted(ctx.piece.color);
 
     // 4b. Move the rook as part of castling so the windowed board animates both pieces.
     if castling {
@@ -373,7 +396,14 @@ pub fn execute_move(
         }
     }
     engine.sync_ecs_to_engine_mut(pieces_query);
+    // A second accepted move can arrive before update_game_phase runs.
+    engine.rebuild_legal_move_cache();
     engine.synced_this_move = true;
+    if let Some(fen) = verified {
+        commands.queue(move |world: &mut World| {
+            super::board_snapshot::VerifiedBoardPosition::record(world, fen);
+        });
+    }
 
     if let Some(writer) = move_events {
         let fen_after = engine.current_fen().to_string();

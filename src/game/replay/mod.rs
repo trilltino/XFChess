@@ -3,9 +3,10 @@
 
 use crate::core::{game_scene, GameMode, GameState};
 use crate::engine::board_state::ChessEngine;
-use crate::game::components::{HasMoved, PieceMoveAnimation};
+use crate::game::components::HasMoved;
 use crate::game::replay_shorts::ReplayAnnotations;
 use crate::game::view_mode::ViewMode;
+use crate::motion::{StartPieceMotion, GAMEPLAY_MOVE_SECONDS};
 use crate::rendering::pieces::{
     Piece, Piece2DVisual, Piece3DVisual, PieceColor, PieceMeshes, PieceSpriteHandles, PieceType,
     PiecesSpawned, PIECE_ON_BOARD_Y,
@@ -223,5 +224,72 @@ mod tests {
         let state = std::mem::size_of::<PgnReplayState>();
         assert!(engine < 4096, "rules position is {engine} bytes");
         assert!(state < 1024, "replay state is {state} bytes");
+    }
+
+    #[test]
+    fn forward_backward_seek_pause_and_resume_do_not_publish_moves() -> Result<(), String> {
+        use std::time::Duration;
+        let pgn = xfchess_rules::parse_pgn("1. e4 e5 2. Nf3 Nc6 *")?;
+        let snapshots = pgn.snapshots()?;
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.init_resource::<ChessEngine>();
+        app.insert_resource(ParsedPgnGameResource {
+            inner: pgn,
+            show_eval_graph: false,
+            puzzle_mode: false,
+            puzzle_revealed: false,
+        });
+        app.insert_resource(PgnReplayState {
+            fen_snapshots: snapshots.clone(),
+            ..Default::default()
+        });
+        app.add_message::<crate::game::events::MoveMadeEvent>();
+        app.add_systems(
+            Update,
+            (
+                replay_auto_advance_system,
+                replay_apply_move_system,
+                replay_sync_engine_system,
+            )
+                .chain(),
+        );
+        for (target, animated) in [(1, true), (0, false), (4, false), (0, false)] {
+            let mut replay = app.world_mut().resource_mut::<PgnReplayState>();
+            replay.current_ply = target;
+            replay.position_dirty = true;
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<PgnReplayState>()
+                    .animate_next_advance,
+                animated
+            );
+            assert_eq!(
+                app.world().resource::<ChessEngine>().current_fen(),
+                snapshots[target]
+            );
+        }
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs(3));
+        app.update();
+        assert_eq!(app.world().resource::<PgnReplayState>().current_ply, 0);
+        {
+            let mut replay = app.world_mut().resource_mut::<PgnReplayState>();
+            replay.speed = 0.1;
+            replay.timer = Timer::from_seconds(0.1, TimerMode::Once);
+            replay.paused = false;
+        }
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs_f32(0.11));
+        app.update();
+        assert_eq!(app.world().resource::<PgnReplayState>().current_ply, 1);
+        assert!(app
+            .world()
+            .resource::<Messages<crate::game::events::MoveMadeEvent>>()
+            .is_empty());
+        Ok(())
     }
 }
