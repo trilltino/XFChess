@@ -1,21 +1,16 @@
 use bevy::prelude::*;
 use braid_chess::message::ChatPayload;
 use braid_chess::{
-    journal::Journal,
-    subscriber::{ChessDelivery, DeliveryReceipt},
-    ChessResource,
+    journal::Journal, subscriber::DeliveryReceipt, ChessResource, StreamCursor, StreamHandle,
+    SupervisorConfig,
 };
-use braid_chess::{ChessMessage, ChessSubscriber, MovePayload};
-use std::time::Duration;
-use tracing::{debug, info, warn};
+use braid_chess::{ChessMessage, MovePayload};
+use tracing::{info, warn};
 
 use crate::multiplayer::network::online_game_session::{OnlineChatMessage, OnlineGameSession};
 use crate::multiplayer::network::protocol::NetworkMessage;
 use crate::multiplayer::types::{CausalChainState, NetworkEvent};
 use crate::multiplayer::TokioRuntime;
-
-const MIN_BACKOFF: Duration = Duration::from_secs(1);
-const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 const GENESIS_PARENT: &str = "0";
 
@@ -70,9 +65,6 @@ impl BraidStreamHeads {
 }
 
 pub type SharedStreamHeads = std::sync::Arc<std::sync::Mutex<BraidStreamHeads>>;
-type AppliedCursors = std::sync::Arc<
-    std::sync::Mutex<std::collections::HashMap<&'static str, Vec<braid_http::Version>>>,
->;
 
 fn version_of(message: &ChessMessage) -> Option<String> {
     Some(match message {
@@ -208,20 +200,11 @@ pub struct BraidTransportState {
     heads: SharedStreamHeads,
     game_id: String,
     rx: Option<crossbeam_channel::Receiver<ChessMessage>>,
-    deliveries: Option<tokio::sync::mpsc::Receiver<ChessDelivery>>,
-    subscription_task: Option<tokio::task::JoinHandle<()>>,
+    /// Moves and chat are supervised independently; dropping a handle cancels its task.
+    moves: Option<StreamHandle>,
+    chat: Option<StreamHandle>,
     journal: Option<Journal>,
     pending: std::collections::HashMap<String, DeliveryReceipt>,
-    cursors: AppliedCursors,
-    pub connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-
-impl Drop for BraidTransportState {
-    fn drop(&mut self) {
-        if let Some(task) = self.subscription_task.take() {
-            task.abort();
-        }
-    }
 }
 
 impl BraidTransportState {
@@ -233,13 +216,11 @@ impl BraidTransportState {
         Self {
             game_id,
             rx: Some(rx),
-            connected: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             heads: SharedStreamHeads::default(),
-            deliveries: None,
-            subscription_task: None,
+            moves: None,
+            chat: None,
             journal: None,
             pending: Default::default(),
-            cursors: Default::default(),
         }
     }
 
@@ -250,20 +231,45 @@ impl BraidTransportState {
     pub fn reset(&mut self) {
         self.game_id.clear();
         self.rx = None;
-        self.deliveries = None;
-        if let Some(task) = self.subscription_task.take() {
-            task.abort();
-        }
+        self.moves = None;
+        self.chat = None;
         self.journal = None;
         self.pending.clear();
-        self.cursors = Default::default();
-        self.connected
-            .store(false, std::sync::atomic::Ordering::Relaxed);
         self.heads = SharedStreamHeads::default();
     }
 
+    /// The move stream is the one the game depends on; chat health is reported separately.
     pub fn is_connected(&self) -> bool {
-        self.connected.load(std::sync::atomic::Ordering::Relaxed)
+        self.moves.as_ref().is_some_and(StreamHandle::is_online)
+    }
+
+    pub fn chat_is_connected(&self) -> bool {
+        self.chat.as_ref().is_some_and(StreamHandle::is_online)
+    }
+
+    fn handle(&self, stream: &str) -> Option<&StreamHandle> {
+        if stream == "chat" {
+            self.chat.as_ref()
+        } else {
+            self.moves.as_ref()
+        }
+    }
+
+    /// Moves are drained first so a busy chat stream can never delay a move.
+    fn next_delivery(&mut self) -> Option<(ChessMessage, Option<DeliveryReceipt>)> {
+        let delivery = self
+            .moves
+            .as_mut()
+            .and_then(StreamHandle::try_recv)
+            .or_else(|| self.chat.as_mut().and_then(StreamHandle::try_recv));
+        if let Some(delivery) = delivery {
+            return Some((delivery.message, Some(delivery.receipt)));
+        }
+        self.rx
+            .as_ref()?
+            .try_recv()
+            .ok()
+            .map(|message| (message, None))
     }
 
     fn confirm(&self, receipt: DeliveryReceipt, stream: &'static str, fen: Option<String>) {
@@ -272,8 +278,8 @@ impl BraidTransportState {
         };
         match journal.applied(stream, receipt.versions().to_vec(), fen) {
             Ok(()) => {
-                if let Ok(mut cursors) = self.cursors.lock() {
-                    cursors.insert(stream, receipt.versions().to_vec());
+                if let Some(handle) = self.handle(stream) {
+                    handle.cursor().set(receipt.versions().to_vec());
                 }
                 let _ = receipt.acknowledge();
             }
@@ -298,7 +304,7 @@ pub fn ensure_subscribed(
     game_id: String,
     rt: &tokio::runtime::Handle,
 ) {
-    if state.game_id == game_id && state.deliveries.is_some() {
+    if state.game_id == game_id && state.moves.is_some() {
         return;
     }
     state.reset();
@@ -311,106 +317,18 @@ pub fn ensure_subscribed(
     };
     state.game_id = game_id.clone();
     state.journal = Some(journal);
-    state
-        .connected
-        .store(false, std::sync::atomic::Ordering::Relaxed);
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<ChessDelivery>(2);
-    state.deliveries = Some(rx);
-
-    state.subscription_task = Some(spawn_reconnecting_subscription(
-        base_url,
-        game_id,
-        tx,
-        state.connected.clone(),
-        state.cursors.clone(),
-        rt,
-    ));
-}
-
-fn spawn_reconnecting_subscription(
-    base_url: String,
-    game_id: String,
-    tx: tokio::sync::mpsc::Sender<ChessDelivery>,
-    connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    cursors: AppliedCursors,
-    rt: &tokio::runtime::Handle,
-) -> tokio::task::JoinHandle<()> {
-    rt.spawn(async move {
-        let mut backoff = MIN_BACKOFF;
-        // Show reconnection notices only after a prior successful connection was lost.
-        let mut recovering = false;
-        loop {
-            if tx.is_closed() { return; }
-            let sub = match ChessSubscriber::new(&base_url, &game_id) {
-                Ok(s) => s,
-                Err(e) => {
-                    warn!(
-                        "[NET] Move sync backup (Braid) couldn't start for game {game_id}: {e}"
-                    );
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
-                    recovering = true;
-                    continue;
-                }
-            };
-
-            // Resume both streams from their last durable application acknowledgment.
-            let (moves_parents, chat_parents) = match cursors.lock() {
-                Ok(cursors) => (cursors.get("moves").cloned().unwrap_or_default(), cursors.get("chat").cloned().unwrap_or_default()),
-                Err(_) => return,
-            };
-            let moves = sub.subscribe_acknowledged(ChessResource::moves(&game_id), moves_parents).await;
-            let chat = sub.subscribe_acknowledged(ChessResource::chat(&game_id), chat_parents).await;
-            let (moves_rx, chat_rx) = match (moves, chat) {
-                (Ok((m, _)), Ok((c, _))) => (m, c),
-                (Err(e), _) | (_, Err(e)) => {
-                    if matches!(e, braid_chess::BraidChessError::HttpStatus(410)) {
-                        // Replay through the engine and deduplication layer after cursor expiry.
-                        if let Ok(mut cursors) = cursors.lock() { cursors.clear(); }
-                    }
-                    warn!(
-                        "[NET] Move sync backup (Braid) couldn't reach the server for game {game_id}: {e} — retrying"
-                    );
-                    connected.store(false, std::sync::atomic::Ordering::Relaxed);
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
-                    recovering = true;
-                    continue;
-                }
-            };
-            if recovering {
-                info!("[NET] Move sync backup (Braid) reconnected for game {game_id}");
-            } else {
-                debug!("[braid-transport] subscribed to moves+chat for game {game_id}");
-            }
-            backoff = MIN_BACKOFF; // reset after a successful (re)connect
-            connected.store(true, std::sync::atomic::Ordering::Relaxed);
-
-            loop {
-                tokio::select! {
-                    msg = moves_rx.recv() => {
-                        match msg {
-                            Ok(m) => { if tx.send(m).await.is_err() { return; } }
-                            Err(_) => break,
-                        }
-                    }
-                    msg = chat_rx.recv() => {
-                        match msg {
-                            Ok(m) => { if tx.send(m).await.is_err() { return; } }
-                            Err(_) => break,
-                        }
-                    }
-                }
-            }
-            connected.store(false, std::sync::atomic::Ordering::Relaxed);
-            warn!(
-                "[NET] Move sync backup (Braid) lost connection for game {game_id} — reconnecting"
-            );
-            recovering = true;
-            tokio::time::sleep(MIN_BACKOFF).await;
-        }
-    })
+    let spawn = |resource: ChessResource| {
+        StreamHandle::spawn(
+            base_url.clone(),
+            game_id.clone(),
+            resource,
+            StreamCursor::default(),
+            SupervisorConfig::default(),
+            rt,
+        )
+    };
+    state.moves = Some(spawn(ChessResource::moves(&game_id)));
+    state.chat = Some(spawn(ChessResource::chat(&game_id)));
 }
 
 pub fn drain_braid_messages(
@@ -421,26 +339,15 @@ pub fn drain_braid_messages(
     mut resign_events: MessageWriter<crate::game::events::ResignEvent>,
     mut chat_events: MessageWriter<OnlineChatMessage>,
 ) {
-    if state.rx.is_none() && state.deliveries.is_none() {
+    if state.rx.is_none() && state.moves.is_none() {
         return;
     }
     let game_id_u64 =
         crate::multiplayer::network::online_game_session::numeric_game_id(&session.game_id);
 
     for _ in 0..256 {
-        let (msg, receipt) = if let Some(rx) = state.deliveries.as_mut() {
-            let Ok(delivery) = rx.try_recv() else {
-                break;
-            };
-            (delivery.message, Some(delivery.receipt))
-        } else {
-            let Some(rx) = &state.rx else {
-                break;
-            };
-            let Ok(msg) = rx.try_recv() else {
-                break;
-            };
-            (msg, None)
+        let Some((msg, receipt)) = state.next_delivery() else {
+            break;
         };
         let stream = stream_of(&msg);
         let fen = if let ChessMessage::Move(payload) = &msg {

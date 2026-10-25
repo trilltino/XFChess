@@ -21,3 +21,7 @@ workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
+axum.workspace = true
+bytes = "1"
+futures.workspace = true
+xfchess-braid-server = { path = "../xfchess-braid-server" }
