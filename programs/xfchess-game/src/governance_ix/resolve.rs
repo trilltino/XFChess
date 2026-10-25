@@ -110,6 +110,12 @@ pub fn handler(
                     )?;
                 }
             }
+            escrow::sweep_sub_rent_dust(
+                &ctx.accounts.escrow_pda.to_account_info(),
+                &ctx.accounts.platform_treasury.to_account_info(),
+                game_id,
+                escrow_bump,
+            )?;
         }
     }
 

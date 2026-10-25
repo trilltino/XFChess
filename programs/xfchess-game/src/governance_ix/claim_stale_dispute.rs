@@ -75,6 +75,13 @@ pub fn handler(ctx: Context<ClaimStaleDispute>, game_id: u64) -> Result<()> {
                 game_id,
                 escrow_bump,
             )?;
+            // No treasury account here; the white seat takes any sub-rent dust.
+            escrow::sweep_sub_rent_dust(
+                &ctx.accounts.escrow_pda.to_account_info(),
+                &ctx.accounts.white_authority.to_account_info(),
+                game_id,
+                escrow_bump,
+            )?;
         }
     }
 

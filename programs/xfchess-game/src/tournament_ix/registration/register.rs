@@ -108,6 +108,19 @@ pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64) -> Result<()> {
         GameErrorCode::EloOutOfRange
     );
 
+    // Every shard the tournament can use must be supplied. Otherwise a player
+    // already seated in an omitted shard would pass the duplicate check below.
+    let required = shards::required_shards(tournament.max_players) as usize;
+    let supplied = [
+        true,
+        ctx.accounts.tournament_players_shard_1.is_some(),
+        ctx.accounts.tournament_players_shard_2.is_some(),
+        ctx.accounts.tournament_players_shard_3.is_some(),
+    ];
+    require!(
+        supplied[..required].iter().all(|present| *present),
+        GameErrorCode::InvalidTournamentStatus
+    );
     let mut present_shards: Vec<&TournamentPlayersShard> =
         vec![&ctx.accounts.tournament_players_shard_0];
     if let Some(s) = ctx.accounts.tournament_players_shard_1.as_ref() {
@@ -134,8 +147,13 @@ pub fn handler(ctx: Context<RegisterPlayer>, tournament_id: u64) -> Result<()> {
         ctx.remaining_accounts,
     )?;
 
-    let shard_id =
-        (tournament.num_registered_players / TournamentPlayersShard::SHARD_CAPACITY) as u8;
+    // Departures leave holes, so the registered count does not say which shard
+    // has room; take the first required shard that does.
+    let shard_id = present_shards
+        .iter()
+        .take(required)
+        .position(|shard| shard.players.len() < TournamentPlayersShard::SHARD_CAPACITY as usize)
+        .ok_or(GameErrorCode::TournamentFull)? as u8;
 
     match shard_id {
         0 => {

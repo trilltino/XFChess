@@ -80,6 +80,7 @@ jobs:
           cargo clippy -p xfchess --all-targets --features solana -- -D warnings
           cargo clippy -p backend -p xfchess-rules -p xfchess-stockfish --all-targets -- -D warnings
           cargo clippy -p xfchess-game -- -D warnings
+          cargo clippy -p xfchess-game --tests -- -D warnings
       - name: Enforce Rust safety policy
         run: pwsh -NoProfile -File scripts/check_rust_safety.ps1
 
@@ -145,8 +146,13 @@ jobs:
           cargo build-sbf --arch v0 --tools-version v1.58 --manifest-path programs/xfchess-game-sbf/Cargo.toml -- --locked
       - name: Application and engine tests (isolated from contract features)
         run: cargo test -p xfchess -p backend -p xfchess-rules -p xfchess-stockfish
+      - name: Record the built program hash
+        run: sha256sum target/deploy/xfchess_game.so && wc -c target/deploy/xfchess_game.so
       - name: Fetch pinned external tournament-pass fixture
         run: python3 docs/security/fetch_pass_fixture.py
+      # Rollback recipient tests run the real MagicBlock Delegation Program binary.
+      - name: Fetch pinned Delegation Program fixture
+        run: python3 docs/security/fetch_dlp_fixture.py
       - name: Contract tests, including host-rules compatibility
         run: cargo test -p xfchess-game -- --test-threads=1
       - name: Remaining workspace tests

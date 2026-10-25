@@ -251,11 +251,6 @@ pub fn recover(ctx: Context<RecoverStuckDelegationV2>, game_id: u64) -> Result<(
         GameErrorCode::RecoveryIdentityMismatch
     );
     if share > 0 {
-        let remaining = accounts.escrow_pda.lamports() - pot;
-        require!(
-            remaining == 0 || Rent::get()?.is_exempt(remaining, 0),
-            GameErrorCode::RecoveryIdentityMismatch
-        );
         crate::common::escrow::require_rent_exempt_after(accounts.white_authority.as_ref(), share)?;
         crate::common::escrow::require_rent_exempt_after(accounts.black_authority.as_ref(), share)?;
     }
@@ -274,6 +269,14 @@ pub fn recover(ctx: Context<RecoverStuckDelegationV2>, game_id: u64) -> Result<(
             ctx.bumps.legacy.escrow_pda,
         )?;
     }
+    // Sub-rent dust (e.g. a donation) would leave the escrow rent-paying and
+    // fail the whole recovery; balances at or above the rent minimum stay put.
+    crate::common::escrow::sweep_sub_rent_dust(
+        &accounts.escrow_pda.to_account_info(),
+        &accounts.treasury_vault.to_account_info(),
+        game_id,
+        ctx.bumps.legacy.escrow_pda,
+    )?;
     let rent = accounts.game.lamports();
     let treasury = accounts.treasury_vault.to_account_info();
     let received = treasury
