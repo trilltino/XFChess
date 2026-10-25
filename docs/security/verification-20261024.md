@@ -54,7 +54,7 @@ to avoid verifying an obsolete graph. Test compilation now uses the updated grap
 | Latest-stack local base-chain/ER round trip | Passed, including schedule/cancel task CPIs; localnet-only routing and SDK 5 signed transactions |
 | Latest client/backend integration checks | Passed: backend all targets (including CU benchmark dependency); three wire-boundary and eight rules tests |
 | Devnet upgrade and independent ProgramData hash verification | Finalized at slot 514786564; exact code hash and zero padding independently verified |
-| Contracts source/IDL synchronization and main push | Engine manifest only so far |
+| Contracts source/IDL synchronization and main push | Full source, clients, IDL and dependencies pushed to [568b153](https://github.com/trilltino/xfchess-contracts/commit/568b15365965455785fbe65af07b4f0157d78bf8); independent extraction rebuild/tests pending |
 | XFChess PR | [Draft #52](https://github.com/trilltino/XFChess/pull/52) |
 
 The local ER test uses fixed loopback RPCs and freshly generated in-memory keys.
