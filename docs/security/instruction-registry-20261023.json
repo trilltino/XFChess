@@ -1,0 +1,1150 @@
+[
+  {
+    "name": "initialize_config",
+    "context": "InitializeConfig",
+    "discriminator": [
+      208,
+      127,
+      21,
+      1,
+      194,
+      190,
+      196,
+      70
+    ]
+  },
+  {
+    "name": "update_config",
+    "context": "UpdateConfig",
+    "discriminator": [
+      29,
+      158,
+      252,
+      191,
+      10,
+      83,
+      219,
+      99
+    ]
+  },
+  {
+    "name": "init_profile",
+    "context": "InitProfile",
+    "discriminator": [
+      210,
+      162,
+      212,
+      95,
+      95,
+      186,
+      89,
+      119
+    ]
+  },
+  {
+    "name": "verify_profile",
+    "context": "VerifyProfile",
+    "discriminator": [
+      101,
+      137,
+      36,
+      242,
+      139,
+      119,
+      156,
+      251
+    ]
+  },
+  {
+    "name": "set_username",
+    "context": "SetUsername",
+    "discriminator": [
+      103,
+      131,
+      39,
+      36,
+      30,
+      228,
+      75,
+      132
+    ]
+  },
+  {
+    "name": "link_external_elo",
+    "context": "LinkExternalElo",
+    "discriminator": [
+      112,
+      2,
+      152,
+      9,
+      115,
+      165,
+      224,
+      242
+    ]
+  },
+  {
+    "name": "send_friend_request",
+    "context": "SendFriendRequest",
+    "discriminator": [
+      26,
+      246,
+      211,
+      226,
+      34,
+      70,
+      151,
+      20
+    ]
+  },
+  {
+    "name": "accept_friend_request",
+    "context": "AcceptFriendRequest",
+    "discriminator": [
+      54,
+      73,
+      153,
+      144,
+      199,
+      113,
+      176,
+      81
+    ]
+  },
+  {
+    "name": "close_friendship",
+    "context": "CloseFriendship",
+    "discriminator": [
+      20,
+      118,
+      133,
+      117,
+      237,
+      160,
+      30,
+      1
+    ]
+  },
+  {
+    "name": "block_user",
+    "context": "BlockUser",
+    "discriminator": [
+      10,
+      164,
+      178,
+      6,
+      231,
+      175,
+      185,
+      191
+    ]
+  },
+  {
+    "name": "create_game",
+    "context": "CreateGame",
+    "discriminator": [
+      124,
+      69,
+      75,
+      66,
+      184,
+      220,
+      72,
+      206
+    ]
+  },
+  {
+    "name": "join_game",
+    "context": "JoinGame",
+    "discriminator": [
+      107,
+      112,
+      18,
+      38,
+      56,
+      173,
+      60,
+      128
+    ]
+  },
+  {
+    "name": "create_game_v2",
+    "context": "'info, CreateGameV2<'info>",
+    "discriminator": [
+      90,
+      76,
+      151,
+      23,
+      129,
+      67,
+      237,
+      63
+    ]
+  },
+  {
+    "name": "join_game_v2",
+    "context": "'info, JoinGameV2<'info>",
+    "discriminator": [
+      219,
+      31,
+      158,
+      109,
+      47,
+      39,
+      23,
+      148
+    ]
+  },
+  {
+    "name": "global_create_game_v2",
+    "context": "'info, GlobalCreateGameV2<'info>",
+    "discriminator": [
+      221,
+      180,
+      136,
+      99,
+      4,
+      164,
+      8,
+      16
+    ]
+  },
+  {
+    "name": "global_join_game_v2",
+    "context": "'info, GlobalJoinGameV2<'info>",
+    "discriminator": [
+      246,
+      214,
+      214,
+      60,
+      136,
+      35,
+      220,
+      15
+    ]
+  },
+  {
+    "name": "create_tournament_game_v2",
+    "context": "'info, CreateTournamentGameV2<'info>",
+    "discriminator": [
+      92,
+      12,
+      34,
+      22,
+      171,
+      2,
+      217,
+      0
+    ]
+  },
+  {
+    "name": "session_create_game_v2",
+    "context": "'info, SessionCreateGameV2<'info>",
+    "discriminator": [
+      99,
+      127,
+      39,
+      41,
+      19,
+      179,
+      141,
+      191
+    ]
+  },
+  {
+    "name": "session_join_game_v2",
+    "context": "'info, SessionJoinGameV2<'info>",
+    "discriminator": [
+      77,
+      80,
+      155,
+      208,
+      124,
+      135,
+      232,
+      214
+    ]
+  },
+  {
+    "name": "delegate_game_v2",
+    "context": "'info, DelegateGameV2<'info>",
+    "discriminator": [
+      153,
+      86,
+      166,
+      7,
+      54,
+      22,
+      81,
+      68
+    ]
+  },
+  {
+    "name": "recover_stuck_delegation_v2",
+    "context": "RecoverStuckDelegationV2",
+    "discriminator": [
+      0,
+      193,
+      81,
+      209,
+      144,
+      152,
+      100,
+      131
+    ]
+  },
+  {
+    "name": "record_move",
+    "context": "RecordMove",
+    "discriminator": [
+      111,
+      244,
+      88,
+      207,
+      200,
+      48,
+      59,
+      2
+    ]
+  },
+  {
+    "name": "global_record_move",
+    "context": "GlobalRecordMove",
+    "discriminator": [
+      74,
+      198,
+      216,
+      153,
+      251,
+      220,
+      45,
+      71
+    ]
+  },
+  {
+    "name": "finalize_game",
+    "context": "EndGame",
+    "discriminator": [
+      203,
+      227,
+      3,
+      167,
+      186,
+      102,
+      76,
+      10
+    ]
+  },
+  {
+    "name": "resign",
+    "context": "ResignGame",
+    "discriminator": [
+      177,
+      177,
+      153,
+      96,
+      88,
+      149,
+      206,
+      225
+    ]
+  },
+  {
+    "name": "offer_draw",
+    "context": "OfferDraw",
+    "discriminator": [
+      87,
+      16,
+      73,
+      235,
+      76,
+      137,
+      216,
+      229
+    ]
+  },
+  {
+    "name": "accept_draw",
+    "context": "AcceptDraw",
+    "discriminator": [
+      5,
+      12,
+      23,
+      213,
+      201,
+      27,
+      117,
+      193
+    ]
+  },
+  {
+    "name": "claim_timeout",
+    "context": "ClaimTimeout",
+    "discriminator": [
+      130,
+      234,
+      45,
+      53,
+      120,
+      90,
+      86,
+      178
+    ]
+  },
+  {
+    "name": "withdraw_expired_wager",
+    "context": "WithdrawExpiredWager",
+    "discriminator": [
+      167,
+      176,
+      220,
+      114,
+      145,
+      206,
+      147,
+      179
+    ]
+  },
+  {
+    "name": "cancel_game",
+    "context": "CancelGame",
+    "discriminator": [
+      121,
+      194,
+      154,
+      118,
+      103,
+      235,
+      149,
+      52
+    ]
+  },
+  {
+    "name": "dispute_game",
+    "context": "DisputeGame",
+    "discriminator": [
+      6,
+      124,
+      64,
+      120,
+      202,
+      105,
+      205,
+      91
+    ]
+  },
+  {
+    "name": "resolve_dispute",
+    "context": "ResolveDispute",
+    "discriminator": [
+      231,
+      6,
+      202,
+      6,
+      96,
+      103,
+      12,
+      230
+    ]
+  },
+  {
+    "name": "claim_stale_dispute",
+    "context": "ClaimStaleDispute",
+    "discriminator": [
+      181,
+      240,
+      112,
+      170,
+      63,
+      112,
+      252,
+      58
+    ]
+  },
+  {
+    "name": "recover_stuck_delegation",
+    "context": "RecoverStuckDelegation",
+    "discriminator": [
+      24,
+      114,
+      109,
+      247,
+      7,
+      95,
+      71,
+      101
+    ]
+  },
+  {
+    "name": "authorize_session_key",
+    "context": "AuthorizeSessionCtx",
+    "discriminator": [
+      38,
+      249,
+      219,
+      111,
+      37,
+      144,
+      247,
+      40
+    ]
+  },
+  {
+    "name": "revoke_session_key",
+    "context": "RevokeSessionCtx",
+    "discriminator": [
+      81,
+      192,
+      32,
+      110,
+      104,
+      116,
+      144,
+      151
+    ]
+  },
+  {
+    "name": "delegate_game",
+    "context": "DelegateGameCtx",
+    "discriminator": [
+      116,
+      183,
+      70,
+      107,
+      112,
+      223,
+      122,
+      210
+    ]
+  },
+  {
+    "name": "undelegate_game",
+    "context": "UndelegateGameCtx",
+    "discriminator": [
+      40,
+      145,
+      154,
+      66,
+      48,
+      111,
+      127,
+      1
+    ]
+  },
+  {
+    "name": "request_force_undelegate",
+    "context": "RequestForceUndelegateCtx",
+    "discriminator": [
+      249,
+      59,
+      55,
+      253,
+      199,
+      253,
+      112,
+      82
+    ]
+  },
+  {
+    "name": "force_undelegate_after_timeout",
+    "context": "ForceUndelegateAfterTimeoutCtx",
+    "discriminator": [
+      44,
+      14,
+      40,
+      60,
+      15,
+      84,
+      76,
+      249
+    ]
+  },
+  {
+    "name": "process_undelegation",
+    "context": "InitializeAfterUndelegation",
+    "discriminator": [
+      196,
+      28,
+      41,
+      206,
+      48,
+      37,
+      51,
+      167
+    ]
+  },
+  {
+    "name": "initialize_tournament",
+    "context": "InitializeTournament",
+    "discriminator": [
+      75,
+      218,
+      86,
+      80,
+      49,
+      127,
+      155,
+      186
+    ]
+  },
+  {
+    "name": "initialize_tournament_shards",
+    "context": "InitializeTournamentShards",
+    "discriminator": [
+      10,
+      119,
+      225,
+      171,
+      226,
+      179,
+      18,
+      161
+    ]
+  },
+  {
+    "name": "initialize_shards_small",
+    "context": "InitializeShardsSmall",
+    "discriminator": [
+      161,
+      179,
+      0,
+      52,
+      152,
+      177,
+      194,
+      67
+    ]
+  },
+  {
+    "name": "initialize_shards_medium",
+    "context": "InitializeShardsMedium",
+    "discriminator": [
+      59,
+      172,
+      7,
+      144,
+      57,
+      98,
+      57,
+      224
+    ]
+  },
+  {
+    "name": "initialize_tournament_escrow",
+    "context": "InitializeTournamentEscrow",
+    "discriminator": [
+      150,
+      97,
+      47,
+      136,
+      174,
+      12,
+      30,
+      53
+    ]
+  },
+  {
+    "name": "initialize_match",
+    "context": "InitializeMatch",
+    "discriminator": [
+      156,
+      133,
+      52,
+      179,
+      176,
+      29,
+      64,
+      124
+    ]
+  },
+  {
+    "name": "register_player",
+    "context": "RegisterPlayer",
+    "discriminator": [
+      242,
+      146,
+      194,
+      234,
+      234,
+      145,
+      228,
+      42
+    ]
+  },
+  {
+    "name": "bind_tournament_pass",
+    "context": "BindTournamentPass",
+    "discriminator": [
+      183,
+      203,
+      70,
+      206,
+      35,
+      3,
+      5,
+      178
+    ]
+  },
+  {
+    "name": "issue_pass_eligibility",
+    "context": "IssuePassEligibility",
+    "discriminator": [
+      154,
+      29,
+      92,
+      90,
+      228,
+      30,
+      57,
+      53
+    ]
+  },
+  {
+    "name": "revoke_pass_eligibility",
+    "context": "RevokePassEligibility",
+    "discriminator": [
+      133,
+      120,
+      26,
+      101,
+      140,
+      187,
+      12,
+      81
+    ]
+  },
+  {
+    "name": "set_pass_paused",
+    "context": "SetPassPaused",
+    "discriminator": [
+      168,
+      121,
+      79,
+      106,
+      182,
+      88,
+      68,
+      107
+    ]
+  },
+  {
+    "name": "leave_tournament",
+    "context": "LeaveTournament",
+    "discriminator": [
+      223,
+      40,
+      200,
+      157,
+      188,
+      21,
+      52,
+      7
+    ]
+  },
+  {
+    "name": "start_tournament",
+    "context": "StartTournament",
+    "discriminator": [
+      164,
+      168,
+      208,
+      157,
+      43,
+      10,
+      220,
+      241
+    ]
+  },
+  {
+    "name": "record_match_result",
+    "context": "RecordMatchResult",
+    "discriminator": [
+      37,
+      251,
+      4,
+      178,
+      56,
+      184,
+      50,
+      210
+    ]
+  },
+  {
+    "name": "advance_winner",
+    "context": "AdvanceWinner",
+    "discriminator": [
+      124,
+      40,
+      219,
+      225,
+      178,
+      147,
+      211,
+      169
+    ]
+  },
+  {
+    "name": "claim_tournament_prize",
+    "context": "ClaimTournamentPrize",
+    "discriminator": [
+      219,
+      207,
+      183,
+      94,
+      201,
+      32,
+      78,
+      193
+    ]
+  },
+  {
+    "name": "distribute_tournament_prizes",
+    "context": "'info, DistributeTournamentPrizes<'info>",
+    "discriminator": [
+      88,
+      13,
+      187,
+      53,
+      93,
+      202,
+      253,
+      188
+    ]
+  },
+  {
+    "name": "cancel_tournament",
+    "context": "'info, CancelTournament<'info>",
+    "discriminator": [
+      249,
+      227,
+      133,
+      5,
+      9,
+      142,
+      29,
+      122
+    ]
+  },
+  {
+    "name": "close_tournament",
+    "context": "CloseTournament",
+    "discriminator": [
+      14,
+      80,
+      54,
+      9,
+      221,
+      239,
+      201,
+      35
+    ]
+  },
+  {
+    "name": "fund_usdc_prize",
+    "context": "FundUsdcPrize",
+    "discriminator": [
+      171,
+      94,
+      155,
+      165,
+      58,
+      85,
+      203,
+      109
+    ]
+  },
+  {
+    "name": "fund_sol_prize",
+    "context": "FundSolPrize",
+    "discriminator": [
+      19,
+      238,
+      137,
+      80,
+      105,
+      51,
+      35,
+      154
+    ]
+  },
+  {
+    "name": "record_swiss_result",
+    "context": "RecordSwissResult",
+    "discriminator": [
+      19,
+      225,
+      143,
+      213,
+      146,
+      62,
+      205,
+      129
+    ]
+  },
+  {
+    "name": "advance_round",
+    "context": "AdvanceRound",
+    "discriminator": [
+      230,
+      88,
+      119,
+      80,
+      54,
+      4,
+      212,
+      250
+    ]
+  },
+  {
+    "name": "complete_swiss_tournament",
+    "context": "CompleteSwissTournament",
+    "discriminator": [
+      126,
+      224,
+      49,
+      196,
+      224,
+      235,
+      46,
+      147
+    ]
+  },
+  {
+    "name": "create_tournament_game",
+    "context": "CreateTournamentGame",
+    "discriminator": [
+      49,
+      132,
+      130,
+      171,
+      78,
+      129,
+      42,
+      177
+    ]
+  },
+  {
+    "name": "authorize_tournament_session",
+    "context": "AuthorizeTournamentSessionCtx",
+    "discriminator": [
+      156,
+      28,
+      223,
+      238,
+      121,
+      17,
+      61,
+      245
+    ]
+  },
+  {
+    "name": "revoke_tournament_session",
+    "context": "RevokeTournamentSessionCtx",
+    "discriminator": [
+      225,
+      67,
+      53,
+      196,
+      126,
+      106,
+      183,
+      151
+    ]
+  },
+  {
+    "name": "session_create_game",
+    "context": "SessionCreateGame",
+    "discriminator": [
+      132,
+      64,
+      249,
+      0,
+      17,
+      170,
+      239,
+      208
+    ]
+  },
+  {
+    "name": "session_join_game",
+    "context": "SessionJoinGame",
+    "discriminator": [
+      40,
+      77,
+      108,
+      247,
+      72,
+      71,
+      93,
+      7
+    ]
+  },
+  {
+    "name": "authorize_global_session",
+    "context": "AuthorizeGlobalSessionCtx",
+    "discriminator": [
+      71,
+      185,
+      84,
+      139,
+      71,
+      116,
+      77,
+      37
+    ]
+  },
+  {
+    "name": "revoke_global_session",
+    "context": "RevokeGlobalSessionCtx",
+    "discriminator": [
+      118,
+      200,
+      204,
+      20,
+      10,
+      41,
+      23,
+      170
+    ]
+  },
+  {
+    "name": "withdraw_global_session",
+    "context": "WithdrawGlobalSessionCtx",
+    "discriminator": [
+      191,
+      181,
+      188,
+      178,
+      12,
+      178,
+      160,
+      2
+    ]
+  },
+  {
+    "name": "global_create_game",
+    "context": "GlobalCreateGame",
+    "discriminator": [
+      135,
+      237,
+      143,
+      254,
+      238,
+      143,
+      206,
+      24
+    ]
+  },
+  {
+    "name": "global_join_game",
+    "context": "GlobalJoinGame",
+    "discriminator": [
+      216,
+      82,
+      54,
+      154,
+      203,
+      105,
+      110,
+      91
+    ]
+  },
+  {
+    "name": "withdraw_treasury",
+    "context": "WithdrawTreasury",
+    "discriminator": [
+      40,
+      63,
+      122,
+      158,
+      144,
+      216,
+      83,
+      96
+    ]
+  },
+  {
+    "name": "create_session",
+    "context": "CreateSession",
+    "discriminator": [
+      242,
+      193,
+      143,
+      179,
+      150,
+      25,
+      122,
+      227
+    ]
+  },
+  {
+    "name": "revoke_session",
+    "context": "RevokeSession",
+    "discriminator": [
+      86,
+      92,
+      198,
+      120,
+      144,
+      2,
+      7,
+      194
+    ]
+  },
+  {
+    "name": "update_elo",
+    "context": "UpdateElo",
+    "discriminator": [
+      68,
+      19,
+      100,
+      169,
+      152,
+      2,
+      204,
+      112
+    ]
+  },
+  {
+    "name": "schedule_time_check",
+    "context": "ScheduleTimeCheck",
+    "discriminator": [
+      152,
+      12,
+      220,
+      83,
+      11,
+      81,
+      135,
+      31
+    ]
+  },
+  {
+    "name": "crank_time_check",
+    "context": "CrankTimeCheck",
+    "discriminator": [
+      173,
+      4,
+      97,
+      237,
+      124,
+      141,
+      165,
+      103
+    ]
+  },
+  {
+    "name": "cancel_time_check",
+    "context": "CancelTimeCheck",
+    "discriminator": [
+      158,
+      77,
+      59,
+      154,
+      49,
+      29,
+      163,
+      236
+    ]
+  }
+]

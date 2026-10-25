@@ -1,6 +1,8 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
 use anyhow::Context as _;
-use solana_program_test::{
+use crate::agave::{
     BanksClientError, ProgramTest, ProgramTestBanksClientExt, ProgramTestContext,
 };
 use solana_sdk::{
@@ -222,22 +224,27 @@ fn create_tournament_game_ix(
     black: Pubkey,
     session_key: Pubkey,
 ) -> Instruction {
-    let accounts = xfchess_game::__client_accounts_create_tournament_game::CreateTournamentGame {
-        tournament: tournament_pda(TOURNAMENT_ID).0,
-        tournament_players_shard_0: shard_pda(TOURNAMENT_ID, 0).0,
-        tournament_players_shard_1: None,
-        tournament_players_shard_2: None,
-        tournament_players_shard_3: None,
-        game: game_pda(GAME_ID),
-        white_session: session_pda(GAME_ID, white),
-        black_session: session_pda(GAME_ID, black),
-        white,
-        black,
-        authority,
-        system_program: solana_system_interface::program::ID,
-    }
-    .to_account_metas(None);
-    let data = xfchess_game::instruction::CreateTournamentGame {
+    let mut accounts =
+        xfchess_game::__client_accounts_create_tournament_game::CreateTournamentGame {
+            tournament: tournament_pda(TOURNAMENT_ID).0,
+            tournament_players_shard_0: shard_pda(TOURNAMENT_ID, 0).0,
+            tournament_players_shard_1: None,
+            tournament_players_shard_2: None,
+            tournament_players_shard_3: None,
+            game: game_pda(GAME_ID),
+            white_session: session_pda(GAME_ID, white),
+            black_session: session_pda(GAME_ID, black),
+            white,
+            black,
+            authority,
+            system_program: solana_system_interface::program::ID,
+        }
+        .to_account_metas(None);
+    accounts.push(solana_sdk::instruction::AccountMeta::new(
+        recovery_identity_pda(GAME_ID),
+        false,
+    ));
+    let data = xfchess_game::instruction::CreateTournamentGameV2 {
         tournament_id: TOURNAMENT_ID,
         game_id: GAME_ID,
         session_key,
@@ -248,6 +255,119 @@ fn create_tournament_game_ix(
         accounts,
         data,
     }
+}
+
+fn recovery_identity_pda(game_id: u64) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            xfchess_game::state::RecoveryIdentity::SEED,
+            &game_id.to_le_bytes(),
+        ],
+        &xfchess_game::ID,
+    )
+    .0
+}
+
+#[tokio::test]
+async fn tournament_session_v2_funds_game_record_and_wager_from_its_vault() -> anyhow::Result<()> {
+    use anchor_lang::AccountDeserialize;
+    use solana_sdk::account::AccountSharedData;
+    use xfchess_game::state::{
+        MatchType, RecoveryIdentity, RecoveryStatus, TournamentSessionDelegation,
+    };
+    let (mut ctx, field) = setup().await?;
+    let signer = Keypair::new();
+    let (vault, bump) = Pubkey::find_program_address(
+        &[
+            TournamentSessionDelegation::SEED,
+            &TOURNAMENT_ID.to_le_bytes(),
+            field.p1.as_ref(),
+        ],
+        &xfchess_game::ID,
+    );
+    let session = TournamentSessionDelegation {
+        tournament_id: TOURNAMENT_ID,
+        player: field.p1,
+        session_key: signer.pubkey(),
+        expires_at: i64::MAX / 2,
+        spending_limit: 100_000_000,
+        total_spent: 0,
+        max_wager: 100_000_000,
+        games_played: 0,
+        enabled: true,
+        bump,
+    };
+    let mut initial = serialize_padded(&session, 8 + TournamentSessionDelegation::INIT_SPACE)?;
+    let rent = anchor_lang::prelude::Rent::default();
+    let reserve = rent.minimum_balance(initial.data.len());
+    let wager = 10_000_000;
+    initial.lamports = reserve
+        + wager
+        + rent.minimum_balance(8 + Game::INIT_SPACE)
+        + rent.minimum_balance(8 + RecoveryIdentity::INIT_SPACE);
+    ctx.set_account(&vault, &AccountSharedData::from(initial));
+    let mut accounts = xfchess_game::__client_accounts_session_create_game::SessionCreateGame {
+        tournament: tournament_pda(TOURNAMENT_ID).0,
+        tournament_players_shard_0: shard_pda(TOURNAMENT_ID, 0).0,
+        tournament_players_shard_1: None,
+        tournament_players_shard_2: None,
+        tournament_players_shard_3: None,
+        session_delegation: vault,
+        session_signer: signer.pubkey(),
+        player: field.p1,
+        game: game_pda(GAME_ID),
+        escrow_pda: Pubkey::find_program_address(
+            &[b"escrow", &GAME_ID.to_le_bytes()],
+            &xfchess_game::ID,
+        )
+        .0,
+        system_program: solana_system_interface::program::ID,
+    }
+    .to_account_metas(None);
+    accounts.push(solana_sdk::instruction::AccountMeta::new(
+        recovery_identity_pda(GAME_ID),
+        false,
+    ));
+    send(
+        &mut ctx,
+        Instruction {
+            program_id: xfchess_game::ID,
+            accounts,
+            data: xfchess_game::instruction::SessionCreateGameV2 {
+                tournament_id: TOURNAMENT_ID,
+                game_id: GAME_ID,
+                wager_amount: wager,
+                match_type: MatchType::Rated,
+                platform_fee: 0,
+                base_time_seconds: 300,
+                increment_seconds: 0,
+            }
+            .data(),
+        },
+        &[&signer],
+    )
+    .await?
+    .context("session-funded v2 creation must succeed")?;
+    assert_eq!(ctx.banks_client.get_balance(vault).await?, reserve);
+    let identity: RecoveryIdentity = fetch(&mut ctx, recovery_identity_pda(GAME_ID)).await?;
+    assert_eq!(
+        (identity.white, identity.wager_amount, identity.status),
+        (field.p1, wager, RecoveryStatus::Waiting)
+    );
+    let game: Game = fetch(&mut ctx, game_pda(GAME_ID)).await?;
+    assert_eq!(
+        (game.white, game.wager_amount, game.tournament_id),
+        (field.p1, wager, Some(TOURNAMENT_ID))
+    );
+    let vault_after = ctx
+        .banks_client
+        .get_account(vault)
+        .await?
+        .context("vault missing")?;
+    let session_after =
+        TournamentSessionDelegation::try_deserialize(&mut vault_after.data.as_slice())?;
+    assert_eq!(session_after.total_spent, wager);
+    Ok(())
 }
 
 struct Field {
@@ -333,6 +453,11 @@ async fn authority_seats_a_pairing_in_an_active_game_with_move_sessions() -> any
     assert_eq!(game.tournament_id, Some(TOURNAMENT_ID));
     assert_eq!(game.wager_amount, 0);
     assert_eq!(game.fee_payer, session_key);
+    let identity: xfchess_game::state::RecoveryIdentity =
+        fetch(&mut ctx, recovery_identity_pda(GAME_ID)).await?;
+    assert_eq!((identity.white, identity.black), (f.p1, f.p3));
+    assert_eq!(identity.wager_amount, 0);
+    assert_eq!(identity.status, xfchess_game::state::RecoveryStatus::Ready);
 
     for player in [f.p1, f.p3] {
         let s: SessionDelegation = fetch(&mut ctx, session_pda(GAME_ID, player)).await?;

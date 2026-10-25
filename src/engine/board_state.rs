@@ -63,6 +63,22 @@ impl Default for ChessEngine {
 }
 
 impl ChessEngine {
+    /// Build a complete, syntactically valid UCI move without indexing invalid squares.
+    pub fn move_uci(from: (u8, u8), to: (u8, u8), promotion: Option<char>) -> Option<String> {
+        if [from.0, from.1, to.0, to.1].into_iter().any(|v| v >= 8) {
+            return None;
+        }
+        let mut uci = format!(
+            "{}{}",
+            Self::coords_to_uci(from.0, from.1),
+            Self::coords_to_uci(to.0, to.1)
+        );
+        if let Some(promotion) = promotion {
+            uci.push(promotion);
+        }
+        Self::parse_uci_move(&uci).map(|_| uci)
+    }
+
     pub fn coords_to_uci(x: u8, y: u8) -> String {
         let file = (b'a' + x) as char;
         let rank = (b'1' + y) as char;

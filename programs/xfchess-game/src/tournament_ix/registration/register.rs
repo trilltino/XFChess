@@ -60,6 +60,7 @@ pub struct RegisterPlayer<'info> {
         constraint = host_treasury.key() == tournament.host_treasury @ GameErrorCode::UnauthorizedAccess,
         constraint = host_treasury.owner == &system_program::ID @ GameErrorCode::InvalidAccountOwner
     )]
+    /// CHECK: Address equals the stored tournament host treasury; retained for the deployed account interface.
     pub host_treasury: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 
@@ -213,7 +214,8 @@ fn load_pass_binding(
         crate::ID,
         GameErrorCode::InvalidAccountOwner
     );
-    let binding = TournamentPassBinding::try_deserialize(&mut &pass_binding.try_borrow_data()?[..])?;
+    let binding =
+        TournamentPassBinding::try_deserialize(&mut &pass_binding.try_borrow_data()?[..])?;
     require!(
         binding.tournament_id == tournament_id,
         GameErrorCode::UnauthorizedAccess
@@ -257,7 +259,11 @@ fn redeem_pass<'info>(
         GameErrorCode::PassNotHeld
     );
     let (expected_record, _) = Pubkey::find_program_address(
-        &[b"eligibility", binding.pass_mint.as_ref(), player.key().as_ref()],
+        &[
+            b"eligibility",
+            binding.pass_mint.as_ref(),
+            player.key().as_ref(),
+        ],
         &XFCHESS_PASS_PROGRAM_ID,
     );
     let Some(record_info) = remaining_accounts

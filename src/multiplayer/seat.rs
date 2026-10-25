@@ -101,6 +101,9 @@ fn track_seat(mut seat: ResMut<SeatState>) {
     if let Some(rx) = seat.check_rx.as_mut() {
         match rx.try_recv() {
             Ok(Ok(lease)) => {
+                if let Some(lease) = &lease {
+                    seat.epoch = lease.epoch;
+                }
                 if lease_belongs_to_other_device(lease.as_ref(), me) && !seat.superseded {
                     warn!(
                         "[SEAT] game {} is now played on another device",
@@ -179,6 +182,7 @@ impl Plugin for SeatPlugin {
                 Update,
                 track_seat
                     .after(claim_seat_on_game_start)
+                    .in_set(crate::core::schedule::SessionSet::Match)
                     .run_if(in_state(crate::core::GameState::InGame)),
             )
             .add_systems(

@@ -48,7 +48,7 @@ pub struct KycInput<'a> {
 fn blind_hash(input: &str) -> String {
     let mut h = Sha256::new();
     h.update(input.trim().as_bytes());
-    format!("{:x}", h.finalize())
+    hex::encode(h.finalize())
 }
 
 #[derive(Clone)]

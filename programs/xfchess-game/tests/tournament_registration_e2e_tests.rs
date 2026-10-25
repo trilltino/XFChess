@@ -1,3 +1,5 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
@@ -92,7 +94,7 @@ fn vps_authority_keypair() -> Option<Keypair> {
 // Ignored test requires the real VPS authority key; provision it before
 // running cargo test -- --ignored.
 #[tokio::test]
-#[ignore = "needs keys/vps_authority.json (devnet-only, gitignored) — see docs/development/verification.md"]
+#[ignore = "needs keys/vps_authority.json (devnet-only, gitignored) â€” see docs/development/verification.md"]
 async fn register_player_deposits_entry_fee_and_adds_to_shard() -> anyhow::Result<()> {
     let Some(authority) = vps_authority_keypair() else {
         eprintln!("skip: keys/vps_authority.json not present");
@@ -193,7 +195,7 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() -> anyhow::Resul
         .await
         .context("tournament setup (init + escrow + shards) should succeed")?;
 
-    // 4. fund_sol_prize — guaranteed prize must be locked before anyone can register.
+    // 4. fund_sol_prize â€” guaranteed prize must be locked before anyone can register.
     let fund_prize_accounts = xfchess_game::__client_accounts_fund_sol_prize::FundSolPrize {
         tournament: tournament_pda(tournament_id),
         escrow_pda: escrow_pda(tournament_id),
@@ -265,7 +267,7 @@ async fn register_player_deposits_entry_fee_and_adds_to_shard() -> anyhow::Resul
         .await
         .context("register_player should succeed with the client's account layout")?;
 
-    // ── Assertions: the actual on-chain effects a real player should see ──
+    // â”€â”€ Assertions: the actual on-chain effects a real player should see â”€â”€
 
     // Entry fee really left the player's wallet (fee + entry_fee debited).
     let player_balance_after = ctx

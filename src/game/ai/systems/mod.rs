@@ -77,10 +77,18 @@ impl Plugin for AIPlugin {
             .register_type::<AIStatistics>()
             .add_systems(
                 Update,
-                // Think on the frame's final state: after moves, turn flip,
-                // check/mate and game-over handling.
-                (spawn_ai_task_system, poll_ai_task_system)
-                    .chain()
+                // Apply completed searches before this frame finalizes authority.
+                poll_ai_task_system
+                    .after(crate::game::systems::network_move::handle_network_moves)
+                    .after(crate::game::systems::detect_pawn_promotion)
+                    .before(crate::game::systems::flush_pending_turn)
+                    .in_set(GameSystems::Execution)
+                    .run_if(resource_equals(GameMode::SinglePlayer)),
+            )
+            .add_systems(
+                Update,
+                // Start the next search only after turn, clocks and result agree.
+                spawn_ai_task_system
                     .after(crate::game::systems::confirm_game_over_prompt)
                     .in_set(GameSystems::Execution)
                     .run_if(resource_equals(GameMode::SinglePlayer)),
@@ -314,14 +322,15 @@ fn spawn_ai_task_system(mut commands: Commands, params: AiSpawnParams) {
 }
 
 fn normalized_move_uci(from: (u8, u8), to: (u8, u8), promotion: Option<char>) -> String {
-    format!(
-        "{}{}{}",
+    let mut uci = format!(
+        "{}{}",
         ChessEngine::coords_to_uci(from.0, from.1),
         ChessEngine::coords_to_uci(to.0, to.1),
-        promotion
-            .map(|c| c.to_ascii_lowercase())
-            .unwrap_or_default()
-    )
+    );
+    if let Some(promotion) = promotion {
+        uci.push(promotion.to_ascii_lowercase());
+    }
+    uci
 }
 
 fn should_skip_ai_spawn(
@@ -655,6 +664,7 @@ mod tests {
     fn promotion_suffixes_are_preserved_in_uci() -> Result<(), Box<dyn std::error::Error>> {
         let from = ChessEngine::uci_to_coords("e7").ok_or("missing test value")?;
         let to = ChessEngine::uci_to_coords("e8").ok_or("missing test value")?;
+        assert_eq!(normalized_move_uci((4, 1), (4, 3), None), "e2e4");
         for promotion in ['q', 'r', 'b', 'n'] {
             assert_eq!(
                 normalized_move_uci(from, to, Some(promotion)),
@@ -679,6 +689,112 @@ mod tests {
             .add_message::<MoveMadeEvent>()
             .add_systems(Update, poll_ai_task_system);
         app
+    }
+
+    #[test]
+    fn plugin_applies_ready_results_before_turn_and_clock_finalization() -> Result<(), String> {
+        use crate::game::resources::{GameTimer, PendingGameOver};
+        let mut app = App::new();
+        app.insert_resource(State::new(GameState::InGame));
+        app.insert_resource(GameMode::SinglePlayer);
+        app.init_resource::<CurrentTurn>()
+            .init_resource::<CurrentGamePhase>()
+            .init_resource::<MoveHistory>()
+            .init_resource::<CapturedPieces>()
+            .init_resource::<ChessEngine>()
+            .init_resource::<PendingGameOver>()
+            .init_resource::<crate::game::resources::PendingTurnAdvance>();
+        app.insert_resource(GameTimer {
+            increment: 2.0,
+            ..Default::default()
+        });
+        app.insert_resource(Players {
+            player_1: Player::new(1, "AI".into(), PieceColor::White, false),
+            player_2: Player::new(2, "Human".into(), PieceColor::Black, true),
+        });
+        app.add_message::<MoveMadeEvent>();
+        crate::core::schedule::configure(&mut app);
+        app.add_plugins(AIPlugin);
+        app.world_mut().resource_mut::<ChessAIResource>().mode =
+            crate::game::ai::resource::AiMode::VsAI {
+                ai_color: PieceColor::White,
+            };
+        for (row, rank) in xfchess_rules::STARTING_FEN
+            .split_whitespace()
+            .next()
+            .ok_or("missing board")?
+            .split('/')
+            .enumerate()
+        {
+            let mut file = 0;
+            for ch in rank.chars() {
+                if let Some(skip) = ch.to_digit(10) {
+                    file += skip as u8;
+                    continue;
+                }
+                let color = if ch.is_ascii_uppercase() {
+                    PieceColor::White
+                } else {
+                    PieceColor::Black
+                };
+                let kind = match ch.to_ascii_lowercase() {
+                    'p' => crate::rendering::pieces::PieceType::Pawn,
+                    'k' => crate::rendering::pieces::PieceType::King,
+                    _ => {
+                        crate::rendering::pieces::PieceType::from_char(ch).ok_or("invalid piece")?
+                    }
+                };
+                app.world_mut().spawn((
+                    Piece::new(color, kind, file, 7 - row as u8),
+                    HasMoved::default(),
+                ));
+                file += 1;
+            }
+        }
+        app.insert_resource(AIMovePendingReveal {
+            result: Ok(AIMove {
+                from: (4, 1),
+                to: (4, 3),
+                uci: "e2e4".into(),
+                score: 0,
+                depth: 1,
+                thinking_time: 0.0,
+                nodes: 1,
+            }),
+            ready_at: Instant::now(),
+            fen: xfchess_rules::STARTING_FEN.into(),
+            game_id: 0,
+        });
+        app.add_systems(
+            Update,
+            crate::game::systems::flush_pending_turn.in_set(GameSystems::Execution),
+        );
+        app.update();
+        assert_eq!(
+            app.world().resource::<CurrentTurn>().color,
+            PieceColor::Black,
+            "engine={}, history={}, error={:?}, reveal={}, pending={}",
+            app.world().resource::<ChessEngine>().current_fen(),
+            app.world().resource::<MoveHistory>().len(),
+            app.world().resource::<AIEngineStatus>().error,
+            app.world().contains_resource::<AIMovePendingReveal>(),
+            app.world()
+                .resource::<crate::game::resources::PendingTurnAdvance>()
+                .is_pending(),
+        );
+        assert_eq!(
+            app.world().resource::<ChessEngine>().current_turn,
+            PieceColor::Black
+        );
+        assert_eq!(app.world().resource::<GameTimer>().white_time_left, 602.0);
+        assert!(!app
+            .world()
+            .resource::<crate::game::resources::PendingTurnAdvance>()
+            .is_pending());
+        assert!(!app.world().contains_resource::<PendingAIMove>());
+        assert!(!app.world().contains_resource::<StockfishProcess>());
+        assert_eq!(app.world().resource::<MoveHistory>().len(), 1);
+        Ok(())
     }
 
     #[test]

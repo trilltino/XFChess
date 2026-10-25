@@ -98,6 +98,7 @@ impl Plugin for MultiplayerPlugin {
                     systems::sweep_stale_move_buffers,
                     systems::dispatch_remote_moves,
                     systems::handle_resync_response,
+                    systems::poll_trusted_recovery,
                     systems::handle_resync_request,
                     systems::handle_game_control_messages,
                     systems::handle_pong,

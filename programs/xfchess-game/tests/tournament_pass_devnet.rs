@@ -17,6 +17,7 @@ use std::{
     thread::sleep,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use xfchess_client_compat::prelude::*;
 
 use anchor_lang::{
     solana_program::instruction::AccountMeta, AccountDeserialize, InstructionData, ToAccountMetas,
@@ -106,7 +107,7 @@ fn send(
 ) -> TestResult {
     let transaction = signed(rpc, instructions, payer, extra)?;
     let signature = rpc
-        .send_and_confirm_transaction(&transaction)
+        .send_sdk_and_confirm_transaction(&transaction)
         .map_err(|error| format!("{label}: {error}"))?;
     println!("  ok      {label}: {signature}");
     Ok(())
@@ -122,7 +123,7 @@ fn landed_failure(
     extra: &[&Keypair],
 ) -> TestResult<TransactionError> {
     let transaction = signed(rpc, instructions, payer, extra)?;
-    let signature = rpc.send_transaction_with_config(
+    let signature = rpc.send_sdk_transaction_with_config(
         &transaction,
         RpcSendTransactionConfig {
             skip_preflight: true,
@@ -135,7 +136,7 @@ fn landed_failure(
                 .err
                 .ok_or_else(|| format!("{label}: expected a refusal, it succeeded"))?;
             println!("  refused {label}: {error:?} ({signature})");
-            return Ok(error);
+            return Ok(serde_json::from_value(serde_json::to_value(error)?)?);
         }
         sleep(Duration::from_millis(500));
     }
@@ -187,8 +188,16 @@ fn pass_transfer_ix(
     owner: &Pubkey,
     destination_owner: &Pubkey,
 ) -> TestResult<Instruction> {
-    let mut instruction =
-        token_instruction::transfer_checked(&TOKEN_2022, source, mint, destination, owner, &[], 1, 0)?;
+    let mut instruction = token_instruction::transfer_checked(
+        &TOKEN_2022,
+        source,
+        mint,
+        destination,
+        owner,
+        &[],
+        1,
+        0,
+    )?;
     instruction.accounts.extend([
         AccountMeta::new_readonly(config_pda(mint), false),
         AccountMeta::new_readonly(record_pda(mint, destination_owner), false),
@@ -224,7 +233,8 @@ fn token_account_ixs(
 
 fn create_hooked_mint(rpc: &RpcClient, payer: &Keypair, label: &str) -> TestResult<Pubkey> {
     let mint = Keypair::new();
-    let len = ExtensionType::try_calculate_account_len::<MintState>(&[ExtensionType::TransferHook])?;
+    let len =
+        ExtensionType::try_calculate_account_len::<MintState>(&[ExtensionType::TransferHook])?;
     send(
         rpc,
         label,
@@ -242,7 +252,13 @@ fn create_hooked_mint(rpc: &RpcClient, payer: &Keypair, label: &str) -> TestResu
                 Some(payer.pubkey()),
                 Some(XFCHESS_PASS_PROGRAM_ID),
             )?,
-            token_instruction::initialize_mint2(&TOKEN_2022, &mint.pubkey(), &payer.pubkey(), None, 0)?,
+            token_instruction::initialize_mint2(
+                &TOKEN_2022,
+                &mint.pubkey(),
+                &payer.pubkey(),
+                None,
+                0,
+            )?,
         ],
         payer,
         &[&mint],
@@ -313,7 +329,10 @@ impl Tournaments {
                 system_program: solana_system_interface::program::ID,
             }
             .to_account_metas(None),
-            data: xfchess_game::instruction::BindTournamentPass { tournament_id: self.id }.data(),
+            data: xfchess_game::instruction::BindTournamentPass {
+                tournament_id: self.id,
+            }
+            .data(),
         }
     }
 
@@ -330,21 +349,25 @@ impl Tournaments {
     ) -> Instruction {
         Instruction {
             program_id: xfchess_game::ID,
-            accounts: xfchess_game::__client_accounts_issue_pass_eligibility::IssuePassEligibility {
-                tournament: self.tournament,
-                pass_binding: self.binding,
-                player: *player,
-                player_profile: game_pda(&[b"profile", player.as_ref()]),
-                pass_mint: *mint,
-                pass_config: config_pda(mint),
-                eligibility_record: record_pda(mint, player),
-                registrar: game_pda(&[PASS_REGISTRAR_SEED]),
-                payer: *payer,
-                pass_program,
-                system_program: solana_system_interface::program::ID,
+            accounts:
+                xfchess_game::__client_accounts_issue_pass_eligibility::IssuePassEligibility {
+                    tournament: self.tournament,
+                    pass_binding: self.binding,
+                    player: *player,
+                    player_profile: game_pda(&[b"profile", player.as_ref()]),
+                    pass_mint: *mint,
+                    pass_config: config_pda(mint),
+                    eligibility_record: record_pda(mint, player),
+                    registrar: game_pda(&[PASS_REGISTRAR_SEED]),
+                    payer: *payer,
+                    pass_program,
+                    system_program: solana_system_interface::program::ID,
+                }
+                .to_account_metas(None),
+            data: xfchess_game::instruction::IssuePassEligibility {
+                tournament_id: self.id,
             }
-            .to_account_metas(None),
-            data: xfchess_game::instruction::IssuePassEligibility { tournament_id: self.id }.data(),
+            .data(),
         }
     }
 
@@ -361,26 +384,34 @@ impl Tournaments {
                 pass_program: XFCHESS_PASS_PROGRAM_ID,
             }
             .to_account_metas(None),
-            data: xfchess_game::instruction::SetPassPaused { tournament_id: self.id, is_paused }.data(),
+            data: xfchess_game::instruction::SetPassPaused {
+                tournament_id: self.id,
+                is_paused,
+            }
+            .data(),
         }
     }
 
     fn revoke_ix(&self, mint: &Pubkey, player: &Pubkey, authority: &Pubkey) -> Instruction {
         Instruction {
             program_id: xfchess_game::ID,
-            accounts: xfchess_game::__client_accounts_revoke_pass_eligibility::RevokePassEligibility {
-                tournament: self.tournament,
-                pass_binding: self.binding,
-                player: *player,
-                pass_mint: *mint,
-                pass_config: config_pda(mint),
-                eligibility_record: record_pda(mint, player),
-                registrar: game_pda(&[PASS_REGISTRAR_SEED]),
-                authority: *authority,
-                pass_program: XFCHESS_PASS_PROGRAM_ID,
+            accounts:
+                xfchess_game::__client_accounts_revoke_pass_eligibility::RevokePassEligibility {
+                    tournament: self.tournament,
+                    pass_binding: self.binding,
+                    player: *player,
+                    pass_mint: *mint,
+                    pass_config: config_pda(mint),
+                    eligibility_record: record_pda(mint, player),
+                    registrar: game_pda(&[PASS_REGISTRAR_SEED]),
+                    authority: *authority,
+                    pass_program: XFCHESS_PASS_PROGRAM_ID,
+                }
+                .to_account_metas(None),
+            data: xfchess_game::instruction::RevokePassEligibility {
+                tournament_id: self.id,
             }
-            .to_account_metas(None),
-            data: xfchess_game::instruction::RevokePassEligibility { tournament_id: self.id }.data(),
+            .data(),
         }
     }
 }
@@ -439,9 +470,15 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
     let registrar = game_pda(&[PASS_REGISTRAR_SEED]);
     let escrow = game_pda(&[b"t_escrow", &id.to_le_bytes()]);
     let shard = game_pda(&[b"tourney_players", &[0u8], &id.to_le_bytes()]);
-    println!("tournament {id}, game {}, pass program {XFCHESS_PASS_PROGRAM_ID}", xfchess_game::ID);
+    println!(
+        "tournament {id}, game {}, pass program {XFCHESS_PASS_PROGRAM_ID}",
+        xfchess_game::ID
+    );
     for program in [xfchess_game::ID, XFCHESS_PASS_PROGRAM_ID] {
-        assert!(rpc.get_account(&program)?.executable, "{program} is not deployed on Devnet");
+        assert!(
+            rpc.get_account(&program)?.executable,
+            "{program} is not deployed on Devnet"
+        );
     }
 
     // A blitz tournament for ratings 1000..=1400 (a new profile counts as 1200) and a second
@@ -471,7 +508,11 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
     send(
         &rpc,
         "initialize the tournament, escrow and shards",
-        &[main.init_ix(&vps.pubkey(), (1_000, 1_400)), escrow_ix, shards_ix],
+        &[
+            main.init_ix(&vps.pubkey(), (1_000, 1_400)),
+            escrow_ix,
+            shards_ix,
+        ],
         &vps,
         &[],
     )?;
@@ -491,7 +532,11 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
             system_program: solana_system_interface::program::ID,
         }
         .to_account_metas(None),
-        data: xfchess_game::instruction::FundSolPrize { tournament_id: id, amount: PRIZE }.data(),
+        data: xfchess_game::instruction::FundSolPrize {
+            tournament_id: id,
+            amount: PRIZE,
+        }
+        .data(),
     };
     send(&rpc, "fund the guaranteed prize", &[fund_prize], &vps, &[])?;
 
@@ -499,7 +544,11 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
     send(
         &rpc,
         "fund the registering player",
-        &[system_instruction::transfer(&payer.pubkey(), &registered.pubkey(), 100_000_000)],
+        &[system_instruction::transfer(
+            &payer.pubkey(),
+            &registered.pubkey(),
+            100_000_000,
+        )],
         &payer,
         &[],
     )?;
@@ -517,7 +566,10 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
         send(
             &rpc,
             "create a player profile",
-            &[init_profile_ix(&player.pubkey(), format!("pass{}x{index}", id % 10_000_000))],
+            &[init_profile_ix(
+                &player.pubkey(),
+                format!("pass{}x{index}", id % 10_000_000),
+            )],
             player,
             &[],
         )?;
@@ -528,8 +580,21 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
     let mint = create_hooked_mint(&rpc, &payer, "create the hooked pass mint")?;
     let treasury = Keypair::new();
     let mut ixs = token_account_ixs(&rpc, &payer.pubkey(), &treasury, &mint, &payer.pubkey())?;
-    ixs.push(token_instruction::mint_to(&TOKEN_2022, &mint, &treasury.pubkey(), &payer.pubkey(), &[], 3)?);
-    send(&rpc, "mint three passes to the organizer", &ixs, &payer, &[&treasury])?;
+    ixs.push(token_instruction::mint_to(
+        &TOKEN_2022,
+        &mint,
+        &treasury.pubkey(),
+        &payer.pubkey(),
+        &[],
+        3,
+    )?);
+    send(
+        &rpc,
+        "mint three passes to the organizer",
+        &ixs,
+        &payer,
+        &[&treasury],
+    )?;
 
     let error = landed_failure(
         &rpc,
@@ -538,7 +603,10 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
         &vps,
         &[],
     )?;
-    assert_eq!(custom(&error), game_code(GameErrorCode::PassMintAuthorityActive));
+    assert_eq!(
+        custom(&error),
+        game_code(GameErrorCode::PassMintAuthorityActive)
+    );
     send(
         &rpc,
         "revoke the mint authority",
@@ -577,17 +645,47 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
         &payer,
         &[],
     )?;
-    send(&rpc, "bind the pass to the tournament", &[main.bind_ix(&vps.pubkey(), &mint)], &vps, &[])?;
-    send(&rpc, "bind the same pass to the narrow tournament", &[narrow.bind_ix(&vps.pubkey(), &mint)], &vps, &[])?;
+    send(
+        &rpc,
+        "bind the pass to the tournament",
+        &[main.bind_ix(&vps.pubkey(), &mint)],
+        &vps,
+        &[],
+    )?;
+    send(
+        &rpc,
+        "bind the same pass to the narrow tournament",
+        &[narrow.bind_ix(&vps.pubkey(), &mint)],
+        &vps,
+        &[],
+    )?;
 
     let accounts: Vec<Keypair> = (0..3).map(|_| Keypair::new()).collect();
     let mut ixs = vec![];
     for (account, owner) in accounts.iter().zip([&registered, &expiring, &revoked]) {
-        ixs.extend(token_account_ixs(&rpc, &payer.pubkey(), account, &mint, &owner.pubkey())?);
+        ixs.extend(token_account_ixs(
+            &rpc,
+            &payer.pubkey(),
+            account,
+            &mint,
+            &owner.pubkey(),
+        )?);
     }
-    send(&rpc, "create the players' pass accounts", &ixs, &payer, &accounts.iter().collect::<Vec<_>>())?;
+    send(
+        &rpc,
+        "create the players' pass accounts",
+        &ixs,
+        &payer,
+        &accounts.iter().collect::<Vec<_>>(),
+    )?;
     let transfer = |to: usize, owner: &Keypair| {
-        pass_transfer_ix(&mint, &treasury.pubkey(), &accounts[to].pubkey(), &payer.pubkey(), &owner.pubkey())
+        pass_transfer_ix(
+            &mint,
+            &treasury.pubkey(),
+            &accounts[to].pubkey(),
+            &payer.pubkey(),
+            &owner.pubkey(),
+        )
     };
 
     // An unverified profile cannot be attested; the KYC authority then verifies all three players.
@@ -603,10 +701,22 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
         .iter()
         .map(|player| verify_profile_ix(&player.pubkey(), &kyc.pubkey()))
         .collect();
-    send(&rpc, "the KYC authority verifies the three profiles", &verifications, &payer, &[&kyc])?;
+    send(
+        &rpc,
+        "the KYC authority verifies the three profiles",
+        &verifications,
+        &payer,
+        &[&kyc],
+    )?;
 
     // Refusals: the hook before attestation, and the bridge and pass program on bad input.
-    let error = landed_failure(&rpc, "pass transfer before attestation", &[transfer(0, &registered)?], &payer, &[])?;
+    let error = landed_failure(
+        &rpc,
+        "pass transfer before attestation",
+        &[transfer(0, &registered)?],
+        &payer,
+        &[],
+    )?;
     assert_eq!(custom(&error), Some(PASS_ERROR_NOT_ELIGIBLE));
     let error = landed_failure(
         &rpc,
@@ -628,11 +738,19 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
     let error = landed_failure(
         &rpc,
         "attest through a program that is not the pass program",
-        &[main.bridge_with(&mint, &registered.pubkey(), &payer.pubkey(), solana_system_interface::program::ID)],
+        &[main.bridge_with(
+            &mint,
+            &registered.pubkey(),
+            &payer.pubkey(),
+            solana_system_interface::program::ID,
+        )],
         &payer,
         &[],
     )?;
-    assert_eq!(custom(&error), game_code(GameErrorCode::InvalidAccountOwner));
+    assert_eq!(
+        custom(&error),
+        game_code(GameErrorCode::InvalidAccountOwner)
+    );
     let mut forged = PASS_ISSUE.to_vec();
     forged.extend_from_slice(&1_200u32.to_le_bytes());
     let stranger = Keypair::new().pubkey();
@@ -657,9 +775,25 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
     assert_eq!(custom(&error), Some(PASS_ERROR_UNAUTHORIZED_REGISTRAR));
 
     // Player 1: attested, receives the pass, registers by burning it.
-    send(&rpc, "attest player 1", &[main.bridge_ix(&mint, &registered.pubkey(), &payer.pubkey())], &payer, &[])?;
-    assert_eq!(record_fields(&rpc, &mint, &registered.pubkey())?.0, 1_200, "the profile's rating");
-    send(&rpc, "transfer a pass to player 1", &[transfer(0, &registered)?], &payer, &[])?;
+    send(
+        &rpc,
+        "attest player 1",
+        &[main.bridge_ix(&mint, &registered.pubkey(), &payer.pubkey())],
+        &payer,
+        &[],
+    )?;
+    assert_eq!(
+        record_fields(&rpc, &mint, &registered.pubkey())?.0,
+        1_200,
+        "the profile's rating"
+    );
+    send(
+        &rpc,
+        "transfer a pass to player 1",
+        &[transfer(0, &registered)?],
+        &payer,
+        &[],
+    )?;
     assert_eq!(token_balance(&rpc, &accounts[0].pubkey())?, 1);
     let mut register = Instruction {
         program_id: xfchess_game::ID,
@@ -683,34 +817,94 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
         data: xfchess_game::instruction::RegisterPlayer { tournament_id: id }.data(),
     };
     // The game reads the player's eligibility record to confirm the pass was attested.
-    register
-        .accounts
-        .push(AccountMeta::new_readonly(record_pda(&mint, &registered.pubkey()), false));
-    send(&rpc, "player 1 registers, burning the pass", &[register], &registered, &[])?;
-    assert_eq!(token_balance(&rpc, &accounts[0].pubkey())?, 0, "the pass is burned");
-    let shard_state = TournamentPlayersShard::try_deserialize(&mut account_data(&rpc, &shard)?.as_slice())?;
+    register.accounts.push(AccountMeta::new_readonly(
+        record_pda(&mint, &registered.pubkey()),
+        false,
+    ));
+    send(
+        &rpc,
+        "player 1 registers, burning the pass",
+        &[register],
+        &registered,
+        &[],
+    )?;
+    assert_eq!(
+        token_balance(&rpc, &accounts[0].pubkey())?,
+        0,
+        "the pass is burned"
+    );
+    let shard_state =
+        TournamentPlayersShard::try_deserialize(&mut account_data(&rpc, &shard)?.as_slice())?;
     assert_eq!(shard_state.players, vec![registered.pubkey()]);
     assert_eq!(shard_state.player_elos, vec![1_200]);
     let state = Tournament::try_deserialize(&mut account_data(&rpc, &main.tournament)?.as_slice())?;
     assert_eq!(state.num_registered_players, 1);
 
     // Player 2: the attestation expires, the transfer is refused, a refresh renews it.
-    send(&rpc, "attest player 2", &[main.bridge_ix(&mint, &expiring.pubkey(), &payer.pubkey())], &payer, &[])?;
+    send(
+        &rpc,
+        "attest player 2",
+        &[main.bridge_ix(&mint, &expiring.pubkey(), &payer.pubkey())],
+        &payer,
+        &[],
+    )?;
     let (_, attested_at, _) = record_fields(&rpc, &mint, &expiring.pubkey())?;
     wait_for_expiry(&rpc, attested_at)?;
-    let error = landed_failure(&rpc, "pass transfer after the attestation expired", &[transfer(1, &expiring)?], &payer, &[])?;
+    let error = landed_failure(
+        &rpc,
+        "pass transfer after the attestation expired",
+        &[transfer(1, &expiring)?],
+        &payer,
+        &[],
+    )?;
     assert_eq!(custom(&error), Some(PASS_ERROR_EXPIRED));
-    send(&rpc, "refresh player 2's attestation", &[main.bridge_ix(&mint, &expiring.pubkey(), &payer.pubkey())], &payer, &[])?;
+    send(
+        &rpc,
+        "refresh player 2's attestation",
+        &[main.bridge_ix(&mint, &expiring.pubkey(), &payer.pubkey())],
+        &payer,
+        &[],
+    )?;
     assert!(record_fields(&rpc, &mint, &expiring.pubkey())?.1 > attested_at);
-    send(&rpc, "the organizer pauses pass transfers", &[main.pause_ix(&mint, &vps.pubkey(), true)], &vps, &[])?;
-    let error = landed_failure(&rpc, "pass transfer while paused", &[transfer(1, &expiring)?], &payer, &[])?;
+    send(
+        &rpc,
+        "the organizer pauses pass transfers",
+        &[main.pause_ix(&mint, &vps.pubkey(), true)],
+        &vps,
+        &[],
+    )?;
+    let error = landed_failure(
+        &rpc,
+        "pass transfer while paused",
+        &[transfer(1, &expiring)?],
+        &payer,
+        &[],
+    )?;
     assert_eq!(custom(&error), Some(PASS_ERROR_PAUSED));
-    send(&rpc, "the organizer resumes pass transfers", &[main.pause_ix(&mint, &vps.pubkey(), false)], &vps, &[])?;
-    send(&rpc, "transfer a pass to player 2 after the refresh", &[transfer(1, &expiring)?], &payer, &[])?;
+    send(
+        &rpc,
+        "the organizer resumes pass transfers",
+        &[main.pause_ix(&mint, &vps.pubkey(), false)],
+        &vps,
+        &[],
+    )?;
+    send(
+        &rpc,
+        "transfer a pass to player 2 after the refresh",
+        &[transfer(1, &expiring)?],
+        &payer,
+        &[],
+    )?;
     assert_eq!(token_balance(&rpc, &accounts[1].pubkey())?, 1);
 
     // Player 3: revoked by the organizer, cannot be refreshed back or receive the pass.
-    send(&rpc, "attest player 3", &[main.bridge_ix(&mint, &revoked.pubkey(), &payer.pubkey())], &payer, &[])?;
+    send(
+        &rpc,
+        "attest player 3",
+        &[main.bridge_ix(&mint, &revoked.pubkey(), &payer.pubkey())],
+        &payer,
+        &[],
+    )?;
     let error = landed_failure(
         &rpc,
         "revoke as someone other than the organizer",
@@ -718,8 +912,17 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
         &payer,
         &[],
     )?;
-    assert_eq!(custom(&error), game_code(GameErrorCode::NotTournamentAuthority));
-    send(&rpc, "the organizer revokes player 3", &[main.revoke_ix(&mint, &revoked.pubkey(), &vps.pubkey())], &vps, &[])?;
+    assert_eq!(
+        custom(&error),
+        game_code(GameErrorCode::NotTournamentAuthority)
+    );
+    send(
+        &rpc,
+        "the organizer revokes player 3",
+        &[main.revoke_ix(&mint, &revoked.pubkey(), &vps.pubkey())],
+        &vps,
+        &[],
+    )?;
     assert!(record_fields(&rpc, &mint, &revoked.pubkey())?.2);
     let error = landed_failure(
         &rpc,
@@ -728,11 +931,23 @@ fn the_deployed_programs_attest_expire_revoke_and_burn_passes() -> TestResult {
         &payer,
         &[],
     )?;
-    assert_eq!(custom(&error), game_code(GameErrorCode::PassEligibilityRevoked));
-    let error = landed_failure(&rpc, "pass transfer to the revoked player", &[transfer(2, &revoked)?], &payer, &[])?;
+    assert_eq!(
+        custom(&error),
+        game_code(GameErrorCode::PassEligibilityRevoked)
+    );
+    let error = landed_failure(
+        &rpc,
+        "pass transfer to the revoked player",
+        &[transfer(2, &revoked)?],
+        &payer,
+        &[],
+    )?;
     assert_eq!(custom(&error), Some(PASS_ERROR_REVOKED));
     assert_eq!(token_balance(&rpc, &accounts[2].pubkey())?, 0);
 
-    println!("\nmint {mint}\ntournament {id} (narrow range {})", narrow.id);
+    println!(
+        "\nmint {mint}\ntournament {id} (narrow range {})",
+        narrow.id
+    );
     Ok(())
 }

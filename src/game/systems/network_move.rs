@@ -80,8 +80,11 @@ pub fn handle_network_moves(
                 continue;
             }
 
-            let legal_dests = engine.get_legal_moves_for_square(event.from, piece.color);
-            if !legal_dests.contains(&event.to) {
+            // Validate the complete UCI move. A destination alone cannot tell
+            // whether a promotion is required, forbidden, or has a legal type.
+            let Some(uci) = ChessEngine::move_uci(event.from, event.to, event.promotion)
+                .filter(|uci| engine.is_move_legal_by_uci(uci))
+            else {
                 warn!(
                     "[NETWORK_MOVE] Rejected illegal move {:?} -> {:?} for {:?}",
                     event.from, event.to, piece.color
@@ -92,7 +95,7 @@ pub fn handle_network_moves(
                     fen: None,
                 });
                 continue;
-            }
+            };
 
             let capture_data = pieces_query
                 .iter()
@@ -163,21 +166,6 @@ pub fn handle_network_moves(
 
             // Record the remote move after execute_move updates the engine’s FEN.
             {
-                let from_col = (b'a' + event.from.0) as char;
-                let from_row = event.from.1 + 1;
-                let to_col = (b'a' + event.to.0) as char;
-                let to_row = event.to.1 + 1;
-                let mut uci = format!("{}{}{}{}", from_col, from_row, to_col, to_row);
-                if let Some(promo) = event.promotion {
-                    let promo_char = match PieceType::from_char(promo) {
-                        Some(crate::game::components::PieceType::Queen) => 'q',
-                        Some(crate::game::components::PieceType::Rook) => 'r',
-                        Some(crate::game::components::PieceType::Bishop) => 'b',
-                        Some(crate::game::components::PieceType::Knight) => 'n',
-                        _ => 'q',
-                    };
-                    uci.push(promo_char);
-                }
                 let fen_after = engine.current_fen().to_string();
                 let matches_expected = event
                     .expected_fen
@@ -196,6 +184,9 @@ pub fn handle_network_moves(
                             "[NET] FEN desync after move {} — local: {} | remote: {}",
                             uci, fen_after, expected
                         );
+                        // Visual only: stop drawing a move the peer disagrees
+                        // with; pieces snap to the board until the resync lands.
+                        commands.queue(crate::motion::retire_board_visuals);
                         // Ask the opponent to resend the authoritative FEN.
                         if let (Some(ns), Some(sess)) = (&network_state, &session) {
                             let game_id =
@@ -333,6 +324,123 @@ mod application_tests {
         );
         assert!(app.world().resource::<CausalChainState>().applied_versions[&1].contains("v1"));
 
+        Ok(())
+    }
+
+    #[test]
+    fn promotion_suffixes_and_invalid_squares_are_rejected_before_mutation() {
+        for (from, to, promotion) in [
+            ((4, 1), (4, 3), Some('q')),
+            ((6, 0), (5, 2), Some('n')),
+            ((4, 1), (4, 3), Some('Q')),
+            ((4, 1), (4, 3), Some('k')),
+            ((4, 1), (4, 3), Some('é')),
+            ((4, 1), (255, 255), None),
+        ] {
+            let mut app = game();
+            let before = app
+                .world()
+                .resource::<ChessEngine>()
+                .current_fen()
+                .to_owned();
+            app.world_mut().write_message(NetworkMoveEvent {
+                from,
+                to,
+                promotion,
+                expected_fen: Some(before.clone()),
+                dedup_version: Some("invalid".into()),
+            });
+            app.update();
+            assert_eq!(app.world().resource::<ChessEngine>().current_fen(), before);
+            assert!(app.world().resource::<MoveHistory>().is_empty());
+            assert!(!app.world().resource::<PendingTurnAdvance>().is_pending());
+            assert!(app.world().resource::<Messages<MoveMadeEvent>>().is_empty());
+            assert!(app
+                .world()
+                .resource::<Messages<RemoteMoveApplied>>()
+                .is_empty());
+            let mut results = bevy::ecs::message::MessageCursor::<
+                crate::game::events::NetworkMoveResult,
+            >::default();
+            let results: Vec<_> = results
+                .read(
+                    app.world()
+                        .resource::<Messages<crate::game::events::NetworkMoveResult>>(),
+                )
+                .collect();
+            assert_eq!(results.len(), 1);
+            assert!(results[0].fen.is_none());
+            assert_eq!(
+                app.world_mut()
+                    .query::<&crate::motion::PieceMotion>()
+                    .iter(app.world())
+                    .count(),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn last_rank_requires_a_legal_promotion_and_accepts_all_four_choices() -> Result<(), String> {
+        let fen = "4k3/P7/8/8/8/8/8/4K3 w - - 0 17";
+        for promotion in [
+            None,
+            Some('p'),
+            Some('x'),
+            Some('q'),
+            Some('r'),
+            Some('b'),
+            Some('n'),
+        ] {
+            let mut app = game();
+            let entities: Vec<_> = app
+                .world_mut()
+                .query::<(Entity, &Piece)>()
+                .iter(app.world())
+                .map(|(entity, _)| entity)
+                .collect();
+            for entity in entities {
+                app.world_mut().despawn(entity);
+            }
+            app.world_mut()
+                .resource_mut::<ChessEngine>()
+                .set_from_fen(fen)?;
+            for (color, kind, x, y) in [
+                (PieceColor::White, PieceType::Pawn, 0, 6),
+                (PieceColor::White, PieceType::King, 4, 0),
+                (PieceColor::Black, PieceType::King, 4, 7),
+            ] {
+                app.world_mut()
+                    .spawn((Piece::new(color, kind, x, y), HasMoved::default()));
+            }
+            app.world_mut().write_message(NetworkMoveEvent {
+                from: (0, 6),
+                to: (0, 7),
+                promotion,
+                expected_fen: None,
+                dedup_version: Some("promotion".into()),
+            });
+            app.update();
+            let valid = promotion.is_some_and(|kind| "qrbn".contains(kind));
+            assert_eq!(
+                app.world().resource::<MoveHistory>().len(),
+                usize::from(valid)
+            );
+            let mut cursor = bevy::ecs::message::MessageCursor::<
+                crate::game::events::NetworkMoveResult,
+            >::default();
+            let result = cursor
+                .read(
+                    app.world()
+                        .resource::<Messages<crate::game::events::NetworkMoveResult>>(),
+                )
+                .next()
+                .ok_or("missing application result")?;
+            assert_eq!(result.fen.is_some(), valid);
+            if !valid {
+                assert_eq!(app.world().resource::<ChessEngine>().current_fen(), fen);
+            }
+        }
         Ok(())
     }
 

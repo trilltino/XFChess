@@ -1,0 +1,142 @@
+[
+  {
+    "log": "xfchess-latest-full-contract-tests.log",
+    "sha256": "e779639d304c48bf632c55942c9b3cb7523bd83372546d1fb3264bb8b6cb16cc",
+    "excerpts": [
+      "    Finished `test` profile [unoptimized] target(s) in 12.28s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+      "test result: ok. 100 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s",
+      "test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.85s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s",
+      "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.28s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s",
+      "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.59s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.78s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s",
+      "test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s",
+      "test result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 5.69s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.48s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.38s",
+      "test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.43s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.61s",
+      "test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.91s",
+      "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.18s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.09s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ]
+  },
+  {
+    "log": "xfchess-latest-account-vm-tests.log",
+    "sha256": "f09a848456dfbd7ddb0777ae07319e756f1a9838fb91f1d04f355d4900b58d74",
+    "excerpts": [
+      "    Finished `test` profile [unoptimized] target(s) in 34.12s",
+      "test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.89s"
+    ]
+  },
+  {
+    "log": "xfchess-latest-clippy-final.log",
+    "sha256": "7cd072c5685c9eae4cdbbcc01c472026bd88ae6f17d4206a9fbaa9dbd7ace04f",
+    "excerpts": [
+      "    Finished `dev` profile [unoptimized] target(s) in 1m 12s"
+    ]
+  },
+  {
+    "log": "xfchess-latest-backend-check-final3.log",
+    "sha256": "6938284c88d1aa76fdddfc88fcf2ec7fa4efb8bc3813c44e1e543c8e1aad27d1",
+    "excerpts": [
+      "    Finished `dev` profile [unoptimized] target(s) in 1m 19s"
+    ]
+  },
+  {
+    "log": "xfchess-latest-boundary-rules-final.log",
+    "sha256": "79e1b27801ca442f67aaaa52757e0c5cba8d02ed552c22d786e9a82e445e7dfc",
+    "excerpts": [
+      "    Finished `test` profile [unoptimized] target(s) in 1m 01s",
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ]
+  },
+  {
+    "log": "xfchess-latest-live-er-expanded-test.log",
+    "sha256": "731d6c9272a6e23d6a16e7bbd2f3d13e0f5d997d604e51d2b42c980160fa4808",
+    "excerpts": [
+      "    Finished `test` profile [unoptimized] target(s) in 48.88s",
+      "simulation CU: Some(150)",
+      "simulation CU: Some(28797)",
+      "simulation CU: Some(150)",
+      "simulation CU: Some(22797)",
+      "simulation CU: Some(32970)",
+      "simulation CU: Some(37326)",
+      "simulation CU: Some(21526)",
+      "simulation CU: Some(55130)",
+      "simulation CU: Some(19783)",
+      "simulation CU: Some(24084)",
+      "simulation CU: Some(13018)",
+      "simulation CU: Some(40480)",
+      "PASS: real delegate -> legal move -> stale rejection -> schedule/cancel -> commit/undelegate -> exact byte restoration; game_id=1792886612871",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.34s"
+    ]
+  },
+  {
+    "log": "xfchess-latest-sbf-final-refresh.log",
+    "sha256": "5e6f5b782eb5f75aa22183b047325fb191ce3c557f8469e57af8056691a68a04",
+    "excerpts": [
+      "Error: Function _RINvMNtCs9zPf8BuLM6C_12hybrid_array7from_fnINtB5_5ArrayhINtNtCsdqYsWhYZY7K_7typenum4uint4UIntIBT_IBT_I",
+      "Error: Function _RNvXs25_NtCs65Kq9KrUq68_13crypto_common6hazmatAtj800_NtB6_17SerializableState11deserialize overflows ",
+      "Error: Function _RNvXs25_NtCs65Kq9KrUq68_13crypto_common6hazmatAtj800_NtB6_17SerializableState9serialize overflows the ",
+      "Error: Function _RNvXs26_NtCs65Kq9KrUq68_13crypto_common6hazmatAtj1000_NtB6_17SerializableState11deserialize overflows ",
+      "Error: Function _RNvXs26_NtCs65Kq9KrUq68_13crypto_common6hazmatAtj1000_NtB6_17SerializableState9serialize overflows ",
+      "Error: Function _RNvXs2P_NtCs65Kq9KrUq68_13crypto_common6hazmatAyj200_NtB6_17SerializableState11deserialize overflows ",
+      "Error: Function _RNvXs2P_NtCs65Kq9KrUq68_13crypto_common6hazmatAyj200_NtB6_17SerializableState9serialize overflows the ",
+      "Error: Function _RNvXs2Q_NtCs65Kq9KrUq68_13crypto_common6hazmatAyj400_NtB6_17SerializableState11deserialize overflows ",
+      "Error: Function _RNvXs2Q_NtCs65Kq9KrUq68_13crypto_common6hazmatAyj400_NtB6_17SerializableState9serialize overflows the ",
+      "Error: Function _RNvXs2w_NtCs65Kq9KrUq68_13crypto_common6hazmatAmj400_NtB6_17SerializableState11deserialize overflows ",
+      "Error: Function _RNvXs2w_NtCs65Kq9KrUq68_13crypto_common6hazmatAmj400_NtB6_17SerializableState9serialize overflows the ",
+      "Error: Function _RNvXs2x_NtCs65Kq9KrUq68_13crypto_common6hazmatAmj800_NtB6_17SerializableState11deserialize overflows ",
+      "Error: Function _RNvXs2x_NtCs65Kq9KrUq68_13crypto_common6hazmatAmj800_NtB6_17SerializableState9serialize overflows the ",
+      "Error: Function _RNvXs34_NtCs65Kq9KrUq68_13crypto_common6hazmatAoj100_NtB6_17SerializableState11deserialize overflows ",
+      "Error: Function _RNvXs35_NtCs65Kq9KrUq68_13crypto_common6hazmatAoj200_NtB6_17SerializableState11deserialize overflows ",
+      "Error: Function _RNvXs35_NtCs65Kq9KrUq68_13crypto_common6hazmatAoj200_NtB6_17SerializableState9serialize overflows the ",
+      "    Finished `release` profile [optimized] target(s) in 39.98s"
+    ]
+  },
+  {
+    "log": "xfchess-latest-idl-normal.log",
+    "sha256": "b310dac6735a2a43f95f5d16616c37d1d21ce7ab76321f912441d034093b3a79",
+    "excerpts": [
+      "    Finished `test` profile [unoptimized] target(s) in 1m 38s",
+      "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 100 filtered out; finished in 0.94s"
+    ]
+  },
+  {
+    "log": "xfchess-latest-bincode3-compatibility.log",
+    "sha256": "99226a3c17745d8b4b96355ee33953678d872d676945c2ea3fcd9590d20225de",
+    "excerpts": [
+      "error: https://xkcd.com/2347/",
+      "error: could not compile `bincode` (lib) due to 1 previous error"
+    ]
+  }
+]

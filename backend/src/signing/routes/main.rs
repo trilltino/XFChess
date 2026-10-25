@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -521,6 +522,10 @@ pub async fn activate_session(
             "authorize_session_key",
             "global_create_game",
             "global_join_game",
+            "create_game_v2",
+            "join_game_v2",
+            "global_create_game_v2",
+            "global_join_game_v2",
         ],
         &[expected_game_pda],
     )
@@ -1204,7 +1209,7 @@ pub async fn delegate_game(
             &[&payer, &session_kp],
             blockhash,
         );
-        rpc.send_and_confirm_transaction(&tx)
+        rpc.send_sdk_and_confirm_transaction(&tx)
             .map(|s| s.to_string())
             .map_err(|e| {
                 // Log Debug separately to retain simulation logs omitted by ClientError Display.

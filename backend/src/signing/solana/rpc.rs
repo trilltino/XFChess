@@ -141,7 +141,9 @@ pub fn redact_urls_in(text: &str) -> String {
         out.push_str(&rest[..start]);
         let tail = &rest[start..];
         let end = tail
-            .find(|c: char| c.is_whitespace() || matches!(c, ')' | '"' | '\'' | '<' | '>' | ',' | '\u{1b}'))
+            .find(|c: char| {
+                c.is_whitespace() || matches!(c, ')' | '"' | '\'' | '<' | '>' | ',' | '\u{1b}')
+            })
             .unwrap_or(tail.len());
         out.push_str(&redact_url(&tail[..end]));
         rest = &tail[end..];

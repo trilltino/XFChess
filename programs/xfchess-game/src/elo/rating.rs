@@ -237,10 +237,7 @@ mod tests {
     fn display_rating_treats_an_untouched_bucket_as_the_initial_rating() {
         let profile = PlayerProfile::default();
         for base_time_seconds in [0, 60, 300, 900, 1_800] {
-            assert_eq!(
-                display_rating(&profile, base_time_seconds),
-                INITIAL_ELO
-            );
+            assert_eq!(display_rating(&profile, base_time_seconds), INITIAL_ELO);
         }
     }
 
@@ -251,7 +248,11 @@ mod tests {
                 elo_blitz: stored,
                 ..Default::default()
             };
-            assert_eq!(display_rating(&profile, 300), INITIAL_ELO, "stored {stored}");
+            assert_eq!(
+                display_rating(&profile, 300),
+                INITIAL_ELO,
+                "stored {stored}"
+            );
         }
     }
 }

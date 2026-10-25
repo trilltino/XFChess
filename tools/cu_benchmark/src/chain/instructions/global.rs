@@ -86,7 +86,7 @@ pub fn global_create_game_ix(
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
-    let mut data = anchor_discriminator("global_create_game").to_vec();
+    let mut data = anchor_discriminator("global_create_game_v2").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&wager_amount.to_le_bytes());
     data.push(match_type);
@@ -103,6 +103,14 @@ pub fn global_create_game_ix(
             AccountMeta::new(game_pda, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new(
+                Pubkey::find_program_address(
+                    &[b"recovery_identity", &game_id.to_le_bytes()],
+                    &program_id,
+                )
+                .0,
+                false,
+            ),
         ],
         data,
     })
@@ -125,7 +133,7 @@ pub fn global_join_game_ix(
     let escrow_pda =
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
-    let mut data = anchor_discriminator("global_join_game").to_vec();
+    let mut data = anchor_discriminator("global_join_game_v2").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
 
     Ok(Instruction {
@@ -139,6 +147,14 @@ pub fn global_join_game_ix(
             AccountMeta::new_readonly(white_profile_pda, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new(
+                Pubkey::find_program_address(
+                    &[b"recovery_identity", &game_id.to_le_bytes()],
+                    &program_id,
+                )
+                .0,
+                false,
+            ),
         ],
         data,
     })

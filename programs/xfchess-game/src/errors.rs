@@ -320,7 +320,9 @@ pub enum GameErrorCode {
     PassMintMismatch,
     #[msg("The player does not hold a tournament pass.")]
     PassNotHeld,
-    #[msg("A pass mint must be a zero-decimal Token-2022 mint hooked by the xfchess_pass program.")]
+    #[msg(
+        "A pass mint must be a zero-decimal Token-2022 mint hooked by the xfchess_pass program."
+    )]
     InvalidPassMint,
     #[msg("A pass mint must have its mint authority revoked so the supply is fixed.")]
     PassMintAuthorityActive,
@@ -338,6 +340,15 @@ pub enum GameErrorCode {
     PassRegistrarMismatch,
     #[msg("The pass policy's rating range does not cover the tournament's rating range.")]
     PassPolicyMismatch,
+
+    #[msg(
+        "Original players cannot be authenticated from wiped Game data; recovery preserves escrow."
+    )]
+    RecoveryIdentityUnavailable,
+    #[msg(
+        "The recovery identity does not match this game's original players, wager, or lifecycle."
+    )]
+    RecoveryIdentityMismatch,
 }
 
 pub use GameErrorCode as XfchessGameError;

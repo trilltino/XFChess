@@ -19,6 +19,7 @@ pub struct GlobalJoinGame<'info> {
 
     pub session_signer: Signer<'info>,
 
+    /// CHECK: Key is bound to the typed session player; its registered session key must sign.
     pub player: UncheckedAccount<'info>,
 
     #[account(
@@ -35,6 +36,7 @@ pub struct GlobalJoinGame<'info> {
     pub white_profile: Account<'info, PlayerProfile>,
 
     #[account(mut, seeds = [WAGER_ESCROW_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: Canonical escrow PDA receives the wager from the authenticated program-owned session vault.
     pub escrow_pda: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
@@ -96,7 +98,7 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     game.black = ctx.accounts.player.key();
     game.status = GameStatus::Active;
-    // country_fee was set at creation time from live SOL/GBP rate — no recalculation needed.
+    // country_fee was set at creation time from live SOL/GBP rate â€” no recalculation needed.
     game.fees_advanced = game
         .fees_advanced
         .checked_add(JOIN_GAME_COST)

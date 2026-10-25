@@ -6,7 +6,7 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 xfchess-rules = { path = "../xfchess-rules" }
-crossbeam-channel = "=0.5.15"
+crossbeam-channel = "=0.5.17"
 
 [lints]
 workspace = true

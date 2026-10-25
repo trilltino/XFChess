@@ -6,17 +6,23 @@ use anchor_lang::prelude::*;
 #[instruction(game_id: u64)]
 pub struct RequestForceUndelegateCtx<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: Game PDA may be delegation-owned; handler deserializes it and enforces the stuck-game time guard.
     pub game: UncheckedAccount<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     #[account(address = crate::ID @ GameErrorCode::InvalidOwnerProgram)]
+    /// CHECK: Address pinned to this program; included in the exact SDK rollback instruction account list.
     pub owner_program: UncheckedAccount<'info>,
     #[account(mut)]
+    /// CHECK: Key checked against the SDK-generated instruction before CPI; Delegation Program validates protocol state.
     pub undelegation_request_pda: UncheckedAccount<'info>,
+    /// CHECK: Key checked against the SDK-generated instruction before CPI; Delegation Program validates protocol state.
     pub delegation_record_pda: UncheckedAccount<'info>,
     #[account(mut)]
+    /// CHECK: Key checked against the SDK-generated instruction before CPI; Delegation Program validates protocol state.
     pub delegation_metadata_pda: UncheckedAccount<'info>,
     #[account(address = ephemeral_rollups_sdk::id())]
+    /// CHECK: Address pinned to the SDK Delegation Program, which validates the rollback protocol.
     pub delegation_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -50,24 +56,34 @@ pub fn handler_request_force_undelegate(
 #[instruction(game_id: u64)]
 pub struct ForceUndelegateAfterTimeoutCtx<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
+    /// CHECK: Canonical Game PDA may be delegation-owned; Delegation Program CPI enforces the rollback timeout.
     pub game: UncheckedAccount<'info>,
     #[account(address = crate::ID @ GameErrorCode::InvalidOwnerProgram)]
+    /// CHECK: Address pinned to this program; included in the exact SDK rollback instruction account list.
     pub owner_program: UncheckedAccount<'info>,
     #[account(mut)]
+    /// CHECK: Key checked against the SDK-generated instruction before CPI; Delegation Program validates protocol state.
     pub undelegation_request_pda: UncheckedAccount<'info>,
     #[account(mut)]
+    /// CHECK: Key checked against the SDK-generated instruction before CPI; Delegation Program validates protocol state.
     pub delegation_record_pda: UncheckedAccount<'info>,
     #[account(mut)]
+    /// CHECK: Key checked against the SDK-generated instruction before CPI; Delegation Program validates protocol state.
     pub delegation_metadata_pda: UncheckedAccount<'info>,
     #[account(mut)]
+    /// CHECK: Forwarded to the SDK rollback builder as a rent recipient; Delegation Program enforces reimbursement policy.
     pub delegation_rent_payer: UncheckedAccount<'info>,
     #[account(mut)]
+    /// CHECK: Key checked against the SDK rollback instruction; Delegation Program validates committed state.
     pub commit_state_pda: UncheckedAccount<'info>,
     #[account(mut)]
+    /// CHECK: Key checked against the SDK rollback instruction; Delegation Program validates committed state.
     pub commit_record_pda: UncheckedAccount<'info>,
     #[account(mut)]
+    /// CHECK: Forwarded to the SDK rollback builder as a rent recipient; Delegation Program enforces reimbursement policy.
     pub commit_reimbursement: UncheckedAccount<'info>,
     #[account(address = ephemeral_rollups_sdk::id())]
+    /// CHECK: Address pinned to the SDK Delegation Program, which validates the rollback protocol.
     pub delegation_program: UncheckedAccount<'info>,
 }
 

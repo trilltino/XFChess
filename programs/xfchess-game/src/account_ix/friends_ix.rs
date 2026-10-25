@@ -13,7 +13,9 @@ pub struct SendFriendRequest<'info> {
         bump
     )]
     pub friendship: Account<'info, Friendship>,
+    /// CHECK: Key-only party in the sorted friendship PDA; handler requires a party to sign as requester.
     pub party_a: UncheckedAccount<'info>,
+    /// CHECK: Key-only party in the sorted friendship PDA; handler requires a party to sign as requester.
     pub party_b: UncheckedAccount<'info>,
     #[account(mut)]
     pub requester: Signer<'info>,
@@ -51,7 +53,9 @@ pub struct AcceptFriendRequest<'info> {
         bump = friendship.bump,
     )]
     pub friendship: Account<'info, Friendship>,
+    /// CHECK: Key-only seed of the existing friendship PDA; handler authenticates its stored addressee signer.
     pub party_a: UncheckedAccount<'info>,
+    /// CHECK: Key-only seed of the existing friendship PDA; handler authenticates its stored addressee signer.
     pub party_b: UncheckedAccount<'info>,
     pub addressee: Signer<'info>,
 }
@@ -80,7 +84,9 @@ pub struct CloseFriendship<'info> {
         close = signer,
     )]
     pub friendship: Account<'info, Friendship>,
+    /// CHECK: Key-only seed of the friendship PDA; handler authenticates a stored party before rent closure.
     pub party_a: UncheckedAccount<'info>,
+    /// CHECK: Key-only seed of the friendship PDA; handler authenticates a stored party before rent closure.
     pub party_b: UncheckedAccount<'info>,
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -104,7 +110,9 @@ pub struct BlockUser<'info> {
         bump = friendship.bump,
     )]
     pub friendship: Account<'info, Friendship>,
+    /// CHECK: Key-only seed of the friendship PDA; handler authenticates the signer against stored parties.
     pub party_a: UncheckedAccount<'info>,
+    /// CHECK: Key-only seed of the friendship PDA; handler authenticates the signer against stored parties.
     pub party_b: UncheckedAccount<'info>,
     pub signer: Signer<'info>,
 }

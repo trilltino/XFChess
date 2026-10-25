@@ -6,6 +6,7 @@ pub mod active_time_control;
 pub mod history;
 pub mod menu_sounds;
 pub mod player;
+pub mod premove;
 pub mod sounds;
 pub mod turn;
 

@@ -15,7 +15,7 @@ macro_rules! spawn_piece_visual {
 
 /// Spawn pieces from a FEN board. FEN row i maps to board rank 7-i.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn spawn_pieces_from_fen(
+pub(crate) fn spawn_pieces_from_fen(
     commands: &mut Commands,
     meshes: &PieceMeshes,
     materials: &mut Assets<StandardMaterial>,
@@ -72,6 +72,10 @@ pub(super) fn spawn_pieces_from_fen(
             file = file.saturating_add(1);
         }
     }
+    let fen = fen.to_owned();
+    commands.queue(move |world: &mut World| {
+        crate::game::systems::board_snapshot::stamp_fen_history(world, &fen)
+    });
 }
 
 /// Spawn a piece at zero-based (file, rank) coordinates. Mesh offsets compensate

@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 mod admin_connection;
 use admin_connection::{abbreviate, is_insecure_remote, prefix};
 use anyhow::Context;
@@ -968,7 +969,7 @@ fn advance_tournament_round_directly() -> anyhow::Result<()> {
         blockhash,
     );
 
-    match rpc.send_and_confirm_transaction(&tx) {
+    match rpc.send_sdk_and_confirm_transaction(&tx) {
         Ok(sig) => println!("  [OK] Round advanced. Signature: {sig}"),
         Err(e) => println!(
             "  [ERROR] {e}\n  (TournamentRoundIncomplete means not all {boards_in_round} boards of \

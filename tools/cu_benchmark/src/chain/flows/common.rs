@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
@@ -152,7 +153,7 @@ pub(super) async fn verify_tournament_payout(
         &[cranker],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         crate::cost::measurements::ExecutionLayer::Solana,
         "tournament_payout",

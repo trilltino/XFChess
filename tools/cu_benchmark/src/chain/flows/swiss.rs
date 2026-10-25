@@ -1,3 +1,4 @@
+use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -55,7 +56,7 @@ pub async fn run_swiss_tournament_flow(
     let blockhash = base_rpc.get_latest_blockhash()?;
     let tx =
         Transaction::new_signed_with_payer(&init_ixs, Some(&master.pubkey()), &[master], blockhash);
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_setup",
@@ -80,7 +81,7 @@ pub async fn run_swiss_tournament_flow(
         &[master],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_setup",
@@ -104,7 +105,7 @@ pub async fn run_swiss_tournament_flow(
         &[master],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_setup",
@@ -126,7 +127,7 @@ pub async fn run_swiss_tournament_flow(
     let blockhash = base_rpc.get_latest_blockhash()?;
     let tx =
         Transaction::new_signed_with_payer(&fund_ixs, Some(&master.pubkey()), &[master], blockhash);
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_setup",
@@ -153,7 +154,7 @@ pub async fn run_swiss_tournament_flow(
             &[player],
             blockhash,
         );
-        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
         logger.log(
             ExecutionLayer::Solana,
             "profile",
@@ -191,7 +192,7 @@ pub async fn run_swiss_tournament_flow(
             &[player],
             blockhash,
         );
-        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
         logger.log(
             ExecutionLayer::Solana,
             "tournament_setup",
@@ -415,7 +416,7 @@ pub async fn run_swiss_tournament_flow(
         blockhash,
     );
     // All funded places have been paid; propagate close failure as an error.
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_payout",
@@ -439,7 +440,7 @@ async fn send_as_master(
 ) -> anyhow::Result<()> {
     let blockhash = rpc.get_latest_blockhash()?;
     let tx = Transaction::new_signed_with_payer(&ixs, Some(&master.pubkey()), &[master], blockhash);
-    let sig = with_retry(|| rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         category,

@@ -1,0 +1,14 @@
+{
+  "cluster": "devnet",
+  "program": "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU",
+  "programdata": "DqgseskxrRYcgBpEks4jqh6eHbpg64SXxtGS1yhW9T7F",
+  "read_slot": 514786708,
+  "deployment_slot": 514786564,
+  "upgrade_authority": "C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw",
+  "programdata_bytes": 1424109,
+  "expected_code_bytes": 1152400,
+  "code_sha256": "f60ce59fc4ac7cd02a83e520c54b75ea9d44c6127a986fa8efb01b3e431f74fe",
+  "padding_all_zero": true,
+  "expected_code_sha256": "f60ce59fc4ac7cd02a83e520c54b75ea9d44c6127a986fa8efb01b3e431f74fe",
+  "matches_expected_code": true
+}

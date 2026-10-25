@@ -1,0 +1,480 @@
+Verification output excerpts — 23 October 2026
+Repeated test runs are not additional coverage. Expected-failure logs are labeled.
+Full-log SHA-256 values bind the captured temporary output; excerpts omit linker noise.
+
+=== xfchess-security-verified-tests.log ===
+Full-log SHA-256: 502c143de96f86c7278aeeef945420dda9796c7c67ae6b26a062c7eaa432b85a
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.87s
+     Running unittests C:\Users\isich\XFChess\programs\xfchess-game\src\lib.rs
+running 101 tests
+test chess_logic_on_chain::tests::test_invalid_move_format_returns_false ... ok
+test chess_logic_on_chain::tests::test_known_illegal_move_returns_false ... ok
+test chess_logic_on_chain::tests::test_invalid_fen_returns_false ... ok
+test chess_logic_on_chain::tests::test_known_legal_move_returns_true ... ok
+test constants::tests::production_authorities_are_not_default_pubkeys ... ok
+test constants::tests::production_authorities_are_pairwise_distinct ... ok
+test elo::k_factor::tests::draw_between_equal_players_unchanged ... ok
+test elo::k_factor::tests::equal_players_win_increases_rating ... ok
+test elo::k_factor::tests::floor_prevents_negative_ratings ... ok
+test elo::rating::tests::bucket_for_time_control_matches_client_thresholds ... ok
+test elo::rating::tests::centiscale_to_display_rounds_to_nearest_elo ... ok
+test elo::rating::tests::display_rating_counts_unusable_ratings_as_the_initial_rating ... ok
+test elo::rating::tests::display_rating_reads_the_bucket_of_the_time_control ... ok
+test elo::rating::tests::display_rating_reads_the_time_control_bucket ... ok
+test elo::rating::tests::display_rating_rounds_to_the_nearest_elo ... ok
+test elo::rating::tests::display_rating_treats_an_untouched_bucket_as_the_initial_rating ... ok
+test elo::rating::tests::external_to_centiscale_rejects_out_of_range_before_scaling ... ok
+test elo::rating::tests::external_to_centiscale_scales_by_100 ... ok
+test elo::rating::tests::initial_elo_constant_round_trips ... ok
+test elo::rating::tests::rating_field_mut_lazily_seeds_on_first_touch ... ok
+test elo::rating::tests::rating_field_mut_maps_each_bucket_to_its_own_field ... ok
+test elo::rating::tests::validate_accepts_range_boundaries ... ok
+test elo::rating::tests::validate_rejects_just_outside_boundaries ... ok
+test game_ix::cancel::tests::active_game_cancellation_requires_a_player_for_every_move_count ... ok
+test governance_ix::resolution::tests::apply_resolution_rejects_oversized_text_before_mutating ... ok
+test governance_ix::resolution::tests::apply_resolution_updates_both_dispute_and_game ... ok
+test governance_ix::resolution::tests::require_text_fits_accepts_the_exact_cap ... ok
+test governance_ix::resolution::tests::require_text_fits_rejects_one_over_the_cap ... ok
+test governance_ix::resolution::tests::validate_resolution_accepts_a_real_player_as_winner ... ok
+test governance_ix::resolution::tests::validate_resolution_none_is_a_draw ... ok
+test governance_ix::resolution::tests::validate_resolution_rejects_a_non_player_winner ... ok
+test lifecycle::clock::tests::extreme_time_controls_do_not_overflow ... ok
+test lifecycle::clock::tests::short_controls_keep_the_minimum_window ... ok
+test lifecycle::clock::tests::timed_window_adds_every_increment_the_mover_has_earned ... ok
+test lifecycle::clock::tests::timed_window_covers_the_whole_base_clock ... ok
+test lifecycle::clock::tests::untimed_and_zero_move_windows_are_unchanged ... ok
+test lifecycle::guards::tests::live_delegated_game_cannot_be_force_undelegated ... ok
+test lifecycle::guards::tests::require_delegated_fails_when_not_delegated ... ok
+test lifecycle::guards::tests::require_delegated_passes_when_delegated ... ok
+test lifecycle::guards::tests::require_phase_fails_on_mismatched_phase ... ok
+test lifecycle::guards::tests::require_phase_passes_on_matching_phase ... ok
+test lifecycle::guards::tests::require_phase_propagates_unreachable_phase_error ... ok
+test lifecycle::guards::tests::require_undelegated_fails_when_delegated ... ok
+test lifecycle::guards::tests::require_undelegated_passes_when_not_delegated ... ok
+test lifecycle::guards::tests::unreturned_terminal_game_can_be_force_undelegated ... ok
+test lifecycle::settlement::split_draw_remaining_tests::even_splits_equally ... ok
+test lifecycle::settlement::split_draw_remaining_tests::odd_accounts_for_every_lamport ... ok
+test lifecycle::settlement::split_draw_remaining_tests::one_lamport_goes_to_black_not_lost ... ok
+test lifecycle::settlement::split_draw_remaining_tests::zero_splits_to_zero ... ok
+test lifecycle::terminal::tests::accept_draw_rejects_accepting_own_offer ... ok
+test lifecycle::terminal::tests::accept_draw_rejects_when_no_offer_pending ... ok
+test lifecycle::terminal::tests::crank_timeout_cancels_zero_move_game_instead_of_awarding_black ... ok
+test lifecycle::terminal::tests::crank_twin_is_a_noop_before_inactivity_window_elapses ... ok
+test lifecycle::terminal::tests::crank_twin_matches_manual_claim_timeout_outcome ... ok
+test lifecycle::terminal::tests::draw_offer_then_accept_by_other_player_finishes_as_draw ... ok
+test lifecycle::terminal::tests::offer_draw_rejects_non_participant ... ok
+test lifecycle::terminal::tests::resign_finishes_without_clearing_delegation ... ok
+test lifecycle::terminal::tests::timeout_accepts_just_past_the_minimum_window_for_short_timed_games ... ok
+test lifecycle::terminal::tests::timeout_awards_white_when_black_flags ... ok
+test lifecycle::terminal::tests::timeout_cancels_zero_move_game_instead_of_awarding_black ... ok
+test lifecycle::terminal::tests::timeout_finishes_without_clearing_delegation ... ok
+test lifecycle::terminal::tests::timeout_never_forfeits_a_player_with_clock_time_left ... ok
+test lifecycle::terminal::tests::timeout_rejects_before_inactivity_window_elapses ... ok
+test lifecycle::terminal::tests::untimed_games_keep_the_24h_window_not_the_short_timed_one ... ok
+test lifecycle::transitions::tests::anyone_undelegates_a_finished_or_cancelled_game ... ok
+test lifecycle::transitions::tests::full_lifecycle_fees_advanced_matches_sum_of_all_flat_costs ... ok
+test lifecycle::transitions::tests::mark_delegated_accrues_delegate_cost ... ok
+test lifecycle::transitions::tests::mark_undelegated_accrues_undelegate_and_session_fee ... ok
+test lifecycle::transitions::tests::mark_undelegated_rejects_non_delegated_game ... ok
+test lifecycle::transitions::tests::only_participants_or_fee_payer_undelegate_a_live_game ... ok
+test moves_ix::apply::tests::offerers_own_move_keeps_the_offer_open_for_the_reply ... ok
+test moves_ix::apply::tests::opponent_move_declines_a_pending_draw_offer ... ok
+test state::game::tests::derives_base_and_er_phases ... ok
+test state::game::tests::rejects_invalid_delegated_waiting_phase ... ok
+test state::game::tests::wager_amount_offset_is_212 ... ok
+test state::global_session::tests::has_budget_is_overflow_safe ... ok
+test state::global_session::tests::has_budget_respects_cumulative_cap ... ok
+test state::global_session::tests::has_budget_respects_max_wager ... ok
+test state::global_session::tests::is_valid_returns_false_when_disabled ... ok
+test state::global_session::tests::is_valid_returns_false_when_expired ... ok
+test state::global_session::tests::is_valid_returns_false_when_no_games_remaining ... ok
+test state::global_session::tests::is_valid_returns_true_when_enabled_and_future ... ok
+test state::tournament_session::tests::has_budget_is_overflow_safe ... ok
+test state::tournament_session::tests::has_budget_respects_cumulative_cap ... ok
+test state::tournament_session::tests::has_budget_respects_max_wager ... ok
+test state::tournament_session::tests::is_valid_boundary_is_exclusive ... ok
+test state::tournament_session::tests::is_valid_returns_false_when_disabled ... ok
+test state::tournament_session::tests::is_valid_returns_false_when_expired ... ok
+test state::tournament_session::tests::is_valid_returns_true_when_enabled_and_future ... ok
+test state::tournament_session::tests::sequential_spending_is_tracked ... ok
+test test_id ... ok
+test tournament_ix::matches::round_bitmap::tests::last_bit_of_last_byte_is_addressable ... ok
+test tournament_ix::matches::round_bitmap::tests::covers_the_256_player_worst_case_of_128_boards ... ok
+test tournament_ix::matches::round_bitmap::tests::tracks_individual_bits_without_disturbing_others ... ok
+test tournament_ix::registration::pass_accounts::tests::a_config_binds_only_for_this_mint_registrar_and_range ... ok
+test tournament_ix::registration::pass_accounts::tests::config_fields_are_read_from_their_offsets ... ok
+test tournament_ix::registration::pass_accounts::tests::config_rejects_wrong_length_discriminator_and_version ... ok
+test tournament_ix::registration::pass_accounts::tests::layouts_have_the_pass_programs_sizes ... ok
+test tournament_ix::registration::pass_accounts::tests::only_an_unrevoked_record_for_this_mint_and_player_redeems ... ok
+test tournament_ix::registration::pass_accounts::tests::record_fields_are_read_from_their_offsets ... ok
+test tournament_ix::registration::pass_accounts::tests::record_is_not_mistaken_for_a_config_or_the_reverse ... ok
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running C:\Users\isich\XFChess\programs\xfchess-game\tests\account_security_tests.rs (C:\Users\isich\AppData\Local
+running 18 tests
+test legacy_lifecycle_cannot_omit_or_reuse_a_v2_identity ... ok
+test active_session_cannot_reset_allowance ... ok
+test authenticated_zero_wager_recovery_succeeds_preserves_donations_and_rejects_retry ... ok
+test canonical_nonempty_profile_with_wrong_owner_is_rejected ... ok
+test recovery_record_binding_is_immutable_and_cannot_delegate_twice ... ok
+test authorized_recovery_without_identity_preserves_all_accounts_on_retry ... ok
+test ordinary_settlement_must_supply_canonical_record_and_disables_recovery ... ok
+test authorized_v2_recovery_rejects_either_forged_recipient_atomically ... ok
+test canonical_profile_reinitialization_preserves_accumulated_state ... ok
+test global_join_v2_binds_authenticated_black_and_preserves_white ... ok
+test callback_checks_buffer_system_program_and_sdk_signature_owner ... ok
+test callback_rejects_malformed_seeds_and_wrong_game_without_mutation ... ok
+test profile_rejects_game_and_other_players_profile_without_mutation ... ok
+test recovery_rejects_unauthorized_signer_and_populated_game ... ok
+test recovery_with_subrent_excess_fails_before_all_payments ... ok
+test session_key_cannot_replace_player_wallet_authorization ... ok
+test wager_expiry_rejects_overflow_and_exact_boundary_without_mutation ... ok
+test wallet_reauthorization_resets_only_expired_exhausted_or_revoked_sessions ... ok
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running C:\Users\isich\XFChess\programs\xfchess-game\tests\client_layout_tests.rs
+running 3 tests
+test desktop::withdraw_expired_layout_tests::withdraw_expired_wager_matches_the_program_encoding_and_account_order ... ok
+test desktop_create_v2_matches_generated_arguments_and_account_order ... ok
+test desktop_join_v2_matches_generated_arguments_and_account_order ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running C:\Users\isich\XFChess\programs\xfchess-game\tests\instruction_layout_tests.rs (C:\Users\isich\AppData\Loc
+running 4 tests
+test initialize_tournament_deserializes_captured_devnet_bytes ... ok
+test initialize_tournament_matches_hand_built_layout ... ok
+test recovery_versioned_creation_keeps_argument_bytes_and_account_prefix ... ok
+test recovery_errors_append_after_existing_error_codes ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running C:\Users\isich\XFChess\programs\xfchess-game\tests\profile_session_tests.rs (C:\Users\isich\AppData\Local\
+running 3 tests
+test player_session_budget_is_overflow_safe ... ok
+test external_elo_is_stored_in_centiscale ... ok
+test profile_init_preserves_existing_stats_and_verification ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== xfchess-security-clippy-final.log ===
+Full-log SHA-256: 5045a2d53f5c74a9ac838b1e31f1203368c20d380e97f495c7bbc3561df7fea5
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 24.34s
+
+=== xfchess-security-all-targets-final.log ===
+Full-log SHA-256: fa30fa626e43170429f2e87c1d26bc773dfc35080ead93f727d43c2b19897e61
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.76s
+
+=== xfchess-security-sbf-funding-fix.log ===
+Full-log SHA-256: 8e0a5a24c572f7b0b686a9cc49a19bc7f15bb391d767a7c1b84922e6f0600715
+    Finished `release` profile [optimized] target(s) in 23.92s
+
+=== xfchess-security-program-tests-final.log ===
+Full-log SHA-256: 31bf4ead81f122d1f21d28ac2c30d841e3aeb2c75171274003ad10736bbe3fb5
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.72s
+     Running tests\account_security_tests.rs (target\debug\deps\account_security_tests-b1dc002cb4e51b44.exe)
+running 18 tests
+test legacy_lifecycle_cannot_omit_or_reuse_a_v2_identity ... ok
+test authenticated_zero_wager_recovery_succeeds_preserves_donations_and_rejects_retry ... ok
+test active_session_cannot_reset_allowance ... ok
+test recovery_record_binding_is_immutable_and_cannot_delegate_twice ... ok
+test authorized_recovery_without_identity_preserves_all_accounts_on_retry ... ok
+test authorized_v2_recovery_rejects_either_forged_recipient_atomically ... ok
+test profile_rejects_game_and_other_players_profile_without_mutation ... ok
+test callback_rejects_malformed_seeds_and_wrong_game_without_mutation ... ok
+test canonical_nonempty_profile_with_wrong_owner_is_rejected ... ok
+test canonical_profile_reinitialization_preserves_accumulated_state ... ok
+test global_join_v2_binds_authenticated_black_and_preserves_white ... ok
+test ordinary_settlement_must_supply_canonical_record_and_disables_recovery ... ok
+test callback_checks_buffer_system_program_and_sdk_signature_owner ... ok
+test recovery_rejects_unauthorized_signer_and_populated_game ... ok
+test recovery_with_subrent_excess_fails_before_all_payments ... ok
+test session_key_cannot_replace_player_wallet_authorization ... ok
+test wager_expiry_rejects_overflow_and_exact_boundary_without_mutation ... ok
+test wallet_reauthorization_resets_only_expired_exhausted_or_revoked_sessions ... ok
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests\client_layout_tests.rs (target\debug\deps\client_layout_tests-5266c62e741f5112.exe)
+running 3 tests
+test desktop::withdraw_expired_layout_tests::withdraw_expired_wager_matches_the_program_encoding_and_account_order ... ok
+test desktop_join_v2_matches_generated_arguments_and_account_order ... ok
+test desktop_create_v2_matches_generated_arguments_and_account_order ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\er_recovery_tests.rs (target\debug\deps\er_recovery_tests-254882dec7e3d048.exe)
+running 8 tests
+test recovery_v2_pays_verified_wagers_and_preserves_extra_lamports ... ok
+test recovery_v2_authority_cannot_substitute_either_player ... ok
+test recover_stuck_delegation_rejects_wrong_authority ... ok
+test request_force_undelegate_rejects_spoofed_owner_program ... ok
+test request_force_undelegate_rejects_a_live_game ... ok
+test request_force_undelegate_allows_a_game_idle_past_its_timeout ... ok
+test request_force_undelegate_rejects_spoofed_delegation_program ... ok
+test force_undelegate_after_timeout_rejects_spoofed_owner_program ... ok
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+     Running tests\global_create_game_tests.rs (target\debug\deps\global_create_game_tests-bfacba9abdfc3309.exe)
+running 7 tests
+test global_create_game_rejects_an_underfunded_session_vault ... ok
+test global_create_game_works_for_a_free_zero_wager_game ... ok
+test global_create_game_rejects_unreasonable_platform_fee ... ok
+test global_create_game_funds_rent_and_wager_from_session_vault ... ok
+test global_create_game_accepts_a_vault_funded_exactly_enough ... ok
+test global_join_game_rejects_an_underfunded_session_vault ... ok
+test global_join_game_funds_wager_from_session_vault ... ok
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+     Running tests\init_profile_sponsored_tests.rs
+running 2 tests
+test profile_substitution_cannot_overwrite_game_or_create_username ... ok
+test sponsored_profile_is_owned_by_player_not_backend ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+     Running tests\instruction_layout_tests.rs (target\debug\deps\instruction_layout_tests-f859c69c8b11215f.exe)
+running 4 tests
+test recovery_errors_append_after_existing_error_codes ... ok
+test initialize_tournament_deserializes_captured_devnet_bytes ... ok
+test recovery_versioned_creation_keeps_argument_bytes_and_account_prefix ... ok
+test initialize_tournament_matches_hand_built_layout ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== xfchess-security-settlement-tests.log ===
+Full-log SHA-256: a71c681c60ee5af914379cddc9624641b03a70d6275159cc014ea8f8e228f92c
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.19s
+     Running tests\game_settlement_tests.rs (target\debug\deps\game_settlement_tests-5baa6808e113b9d6.exe)
+running 4 tests
+test init_game_fields_sets_complete_waiting_state ... ok
+test pot_is_wager_times_two_with_overflow_guard ... ok
+test opponent_guard_returns_the_other_player ... ok
+test move_apply_rejects_turn_and_nonce_mismatches ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\global_session_settlement_tests.rs
+running 5 tests
+test finalize_game_refunds_cancelled_zero_move_game_to_both_players ... ok
+test finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer ... ok
+test finalize_game_rejects_mismatched_fee_payer ... ok
+test finalize_game_pays_the_nonzero_country_fee_to_treasury ... ok
+test finalize_game_rejects_spoofed_black_authority ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+     Running tests\tournament_game_creation_tests.rs
+running 2 tests
+test authority_seats_a_pairing_in_an_active_game_with_move_sessions ... ok
+test only_the_authority_may_create_and_only_for_registered_players ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+=== xfchess-security-wallet-lifecycle-tests.log ===
+Full-log SHA-256: f16c8a6894b8cd4ba045a87541fc54b9641c10d850697c75264272fcb2d52c46
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 12s
+     Running tests\global_create_game_tests.rs (target\debug\deps\global_create_game_tests-bfacba9abdfc3309.exe)
+running 8 tests
+test global_join_game_rejects_an_underfunded_session_vault ... ok
+test global_create_game_rejects_unreasonable_platform_fee ... ok
+test global_create_game_works_for_a_free_zero_wager_game ... ok
+test global_create_game_rejects_an_underfunded_session_vault ... ok
+test global_create_game_funds_rent_and_wager_from_session_vault ... ok
+test global_join_game_funds_wager_from_session_vault ... ok
+test wallet_v2_create_join_cancel_conserves_wagers_and_closes_identity ... ok
+test global_create_game_accepts_a_vault_funded_exactly_enough ... ok
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+=== xfchess-security-tournament-session-tests.log ===
+Full-log SHA-256: 6b75393fe698420e89948817b6c39d35b19725e88e0259706c2bcb94ffc39298
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.41s
+     Running tests\tournament_game_creation_tests.rs
+running 3 tests
+test only_the_authority_may_create_and_only_for_registered_players ... ok
+test tournament_session_v2_funds_game_record_and_wager_from_its_vault ... ok
+test authority_seats_a_pairing_in_an_active_game_with_move_sessions ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+=== xfchess-security-rules-tests.log ===
+Full-log SHA-256: 39fd44bb73f892263ba8516a5eeb86f433626e7a8ec4a55b1d2a7c39346b131d
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.83s
+     Running unittests C:\Users\isich\XFChess\libs\chess\xfchess-rules\src\lib.rs
+running 2 tests
+test tests::halfmove_clock_reads_the_position ... ok
+test tests::insufficient_material_follows_the_contract_definition ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== xfchess-security-engine-standalone.log ===
+Full-log SHA-256: 563283ca7cb1c057f2f5cbda3a4f99d052b16ff24b9a943b8a46eddb4606ac96
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 40.25s
+     Running unittests src\lib.rs
+running 77 tests
+test board::tests::test_get_piece_at ... ok
+test board::tests::test_get_piece_color ... ok
+test board::tests::test_init_board_starting_position ... ok
+test board::tests::test_is_empty ... ok
+test api::moves::tests::bitboards_in_sync_after_simple_move ... ok
+test api::moves::tests::bitboards_in_sync_after_promotion ... ok
+test api::moves::tests::bitboards_in_sync_after_white_kingside_castle ... ok
+test api::moves::tests::is_legal_move_restores_bitboards ... ok
+test api::moves::tests::bitboards_in_sync_after_black_kingside_castle ... ok
+test board::tests::test_piece_belongs_to ... ok
+test api::moves::tests::san_to_move_ne5_after_double_castling ... ok
+test board::tests::test_pos_to_square ... ok
+test board::tests::test_is_valid_pos ... ok
+test board::tests::test_is_valid_square ... ok
+test board::tests::test_square_to_pos ... ok
+test api::moves::tests::bitboards_in_sync_after_capture ... ok
+test board::tests::test_square_conversion_round_trip ... ok
+test api::moves::tests::zugzwang_pgn_precomputes_all_50_plies ... ok
+test book::tests::book_responds_to_e4 ... ok
+test book::tests::out_of_book_returns_none ... ok
+test evaluation::position::tests::extra_queen_is_decisive ... ok
+test evaluation::position::tests::startpos_is_symmetric ... ok
+test evaluation::position::tests::eval_is_color_symmetric ... ok
+test move_gen::noisy_generation_tests::captures_match_filtered_full_near_promotion ... ok
+test evaluation::position::tests::advanced_pawn_beats_home_pawn ... ok
+test on_chain_attack::tests::test_knight_attacks_e4 ... ok
+test on_chain::tests::test_fen_roundtrip_after_e2e4 ... ok
+test on_chain_attack::tests::test_no_check_starting_position ... ok
+test move_gen::noisy_generation_tests::captures_match_filtered_full_kiwipete ... ok
+test on_chain::tests::test_fen_roundtrip_starting_position ... ok
+test move_gen::noisy_generation_tests::captures_match_filtered_full_start ... ok
+test move_gen::noisy_generation_tests::en_passant_capture_is_generated_directly ... ok
+test on_chain_moves::tests::test_parse_uci_e2e4 ... ok
+test move_gen::noisy_generation_tests::captures_match_filtered_full_promotion_heavy ... ok
+test on_chain_moves::tests::test_parse_uci_promotion ... ok
+test on_chain_moves::tests::test_insufficient_material_cases ... ok
+test on_chain_moves::tests::test_capture_to_bare_kings_is_insufficient_material ... ok
+test on_chain_moves::tests::test_wrong_side_to_move ... ok
+test on_chain_moves::tests::test_illegal_move_rejected ... ok
+test on_chain_attack::tests::test_rook_attacks_open_file ... ok
+test perft::tests::kiwipete_depth4 ... ignored, slow — run with `cargo test -- --ignored`
+test on_chain_moves::tests::test_white_pawn_e2e4 ... ok
+test perft::tests::kiwipete_depth1 ... ok
+test perft::tests::pos3_depth1 ... ok
+test perft::tests::pos3_depth4 ... ignored, slow — run with `cargo test -- --ignored`
+test perft::tests::pos3_depth2 ... ok
+test perft::tests::pos5_depth1 ... ok
+test perft::tests::kiwipete_depth2 ... ok
+test perft::tests::pos5_depth2 ... ok
+test perft::tests::start_depth5 ... ignored, slow — run with `cargo test -- --ignored`
+test perft::tests::start_depth1 ... ok
+test search::bench::bench_search_nodes_per_sec ... ignored, manual benchmark — run with --ignored --nocapture, ideally --release
+test perft::tests::start_depth2 ... ok
+test pgn::san_tests::check_with_escape_reports_check_suffix_not_mate ... ok
+test pgn::san_tests::fools_mate_reports_checkmate_suffix ... ok
+test perft::tests::pos3_depth3 ... ok
+test see::tests::quiet_move_to_attacked_square_loses_mover ... ok
+test see::tests::rook_takes_defended_pawn_loses ... ok
+test see::tests::pawn_takes_defended_pawn_is_even ... ok
+test see::tests::rook_takes_undefended_pawn_wins ... ok
+test types::tests::test_guide2_default ... ok
+test types::tests::test_guide1_default ... ok
+test types::tests::test_color_type_alias ... ok
+test types::tests::test_kk_new ... ok
+test types::tests::test_move_default ... ok
+test see::tests::xray_recapture_counts ... ok
+test book::tests::all_book_lines_are_legal ... ok
+test types::tests::test_position_type_alias ... ok
+test types::tests::test_kk_default ... ok
+test types::tests::test_kk_equality ... ok
+test types::tests::test_hash_result_default ... ok
+test types::tests::test_move_is_copy ... ok
+test types::tests::test_tte_default ... ok
+test perft::tests::start_depth3 ... ok
+test perft::tests::pos5_depth3 ... ok
+test perft::tests::kiwipete_depth3 ... ok
+test perft::tests::start_depth4 ... ok
+test result: ok. 73 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+=== xfchess-security-before-fixes.log ===
+Full-log SHA-256: 7e55f444530c35e7fd0946c286ca2790b80c35e20d7e84e772ba779343eff72c
+EXPECTED FAILURE: intentionally vulnerable comparison source, never deployed.
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8m 43s
+     Running C:\Users\isich\XFChess\programs\xfchess-game\tests\account_security_tests.rs (C:\Users\isich\AppData\Local
+running 15 tests
+test recovery_record_binding_is_immutable_and_cannot_delegate_twice ... ok
+test active_session_cannot_reset_allowance ... ok
+test authorized_recovery_without_identity_preserves_all_accounts_on_retry ... FAILED
+test authenticated_zero_wager_recovery_succeeds_preserves_donations_and_rejects_retry ... ok
+test authorized_v2_recovery_rejects_either_forged_recipient_atomically ... ok
+test callback_checks_buffer_system_program_and_sdk_signature_owner ... FAILED
+test profile_rejects_game_and_other_players_profile_without_mutation ... FAILED
+test ordinary_settlement_must_supply_canonical_record_and_disables_recovery ... ok
+test canonical_profile_reinitialization_preserves_accumulated_state ... ok
+test callback_rejects_malformed_seeds_and_wrong_game_without_mutation ... FAILED
+test canonical_nonempty_profile_with_wrong_owner_is_rejected ... ok
+test recovery_rejects_unauthorized_signer_and_populated_game ... ok
+test session_key_cannot_replace_player_wallet_authorization ... ok
+test wager_expiry_rejects_overflow_and_exact_boundary_without_mutation ... FAILED
+test wallet_reauthorization_resets_only_expired_exhausted_or_revoked_sessions ... ok
+failures:
+---- authorized_recovery_without_identity_preserves_all_accounts_on_retry stdout ----
+---- callback_checks_buffer_system_program_and_sdk_signature_owner stdout ----
+---- profile_rejects_game_and_other_players_profile_without_mutation stdout ----
+---- callback_rejects_malformed_seeds_and_wrong_game_without_mutation stdout ----
+---- wager_expiry_rejects_overflow_and_exact_boundary_without_mutation stdout ----
+failures:
+test result: FAILED. 10 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+error: test failed, to rerun pass `--test account_security_tests`
+
+=== xfchess-security-program-tests.log ===
+Full-log SHA-256: 551fa5eb1cb8b0945855167c47b3279436923b9ae672b70e23ddccbe63c8f3cc
+INITIAL FAILURE: vault funding order; fixed by sbf-funding-fix and later passing runs.
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 21m 51s
+     Running tests\account_security_tests.rs (target\debug\deps\account_security_tests-f4ecd3d9d138e804.exe)
+running 18 tests
+test legacy_lifecycle_cannot_omit_or_reuse_a_v2_identity ... ok
+test active_session_cannot_reset_allowance ... ok
+test recovery_record_binding_is_immutable_and_cannot_delegate_twice ... ok
+test authenticated_zero_wager_recovery_succeeds_preserves_donations_and_rejects_retry ... ok
+test canonical_nonempty_profile_with_wrong_owner_is_rejected ... ok
+test session_key_cannot_replace_player_wallet_authorization ... ok
+test callback_checks_buffer_system_program_and_sdk_signature_owner ... ok
+test callback_rejects_malformed_seeds_and_wrong_game_without_mutation ... ok
+test authorized_recovery_without_identity_preserves_all_accounts_on_retry ... ok
+test canonical_profile_reinitialization_preserves_accumulated_state ... ok
+test global_join_v2_binds_authenticated_black_and_preserves_white ... ok
+test ordinary_settlement_must_supply_canonical_record_and_disables_recovery ... ok
+test profile_rejects_game_and_other_players_profile_without_mutation ... ok
+test recovery_rejects_unauthorized_signer_and_populated_game ... ok
+test recovery_with_subrent_excess_fails_before_all_payments ... ok
+test authorized_v2_recovery_rejects_either_forged_recipient_atomically ... ok
+test wager_expiry_rejects_overflow_and_exact_boundary_without_mutation ... ok
+test wallet_reauthorization_resets_only_expired_exhausted_or_revoked_sessions ... ok
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests\er_recovery_tests.rs (target\debug\deps\er_recovery_tests-c6526aea693607c9.exe)
+running 8 tests
+test recovery_v2_pays_verified_wagers_and_preserves_extra_lamports ... ok
+test request_force_undelegate_rejects_spoofed_owner_program ... ok
+test request_force_undelegate_allows_a_game_idle_past_its_timeout ... ok
+test request_force_undelegate_rejects_a_live_game ... ok
+test recovery_v2_authority_cannot_substitute_either_player ... ok
+test recover_stuck_delegation_rejects_wrong_authority ... ok
+test force_undelegate_after_timeout_rejects_spoofed_owner_program ... ok
+test request_force_undelegate_rejects_spoofed_delegation_program ... ok
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+     Running tests\global_create_game_tests.rs (target\debug\deps\global_create_game_tests-7795af5ec0c68611.exe)
+running 7 tests
+test global_create_game_accepts_a_vault_funded_exactly_enough ... FAILED
+test global_create_game_rejects_an_underfunded_session_vault ... ok
+test global_join_game_rejects_an_underfunded_session_vault ... ok
+test global_create_game_funds_rent_and_wager_from_session_vault ... FAILED
+test global_join_game_funds_wager_from_session_vault ... ok
+test global_create_game_rejects_unreasonable_platform_fee ... FAILED
+test global_create_game_works_for_a_free_zero_wager_game ... FAILED
+failures:
+---- global_create_game_accepts_a_vault_funded_exactly_enough stdout ----
+Error: a vault holding rent + wager + rent-exemption must be accepted
+Caused by:
+---- global_create_game_funds_rent_and_wager_from_session_vault stdout ----
+Error: global_create_game should succeed when the session vault PDA funds rent + wager
+Caused by:
+---- global_create_game_rejects_unreasonable_platform_fee stdout ----
+---- global_create_game_works_for_a_free_zero_wager_game stdout ----
+Error: global_create_game should succeed for a zero-wager game
+Caused by:
+failures:
+test result: FAILED. 3 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+error: test failed, to rerun pass `-p xfchess-game --test global_create_game_tests`
+
+=== xfchess-security-production.log ===
+Full-log SHA-256: d711c66c377c476b074549ca1b29856084d72539fdbfc5080841f110c7a968c5
+EXPECTED OPEN RELEASE GATE: see verification report; not a passing check.
+error[E0080]: evaluation panicked: mainnet: vps_authority must be rotated
+error[E0080]: evaluation panicked: mainnet: treasury_authority must be rotated
+error[E0080]: evaluation panicked: mainnet: dispute_authority must be rotated
+error[E0080]: evaluation panicked: mainnet: link_authority must be rotated
+error[E0080]: evaluation panicked: mainnet: kyc_authority must be rotated
+error[E0080]: evaluation panicked: mainnet build refused: set the real program address in the mainnet declare_id!() in
+error: could not compile `xfchess-game-sbf` (lib) due to 6 previous errors
+
+=== xfchess-security-format-final.log ===
+Full-log SHA-256: 46a98f443d71d74dfe4a21b042cd245047469c115f6c41a87072b9ae712833ed
+EXPECTED OPEN RELEASE GATE: see verification report; not a passing check.
+Diff in \\?\C:\Users\isich\XFChess\src\rendering\board\spawn.rs:168:
+
+=== xfchess-security-backend-check.log ===
+Full-log SHA-256: 3949347b4858c888008ad5d63cbea2e224ae0cafc6fd141f113d9424c9b9d59a
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3m 38s

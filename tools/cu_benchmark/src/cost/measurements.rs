@@ -2,8 +2,10 @@ use serde::{Deserialize, Serialize};
 use solana_client::{rpc_client::RpcClient, rpc_config::RpcTransactionConfig};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::signature::Signature;
-use solana_transaction_status::{option_serializer::OptionSerializer, UiTransactionEncoding};
 use std::collections::{BTreeMap, HashSet};
+use xfchess_client_compat::transaction_status::{
+    option_serializer::OptionSerializer, UiTransactionEncoding,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
