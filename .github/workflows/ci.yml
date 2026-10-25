@@ -151,6 +151,10 @@ jobs:
         run: cargo test -p xfchess-game -- --test-threads=1
       - name: Remaining workspace tests
         run: cargo test --workspace --exclude xfchess --exclude backend --exclude xfchess-game --exclude xfchess-rules --exclude xfchess-stockfish
+      # The default build leaves out braid-iroh's H3 interface, so its access-policy,
+      # revocation and bridge tests only run with the feature on.
+      - name: Iroh H3 interface tests
+        run: cargo test --locked -p braid-iroh --features proxy
 
   wasm-build:
     name: WASM Build
