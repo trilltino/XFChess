@@ -1,0 +1,41 @@
+{
+  "target": "sbpf-solana-solana",
+  "toolchain": "platform-tools v1.58, rustc 1.95.0",
+  "edges": "normal",
+  "lockfile_sha256": "bcce8dded08f0f96393f932e864f79e0371736d96d41cf8a989ea456f8b1837a",
+  "findings": [
+    {
+      "package": "crypto-bigint",
+      "version": "0.5.5",
+      "advisory": "RUSTSEC-2026-0387",
+      "in_sbpf_normal_dependency_graph": false,
+      "assessment": "Absent from the actual SBPF normal target graph; host/dev lockfile finding.",
+      "evidence_sha256": "9553e5b7181c0d36d713038a16b3bf4aac7837903f7b7f41b8465eda08f0ae47"
+    },
+    {
+      "package": "curve25519-dalek",
+      "version": "3.2.0",
+      "advisory": "RUSTSEC-2024-0344",
+      "in_sbpf_normal_dependency_graph": false,
+      "assessment": "Absent from the actual SBPF normal target graph; host/dev lockfile finding.",
+      "evidence_sha256": "d05f12a5a867611196ff2a71af7f8a916abffbe4c6d523f39f455d688c840155"
+    },
+    {
+      "package": "ed25519-dalek",
+      "version": "1.0.1",
+      "advisory": "RUSTSEC-2022-0093",
+      "in_sbpf_normal_dependency_graph": false,
+      "assessment": "Absent from the actual SBPF normal target graph; host/dev lockfile finding.",
+      "evidence_sha256": "0b037f4e054222c7065e172cd2cc689b8b8de901479617fa3024141ff8dc4c0d"
+    },
+    {
+      "package": "rkyv",
+      "version": "0.7.46",
+      "advisory": "RUSTSEC-2026-0235",
+      "in_sbpf_normal_dependency_graph": true,
+      "assessment": "Dependency present, but DLP diff module disabled. Its only rkyv source use is AlignedVec in that gated module; no application Rc/Arc archive validation path identified.",
+      "evidence_sha256": "39c8ee8fd2a375107f3477b7141dfc1e0d085a0c365c6c5a93ad7ab1aa476149"
+    }
+  ],
+  "scope": "XFChess program and its selected target/features only. Does not audit independently deployed CPI programs, certify host dependencies, suppress advisories or satisfy all-transitive-latest."
+}
