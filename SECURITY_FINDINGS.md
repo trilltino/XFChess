@@ -1,9 +1,8 @@
 # Contract security remediation — 24 October 2026
 
-**Release checks in progress.** The owner has authorized a devnet upgrade,
-the contracts-repository main update and an XFChess pull request. No upgraded
-contract has been deployed. The engine dependency update is on contracts main.
-Historical pinned-dependency results below do not verify the latest lockfile.
+**Devnet upgrade finalized on 25 October 2026.** The owner has authorized a devnet upgrade,
+the contracts-repository main update and an XFChess pull request. The deployed code hash matches the tested artifact. [XFChess PR #52](https://github.com/trilltino/XFChess/pull/52) is open as a draft; the full contracts-main synchronization is being finalized.
+Latest-stack results and remaining audit limits are recorded below.
 
 | Item | Severity / role / assets | Evidence and reproduction | Status | Verification / unresolved work |
 |---|---|---|---|---|

@@ -1,6 +1,6 @@
 # Latest-dependency and release follow-up â€” 24 October 2026
 
-Status: verification in progress. This file records current work separately from
+Status: latest-stack verification passed for the checks recorded below; devnet upgrade finalized on 25 October. Outstanding audit/dependency limits remain explicit. This file records current work separately from
 the historical 23 October pinned-dependency results. Pending checks are not passes.
 
 The owner authorized the recovery schema/client migration, devnet deployment,
@@ -53,9 +53,9 @@ to avoid verifying an obsolete graph. Test compilation now uses the updated grap
 | Normal IDL generation with safety lint enabled | Passed, 21 print tests; 82 instructions/47 types; old layouts and ABI preserved |
 | Latest-stack local base-chain/ER round trip | Passed, including schedule/cancel task CPIs; localnet-only routing and SDK 5 signed transactions |
 | Latest client/backend integration checks | Passed: backend all targets (including CU benchmark dependency); three wire-boundary and eight rules tests |
-| Devnet upgrade and independent ProgramData hash verification | Not performed |
+| Devnet upgrade and independent ProgramData hash verification | Finalized at slot 514786564; exact code hash and zero padding independently verified |
 | Contracts source/IDL synchronization and main push | Engine manifest only so far |
-| XFChess PR | Not yet opened |
+| XFChess PR | [Draft #52](https://github.com/trilltino/XFChess/pull/52) |
 
 The local ER test uses fixed loopback RPCs and freshly generated in-memory keys.
 Its localnet-only routing override selects the official local ER identity; devnet
@@ -139,3 +139,5 @@ their newly generated local payer; deployed keyfiles are never loaded.
 Final follow-up: strict actual-workspace Clippy passed with warnings denied. The expanded live ER test passed in 5.34 seconds, including MagicBlock scheduled-task creation/cancellation before commit/undelegation and exact byte restoration. The final locked SBF rebuild retained SHA-256 f60ce59fc4ac7cd02a83e520c54b75ea9d44c6127a986fa8efb01b3e431f74fe. Inventory refreshed to 953 closure entries, 768 registry names, 342 older entries and zero registry failures.
 
 Final backend `cargo check -p backend --all-targets --locked` passed. Current APIs now decode UI-account data explicitly, copy the five RPC account fields at the SDK boundary, use the split status-client types and preserve lowercase SHA-256 hex output. Client tests now check both directions of legacy/v0 wire conversion and malformed-header rejection. Rules suite: eight passed.
+
+Authorized deployment finalized on 25 October 2026: [3u4N77sN31qvdzx8PFHuRuDp1LGyMGKw7wQc62qmc4iXoCkhJsLq5j9nShjeQju8ZrVVnmudum1APmjyDL7u4FSj](https://explorer.solana.com/tx/3u4N77sN31qvdzx8PFHuRuDp1LGyMGKw7wQc62qmc4iXoCkhJsLq5j9nShjeQju8ZrVVnmudum1APmjyDL7u4FSj?cluster=devnet), slot 514786564. ProgramData code SHA-256 matches the reviewed artifact exactly; authority unchanged. Upload resumed in its existing buffer after public RPC rate limiting, with an independent buffer hash check before upgrade. The buffer closed automatically. Net payer spend: 5,710,000 lamports (0.00571 devnet SOL). Source commit: fb168600806aca161ff423610bc9a6457476b494.
