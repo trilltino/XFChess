@@ -1,21 +1,33 @@
+//! Complete update in the Braid protocol.
+
 use crate::types::{ContentRange, Patch, Version};
-#[cfg(test)]
-use anyhow::Context as _;
 use bytes::Bytes;
 use std::collections::BTreeMap;
 
+/// A complete update in the Braid protocol.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Update {
+    /// Version ID(s)
     pub version: Vec<Version>,
+    /// Parent version(s)
     pub parents: Vec<Version>,
+    /// Catch-up signaling
     pub current_version: Option<Vec<Version>>,
+    /// Conflict resolution strategy
     pub merge_type: Option<String>,
+    /// Incremental updates
     pub patches: Option<Vec<Patch>>,
+    /// Complete state content
     pub body: Option<Bytes>,
+    /// Content range for single patch
     pub content_range: Option<ContentRange>,
+    /// Media type
     pub content_type: Option<String>,
+    /// HTTP status code
     pub status: u16,
+    /// Additional headers
     pub extra_headers: BTreeMap<String, String>,
+    /// Target URL
     pub url: Option<String>,
 }
 
@@ -42,6 +54,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Update {
 }
 
 impl Update {
+    /// Create a snapshot update with complete state.
     #[must_use]
     pub fn snapshot(version: Version, body: impl Into<Bytes>) -> Self {
         Update {
@@ -59,6 +72,7 @@ impl Update {
         }
     }
 
+    /// Create a patch update with incremental changes.
     #[must_use]
     pub fn patched(version: Version, patches: Vec<Patch>) -> Self {
         Update {
@@ -216,6 +230,7 @@ impl Default for Update {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
     fn test_update_snapshot() {
@@ -324,14 +339,7 @@ mod tests {
         // Zero-length bodies are valid per spec Section 4
         let update = Update::snapshot(Version::new("v1"), "");
         assert!(update.body.is_some());
-        assert_eq!(
-            update
-                .body
-                .as_ref()
-                .context("required operation value")?
-                .len(),
-            0
-        );
+        assert_eq!(update.body.as_ref().context("unexpected failure")?.len(), 0);
         Ok(())
     }
 
@@ -341,14 +349,7 @@ mod tests {
         let update = Update::subscription_snapshot(Version::new("v1"), Bytes::new());
         assert_eq!(update.status, 209);
         assert!(update.body.is_some());
-        assert_eq!(
-            update
-                .body
-                .as_ref()
-                .context("required operation value")?
-                .len(),
-            0
-        );
+        assert_eq!(update.body.as_ref().context("unexpected failure")?.len(), 0);
         Ok(())
     }
 }

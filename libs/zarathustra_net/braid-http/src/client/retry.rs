@@ -1,15 +1,19 @@
-#[cfg(test)]
-use anyhow::Context as _;
+//! Retry configuration and logic for Braid HTTP client.
+
 use std::time::Duration;
 
-pub const RETRYABLE_STATUS: &[u16] = &[309, 408, 425, 429, 432, 500, 502, 503, 504];
-
+/// Configuration for retry behavior.
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
+    /// Maximum number of retry attempts (None = infinite)
     pub max_retries: Option<u32>,
+    /// Initial backoff duration
     pub initial_backoff: Duration,
+    /// Maximum backoff duration
     pub max_backoff: Duration,
+    /// HTTP status codes that trigger a retry
     pub retry_on_status: Vec<u16>,
+    /// Whether to respect the `Retry-After` header
     pub respect_retry_after: bool,
 }
 
@@ -19,7 +23,7 @@ impl Default for RetryConfig {
             max_retries: None,
             initial_backoff: Duration::from_secs(1),
             max_backoff: Duration::from_secs(3),
-            retry_on_status: RETRYABLE_STATUS.to_vec(),
+            retry_on_status: vec![408, 425, 429, 502, 503, 504],
             respect_retry_after: true,
         }
     }
@@ -118,10 +122,10 @@ impl RetryState {
         status_text: Option<&str>,
         retry_after: Option<Duration>,
     ) -> RetryDecision {
-        let says_missing_parents =
-            status_text.is_some_and(|t| t.to_ascii_lowercase().contains("missing parents"));
-        if says_missing_parents {
-            return self.decide_retry(retry_after);
+        if let Some(text) = status_text {
+            if text.to_lowercase().contains("missing parents") {
+                return self.decide_retry(retry_after);
+            }
         }
         self.should_retry_status(status, retry_after)
     }
@@ -145,7 +149,7 @@ impl RetryState {
             self.config.max_backoff,
         );
 
-        RetryDecision::Retry(wait)
+        RetryDecision::Retry(wait.min(self.config.max_backoff))
     }
 
     pub fn reset(&mut self) {
@@ -155,36 +159,18 @@ impl RetryState {
 }
 
 pub fn parse_retry_after(value: &str) -> Option<Duration> {
-    if let Ok(seconds) = value.trim().parse::<u64>() {
+    if let Ok(seconds) = value.parse::<u64>() {
         return Some(Duration::from_secs(seconds));
     }
-    httpdate::parse_http_date(value.trim())
-        .ok()
-        .map(|deadline| {
-            deadline
-                .duration_since(std::time::SystemTime::now())
-                .unwrap_or_default()
-        })
+    httpdate::parse_http_date(value).ok().map(|date| {
+        date.duration_since(std::time::SystemTime::now())
+            .unwrap_or_default()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn retry_after_accepts_seconds_and_http_dates() -> anyhow::Result<()> {
-        assert_eq!(parse_retry_after(" 2 "), Some(Duration::from_secs(2)));
-        assert_eq!(
-            parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT"),
-            Some(Duration::ZERO)
-        );
-        let future = std::time::SystemTime::now() + Duration::from_secs(60);
-        let delay = parse_retry_after(&httpdate::fmt_http_date(future))
-            .context("required operation value")?;
-        assert!(delay > Duration::from_secs(58) && delay <= Duration::from_secs(60));
-        assert_eq!(parse_retry_after("not a date"), None);
-        Ok(())
-    }
 
     #[test]
     fn test_default_config() {

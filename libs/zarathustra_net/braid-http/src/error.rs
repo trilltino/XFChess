@@ -1,11 +1,19 @@
+//! Error types for Braid HTTP operations.
+
 use std::io;
 use thiserror::Error;
 
+/// Result type for Braid HTTP operations.
 pub type Result<T> = std::result::Result<T, BraidError>;
 
+/// Errors that can occur during Braid HTTP operations.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum BraidError {
+    #[error("Required capability is unavailable: {capability}")]
+    CapabilityUnavailable { capability: &'static str },
+    #[error("{resource} exceeds the configured limit of {limit} bytes")]
+    ResourceLimit { resource: &'static str, limit: u64 },
     #[error("HTTP error: {0}")]
     Http(String),
 
@@ -32,6 +40,12 @@ pub enum BraidError {
 
     #[error("Expected status 209 for subscription, got {0}")]
     InvalidSubscriptionStatus(u16),
+
+    #[error("Subscription rejected with HTTP {status}")]
+    SubscriptionStatus {
+        status: u16,
+        retry_after: Option<std::time::Duration>,
+    },
 
     #[error("Protocol error: {0}")]
     Protocol(String),
@@ -62,9 +76,14 @@ pub enum BraidError {
 
     #[error("Anyhow error: {0}")]
     Anyhow(String),
+
+    /// An outgoing immutable payload was missing, truncated, or no longer matched its reference.
+    #[error("Payload error: {0}")]
+    Payload(String),
 }
 
 impl BraidError {
+    /// Check if this error is retryable.
     #[inline]
     #[must_use]
     pub fn is_retryable(&self) -> bool {
@@ -83,6 +102,7 @@ impl BraidError {
         }
     }
 
+    /// Check if this is an access denied error.
     #[inline]
     #[must_use]
     pub fn is_access_denied(&self) -> bool {

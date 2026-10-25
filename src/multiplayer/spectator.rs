@@ -311,13 +311,15 @@ fn spawn_live_feed(game_id: &str, tokio: &TokioRuntime) -> (LiveFeedBuffer, Arc<
             }
         };
 
-        let request = BraidRequest::new().subscribe().with_heartbeat(20)
+        let request = BraidRequest::new()
+            .subscribe()
+            .with_heartbeat(20)
             .with_retry(braid_chess::braid_http::client::RetryConfig::default().with_max_retries(5));
         let cancelled = async {
             while !cancel_task.load(Ordering::Relaxed) { tokio::time::sleep(std::time::Duration::from_millis(100)).await; }
         };
         tokio::pin!(cancelled);
-        let opened = tokio::select! { _ = &mut cancelled => return, opened = client.subscribe(&url, request) => opened };
+        let opened = tokio::select! { _ = &mut cancelled => return, opened = client.subscribe_reliable(&url, request) => opened };
         let mut subscription = match opened {
             Ok(s) => s,
             Err(e) => {
@@ -334,14 +336,15 @@ fn spawn_live_feed(game_id: &str, tokio: &TokioRuntime) -> (LiveFeedBuffer, Arc<
             let update = tokio::select! { _ = &mut cancelled => break, update = subscription.next() => update };
             match update {
                 Some(Ok(update)) => {
-                    let Some(body) = update.body_str() else { continue };
-                    let Ok(ChessMessage::Move(payload)) =
-                        serde_json::from_str::<ChessMessage>(body)
-                    else {
-                        continue;
-                    };
-                    if let Ok(mut buf) = buffer_task.lock() {
-                        buf.push(payload.uci);
+                    // The feed is read-only: an update is consumed once it is buffered or skipped.
+                    let mover = update.body_str().and_then(|body| serde_json::from_str::<ChessMessage>(body).ok());
+                    if let Some(ChessMessage::Move(payload)) = mover {
+                        if let Ok(mut buf) = buffer_task.lock() {
+                            buf.push(payload.uci);
+                        }
+                    }
+                    if subscription.acknowledge(&update).await.is_err() {
+                        break;
                     }
                 }
                 Some(Err(e)) => {

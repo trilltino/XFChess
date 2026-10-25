@@ -1,8 +1,9 @@
-use crate::types::{Patch, Version};
-#[cfg(test)]
-use anyhow::Context as _;
+//! Braid-specific request parameters.
 
-#[derive(Clone, Debug)]
+use crate::types::{Patch, Version};
+
+/// Braid-specific request parameters.
+#[derive(Clone, Default)]
 pub struct BraidRequest {
     pub version: Option<Vec<Version>>,
     pub parents: Option<Vec<Version>>,
@@ -11,40 +12,41 @@ pub struct BraidRequest {
     pub heartbeat_interval: Option<u64>,
     pub peer: Option<String>,
     pub ack: Option<Vec<Version>>,
+    pub enable_multiplex: bool,
     pub merge_type: Option<String>,
     pub content_type: Option<String>,
     pub method: String,
     pub body: bytes::Bytes,
     pub extra_headers: std::collections::BTreeMap<String, String>,
     pub retry: Option<crate::client::retry::RetryConfig>,
-    pub manual_ack: bool,
 }
-
-impl Default for BraidRequest {
-    fn default() -> Self {
-        Self {
-            version: None,
-            parents: None,
-            subscribe: false,
-            patches: None,
-            heartbeat_interval: None,
-            peer: None,
-            ack: None,
-            merge_type: None,
-            content_type: None,
-            method: "GET".into(),
-            body: bytes::Bytes::new(),
-            extra_headers: Default::default(),
-            retry: None,
-            manual_ack: false,
-        }
+impl std::fmt::Debug for BraidRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BraidRequest")
+            .field("method", &self.method)
+            .field("version", &self.version)
+            .field("parents", &self.parents)
+            .field("subscribe", &self.subscribe)
+            .field("body_bytes", &self.body.len())
+            .field("patch_count", &self.patches.as_ref().map(Vec::len))
+            .field(
+                "header_names",
+                &self.extra_headers.keys().collect::<Vec<_>>(),
+            )
+            .finish()
     }
 }
 
 impl BraidRequest {
     #[inline]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            method: "GET".to_string(),
+            body: bytes::Bytes::new(),
+            extra_headers: std::collections::BTreeMap::new(),
+            ..Default::default()
+        }
     }
 
     pub fn subscribe(mut self) -> Self {
@@ -102,6 +104,11 @@ impl BraidRequest {
         self
     }
 
+    pub fn with_multiplex(mut self, enable: bool) -> Self {
+        self.enable_multiplex = enable;
+        self
+    }
+
     pub fn with_merge_type(mut self, merge_type: impl Into<String>) -> Self {
         self.merge_type = Some(merge_type.into());
         self
@@ -135,17 +142,12 @@ impl BraidRequest {
     pub fn retry(self) -> Self {
         self.with_retry(crate::client::retry::RetryConfig::default())
     }
-
-    /// Advance the resume cursor only after `Subscription::acknowledger` accepts an update.
-    pub fn with_manual_ack(mut self) -> Self {
-        self.manual_ack = true;
-        self
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
     fn test_braid_request_builder() -> anyhow::Result<()> {
@@ -155,7 +157,7 @@ mod tests {
             .with_heartbeat(5);
 
         assert!(req.subscribe);
-        assert_eq!(req.version.context("required operation value")?.len(), 1);
+        assert_eq!(req.version.context("unexpected failure")?.len(), 1);
         assert_eq!(req.heartbeat_interval, Some(5));
         Ok(())
     }
