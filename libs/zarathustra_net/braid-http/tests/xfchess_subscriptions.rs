@@ -46,7 +46,7 @@ async fn rejects_error_pages_instead_of_opening_a_subscription() -> anyhow::Resu
         .await;
     assert!(matches!(
         result,
-        Err(BraidError::InvalidSubscriptionStatus(401))
+        Err(BraidError::SubscriptionStatus { status: 401, .. })
     ));
     server.abort();
     Ok(())
