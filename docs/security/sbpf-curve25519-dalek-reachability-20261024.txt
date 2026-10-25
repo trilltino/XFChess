@@ -1,0 +1,10 @@
+Command: C:\Users\isich\.cache\solana\v1.58\platform-tools\rust\bin\cargo.exe tree --locked --target sbpf-solana-solana --edges normal -p xfchess-game-sbf -i curve25519-dalek@3.2.0
+
+warning: patch `proc-macro-error2 v2.0.1 (C:\Users\isich\XFChess\vendor\proc-macro-error2)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+warning: nothing to print.
+
+To find dependencies that require specific target platforms, try to use option `--target all` first, and then narrow your search scope accordingly.
