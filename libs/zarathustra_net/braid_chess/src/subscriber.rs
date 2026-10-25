@@ -2,7 +2,6 @@ use crate::error::BraidChessError;
 use crate::message::ChessMessage;
 use crate::resource::ChessResource;
 use async_channel::Receiver;
-use braid_http::client::{Acknowledger, Subscription};
 use braid_http::types::{BraidRequest, Update, Version};
 use braid_http::BraidClient;
 
@@ -13,6 +12,25 @@ pub struct ChessSubscriber {
     base_url: String,
     game_id: String,
     client: BraidClient,
+}
+
+/// Application verdict on one delivered update.
+#[derive(Clone)]
+struct Acknowledger(async_channel::Sender<(Vec<Version>, bool)>);
+
+impl Acknowledger {
+    fn acknowledge(&self, versions: &[Version]) -> braid_http::Result<()> {
+        self.0
+            .try_send((versions.to_vec(), true))
+            .map_err(|_| braid_http::BraidError::Aborted)
+    }
+
+    /// Stop the stream without advancing its cursor; the supervisor resubscribes.
+    fn reject(&self, versions: &[Version]) -> braid_http::Result<()> {
+        self.0
+            .try_send((versions.to_vec(), false))
+            .map_err(|_| braid_http::BraidError::Aborted)
+    }
 }
 
 pub struct DeliveryReceipt {
@@ -52,25 +70,24 @@ impl ChessSubscriber {
         resource: ChessResource,
         parents: Vec<Version>,
     ) -> Result<(Receiver<ChessDelivery>, JoinHandle<()>), BraidChessError> {
-        let request = BraidRequest::new()
-            .subscribe()
-            .with_parents(parents)
-            .with_manual_ack()
-            .with_heartbeat(20)
-            .with_retry(braid_http::client::RetryConfig::default().with_max_retries(5));
+        let mut request = BraidRequest::new().subscribe().with_heartbeat(20);
+        // No cursor means replay from the beginning; send no empty Parents header.
+        if !parents.is_empty() {
+            request = request.with_parents(parents);
+        }
         let mut subscription = self
             .client
             .subscribe(&resource.to_url(&self.base_url), request)
             .await
             .map_err(|e| match e {
-                braid_http::BraidError::InvalidSubscriptionStatus(status) => {
+                braid_http::BraidError::InvalidSubscriptionStatus(status)
+                | braid_http::BraidError::SubscriptionStatus { status, .. } => {
                     BraidChessError::HttpStatus(status)
                 }
                 error => BraidChessError::Http(error.to_string()),
             })?;
-        let acknowledger = subscription
-            .acknowledger()
-            .ok_or_else(|| BraidChessError::Http("manual acknowledgment is unavailable".into()))?;
+        let (ack_tx, ack_rx) = async_channel::bounded(1);
+        let acknowledger = Acknowledger(ack_tx);
         let (tx, rx) = async_channel::bounded(1);
         let handle = tokio::spawn(async move {
             loop {
@@ -79,17 +96,33 @@ impl ChessSubscriber {
                     break;
                 };
                 let Some(message) = decode_update(&update) else {
-                    let _ = acknowledger.reject(&update.version);
                     break;
                 };
+                let versions = update.version;
                 let delivery = ChessDelivery {
                     message,
                     receipt: DeliveryReceipt {
-                        versions: update.version,
+                        versions: versions.clone(),
                         acknowledger: Some(acknowledger.clone()),
                     },
                 };
                 if tx.send(delivery).await.is_err() {
+                    break;
+                }
+                // One update is outstanding at a time: the next frame is not read
+                // until the application accepts this one, and a rejection ends the
+                // stream so the cursor stays where it was.
+                let accepted = loop {
+                    let verdict = tokio::select! { _ = tx.closed() => None, verdict = ack_rx.recv() => verdict.ok() };
+                    match verdict {
+                        Some((acknowledged, accepted)) if acknowledged == versions => {
+                            break accepted
+                        }
+                        Some(_) => continue,
+                        None => break false,
+                    }
+                };
+                if !accepted {
                     break;
                 }
             }
@@ -148,13 +181,15 @@ impl ChessSubscriber {
             .with_heartbeat(20)
             .with_retry(braid_http::client::RetryConfig::default().with_max_retries(5));
 
-        let mut subscription: Subscription = self
+        // Reconnects from the last consumed update; the bridge below consumes each update
+        // as soon as it is forwarded.
+        let mut subscription = self
             .client
-            .subscribe(&url, request)
+            .subscribe_reliable(&url, request)
             .await
             .map_err(|e| BraidChessError::Http(e.to_string()))?;
 
-        // Bridge: Subscription.next() → ChessMessage channel
+        // Bridge: ReliableSubscription.next() → ChessMessage channel
         let (chess_tx, chess_rx) = async_channel::bounded::<ChessMessage>(256);
 
         let handle = tokio::spawn(async move {
@@ -167,6 +202,9 @@ impl ChessSubscriber {
                                 debug!("[BRAID SUB] Receiver dropped – exiting bridge");
                                 break;
                             }
+                        }
+                        if subscription.acknowledge(&update).await.is_err() {
+                            break;
                         }
                     }
                     Some(Err(e)) => {

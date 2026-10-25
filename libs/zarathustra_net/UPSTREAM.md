@@ -1,4 +1,33 @@
-# Upstream networking review
+# Upstream networking
+
+## braid-reborn import (2026-10-25)
+
+| Item | Value |
+| --- | --- |
+| Source | [braid-reborn](https://github.com/trilltino/braid-reborn) `master` @ `b53066b2926c5b0134f2d7043a1b1aa61fefdd7c` |
+| Licence of imported code | MIT OR Apache-2.0 (`braid-http/LICENSE-MIT`, `LICENSE-APACHE`) |
+| Base | XFChess `main` @ `d0bac0cedb2ff7bd981779ac0b26aee802715308` |
+| Imported crate | `braid-http` (src, conformance tests, JS codec fixtures) |
+| Adapted, not copied | `braid-iroh` access policy (braid-reborn's version sits on its `braid-core` replica store, which is not imported) |
+| Not imported | `braid-core`, `braid-blob`, `braidfs-*`, `server`, browser harness, upstream fuzz/interop harnesses |
+| Upstream state when imported | CI run 40205988933 was red on `cargo fmt` and the fuzz lockfile; neither applies here: the imported crate is formatted with this repository's rustfmt and the fuzz harness is not imported |
+
+Divergences from upstream `braid-http` (kept deliberately):
+
+1. `server.rs` — `SubscriptionResponse`, `wants_subscribe`, `resume_from` for the game-log and spectate routes.
+2. `protocol::format_heartbeat` and `MessageParser::for_subscription` — bare-CRLF keep-alive between frames.
+3. Patch counts given only as `application/http-patches; count=N` are accepted, must agree with `Patches:`, and `message_to_update` treats any patch list as a patched update.
+4. Subscription updates carry the resource path; the formatter refuses empty patch ranges.
+5. Test-only `unwrap`/`expect` replaced by `?` so `scripts/check_rust_safety.ps1` passes.
+
+Dependency changes: `iroh`/`iroh-base` 1.3.0 → 1.4.1; in-tree `iroh-h3`, `iroh-h3-axum`,
+`iroh-h3-client` removed in favour of the published `iroh-h3-axum` =0.4.0 and
+`iroh-h3-client` =0.5.0; `iroh-gossip` unchanged at 0.101.0.
+
+Migration matrix: [`docs/networking/INVENTORY.csv`](../../docs/networking/INVENTORY.csv).
+Architecture, ordering rules, stored state and rollback: [`docs/networking/MIGRATION.md`](../../docs/networking/MIGRATION.md).
+
+## Earlier review (2026-10-10)
 
 Reviewed 2026-10-10. Inventoried the Braid organization's 36 public repositories;
 inspected code and tests in the nine networking-related checkouts below, plus

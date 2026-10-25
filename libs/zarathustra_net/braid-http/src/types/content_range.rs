@@ -1,9 +1,15 @@
+//! Content-Range specification for patches.
+
 use std::fmt;
 use std::str::FromStr;
 
+/// Content-Range specification for patches.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub struct ContentRange {
+    /// The addressing unit type (e.g., "json", "bytes").
     pub unit: String,
+    /// The range specification within the resource.
     pub range: String,
 }
 
@@ -88,16 +94,6 @@ impl FromStr for ContentRange {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::from_header_value(s)
-    }
-}
-
-#[cfg(feature = "fuzzing")]
-impl<'a> arbitrary::Arbitrary<'a> for ContentRange {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(ContentRange {
-            unit: u.arbitrary()?,
-            range: u.arbitrary()?,
-        })
     }
 }
 

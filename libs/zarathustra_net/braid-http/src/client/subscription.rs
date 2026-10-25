@@ -1,279 +1,139 @@
+//! Subscription streams retain their pending receive future across polls.
 use crate::error::{BraidError, Result};
 use crate::types::Update;
-#[cfg(test)]
-use anyhow::Context as _;
 use futures::Stream;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::time::Duration;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
-#[derive(Clone)]
-pub struct Acknowledger(async_channel::Sender<(Vec<crate::Version>, bool)>);
-
-impl Acknowledger {
-    pub fn acknowledge(&self, versions: &[crate::Version]) -> Result<()> {
-        self.0
-            .try_send((versions.to_vec(), true))
-            .map_err(|_| BraidError::Aborted)
-    }
-
-    /// Stop this subscription without advancing its cursor. Resubscribe after recovery.
-    pub fn reject(&self, versions: &[crate::Version]) -> Result<()> {
-        self.0
-            .try_send((versions.to_vec(), false))
-            .map_err(|_| BraidError::Aborted)
-    }
+pub struct ReceiverStream<T> {
+    receiver: Pin<Box<async_channel::Receiver<T>>>,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HeartbeatConfig {
-    pub interval: Duration,
-    pub timeout: Duration,
-}
-
-impl HeartbeatConfig {
-    #[must_use]
-    pub fn new(interval: Duration) -> Self {
+impl<T> ReceiverStream<T> {
+    pub fn new(receiver: async_channel::Receiver<T>) -> Self {
         Self {
-            interval,
-            timeout: interval
-                .saturating_add(interval / 5)
-                .saturating_add(Duration::from_secs(3)),
+            receiver: Box::pin(receiver),
         }
     }
-
-    #[must_use]
-    pub fn from_secs(secs: f64) -> Self {
-        Self::new(Duration::from_secs_f64(secs))
+}
+impl<T> Stream for ReceiverStream<T> {
+    type Item = T;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<T>> {
+        self.get_mut().receiver.as_mut().poll_next(cx)
     }
-
-    #[must_use]
+}
+#[derive(Debug, Clone)]
+pub struct HeartbeatConfig {
+    pub interval_secs: f64,
+    pub timeout: Duration,
+}
+impl HeartbeatConfig {
+    pub fn new(interval_secs: f64) -> Self {
+        let interval_secs = if interval_secs.is_finite() && interval_secs > 0.0 {
+            interval_secs.min(86400.0)
+        } else {
+            30.0
+        };
+        Self {
+            interval_secs,
+            timeout: Duration::from_secs_f64(1.2 * interval_secs + 3.0),
+        }
+    }
     pub fn from_header(value: &str) -> Option<Self> {
-        super::utils::parse_heartbeat(value)
+        crate::protocol::parse_heartbeat_duration(value)
             .ok()
-            .filter(|interval| !interval.is_zero())
-            .map(Self::new)
+            .map(|duration| Self::new(duration.as_secs_f64()))
     }
 }
 
 pub struct Subscription {
-    updates: Pin<Box<async_channel::Receiver<Result<Update>>>>,
-    heartbeat: Option<HeartbeatConfig>,
-    terminated: bool,
-    acknowledger: Option<Acknowledger>,
+    receiver: ReceiverStream<Result<Update>>,
+    heartbeat_config: Option<HeartbeatConfig>,
     #[cfg(not(target_arch = "wasm32"))]
-    deadline: Option<Pin<Box<tokio::time::Sleep>>>,
+    timer: Option<Pin<Box<tokio::time::Sleep>>>,
+    #[cfg(target_arch = "wasm32")]
+    timer: Option<Pin<Box<gloo_timers::future::TimeoutFuture>>>,
+    timed_out: bool,
 }
-
-pub(crate) struct SubscriptionStreamHandle {
-    pub updates: async_channel::Receiver<Result<Update>>,
-    pub heartbeat: Option<HeartbeatConfig>,
-    pub acknowledgments: Option<async_channel::Sender<(Vec<crate::Version>, bool)>>,
-}
-
 impl Subscription {
-    #[must_use]
-    pub fn new(updates: async_channel::Receiver<Result<Update>>) -> Self {
+    pub fn new(receiver: async_channel::Receiver<Result<Update>>) -> Self {
         Self {
-            updates: Box::pin(updates),
-            heartbeat: None,
-            terminated: false,
-            acknowledger: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            deadline: None,
+            receiver: ReceiverStream::new(receiver),
+            heartbeat_config: None,
+            timer: None,
+            timed_out: false,
         }
     }
-
-    #[must_use]
     pub fn with_heartbeat(
-        updates: async_channel::Receiver<Result<Update>>,
+        receiver: async_channel::Receiver<Result<Update>>,
         config: HeartbeatConfig,
     ) -> Self {
-        Self::new(updates).heartbeat(Some(config))
-    }
-
-    #[must_use]
-    pub fn heartbeat(mut self, config: Option<HeartbeatConfig>) -> Self {
-        self.heartbeat = config;
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.deadline = config.map(|c| Box::pin(tokio::time::sleep(c.timeout)));
-        }
-        self
-    }
-
-    #[must_use]
-    pub fn heartbeat_config(&self) -> Option<HeartbeatConfig> {
-        self.heartbeat
-    }
-
-    pub(crate) fn from_transport(handle: SubscriptionStreamHandle) -> Self {
-        let mut subscription = Self::new(handle.updates);
-        subscription.heartbeat = handle.heartbeat;
-        subscription.acknowledger = handle.acknowledgments.map(Acknowledger);
+        let mut subscription = Self::new(receiver);
+        subscription.heartbeat_config = Some(config);
+        subscription.reset_timer();
         subscription
     }
-
-    pub fn acknowledger(&self) -> Option<Acknowledger> {
-        self.acknowledger.clone()
+    fn reset_timer(&mut self) {
+        if let Some(config) = &self.heartbeat_config {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.timer = Some(Box::pin(tokio::time::sleep(config.timeout)));
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                self.timer = Some(Box::pin(gloo_timers::future::TimeoutFuture::new(
+                    config.timeout.as_millis().min(u32::MAX as u128) as u32,
+                )));
+            }
+        }
     }
-
     pub async fn next(&mut self) -> Option<Result<Update>> {
         futures::StreamExt::next(self).await
     }
-
-    fn touch(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let (Some(config), Some(deadline)) = (self.heartbeat, self.deadline.as_mut()) {
-            deadline
-                .as_mut()
-                .reset(tokio::time::Instant::now() + config.timeout);
-        }
+    pub fn is_heartbeat_timeout(&self) -> bool {
+        self.timed_out
     }
 }
-
 impl Stream for Subscription {
     type Item = Result<Update>;
-
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        use std::future::Future;
         let this = self.get_mut();
-        if this.terminated {
+        if this.timed_out {
             return Poll::Ready(None);
         }
-
-        // `async_channel::Receiver` is itself a Stream, so it is polled directly —
-        // there is no self-referential future here to construct and pin per call.
-        match this.updates.as_mut().poll_next(cx) {
-            Poll::Ready(Some(item)) => {
-                this.touch();
-                return Poll::Ready(Some(item));
+        match Pin::new(&mut this.receiver).poll_next(cx) {
+            Poll::Ready(result) => {
+                this.reset_timer();
+                Poll::Ready(result)
             }
-            Poll::Ready(None) => return Poll::Ready(None),
-            Poll::Pending => {}
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(deadline) = this.deadline.as_mut() {
-            if std::future::Future::poll(deadline.as_mut(), cx).is_ready() {
-                this.terminated = true;
-                this.updates.close();
-                return Poll::Ready(Some(Err(BraidError::Timeout)));
+            Poll::Pending => {
+                if let Some(timer) = &mut this.timer {
+                    if timer.as_mut().poll(cx).is_ready() {
+                        this.timed_out = true;
+                        return Poll::Ready(Some(Err(BraidError::Timeout)));
+                    }
+                }
+                Poll::Pending
             }
         }
-
-        Poll::Pending
     }
 }
-
-impl Drop for Subscription {
-    fn drop(&mut self) {
-        self.updates.close();
-    }
+pub struct SubscriptionStream {
+    receiver: ReceiverStream<Result<Update>>,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::Version;
-
-    #[test]
-    fn timeout_follows_the_reference_formula() {
-        // 1.2 * 20 + 3
-        assert_eq!(
-            HeartbeatConfig::from_secs(20.0).timeout,
-            Duration::from_secs(27)
-        );
-    }
-
-    #[test]
-    fn heartbeats_header_parses_both_spellings() -> anyhow::Result<()> {
-        assert_eq!(
-            HeartbeatConfig::from_header("20")
-                .context("required operation value")?
-                .interval,
-            Duration::from_secs(20)
-        );
-        assert_eq!(
-            HeartbeatConfig::from_header("20s")
-                .context("required operation value")?
-                .interval,
-            Duration::from_secs(20)
-        );
-        assert!(HeartbeatConfig::from_header("nonsense").is_none());
-        assert!(HeartbeatConfig::from_header("0").is_none());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn updates_are_delivered_in_order_then_the_stream_ends() -> anyhow::Result<()> {
-        let (tx, rx) = async_channel::unbounded();
-        tx.send(Ok(Update::snapshot(Version::new("1"), "a")))
-            .await
-            .context("required operation value")?;
-        tx.send(Ok(Update::snapshot(Version::new("2"), "b")))
-            .await
-            .context("required operation value")?;
-        drop(tx);
-
-        let mut sub = Subscription::new(rx);
-        assert_eq!(
-            sub.next()
-                .await
-                .context("required operation value")?
-                .context("required operation value")?
-                .body_str(),
-            Some("a")
-        );
-        assert_eq!(
-            sub.next()
-                .await
-                .context("required operation value")?
-                .context("required operation value")?
-                .body_str(),
-            Some("b")
-        );
-        assert!(sub.next().await.is_none());
-        Ok(())
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_silent_server_times_out() {
-        // `_tx` is held so the channel never closes — only the deadline can fire.
-        let (_tx, rx) = async_channel::unbounded::<Result<Update>>();
-        let mut sub = Subscription::with_heartbeat(rx, HeartbeatConfig::from_secs(20.0));
-
-        assert!(matches!(sub.next().await, Some(Err(BraidError::Timeout))));
-        assert!(sub.next().await.is_none());
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_quiet_but_live_stream_never_times_out() -> anyhow::Result<()> {
-        let (tx, rx) = async_channel::unbounded();
-        let mut sub = Subscription::with_heartbeat(rx, HeartbeatConfig::from_secs(20.0));
-
-        for i in 0..5 {
-            tokio::time::sleep(Duration::from_secs(20)).await;
-            tx.send(Ok(Update::snapshot(Version::new(i.to_string()), "x")))
-                .await
-                .context("required operation value")?;
-            assert!(
-                sub.next().await.is_some_and(|r| r.is_ok()),
-                "a stream with regular traffic must not time out (step {i})"
-            );
+impl SubscriptionStream {
+    pub fn new(receiver: async_channel::Receiver<Result<Update>>) -> Self {
+        Self {
+            receiver: ReceiverStream::new(receiver),
         }
-        Ok(())
     }
-
-    #[tokio::test]
-    async fn without_a_heartbeat_config_there_is_no_deadline() {
-        let (_tx, rx) = async_channel::unbounded::<Result<Update>>();
-        let mut sub = Subscription::new(rx);
-        assert!(sub.heartbeat_config().is_none());
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), sub.next())
-                .await
-                .is_err(),
-            "should still be waiting, not erroring"
-        );
+}
+impl Stream for SubscriptionStream {
+    type Item = Result<Update>;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.get_mut().receiver).poll_next(cx)
     }
 }

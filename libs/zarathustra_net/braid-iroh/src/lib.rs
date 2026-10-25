@@ -10,6 +10,8 @@ pub mod subscription;
 
 pub use discovery::*;
 pub use node::*;
+#[cfg(feature = "proxy")]
+pub use protocol::AccessPolicy;
 pub use subscription::*;
 
 use std::sync::Arc;
