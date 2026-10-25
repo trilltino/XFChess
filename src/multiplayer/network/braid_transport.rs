@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use braid_chess::message::ChatPayload;
 use braid_chess::{
-    journal::Journal, subscriber::DeliveryReceipt, ChessResource, StreamCursor, StreamHandle,
-    SupervisorConfig,
+    journal::Journal, subscriber::DeliveryReceipt, ChessOutbox, ChessResource, OutboxConfig,
+    OutboxHooks, StreamCursor, StreamHandle, SupervisorConfig,
 };
 use braid_chess::{ChessMessage, MovePayload};
 use tracing::{info, warn};
@@ -34,6 +34,8 @@ pub struct BraidStreamHeads {
     moves: String,
     chat: String,
     self_published: std::collections::HashSet<String>,
+    /// Durable publisher for this game; absent until the subscription is set up.
+    outbox: Option<std::sync::Arc<ChessOutbox>>,
 }
 
 impl Default for BraidStreamHeads {
@@ -42,6 +44,7 @@ impl Default for BraidStreamHeads {
             moves: GENESIS_PARENT.to_string(),
             chat: GENESIS_PARENT.to_string(),
             self_published: std::collections::HashSet::new(),
+            outbox: None,
         }
     }
 }
@@ -298,6 +301,51 @@ impl BraidTransportState {
     }
 }
 
+/// Create the durable publisher that sends this game's events in order, survives restarts,
+/// and adopts anything the earlier journal still holds.
+fn install_outbox(
+    state: &BraidTransportState,
+    base_url: &str,
+    game_id: &str,
+    journal: Journal,
+    rt: &tokio::runtime::Handle,
+) {
+    let accepted_heads = std::sync::Arc::downgrade(&state.heads);
+    let seat_game = game_id.to_owned();
+    let hooks = OutboxHooks {
+        headers: std::sync::Arc::new(crate::multiplayer::network::vps::auth_headers),
+        is_seat_superseded: std::sync::Arc::new(super::device_id::is_seat_superseded_body),
+        on_seat_superseded: std::sync::Arc::new(move || {
+            if let Ok(id) = seat_game.parse() {
+                super::device_id::mark_seat_superseded(id);
+            }
+        }),
+        on_accepted: std::sync::Arc::new(move |stream, version| {
+            if let Some(heads) = accepted_heads.upgrade() {
+                if let Ok(mut heads) = heads.lock() {
+                    heads.set_head(stream.as_str(), version.to_owned());
+                }
+            }
+        }),
+    };
+    let config = OutboxConfig {
+        base_url: base_url.to_owned(),
+        game_id: game_id.to_owned(),
+        device_id: super::device_id::device_id().to_owned(),
+        directory: journal.directory().to_path_buf(),
+        put_timeout: std::time::Duration::from_secs(20),
+        max_pending: 64,
+    };
+    match ChessOutbox::new(config, hooks, rt.clone(), Some(journal)) {
+        Ok(outbox) => {
+            if let Ok(mut heads) = state.heads.lock() {
+                heads.outbox = Some(std::sync::Arc::new(outbox));
+            }
+        }
+        Err(error) => warn!("[braid] could not start the event outbox: {error}"),
+    }
+}
+
 pub fn ensure_subscribed(
     state: &mut BraidTransportState,
     base_url: String,
@@ -316,7 +364,8 @@ pub fn ensure_subscribed(
         }
     };
     state.game_id = game_id.clone();
-    state.journal = Some(journal);
+    state.journal = Some(journal.clone());
+    install_outbox(state, &base_url, &game_id, journal, rt);
     let spawn = |resource: ChessResource| {
         StreamHandle::spawn(
             base_url.clone(),

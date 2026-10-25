@@ -3915,11 +3915,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
+ "async-trait",
  "axum 0.8.9",
  "braid-http",
  "bytes",
  "futures",
  "hex",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "sha2 0.10.9",
