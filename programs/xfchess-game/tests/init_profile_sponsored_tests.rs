@@ -1,3 +1,5 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
@@ -51,7 +53,7 @@ fn init_profile_ix(
 async fn sponsored_profile_is_owned_by_player_not_backend() -> anyhow::Result<()> {
     let ctx = start(vec![]).await;
 
-    // The player has ZERO SOL — the whole point of sponsorship.
+    // The player has ZERO SOL â€” the whole point of sponsorship.
     let player = Keypair::new();
     // A distinct "backend" fee payer, standing in for the real feepayer pool.
     let backend = Keypair::new();
@@ -77,7 +79,7 @@ async fn sponsored_profile_is_owned_by_player_not_backend() -> anyhow::Result<()
         profile_rent + username_rent,
     );
 
-    let dob = 631_152_000i64; // 1990-01-01T00:00:00Z — comfortably 18+ under the on-chain age check
+    let dob = 631_152_000i64; // 1990-01-01T00:00:00Z â€” comfortably 18+ under the on-chain age check
     let init_ix = init_profile_ix(&player.pubkey(), username, "GB", dob);
 
     let mut tx = Transaction::new_with_payer(&[transfer_ix, init_ix], Some(&backend.pubkey()));
@@ -110,7 +112,7 @@ async fn sponsored_profile_is_owned_by_player_not_backend() -> anyhow::Result<()
         "player should not retain any of the sponsored funds"
     );
 
-    // The backend — not the player — is the one who actually paid: it's out
+    // The backend â€” not the player â€” is the one who actually paid: it's out
     // the rent it fronted plus the transaction fee.
     let backend_balance = ctx
         .banks_client
@@ -120,6 +122,53 @@ async fn sponsored_profile_is_owned_by_player_not_backend() -> anyhow::Result<()
     assert!(
         backend_balance < 10_000_000_000 - (profile_rent + username_rent),
         "backend must have paid the rent it fronted plus the tx fee"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn profile_substitution_cannot_overwrite_game_or_create_username() -> anyhow::Result<()> {
+    use xfchess_game::state::GameStatus;
+    let player = Keypair::new();
+    let (target, original) = game_account(
+        42,
+        player.pubkey(),
+        Pubkey::new_unique(),
+        start_board(),
+        1,
+        0,
+        GameStatus::Active,
+    )?;
+    let mut ctx = start(vec![
+        (target, original.clone()),
+        (player.pubkey(), system_account(1_000_000_000)),
+    ])
+    .await;
+    let username = "secureplayer";
+    let mut ix = init_profile_ix(&player.pubkey(), username, "GB", 631_152_000);
+    ix.accounts[0].pubkey = target;
+    let err = send(&mut ctx, ix, &[&player])
+        .await
+        .err()
+        .context("substitution must fail")?;
+    assert_eq!(
+        custom_code(&err),
+        Some(anchor_lang::error::ErrorCode::ConstraintSeeds as u32)
+    );
+    let after = ctx
+        .banks_client
+        .get_account(target)
+        .await?
+        .context("Game must remain")?;
+    assert_eq!(after, original);
+    assert!(ctx
+        .banks_client
+        .get_account(username_record_pda(username))
+        .await?
+        .is_none());
+    assert_eq!(
+        ctx.banks_client.get_balance(player.pubkey()).await?,
+        1_000_000_000
     );
     Ok(())
 }

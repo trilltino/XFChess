@@ -1,8 +1,10 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
 use anchor_lang::{AccountDeserialize, InstructionData, Space, ToAccountMetas};
-use solana_program_test::{ProgramTest, ProgramTestContext};
+use crate::agave::{ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
     instruction::{AccountMeta, Instruction},

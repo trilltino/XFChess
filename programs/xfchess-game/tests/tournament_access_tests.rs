@@ -1,5 +1,7 @@
 //! Who may fund, enter and spend inside a tournament.
 
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
@@ -144,7 +146,7 @@ fn base_accounts(
 }
 
 async fn fetch_tournament(
-    ctx: &mut solana_program_test::ProgramTestContext,
+    ctx: &mut crate::agave::ProgramTestContext,
 ) -> anyhow::Result<Tournament> {
     Ok({
         let acc = ctx
@@ -189,16 +191,17 @@ fn register_ix(player: Pubkey, host_treasury: Pubkey, _claimed_elo: u32) -> Inst
         tournament_players_shard_3: None,
         host_treasury,
         system_program: solana_system_interface::program::ID,
-        pass_binding: Pubkey::find_program_address(&[b"t_pass", &TID.to_le_bytes()], &xfchess_game::ID).0,
+        pass_binding: Pubkey::find_program_address(
+            &[b"t_pass", &TID.to_le_bytes()],
+            &xfchess_game::ID,
+        )
+        .0,
         pass_mint: None,
         player_pass_account: None,
         token_program_2022: None,
     }
     .to_account_metas(None);
-    let data = xfchess_game::instruction::RegisterPlayer {
-        tournament_id: TID,
-    }
-    .data();
+    let data = xfchess_game::instruction::RegisterPlayer { tournament_id: TID }.data();
     Instruction {
         program_id: xfchess_game::ID,
         accounts,

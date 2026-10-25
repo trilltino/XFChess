@@ -1,3 +1,5 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
@@ -144,9 +146,9 @@ async fn finalize_game_pays_the_nonzero_country_fee_to_treasury() -> anyhow::Res
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
-    let game_id = 4045u64; // 0.00045 SOL below — the exact figure the popup-fee bug surfaced as
+    let game_id = 4045u64; // 0.00045 SOL below â€” the exact figure the popup-fee bug surfaced as
     let wager_amount = 10_000_000u64; // 0.01 SOL
-    let country_fee = 450_000u64; // 0.00045 SOL — the platform fee this test guards
+    let country_fee = 450_000u64; // 0.00045 SOL â€” the platform fee this test guards
 
     let (game_pda_key, game_account_data) = finished_game_account(
         game_id,
@@ -195,7 +197,7 @@ async fn finalize_game_pays_the_nonzero_country_fee_to_treasury() -> anyhow::Res
         "treasury_vault must receive exactly the game's country_fee at settlement"
     );
 
-    // Game account closes to fee_payer on finalize — confirms settlement
+    // Game account closes to fee_payer on finalize â€” confirms settlement
     // actually ran to completion rather than erroring out before reaching it.
     let closed = ctx
         .banks_client
@@ -378,7 +380,7 @@ async fn finalize_game_refunds_exact_rent_and_tx_fee_to_correct_fee_payer() -> a
         .await
         .context("required operation value")?;
 
-    // escrow tx-fee reimbursement is min(10_000, pot) — the pot here (2 * 10M)
+    // escrow tx-fee reimbursement is min(10_000, pot) â€” the pot here (2 * 10M)
     // comfortably exceeds 10_000, so the reimbursement is the flat 10_000.
     let expected_tx_fee_reimbursement = 10_000u64;
     let expected_delta = game_account_rent + expected_tx_fee_reimbursement;

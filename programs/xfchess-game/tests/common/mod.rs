@@ -1,6 +1,6 @@
+use crate::agave::{BanksClientError, ProgramTest, ProgramTestContext};
 use anchor_lang::{AccountDeserialize, AccountSerialize, InstructionData, Space, ToAccountMetas};
 use anyhow::Context as _;
-use solana_program_test::{BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
     instruction::{Instruction, InstructionError},
@@ -328,9 +328,54 @@ pub fn claim_timeout_ix(game_id: u64, caller: Pubkey) -> Instruction {
 
 pub async fn send(
     ctx: &mut ProgramTestContext,
-    ix: Instruction,
+    mut ix: Instruction,
     extra: &[&Keypair],
 ) -> Result<(), TransactionError> {
+    // The payout ABI retains its declared prefix and now requires the canonical
+    // recovery record as a trailing account, including for nonexistent legacy records.
+    use anchor_lang::Discriminator;
+    let payouts = [
+        xfchess_game::instruction::FinalizeGame::DISCRIMINATOR,
+        xfchess_game::instruction::CancelGame::DISCRIMINATOR,
+        xfchess_game::instruction::WithdrawExpiredWager::DISCRIMINATOR,
+        xfchess_game::instruction::ResolveDispute::DISCRIMINATOR,
+        xfchess_game::instruction::ClaimStaleDispute::DISCRIMINATOR,
+    ];
+    let legacy_single = [
+        xfchess_game::instruction::CreateGame::DISCRIMINATOR,
+        xfchess_game::instruction::JoinGame::DISCRIMINATOR,
+        xfchess_game::instruction::GlobalCreateGame::DISCRIMINATOR,
+        xfchess_game::instruction::GlobalJoinGame::DISCRIMINATOR,
+    ];
+    let legacy_tournament = [
+        xfchess_game::instruction::CreateTournamentGame::DISCRIMINATOR,
+        xfchess_game::instruction::SessionCreateGame::DISCRIMINATOR,
+        xfchess_game::instruction::SessionJoinGame::DISCRIMINATOR,
+    ];
+    let id_start = if legacy_tournament
+        .iter()
+        .any(|disc| ix.data.starts_with(disc))
+    {
+        Some(16)
+    } else if payouts
+        .iter()
+        .chain(legacy_single.iter())
+        .any(|disc| ix.data.starts_with(disc))
+    {
+        Some(8)
+    } else {
+        None
+    };
+    if let Some(id_start) = id_start.filter(|start| ix.data.len() >= start + 8) {
+        let mut id = [0u8; 8];
+        id.copy_from_slice(&ix.data[id_start..id_start + 8]);
+        let record =
+            Pubkey::find_program_address(&[b"recovery_identity", &id], &xfchess_game::ID).0;
+        if !ix.accounts.iter().any(|account| account.pubkey == record) {
+            ix.accounts
+                .push(solana_sdk::instruction::AccountMeta::new(record, false));
+        }
+    }
     let blockhash = ctx.last_blockhash;
     let payer_pk = ctx.payer.pubkey();
     let mut signers: Vec<&Keypair> = vec![&ctx.payer];
@@ -349,6 +394,22 @@ fn transaction_error(e: BanksClientError) -> TransactionError {
         BanksClientError::SimulationError { err, .. } => err,
         other => panic!("unexpected banks error: {other:?}"),
     }
+}
+
+/// Execute a privileged role fixture without reading any deployed signing key.
+/// BanksServer metadata execution skips transaction signature verification;
+/// this checks the real SBF instruction's signer-role and address constraints.
+pub async fn send_with_signer_role(
+    ctx: &mut ProgramTestContext,
+    ix: Instruction,
+) -> Result<(), TransactionError> {
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&ctx.payer.pubkey()));
+    tx.partial_sign(&[&ctx.payer], ctx.last_blockhash);
+    ctx.banks_client
+        .process_transaction_with_metadata(tx)
+        .await
+        .map_err(transaction_error)?
+        .result
 }
 
 pub fn custom_code(err: &TransactionError) -> Option<u32> {
