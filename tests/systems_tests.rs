@@ -44,6 +44,12 @@ fn test_reset_game_resources_system() -> anyhow::Result<()> {
     app.insert_resource(TurnStateContext::default());
     app.insert_resource(ChessEngine::default());
     app.insert_resource(ActiveTimeControl::default()); // reset_game_resources reads this to seed GameTimer
+    app.init_resource::<xfchess_app::motion::BoardEpoch>();
+    app.init_resource::<premove::Premove>();
+    app.init_resource::<PendingPromotion>();
+    let mut pending_turn = PendingTurnAdvance::default();
+    pending_turn.record_accepted(PieceColor::Black);
+    app.insert_resource(pending_turn);
 
     // Register types used in spawn
     app.register_type::<PointLight>();
@@ -80,5 +86,11 @@ fn test_reset_game_resources_system() -> anyhow::Result<()> {
         .get_resource::<GameOverState>()
         .ok_or_else(|| anyhow::anyhow!("expected game resource is missing"))?;
     assert_eq!(*game_over, GameOverState::Playing);
+    assert!(!app.world().resource::<PendingTurnAdvance>().is_pending());
+    assert_eq!(
+        app.world().resource::<xfchess_app::motion::BoardEpoch>().0,
+        1
+    );
+    assert!(!app.world().resource::<premove::Premove>().is_active());
     Ok(())
 }
