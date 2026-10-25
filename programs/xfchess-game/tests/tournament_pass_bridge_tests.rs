@@ -3,10 +3,13 @@
 //! run as SBF binaries (`cargo build-sbf` the game; put the pass binary built with the same ID as
 //! `XFCHESS_PASS_PROGRAM_ID` as `xfchess_pass.so` in `SBF_OUT_DIR`).
 
+#[path = "common/agave.rs"]
+pub mod agave;
 pub mod common;
 
 use anyhow::Context as _;
 
+use crate::agave::{ProgramTest, ProgramTestContext};
 use anchor_lang::{
     solana_program::instruction::AccountMeta, AccountDeserialize, InstructionData, Space,
     ToAccountMetas,
@@ -19,7 +22,6 @@ use anchor_spl::token_2022::{
     },
     ID as TOKEN_2022,
 };
-use solana_program_test::{ProgramTest, ProgramTestContext};
 use solana_sdk::{
     instruction::Instruction,
     pubkey::Pubkey,

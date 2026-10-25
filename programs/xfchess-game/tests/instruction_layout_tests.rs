@@ -2,6 +2,65 @@ use anchor_lang::prelude::Pubkey;
 use anchor_lang::InstructionData;
 use xfchess_game::state::TournamentType;
 
+#[test]
+fn recovery_versioned_creation_keeps_argument_bytes_and_account_prefix() {
+    use anchor_lang::ToAccountMetas;
+    let player = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let game = Pubkey::new_unique();
+    let escrow = Pubkey::new_unique();
+    let record = Pubkey::new_unique();
+    let legacy = xfchess_game::accounts::CreateGame {
+        game,
+        escrow_pda: escrow,
+        player,
+        fee_payer: payer,
+        system_program: anchor_lang::system_program::ID,
+    };
+    let mut expected = legacy.to_account_metas(None);
+    expected.push(anchor_lang::solana_program::instruction::AccountMeta::new(
+        record, false,
+    ));
+    let versioned = xfchess_game::accounts::CreateGameV2 {
+        legacy,
+        recovery_identity: record,
+    };
+    assert_eq!(versioned.to_account_metas(None), expected);
+    let old = xfchess_game::instruction::CreateGame {
+        game_id: 42,
+        wager_amount: 10_000_000,
+        match_type: xfchess_game::state::MatchType::Rated,
+        platform_fee: 0,
+        base_time_seconds: 300,
+        increment_seconds: 5,
+    }
+    .data();
+    let new = xfchess_game::instruction::CreateGameV2 {
+        game_id: 42,
+        wager_amount: 10_000_000,
+        match_type: xfchess_game::state::MatchType::Rated,
+        platform_fee: 0,
+        base_time_seconds: 300,
+        increment_seconds: 5,
+    }
+    .data();
+    assert_ne!(&old[..8], &new[..8]);
+    assert_eq!(&old[8..], &new[8..]);
+}
+
+#[test]
+fn recovery_errors_append_after_existing_error_codes() {
+    use xfchess_game::errors::GameErrorCode;
+    assert_eq!(
+        GameErrorCode::RecoveryIdentityUnavailable as u32,
+        GameErrorCode::PassPolicyMismatch as u32 + 1
+    );
+    assert_eq!(
+        GameErrorCode::RecoveryIdentityMismatch as u32,
+        GameErrorCode::RecoveryIdentityUnavailable as u32 + 1
+    );
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

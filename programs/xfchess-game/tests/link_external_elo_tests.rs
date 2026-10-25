@@ -1,3 +1,5 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
@@ -6,7 +8,7 @@ use common::*;
 use solana_sdk::{
     instruction::Instruction,
     pubkey::Pubkey,
-    signature::{read_keypair_file, Keypair, Signer},
+    signature::{Keypair, Signer},
 };
 use xfchess_game::errors::GameErrorCode;
 use xfchess_game::state::PlayerProfile;
@@ -64,21 +66,10 @@ fn link_external_elo_ix(
     }
 }
 
-fn link_authority_keypair() -> Option<Keypair> {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../keys/link_authority.json"
-    );
-    read_keypair_file(path).ok()
-}
-
 #[tokio::test]
 async fn link_external_elo_rejects_a_second_wallet_claiming_the_same_lichess_username(
 ) -> anyhow::Result<()> {
-    let Some(link_authority) = link_authority_keypair() else {
-        eprintln!("skip: keys/link_authority.json not present");
-        return Ok(());
-    };
+    let link_authority = xfchess_game::constants::link_authority::ID;
     let player_a = Keypair::new().pubkey();
     let player_b = Keypair::new().pubkey();
     let username = "MagnusCarlsenFan42";
@@ -89,19 +80,12 @@ async fn link_external_elo_rejects_a_second_wallet_claiming_the_same_lichess_use
     let mut ctx = start(vec![
         (profile_a_pda, profile_a_data),
         (profile_b_pda, profile_b_data),
-        (link_authority.pubkey(), system_account(1_000_000_000)),
+        (link_authority, system_account(1_000_000_000)),
     ])
     .await;
 
-    let ix_a = link_external_elo_ix(
-        player_a,
-        link_authority.pubkey(),
-        username,
-        1500,
-        1500,
-        1500,
-    );
-    send(&mut ctx, ix_a, &[&link_authority])
+    let ix_a = link_external_elo_ix(player_a, link_authority, username, 1500, 1500, 1500);
+    send_with_signer_role(&mut ctx, ix_a)
         .await
         .context("first link for a fresh Lichess username should succeed")?;
 
@@ -109,15 +93,8 @@ async fn link_external_elo_rejects_a_second_wallet_claiming_the_same_lichess_use
     assert_eq!(profile_a_after.lichess_username, username);
 
     // A DIFFERENT wallet claiming the SAME Lichess username must be rejected.
-    let ix_b = link_external_elo_ix(
-        player_b,
-        link_authority.pubkey(),
-        username,
-        1400,
-        1400,
-        1400,
-    );
-    let err = send(&mut ctx, ix_b, &[&link_authority])
+    let ix_b = link_external_elo_ix(player_b, link_authority, username, 1400, 1400, 1400);
+    let err = send_with_signer_role(&mut ctx, ix_b)
         .await
         .err()
         .context("a second wallet must not be able to claim an already-linked Lichess username")?;
@@ -139,10 +116,7 @@ async fn link_external_elo_rejects_a_second_wallet_claiming_the_same_lichess_use
 #[tokio::test]
 async fn link_external_elo_allows_the_same_wallet_to_re_sync_its_own_username() -> anyhow::Result<()>
 {
-    let Some(link_authority) = link_authority_keypair() else {
-        eprintln!("skip: keys/link_authority.json not present");
-        return Ok(());
-    };
+    let link_authority = xfchess_game::constants::link_authority::ID;
     let player_a = Keypair::new().pubkey();
     let username = "SameWalletResync";
 
@@ -150,33 +124,19 @@ async fn link_external_elo_allows_the_same_wallet_to_re_sync_its_own_username() 
 
     let mut ctx = start(vec![
         (profile_a_pda, profile_a_data),
-        (link_authority.pubkey(), system_account(1_000_000_000)),
+        (link_authority, system_account(1_000_000_000)),
     ])
     .await;
 
-    let ix_first = link_external_elo_ix(
-        player_a,
-        link_authority.pubkey(),
-        username,
-        1500,
-        1500,
-        1500,
-    );
-    send(&mut ctx, ix_first, &[&link_authority])
+    let ix_first = link_external_elo_ix(player_a, link_authority, username, 1500, 1500, 1500);
+    send_with_signer_role(&mut ctx, ix_first)
         .await
         .context("first link should succeed")?;
 
     // Re-syncing updated ratings for the SAME wallet + SAME username must
     // still succeed (idempotent re-link), not be rejected as "taken".
-    let ix_second = link_external_elo_ix(
-        player_a,
-        link_authority.pubkey(),
-        username,
-        1600,
-        1550,
-        1580,
-    );
-    send(&mut ctx, ix_second, &[&link_authority])
+    let ix_second = link_external_elo_ix(player_a, link_authority, username, 1600, 1550, 1580);
+    send_with_signer_role(&mut ctx, ix_second)
         .await
         .context("the same wallet re-linking its own already-claimed username must succeed")?;
 

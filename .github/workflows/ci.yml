@@ -131,18 +131,22 @@ jobs:
             libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
             libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev \
             libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
-      # Pinned with solana-program-test so the binary under test is reproducible.
+      # Match the latest stable runtime/test cohort and pin the SBF compiler.
       - name: Install Solana CLI (cargo build-sbf)
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.12/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/v4.3.2/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          cargo install cargo-build-sbf --version 4.5.0 --locked --force
       # Program-test suites load target/deploy/xfchess_game.so; build it before cargo test.
       - name: Build on-chain program (.so for solana-program-test)
         run: |
-          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-          cargo build-sbf --arch v0 --manifest-path programs/xfchess-game-sbf/Cargo.toml
+          export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          export NO_DNA=1
+          cargo build-sbf --arch v0 --tools-version v1.58 --manifest-path programs/xfchess-game-sbf/Cargo.toml -- --locked
       - name: Application and engine tests (isolated from contract features)
         run: cargo test -p xfchess -p backend -p xfchess-rules -p xfchess-stockfish
+      - name: Fetch pinned external tournament-pass fixture
+        run: python3 docs/security/fetch_pass_fixture.py
       - name: Contract tests, including host-rules compatibility
         run: cargo test -p xfchess-game -- --test-threads=1
       - name: Remaining workspace tests

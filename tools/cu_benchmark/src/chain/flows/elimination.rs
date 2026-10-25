@@ -4,6 +4,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
+use xfchess_client_compat::prelude::*;
 
 use crate::chain::{
     apply_compute_budget, instructions as ix, unique_id, with_retry, TOURNAMENT_STATUS_COMPLETED,
@@ -66,7 +67,7 @@ pub async fn run_single_elimination_tournament_flow(
     let blockhash = base_rpc.get_latest_blockhash()?;
     let tx =
         Transaction::new_signed_with_payer(&init_ixs, Some(&master.pubkey()), &[master], blockhash);
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_setup",
@@ -91,7 +92,7 @@ pub async fn run_single_elimination_tournament_flow(
         &[master],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_setup",
@@ -115,7 +116,7 @@ pub async fn run_single_elimination_tournament_flow(
         &[master],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_setup",
@@ -136,7 +137,7 @@ pub async fn run_single_elimination_tournament_flow(
     let blockhash = base_rpc.get_latest_blockhash()?;
     let tx =
         Transaction::new_signed_with_payer(&fund_ixs, Some(&master.pubkey()), &[master], blockhash);
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_setup",
@@ -164,7 +165,7 @@ pub async fn run_single_elimination_tournament_flow(
         let blockhash = base_rpc.get_latest_blockhash()?;
         let tx =
             Transaction::new_signed_with_payer(&ixs, Some(&player.pubkey()), &[player], blockhash);
-        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
         logger.log(
             ExecutionLayer::Solana,
             "profile",
@@ -191,7 +192,7 @@ pub async fn run_single_elimination_tournament_flow(
             &[player],
             blockhash,
         );
-        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
         logger.log(
             ExecutionLayer::Solana,
             "tournament_setup",
@@ -217,7 +218,7 @@ pub async fn run_single_elimination_tournament_flow(
         &[master],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_setup",
@@ -260,7 +261,7 @@ pub async fn run_single_elimination_tournament_flow(
             &[master],
             blockhash,
         );
-        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
         logger.log(
             ExecutionLayer::Solana,
             "tournament_bracket",
@@ -312,7 +313,7 @@ pub async fn run_single_elimination_tournament_flow(
             &[master],
             blockhash,
         );
-        let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+        let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
         logger.log(
             ExecutionLayer::Solana,
             "tournament_bracket",
@@ -338,7 +339,7 @@ pub async fn run_single_elimination_tournament_flow(
                 &[master],
                 blockhash,
             );
-            let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+            let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
             logger.log(
                 ExecutionLayer::Solana,
                 "tournament_bracket",
@@ -391,7 +392,7 @@ pub async fn run_single_elimination_tournament_flow(
         &[master],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         ExecutionLayer::Solana,
         "tournament_payout",

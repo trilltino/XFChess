@@ -14,6 +14,7 @@ use solana_sdk::{
 };
 use sqlx::SqlitePool;
 use std::{str::FromStr, sync::Arc};
+use xfchess_client_compat::prelude::*;
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct TournamentOperation {
@@ -230,7 +231,7 @@ impl CancellationService {
             let tx = Transaction::new_signed_with_payer(&[ix], Some(&service.authority.pubkey()),
                 &[service.authority.as_ref()], rpc.get_latest_blockhash()?);
             ensure!(bincode::serialized_size(&tx)? <= 1232, "Cancellation exceeds legacy transaction capacity; batch refund support is required");
-            let simulation = rpc.simulate_transaction(&tx)?;
+            let simulation = rpc.simulate_sdk_transaction(&tx)?;
             ensure!(simulation.value.err.is_none(), "Cancellation simulation rejected: {:?}", simulation.value.err);
             Ok(tx)
         }).await??;
@@ -238,7 +239,8 @@ impl CancellationService {
         sqlx::query("UPDATE tournament_operations SET signature=?,status='submitted',updated_at=unixepoch() WHERE id=?")
             .bind(&signature).bind(&operation.id).execute(self.store.pool()).await?;
         let rpc_url = self.rpc_url.clone();
-        tokio::task::spawn_blocking(move || make_rpc(&rpc_url)?.send_transaction(&tx)).await??;
+        tokio::task::spawn_blocking(move || make_rpc(&rpc_url)?.send_sdk_transaction(&tx))
+            .await??;
         Ok("pending_reconciliation")
     }
 

@@ -1,11 +1,14 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anchor_lang::{AccountSerialize, Discriminator, InstructionData, Space, ToAccountMetas};
+pub mod common;
+use crate::agave::{BanksClientError, ProgramTest, ProgramTestContext};
 use anyhow::Context as _;
-use solana_program_test::{BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
     instruction::{AccountMeta, Instruction, InstructionError},
     pubkey::Pubkey,
-    signature::{read_keypair_file, Keypair, Signer},
+    signature::{Keypair, Signer},
     transaction::{Transaction, TransactionError},
 };
 use solana_system_interface::program as system_program;
@@ -127,38 +130,23 @@ fn withdraw_ix(authority: Pubkey, destination: Pubkey, amount: u64) -> Instructi
     }
 }
 
-fn treasury_authority_keypair() -> Option<Keypair> {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../keys/treasury_authority.json"
-    );
-    read_keypair_file(path).ok()
-}
-
 #[tokio::test]
 async fn withdraw_treasury_happy_path() -> anyhow::Result<()> {
-    let Some(authority) = treasury_authority_keypair() else {
-        eprintln!("skip: keys/treasury_authority.json not present");
-        return Ok(());
-    };
+    let authority = xfchess_game::constants::treasury_authority::ID;
     let vault = treasury_vault_pda().0;
     let dest = Keypair::new().pubkey();
 
     let mut ctx = start(vec![
-        (vault, system_account(1_000_000_000)),  // 1 SOL accrued fees
-        (authority.pubkey(), system_account(0)), // signer, no lamports needed
+        (vault, system_account(1_000_000_000)), // 1 SOL accrued fees
+        (authority, system_account(0)),         // signer, no lamports needed
         (dest, system_account(0)),
     ])
     .await;
 
     let before = lamports_of(&mut ctx, dest).await?;
-    send(
-        &mut ctx,
-        withdraw_ix(authority.pubkey(), dest, 400_000_000),
-        &[&authority],
-    )
-    .await
-    .context("withdraw should succeed")?;
+    common::send_with_signer_role(&mut ctx, withdraw_ix(authority, dest, 400_000_000))
+        .await
+        .context("withdraw should succeed")?;
 
     assert_eq!(lamports_of(&mut ctx, dest).await?, before + 400_000_000);
     assert_eq!(lamports_of(&mut ctx, vault).await?, 600_000_000);
@@ -167,10 +155,7 @@ async fn withdraw_treasury_happy_path() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn withdraw_treasury_rent_floor_rejected() -> anyhow::Result<()> {
-    let Some(authority) = treasury_authority_keypair() else {
-        eprintln!("skip: keys/treasury_authority.json not present");
-        return Ok(());
-    };
+    let authority = xfchess_game::constants::treasury_authority::ID;
     let vault = treasury_vault_pda().0;
     let dest = Keypair::new().pubkey();
 
@@ -178,19 +163,15 @@ async fn withdraw_treasury_rent_floor_rejected() -> anyhow::Result<()> {
     // it must be rejected to keep the vault alive.
     let mut ctx = start(vec![
         (vault, system_account(1_000_000)),
-        (authority.pubkey(), system_account(0)),
+        (authority, system_account(0)),
         (dest, system_account(0)),
     ])
     .await;
 
-    let err = send(
-        &mut ctx,
-        withdraw_ix(authority.pubkey(), dest, 1_000_000),
-        &[&authority],
-    )
-    .await
-    .err()
-    .context("required operation value")?;
+    let err = common::send_with_signer_role(&mut ctx, withdraw_ix(authority, dest, 1_000_000))
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::InsufficientFunds))
@@ -219,7 +200,7 @@ async fn withdraw_treasury_wrong_signer_rejected() -> anyhow::Result<()> {
     .await
     .err()
     .context("required operation value")?;
-    // Anchor `address = …` violation maps to the mapped error code.
+    // Anchor `address = â€¦` violation maps to the mapped error code.
     assert_eq!(
         custom_code(&err),
         Some(ec(GameErrorCode::UnauthorizedAccess))
@@ -229,28 +210,21 @@ async fn withdraw_treasury_wrong_signer_rejected() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn withdraw_treasury_zero_amount_rejected() -> anyhow::Result<()> {
-    let Some(authority) = treasury_authority_keypair() else {
-        eprintln!("skip: keys/treasury_authority.json not present");
-        return Ok(());
-    };
+    let authority = xfchess_game::constants::treasury_authority::ID;
     let vault = treasury_vault_pda().0;
     let dest = Keypair::new().pubkey();
 
     let mut ctx = start(vec![
         (vault, system_account(1_000_000_000)),
-        (authority.pubkey(), system_account(0)),
+        (authority, system_account(0)),
         (dest, system_account(0)),
     ])
     .await;
 
-    let err = send(
-        &mut ctx,
-        withdraw_ix(authority.pubkey(), dest, 0),
-        &[&authority],
-    )
-    .await
-    .err()
-    .context("required operation value")?;
+    let err = common::send_with_signer_role(&mut ctx, withdraw_ix(authority, dest, 0))
+        .await
+        .err()
+        .context("required operation value")?;
     assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidArgument)));
     Ok(())
 }
@@ -394,7 +368,7 @@ async fn close_tournament_blocked_with_unpaid_winner() -> anyhow::Result<()> {
     let id = 2;
     let authority = Keypair::new();
     let bump = tournament_pda(id).1;
-    // Completed, winner funded (share > 0), but claim bit NOT set → must block.
+    // Completed, winner funded (share > 0), but claim bit NOT set â†’ must block.
     let t = tournament(
         id,
         authority.pubkey(),
@@ -423,7 +397,7 @@ async fn close_tournament_succeeds_when_all_claimed() -> anyhow::Result<()> {
     let id = 3;
     let authority = Keypair::new();
     let bump = tournament_pda(id).1;
-    // Completed, winner's claim bit (bit 0) set → close allowed; residual dust
+    // Completed, winner's claim bit (bit 0) set â†’ close allowed; residual dust
     // above rent-exempt is swept to the treasury vault.
     let t = tournament(
         id,

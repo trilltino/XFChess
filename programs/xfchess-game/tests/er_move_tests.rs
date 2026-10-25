@@ -1,3 +1,5 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
@@ -80,7 +82,7 @@ async fn rejects_parent_nonce_mismatch() -> anyhow::Result<()> {
 
     let mv = uci("e2e4");
     let next = apply(&board, &mv)?;
-    // game.nonce == 0, but the client claims a parent of 5 → causal break.
+    // game.nonce == 0, but the client claims a parent of 5 â†’ causal break.
     let ix = record_move_ix(GAME_ID, &white, &session.pubkey(), mv, next, 1, Some(5));
 
     let err = send(&mut ctx, ix, &[&session])
@@ -190,10 +192,10 @@ async fn detects_checkmate_and_finishes_game() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
 
-    // Position after 1. f3 e5 2. g4 — black to move, Qd8-h4 is Fool's Mate.
+    // Position after 1. f3 e5 2. g4 â€” black to move, Qd8-h4 is Fool's Mate.
     let board = board_from_fen("rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2");
 
-    // turn == 4 (even → black to move); nonce == 3 so the mating move is #4.
+    // turn == 4 (even â†’ black to move); nonce == 3 so the mating move is #4.
     let mut ctx = start(vec![
         game_account(GAME_ID, white, black, board, 4, 3, GameStatus::Active)?,
         session_account(GAME_ID, black, session.pubkey(), i64::MAX, true)?,

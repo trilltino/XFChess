@@ -7,6 +7,7 @@ use solana_sdk::{
 use solana_system_interface::instruction as system_instruction;
 use std::fs;
 use std::path::Path;
+use xfchess_client_compat::prelude::*;
 
 use crate::chain::{
     CHILDREN_KEYPAIR_PATH, CHILD_FUNDING_AMOUNT, MASTER_KEYPAIR_PATH, MASTER_MIN_BALANCE,
@@ -144,7 +145,7 @@ pub async fn fund_children(
             &[master],
             recent_blockhash,
         );
-        let sig = rpc.send_and_confirm_transaction(&tx)?;
+        let sig = rpc.send_sdk_and_confirm_transaction(&tx)?;
         println!(
             "   Funded child {}/{}: {} -> {} SOL (sig: {})",
             i + 1,
@@ -184,7 +185,7 @@ pub async fn reclaim_surplus(
             recent_blockhash,
         );
 
-        match rpc.send_and_confirm_transaction(&tx) {
+        match rpc.send_sdk_and_confirm_transaction(&tx) {
             Ok(sig) => {
                 total_reclaimed += reclaim_amount;
                 println!(

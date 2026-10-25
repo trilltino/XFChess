@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use xfchess_client_compat::prelude::*;
 
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -56,7 +57,7 @@ pub fn run(name: &str, url: &str, payer: &Keypair, count: usize) -> TxLandReport
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
 
         let submit_start = Instant::now();
-        let sig = match rpc.send_transaction(&tx) {
+        let sig = match rpc.send_sdk_transaction(&tx) {
             Ok(sig) => {
                 report
                     .submit

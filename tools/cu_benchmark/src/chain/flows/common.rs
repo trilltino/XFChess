@@ -5,6 +5,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
+use xfchess_client_compat::prelude::*;
 
 use crate::chain::{
     apply_compute_budget, instructions as ix, with_retry, CONTRACT_ER_SESSION_REIMBURSEMENT,
@@ -152,7 +153,7 @@ pub(super) async fn verify_tournament_payout(
         &[cranker],
         blockhash,
     );
-    let sig = with_retry(|| base_rpc.send_and_confirm_transaction(&tx)).await?;
+    let sig = with_retry(|| base_rpc.send_sdk_and_confirm_transaction(&tx)).await?;
     logger.log(
         crate::cost::measurements::ExecutionLayer::Solana,
         "tournament_payout",

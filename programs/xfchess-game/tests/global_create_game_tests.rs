@@ -1,3 +1,5 @@
+#[path = "common/agave.rs"]
+pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
@@ -57,7 +59,7 @@ fn global_create_game_ix(
     base_time_seconds: u64,
     increment_seconds: u16,
 ) -> Instruction {
-    let accounts = xfchess_game::__client_accounts_global_create_game::GlobalCreateGame {
+    let mut accounts = xfchess_game::__client_accounts_global_create_game::GlobalCreateGame {
         session_delegation: session_pda,
         session_signer,
         player,
@@ -66,7 +68,18 @@ fn global_create_game_ix(
         system_program: solana_system_interface::program::ID,
     }
     .to_account_metas(None);
-    let data = xfchess_game::instruction::GlobalCreateGame {
+    accounts.push(solana_sdk::instruction::AccountMeta::new(
+        Pubkey::find_program_address(
+            &[
+                xfchess_game::state::RecoveryIdentity::SEED,
+                &game_id.to_le_bytes(),
+            ],
+            &xfchess_game::ID,
+        )
+        .0,
+        false,
+    ));
+    let data = xfchess_game::instruction::GlobalCreateGameV2 {
         game_id,
         wager_amount,
         match_type,
@@ -86,7 +99,7 @@ fn global_create_game_ix(
 async fn global_create_game_funds_rent_and_wager_from_session_vault() -> anyhow::Result<()> {
     let player = Pubkey::new_unique();
     let session_signer = Keypair::new();
-    let wager_amount = 10_000_000u64; // 0.01 SOL — above MIN_WAGER_LAMPORTS
+    let wager_amount = 10_000_000u64; // 0.01 SOL â€” above MIN_WAGER_LAMPORTS
 
     let (session_pda, session_account_data) = global_session_account(
         player,
@@ -139,6 +152,22 @@ async fn global_create_game_funds_rent_and_wager_from_session_vault() -> anyhow:
         .context("required operation value")?;
     assert_eq!(session.total_spent, wager_amount);
     assert_eq!(session.games_remaining, 199);
+    use xfchess_game::state::{RecoveryIdentity, RecoveryStatus};
+    let identity_key = Pubkey::find_program_address(
+        &[RecoveryIdentity::SEED, &game_id.to_le_bytes()],
+        &xfchess_game::ID,
+    )
+    .0;
+    let identity = ctx
+        .banks_client
+        .get_account(identity_key)
+        .await?
+        .context("v2 recovery identity missing")?;
+    let identity = RecoveryIdentity::try_deserialize(&mut identity.data.as_slice())?;
+    assert_eq!(identity.white, player);
+    assert_eq!(identity.black, Pubkey::default());
+    assert_eq!(identity.wager_amount, wager_amount);
+    assert_eq!(identity.status, RecoveryStatus::Waiting);
     Ok(())
 }
 
@@ -158,7 +187,7 @@ async fn global_create_game_rejects_unreasonable_platform_fee() -> anyhow::Resul
     let mut ctx = start(vec![(session_pda, session_account_data)]).await;
 
     let game_id = 43u64;
-    let absurd_platform_fee = 2_000_000_000u64; // 2 SOL — far above any real per-game fee
+    let absurd_platform_fee = 2_000_000_000u64; // 2 SOL â€” far above any real per-game fee
     let ix = global_create_game_ix(
         session_pda,
         session_signer.pubkey(),
@@ -246,8 +275,13 @@ async fn global_create_game_accepts_a_vault_funded_exactly_enough() -> anyhow::R
         1_000_000_000,
     )?;
 
-    // Fund only the reserve, game rent, and wager to exercise the minimum vault balance.
-    session_account_data.lamports = 20_000_000;
+    // Both permanent accounts must be funded while preserving the vault reserve.
+    let rent = anchor_lang::prelude::Rent::default();
+    let reserve = rent.minimum_balance(session_account_data.data.len());
+    session_account_data.lamports = reserve
+        + rent.minimum_balance(8 + Game::INIT_SPACE)
+        + rent.minimum_balance(8 + xfchess_game::state::RecoveryIdentity::INIT_SPACE)
+        + wager_amount;
 
     let mut ctx = start(vec![(session_pda, session_account_data)]).await;
 
@@ -274,6 +308,7 @@ async fn global_create_game_accepts_a_vault_funded_exactly_enough() -> anyhow::R
         .await
         .context("required operation value")?;
     assert_eq!(escrow_balance, wager_amount);
+    assert_eq!(ctx.banks_client.get_balance(session_pda).await?, reserve);
     Ok(())
 }
 
@@ -317,6 +352,135 @@ async fn global_create_game_works_for_a_free_zero_wager_game() -> anyhow::Result
 
 fn player_profile_pda(player: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[b"profile", player.as_ref()], &xfchess_game::ID).0
+}
+
+#[tokio::test]
+async fn wallet_v2_create_join_cancel_conserves_wagers_and_closes_identity() -> anyhow::Result<()> {
+    use crate::agave::ProgramTestBanksClientExt;
+    use xfchess_game::state::{RecoveryIdentity, RecoveryStatus};
+    let white = Keypair::new();
+    let black = Keypair::new();
+    let mut ctx = start(vec![
+        (white.pubkey(), system_account(1_000_000_000)),
+        (black.pubkey(), system_account(1_000_000_000)),
+        player_profile_account(white.pubkey())?,
+        player_profile_account(black.pubkey())?,
+    ])
+    .await;
+    let game_id = 501u64;
+    let wager = 10_000_000;
+    let record_key = Pubkey::find_program_address(
+        &[RecoveryIdentity::SEED, &game_id.to_le_bytes()],
+        &xfchess_game::ID,
+    )
+    .0;
+    let payer = ctx.payer.pubkey();
+    let mut create_accounts = xfchess_game::__client_accounts_create_game::CreateGame {
+        game: game_pda(game_id).0,
+        escrow_pda: escrow_pda(game_id),
+        player: white.pubkey(),
+        fee_payer: payer,
+        system_program: solana_system_interface::program::ID,
+    }
+    .to_account_metas(None);
+    create_accounts.push(solana_sdk::instruction::AccountMeta::new(record_key, false));
+    send(
+        &mut ctx,
+        Instruction {
+            program_id: xfchess_game::ID,
+            accounts: create_accounts,
+            data: xfchess_game::instruction::CreateGameV2 {
+                game_id,
+                wager_amount: wager,
+                match_type: MatchType::Rated,
+                platform_fee: 0,
+                base_time_seconds: 300,
+                increment_seconds: 0,
+            }
+            .data(),
+        },
+        &[&white],
+    )
+    .await?;
+    assert_eq!(
+        ctx.banks_client.get_balance(white.pubkey()).await?,
+        1_000_000_000 - wager
+    );
+    let mut join_accounts = xfchess_game::__client_accounts_join_game::JoinGame {
+        game: game_pda(game_id).0,
+        escrow_pda: escrow_pda(game_id),
+        player_profile: player_profile_pda(&black.pubkey()),
+        white_profile: player_profile_pda(&white.pubkey()),
+        player: black.pubkey(),
+        fee_payer: payer,
+        system_program: solana_system_interface::program::ID,
+    }
+    .to_account_metas(None);
+    join_accounts.push(solana_sdk::instruction::AccountMeta::new(record_key, false));
+    send(
+        &mut ctx,
+        Instruction {
+            program_id: xfchess_game::ID,
+            accounts: join_accounts,
+            data: xfchess_game::instruction::JoinGameV2 { game_id }.data(),
+        },
+        &[&black],
+    )
+    .await?;
+    assert_eq!(
+        ctx.banks_client.get_balance(black.pubkey()).await?,
+        1_000_000_000 - wager
+    );
+    assert_eq!(
+        ctx.banks_client.get_balance(escrow_pda(game_id)).await?,
+        2 * wager
+    );
+    let before = ctx
+        .banks_client
+        .get_account(record_key)
+        .await?
+        .context("record missing")?;
+    let ready = RecoveryIdentity::try_deserialize(&mut before.data.as_slice())?;
+    assert_eq!(
+        (ready.white, ready.black, ready.status),
+        (white.pubkey(), black.pubkey(), RecoveryStatus::Ready)
+    );
+    let mut cancel_accounts = xfchess_game::__client_accounts_cancel_game::CancelGame {
+        game: game_pda(game_id).0,
+        escrow_pda: escrow_pda(game_id),
+        player: white.pubkey(),
+        white_authority: white.pubkey(),
+        black_authority: black.pubkey(),
+        system_program: solana_system_interface::program::ID,
+    }
+    .to_account_metas(None);
+    // The legacy optional recipient is writable only after an opponent joins.
+    cancel_accounts[4].is_writable = true;
+    let cancel = Instruction {
+        program_id: xfchess_game::ID,
+        accounts: cancel_accounts,
+        data: xfchess_game::instruction::CancelGame { game_id }.data(),
+    };
+    send(&mut ctx, cancel.clone(), &[&white]).await?;
+    // A fresh message executes the handler again instead of reusing a cached tx.
+    ctx.last_blockhash = ctx
+        .banks_client
+        .get_new_latest_blockhash(&ctx.last_blockhash)
+        .await?;
+    send(&mut ctx, cancel, &[&white]).await?;
+    for player in [white.pubkey(), black.pubkey()] {
+        assert_eq!(ctx.banks_client.get_balance(player).await?, 1_000_000_000);
+    }
+    assert_eq!(ctx.banks_client.get_balance(escrow_pda(game_id)).await?, 0);
+    let after = ctx
+        .banks_client
+        .get_account(record_key)
+        .await?
+        .context("permanent record missing")?;
+    let closed = RecoveryIdentity::try_deserialize(&mut after.data.as_slice())?;
+    assert_eq!(closed.status, RecoveryStatus::Closed);
+    assert_eq!(after.lamports, before.lamports);
+    Ok(())
 }
 
 fn player_profile_account(
@@ -408,7 +572,7 @@ async fn global_join_game_rejects_an_underfunded_session_vault() -> anyhow::Resu
     let game_id = 101u64;
     let wager_amount = 20_000_000u64;
 
-    // Generous caps again — only the balance check may reject this.
+    // Generous caps again â€” only the balance check may reject this.
     let (session_pda, mut session_account_data) =
         global_session_account(black, session_signer.pubkey(), 5_000_000_000, 1_000_000_000)?;
     session_account_data.lamports = 2_000_000;

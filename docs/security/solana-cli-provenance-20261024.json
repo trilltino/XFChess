@@ -1,0 +1,8 @@
+{
+  "release": "Agave v4.3.2",
+  "url": "https://github.com/anza-xyz/agave/releases/download/v4.3.2/solana-release-x86_64-pc-windows-msvc.tar.bz2",
+  "archive_bytes": 110665327,
+  "sha256": "ce29128589045fe1964e9d5c064ea5f2a58151f707bae4d5bab345a3725e0f09",
+  "digest_matches_official_release": true,
+  "extracted": "bin/solana.exe"
+}

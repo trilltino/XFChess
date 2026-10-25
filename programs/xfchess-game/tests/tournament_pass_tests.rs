@@ -4,10 +4,13 @@
 //! pass program's config and eligibility accounts (installed below with their real byte layouts)
 //! and burns (burning never invokes a hook).
 
+#[path = "common/agave.rs"]
+pub mod agave;
 pub mod common;
 
 use anyhow::Context as _;
 
+use crate::agave::{ProgramTest, ProgramTestContext};
 use anchor_lang::{
     solana_program::{program_option::COption, program_pack::Pack},
     AccountDeserialize, InstructionData, Space, ToAccountMetas,
@@ -20,7 +23,6 @@ use anchor_spl::token_2022::{
     },
     ID as TOKEN_2022,
 };
-use solana_program_test::{ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
     instruction::Instruction,

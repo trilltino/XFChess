@@ -12,6 +12,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
+use xfchess_client_compat::prelude::*;
 
 static PASSWORD_WORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
@@ -1132,7 +1133,7 @@ async fn broadcast_tx(
 
     let rpc = std::sync::Arc::clone(&state.solana_rpc);
     let sig = tokio::task::spawn_blocking(move || {
-        rpc.send_and_confirm_transaction_with_spinner_and_config(
+        rpc.send_sdk_and_confirm_transaction_with_spinner_and_config(
             &tx,
             CommitmentConfig::confirmed(),
             RpcSendTransactionConfig {

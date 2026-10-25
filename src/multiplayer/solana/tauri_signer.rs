@@ -8,6 +8,7 @@ use solana_sdk::{
     signature::{Keypair, NullSigner, Signature, Signer},
     transaction::{Transaction, VersionedTransaction},
 };
+use xfchess_client_compat::prelude::*;
 
 const SIGN_TIMEOUT_SECS: u64 = 120;
 
@@ -281,7 +282,7 @@ pub fn sign_message_via_tauri(message: &str, label: &str) -> Result<Vec<u8>, Str
 
 fn simulate_before_signing(rpc: &RpcClient, tx: &VersionedTransaction) -> Result<(), String> {
     let response = rpc
-        .simulate_transaction_with_config(
+        .simulate_sdk_transaction_with_config(
             tx,
             solana_client::rpc_config::RpcSimulateTransactionConfig {
                 sig_verify: false,

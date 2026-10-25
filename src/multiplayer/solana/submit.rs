@@ -8,6 +8,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use std::time::{Duration, Instant};
+use xfchess_client_compat::prelude::*;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SubmitConfig {
@@ -30,14 +31,14 @@ impl SubmitConfig {
 
 pub fn submit_and_poll<T>(rpc: &RpcClient, tx: &T, cfg: SubmitConfig) -> Result<Signature, String>
 where
-    T: solana_client::rpc_client::SerializableTransaction,
+    T: xfchess_client_compat::SdkTransaction,
 {
     let config = RpcSendTransactionConfig {
         skip_preflight: cfg.skip_preflight,
         ..Default::default()
     };
     let sig = rpc
-        .send_transaction_with_config(tx, config)
+        .send_sdk_transaction_with_config(tx, config)
         .map_err(|e| format!("send_transaction: {e}"))?;
 
     poll_signature(rpc, sig, cfg)

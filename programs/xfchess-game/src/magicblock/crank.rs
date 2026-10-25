@@ -33,12 +33,13 @@ pub fn build_time_check_schedule_instruction(
         data,
     };
 
-    let ix_data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(ScheduleTaskArgs {
+    let ix_data = MagicBlockInstruction::ScheduleTask(ScheduleTaskArgs {
         task_id: task_id as i64,
         execution_interval_millis: check_interval_millis as i64,
         iterations: iterations as i64,
         instructions: vec![crank_ix],
-    }))
+    })
+    .try_to_vec()
     .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?;
 
     Ok(Instruction::new_with_bytes(
@@ -54,9 +55,10 @@ pub fn build_time_check_cancel_instruction(
     game: Pubkey,
     task_id: u64,
 ) -> Result<Instruction> {
-    let ix_data = bincode::serialize(&MagicBlockInstruction::CancelTask {
+    let ix_data = MagicBlockInstruction::CancelTask {
         task_id: task_id as i64,
-    })
+    }
+    .try_to_vec()
     .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?;
 
     Ok(Instruction::new_with_bytes(
