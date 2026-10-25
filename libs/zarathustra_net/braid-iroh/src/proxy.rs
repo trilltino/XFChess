@@ -15,6 +15,7 @@ use tower::ServiceExt;
 struct ProxyState {
     client: IrohH3Client,
     default_peer: EndpointId,
+    local_id: EndpointId,
     local_router: Option<Router>,
 }
 
@@ -24,10 +25,12 @@ pub(crate) async fn serve(
     default_peer: EndpointId,
     local_router: Router,
 ) -> anyhow::Result<()> {
-    let local_router = (default_peer == endpoint.id()).then_some(local_router);
+    let local_id = endpoint.id();
+    let local_router = (default_peer == local_id).then_some(local_router);
     let state = ProxyState {
         client: IrohH3Client::new(endpoint, crate::node::BRAID_H3_ALPN.to_vec()),
         default_peer,
+        local_id,
         local_router,
     };
     let router = Router::new()
@@ -66,6 +69,10 @@ async fn proxy_handler(
         let (mut parts, body) = request.into_parts();
         // Route parameters from the bridge must not reach the resource router.
         parts.extensions.clear();
+        // The loopback bridge speaks as this node; remote peers never reach this branch.
+        parts
+            .extensions
+            .insert(iroh_h3_axum::RemoteId(state.local_id));
         let request = Request::from_parts(parts, body);
         return router
             .oneshot(request)

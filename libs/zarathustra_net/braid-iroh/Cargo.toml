@@ -21,6 +21,7 @@ tower = { version = "0.5", features = ["util"], optional = true }
 iroh-h3-axum = { path = "../iroh-h3-axum", optional = true }
 iroh-h3-client = { path = "../iroh-h3-client", optional = true }
 http = "1"
+parking_lot.workspace = true
 
 tokio = { workspace = true }
 futures = { workspace = true }

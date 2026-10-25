@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 
 use crate::discovery::{DiscoveryConfig, MockDiscoveryMap};
 #[cfg(feature = "proxy")]
-use crate::protocol::{self, BraidAppState};
+use crate::protocol::{self, AccessPolicy, BraidAppState};
 use crate::subscription::SubscriptionManager;
 
 pub const BRAID_H3_ALPN: &[u8] = b"braid-h3/0";
@@ -52,6 +52,10 @@ pub struct BraidIrohNode {
     proxy_task: Option<JoinHandle<()>>,
     flush_task: Option<crate::persistence::FlushTask>,
     proxy_addr: Option<std::net::SocketAddr>,
+    #[cfg(feature = "proxy")]
+    access: Arc<parking_lot::RwLock<AccessPolicy>>,
+    #[cfg(feature = "proxy")]
+    policy_changed: tokio::sync::watch::Sender<u64>,
 }
 
 impl BraidIrohNode {
@@ -93,10 +97,18 @@ impl BraidIrohNode {
         let proxy_addr = None;
         let gossip = Gossip::builder().spawn(endpoint.clone());
         let subscription_mgr = Arc::new(SubscriptionManager::new(gossip.clone()));
+        // Default deny: remote peers get no H3 access until the application grants it.
+        #[cfg(feature = "proxy")]
+        let access = Arc::new(parking_lot::RwLock::new(AccessPolicy::deny_all()));
+        #[cfg(feature = "proxy")]
+        let (policy_changed, _) = tokio::sync::watch::channel(0u64);
         #[cfg(feature = "proxy")]
         let app_state = BraidAppState {
             subscriptions: subscription_mgr.clone(),
             resources: resources.clone(),
+            local_id: endpoint.id(),
+            access: access.clone(),
+            policy_changed: policy_changed.clone(),
         };
 
         #[cfg(feature = "proxy")]
@@ -144,7 +156,26 @@ impl BraidIrohNode {
             proxy_task,
             flush_task,
             proxy_addr,
+            #[cfg(feature = "proxy")]
+            access,
+            #[cfg(feature = "proxy")]
+            policy_changed,
         })
+    }
+
+    /// Change which remote endpoints may use the H3 interface. Open
+    /// subscriptions re-check the policy immediately, so a revoked peer's
+    /// stream ends rather than lingering until it reconnects.
+    #[cfg(feature = "proxy")]
+    pub fn update_access(&self, change: impl FnOnce(&mut AccessPolicy)) {
+        change(&mut self.access.write());
+        self.policy_changed
+            .send_modify(|generation| *generation += 1);
+    }
+
+    #[cfg(feature = "proxy")]
+    pub fn access_policy(&self) -> AccessPolicy {
+        self.access.read().clone()
     }
 
     pub fn node_id(&self) -> EndpointId {
