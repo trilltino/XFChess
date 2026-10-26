@@ -241,9 +241,128 @@ pub fn handle_network_moves(
     }
 }
 
+/// How long a draw prompt stays on screen. A peer that never hears the answer
+/// would otherwise keep it forever. Only the prompt and button lapse: whether our
+/// own offer can still be accepted depends on the position, not the clock.
+pub const DRAW_OFFER_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Plies played in the engine's current position (0 before the first move).
+pub fn position_ply(engine: &ChessEngine) -> u32 {
+    crate::multiplayer::systems::fen_ply(engine.current_fen())
+        .and_then(|ply| u32::try_from(ply).ok())
+        .unwrap_or(0)
+}
+
+/// A draw offer as the chess rules (and the on-chain program) treat it: made in a
+/// position, standing through the offerer's own next move, and lapsing once the
+/// opponent moves instead of accepting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Standing {
+    ply: u32,
+    by_white: bool,
+}
+
+impl Standing {
+    fn new(ply: u32, offerer: &str) -> Self {
+        Self {
+            ply,
+            by_white: offerer == "white",
+        }
+    }
+
+    /// The first position in which the opponent has moved since the offer.
+    fn lapses_at(self) -> u32 {
+        // Even plies have white to move.
+        let offerer_moves_next = self.ply.is_multiple_of(2) == self.by_white;
+        if offerer_moves_next {
+            self.ply + 2
+        } else {
+            self.ply + 1
+        }
+    }
+
+    fn stands_at(self, ply: u32) -> bool {
+        ply < self.lapses_at()
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct PendingDrawOffer {
+    /// The opponent's offer, waiting for our answer.
     pub from_player: Option<String>,
+    from: Option<Standing>,
+    received_at: Option<std::time::Instant>,
+    /// Our own offer, waiting for their answer (shows the button as sent).
+    sent_at: Option<std::time::Instant>,
+    /// Our own offer. An acceptance is only honoured for it, so nobody can be
+    /// drawn out of a game they did not offer to draw, and it survives the prompt
+    /// timing out: an answer that reaches us late is still real.
+    offered: Option<Standing>,
+}
+
+impl PendingDrawOffer {
+    pub fn receive(&mut self, player: String, ply: u32) {
+        // The same offer arrives over gossip and Braid; keep the later position.
+        let ply = match self.from {
+            Some(known) if self.from_player.is_some() => ply.max(known.ply),
+            _ => ply,
+        };
+        self.from = Some(Standing::new(ply, &player));
+        self.from_player = Some(player);
+        self.received_at = Some(std::time::Instant::now());
+    }
+
+    pub fn mark_sent(&mut self, ply: u32, offerer: &str) {
+        self.sent_at = Some(std::time::Instant::now());
+        self.offered = Some(Standing::new(ply, offerer));
+    }
+
+    pub fn is_sent(&self) -> bool {
+        self.sent_at.is_some()
+    }
+
+    pub fn is_pending(&self) -> bool {
+        self.from_player.is_some() || self.sent_at.is_some()
+    }
+
+    /// Whether an acceptance made in position `ply` answers an offer of ours that
+    /// still stands there.
+    pub fn accepts(&self, ply: Option<u32>) -> bool {
+        self.offered
+            .is_some_and(|offer| ply.is_none_or(|ply| ply >= offer.ply && offer.stands_at(ply)))
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Drop what the opponent's move has overtaken. A move by the offerer leaves
+    /// their offer standing for the reply.
+    fn lapse_for_position(&mut self, ply: u32) {
+        if self.from.is_some_and(|offer| !offer.stands_at(ply)) {
+            self.from = None;
+            self.from_player = None;
+            self.received_at = None;
+        }
+        if self.offered.is_some_and(|offer| !offer.stands_at(ply)) {
+            self.offered = None;
+            self.sent_at = None;
+        }
+    }
+
+    fn expire(&mut self, now: std::time::Instant) {
+        let lapsed = |at: Option<std::time::Instant>| {
+            at.is_some_and(|at| now.saturating_duration_since(at) >= DRAW_OFFER_TTL)
+        };
+        if lapsed(self.received_at) {
+            self.from = None;
+            self.from_player = None;
+            self.received_at = None;
+        }
+        if lapsed(self.sent_at) {
+            self.sent_at = None;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -530,53 +649,140 @@ pub struct PendingRematchOffer {
     pub from_player: Option<String>,
 }
 
+/// Set while a wagered game with a connected wallet is running: its draw offers and
+/// acceptances are recorded on-chain first, by the chain layer, and announced after.
+#[derive(Resource, Default)]
+pub struct ChainDrawGate {
+    pub active: bool,
+}
+
+/// Turn what the player asked for into the announced offer or answer. A declined
+/// offer needs no chain record, and a game without a chain account has nothing to
+/// wait for.
+pub fn route_draw_requests(
+    mut requests: MessageReader<crate::game::events::DrawActionRequest>,
+    gate: Res<ChainDrawGate>,
+    mut offers: MessageWriter<crate::game::events::DrawOfferEvent>,
+    mut answers: MessageWriter<crate::game::events::DrawResponseEvent>,
+) {
+    use crate::game::events::DrawActionKind;
+    for request in requests.read() {
+        if gate.active && request.kind != DrawActionKind::Decline {
+            continue; // the chain layer takes it first
+        }
+        match request.kind {
+            DrawActionKind::Offer => {
+                offers.write(crate::game::events::DrawOfferEvent {
+                    player: request.player.clone(),
+                    remote: false,
+                    ply: None,
+                });
+            }
+            DrawActionKind::Accept | DrawActionKind::Decline => {
+                answers.write(crate::game::events::DrawResponseEvent {
+                    player: request.player.clone(),
+                    accepted: request.kind == DrawActionKind::Accept,
+                    remote: false,
+                    ply: None,
+                });
+            }
+        }
+    }
+}
+
+/// A resignation takes effect at once unless a wagered game must record it first.
+pub fn route_resign_requests(
+    mut requests: MessageReader<crate::game::events::ResignRequest>,
+    gate: Res<ChainDrawGate>,
+    mut resigns: MessageWriter<ResignEvent>,
+) {
+    for request in requests.read() {
+        if gate.active {
+            continue; // the chain layer records it first
+        }
+        resigns.write(ResignEvent {
+            winner: request.winner.clone(),
+            remote: false,
+        });
+    }
+}
+
 pub fn watch_draw_offers(
     mut events: MessageReader<crate::game::events::DrawOfferEvent>,
     mut pending: ResMut<PendingDrawOffer>,
+    engine: Res<ChessEngine>,
 ) {
     for ev in events.read() {
         if ev.remote {
             info!("[DRAW] Received draw offer from {}", ev.player);
-            pending.from_player = Some(ev.player.clone());
+            pending.receive(
+                ev.player.clone(),
+                ev.ply.unwrap_or_else(|| position_ply(&engine)),
+            );
+        } else {
+            pending.mark_sent(position_ply(&engine), &ev.player);
         }
     }
+}
+
+/// Retire offers that can no longer be answered: the position moved on (playing
+/// on declines), the game ended, or the prompt timed out. Draw offers and answers
+/// are durable on the Braid log, so a dropped link neither loses nor revives
+/// them; only the gossip-only rematch prompt is dropped with the link.
+pub fn expire_draw_offers(
+    mut pending: ResMut<PendingDrawOffer>,
+    mut rematch: ResMut<PendingRematchOffer>,
+    game_over: Res<GameOverState>,
+    engine: Res<ChessEngine>,
+    p2p: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+    mut last_link: Local<Option<crate::multiplayer::network::p2p::P2PConnectionStatus>>,
+) {
+    use crate::multiplayer::network::p2p::P2PConnectionStatus;
+
+    if game_over.is_game_over() {
+        pending.clear();
+    } else if pending.is_pending() || pending.offered.is_some() {
+        pending.lapse_for_position(position_ply(&engine));
+    }
+
+    if let Some(p2p) = p2p {
+        let broken = |s: &P2PConnectionStatus| {
+            matches!(
+                s,
+                P2PConnectionStatus::Disconnected | P2PConnectionStatus::Error(_)
+            )
+        };
+        let previous = last_link.replace(p2p.status.clone());
+        if previous.as_ref().is_some_and(|prev| *prev != p2p.status)
+            && (broken(&p2p.status) || previous.as_ref().is_some_and(broken))
+        {
+            rematch.from_player = None;
+        }
+    }
+
+    pending.expire(std::time::Instant::now());
 }
 
 pub fn handle_draw_response_events(
     mut events: MessageReader<crate::game::events::DrawResponseEvent>,
     mut pending: ResMut<PendingDrawOffer>,
     mut game_over: ResMut<GameOverState>,
-    #[cfg(feature = "solana")] solana_wallet: Option<
-        Res<crate::multiplayer::solana::addon::SolanaWallet>,
-    >,
-    #[cfg(feature = "solana")] solana_sync: Option<
-        Res<crate::multiplayer::solana::addon::SolanaGameSync>,
-    >,
 ) {
     for ev in events.read() {
+        // The opponent can only accept a draw we offered, in the position we offered it.
+        if ev.accepted && ev.remote && !pending.accepts(ev.ply) {
+            warn!(
+                "[DRAW] Ignored acceptance from {} (position {:?}): no matching offer of ours",
+                ev.player, ev.ply
+            );
+            continue;
+        }
         if ev.accepted {
             info!(
                 "[DRAW] Draw accepted by {} (remote={})",
                 ev.player, ev.remote
             );
             *game_over = GameOverState::Stalemate; // Stalemate is the closest "draw" variant
-
-            // Only the accepting client can sign the on-chain transaction;
-            // the remote echo must not submit it again.
-            #[cfg(feature = "solana")]
-            if !ev.remote {
-                if let (Some(wallet_pubkey), Some(game_id), Some(rpc_url)) = (
-                    solana_wallet.as_ref().and_then(|w| w.pubkey),
-                    solana_sync.as_ref().and_then(|s| s.game_id),
-                    solana_sync.as_ref().map(|s| s.rpc_url.clone()),
-                ) {
-                    crate::multiplayer::solana::lobby::spawn_accept_draw(
-                        rpc_url,
-                        wallet_pubkey,
-                        game_id,
-                    );
-                }
-            }
         } else {
             info!(
                 "[DRAW] Draw declined by {} (remote={})",
@@ -584,7 +790,7 @@ pub fn handle_draw_response_events(
             );
         }
         // Either way, clear the pending offer.
-        pending.from_player = None;
+        pending.clear();
     }
 }
 
@@ -654,5 +860,172 @@ pub fn handle_flag_timeout_events(
             "[FLAG] Applied flag timeout for '{}' (remote={}) -> {:?}",
             event.flagged_player, event.remote, *game_over
         );
+    }
+}
+
+#[cfg(test)]
+mod draw_offer_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_received_offer_lapses_after_the_ttl() {
+        let mut pending = PendingDrawOffer::default();
+        pending.receive("white".into(), 10);
+        pending.expire(Instant::now() + DRAW_OFFER_TTL - Duration::from_secs(1));
+        assert!(pending.from_player.is_some());
+        pending.expire(Instant::now() + DRAW_OFFER_TTL + Duration::from_secs(1));
+        assert!(pending.from_player.is_none());
+    }
+
+    #[test]
+    fn a_sent_offer_lapses_and_frees_the_button() {
+        let mut pending = PendingDrawOffer::default();
+        pending.mark_sent(10, "white");
+        assert!(pending.is_sent() && pending.is_pending());
+        pending.expire(Instant::now() + DRAW_OFFER_TTL + Duration::from_secs(1));
+        assert!(!pending.is_pending());
+    }
+
+    #[test]
+    fn clear_drops_both_directions() {
+        let mut pending = PendingDrawOffer::default();
+        pending.receive("black".into(), 10);
+        pending.mark_sent(10, "black");
+        pending.clear();
+        assert!(!pending.is_pending());
+        assert!(!pending.accepts(None));
+    }
+
+    #[test]
+    fn an_offer_made_on_the_offerers_turn_stands_through_their_move() {
+        // White to move at ply 10 offers, then moves: black's reply may still accept.
+        let mut pending = PendingDrawOffer::default();
+        pending.receive("white".into(), 10);
+        pending.lapse_for_position(10);
+        pending.lapse_for_position(11);
+        assert!(
+            pending.from_player.is_some(),
+            "the offerer's own move keeps it"
+        );
+        pending.lapse_for_position(12);
+        assert!(
+            pending.from_player.is_none(),
+            "black moved instead of accepting"
+        );
+    }
+
+    #[test]
+    fn an_offer_made_on_the_opponents_turn_lapses_when_they_move() {
+        // Black to move at ply 11; white offers and black plays on.
+        let mut pending = PendingDrawOffer::default();
+        pending.receive("white".into(), 11);
+        pending.lapse_for_position(11);
+        assert!(pending.from_player.is_some());
+        pending.lapse_for_position(12);
+        assert!(pending.from_player.is_none());
+    }
+
+    #[test]
+    fn a_board_still_catching_up_does_not_cancel_an_offer() {
+        // The offer can arrive before the move it follows has been applied.
+        let mut pending = PendingDrawOffer::default();
+        pending.receive("white".into(), 10);
+        pending.lapse_for_position(9);
+        assert!(pending.from_player.is_some());
+    }
+
+    #[test]
+    fn the_same_offer_over_two_transports_keeps_the_later_position() {
+        let mut pending = PendingDrawOffer::default();
+        pending.receive("white".into(), 9); // gossip, ahead of the board
+        pending.receive("white".into(), 10); // Braid, with the real position
+        pending.lapse_for_position(11);
+        assert!(pending.from_player.is_some());
+    }
+
+    #[test]
+    fn only_an_offer_of_ours_that_still_stands_can_be_accepted() {
+        let mut pending = PendingDrawOffer::default();
+        assert!(!pending.accepts(Some(10)), "nothing was offered");
+        pending.mark_sent(10, "white");
+        assert!(pending.accepts(Some(10)));
+        assert!(pending.accepts(Some(11)), "after our own move");
+        assert!(pending.accepts(None), "gossip does not say which position");
+        assert!(!pending.accepts(Some(8)), "before it was made");
+        assert!(!pending.accepts(Some(12)), "after the opponent moved on");
+        // The prompt timing out must not make a late acceptance unreal.
+        pending.expire(Instant::now() + DRAW_OFFER_TTL + Duration::from_secs(1));
+        assert!(!pending.is_sent());
+        assert!(pending.accepts(Some(11)));
+        // The opponent's move withdraws the offer.
+        pending.lapse_for_position(12);
+        assert!(!pending.accepts(Some(11)));
+    }
+}
+
+#[cfg(test)]
+mod draw_acceptance_tests {
+    use super::*;
+    use crate::game::events::{DrawOfferEvent, DrawResponseEvent};
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.init_resource::<PendingDrawOffer>();
+        app.init_resource::<GameOverState>();
+        app.add_message::<DrawResponseEvent>();
+        app.add_message::<DrawOfferEvent>();
+        app.add_systems(Update, handle_draw_response_events);
+        app
+    }
+
+    fn accept(app: &mut App, ply: Option<u32>) {
+        app.world_mut().write_message(DrawResponseEvent {
+            player: "black".into(),
+            accepted: true,
+            remote: true,
+            ply,
+        });
+        app.update();
+    }
+
+    #[test]
+    fn an_acceptance_of_an_offer_nobody_made_does_not_end_the_game() {
+        let mut app = app();
+        accept(&mut app, Some(10));
+        assert_eq!(
+            *app.world().resource::<GameOverState>(),
+            GameOverState::Playing
+        );
+    }
+
+    #[test]
+    fn an_acceptance_in_another_position_does_not_end_the_game() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<PendingDrawOffer>()
+            .mark_sent(10, "white");
+        accept(&mut app, Some(8));
+        assert_eq!(
+            *app.world().resource::<GameOverState>(),
+            GameOverState::Playing
+        );
+    }
+
+    #[test]
+    fn an_acceptance_of_our_offer_ends_the_game_even_after_a_long_offline_spell() {
+        let mut app = app();
+        {
+            let mut pending = app.world_mut().resource_mut::<PendingDrawOffer>();
+            pending.mark_sent(10, "white");
+            // The prompt timed out while we were away; the offer itself is still ours.
+            pending.expire(std::time::Instant::now() + DRAW_OFFER_TTL * 10);
+        }
+        accept(&mut app, Some(10));
+        assert_eq!(
+            *app.world().resource::<GameOverState>(),
+            GameOverState::Stalemate
+        );
+        assert!(!app.world().resource::<PendingDrawOffer>().is_pending());
     }
 }

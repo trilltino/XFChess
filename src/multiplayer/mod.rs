@@ -6,6 +6,7 @@
 use bevy::prelude::*;
 use tokio::runtime::Runtime;
 
+pub mod casual_resume;
 pub mod error;
 pub mod join_link;
 pub mod monitoring;
@@ -22,9 +23,12 @@ pub mod resume;
 pub mod rollup;
 #[cfg(feature = "solana")]
 pub mod seat;
+pub mod session_restore;
 #[cfg(feature = "solana")]
 pub mod solana;
 pub mod spectator;
+#[cfg(test)]
+mod start_handshake_sim;
 pub mod tournament;
 pub mod ui;
 #[cfg(feature = "solana")]
@@ -72,6 +76,8 @@ impl Plugin for MultiplayerPlugin {
             ui::spectator_overlay::SpectatorOverlayPlugin,
             telemetry::FocusTelemetryPlugin,
             monitoring::GameHealthMonitorPlugin,
+            session_restore::SessionRestorePlugin,
+            casual_resume::CasualResumePlugin,
         ));
 
         #[cfg(feature = "solana")]
@@ -80,6 +86,7 @@ impl Plugin for MultiplayerPlugin {
             rollup::bridge::RollupNetworkBridgePlugin,
             solana::integration::SolanaIntegrationPlugin,
             solana::lobby::SolanaLobbyPlugin,
+            solana::chain_actions::ChainActionsPlugin,
             solana::wager_rate::SolUsdRatePlugin,
             // Tournament click handlers require this resource; a missing client silently disables them.
             solana::tournament::TournamentClientPlugin,

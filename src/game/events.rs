@@ -54,10 +54,40 @@ pub struct ResignEvent {
     pub remote: bool,
 }
 
+/// The player chose to resign (or to leave a game, which resigns it). In a wagered game
+/// the resignation is recorded on-chain before it takes effect; elsewhere it becomes
+/// a local [`ResignEvent`] at once.
+#[derive(Message, Debug, Clone)]
+pub struct ResignRequest {
+    /// The side that wins by it ("white" / "black").
+    pub winner: String,
+}
+
+/// What the player asked for in the draw UI. In a wagered game an offer or acceptance
+/// is recorded on-chain before it is announced; everywhere else it is announced
+/// straight away as a [`DrawOfferEvent`] / [`DrawResponseEvent`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawActionKind {
+    Offer,
+    Accept,
+    Decline,
+}
+
+#[derive(Message, Debug, Clone)]
+pub struct DrawActionRequest {
+    /// Colour label of the player acting ("white" / "black").
+    pub player: String,
+    pub kind: DrawActionKind,
+}
+
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
 pub struct DrawOfferEvent {
     pub player: String,
     pub remote: bool,
+    /// Position the offer was made in, when the transport says (Braid does,
+    /// gossip does not); otherwise the current position is assumed.
+    #[serde(default)]
+    pub ply: Option<u32>,
 }
 
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]
@@ -65,6 +95,9 @@ pub struct DrawResponseEvent {
     pub player: String,
     pub accepted: bool,
     pub remote: bool,
+    /// Position the answer refers to, when the transport says.
+    #[serde(default)]
+    pub ply: Option<u32>,
 }
 
 #[derive(Message, Debug, Clone, ::serde::Serialize, ::serde::Deserialize)]

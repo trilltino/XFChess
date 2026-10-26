@@ -41,6 +41,26 @@ pub fn reset_evaluation(mut history: ResMut<EvalHistory>, mut eval: ResMut<EvalB
     *eval = EvalBarState::default();
 }
 
+/// What the list of positions was last built from. Rebuilding it replays every move of
+/// the game and formats a FEN for each, so it is done when one of these changes, not
+/// once per frame (which grew with the length of the game).
+#[derive(Default)]
+pub struct PositionKey {
+    replay: bool,
+    moves: usize,
+    snapshots: usize,
+    fen: String,
+}
+
+impl PositionKey {
+    fn matches(&self, replay: bool, moves: usize, snapshots: usize, fen: &str) -> bool {
+        self.replay == replay
+            && self.moves == moves
+            && self.snapshots == snapshots
+            && self.fen == fen
+    }
+}
+
 pub fn update_eval_bar(
     history: Res<crate::game::resources::MoveHistory>,
     engine: Res<crate::engine::board_state::ChessEngine>,
@@ -50,6 +70,7 @@ pub fn update_eval_bar(
     replay: Option<Res<crate::game::replay::PgnReplayState>>,
     pgn: Option<Res<crate::game::replay::ParsedPgnGameResource>>,
     settings: Res<crate::core::GameSettings>,
+    mut built_from: Local<Option<PositionKey>>,
 ) {
     let restricted = matches!(
         *game_mode,
@@ -61,6 +82,7 @@ pub fn update_eval_bar(
     let graph =
         *game_mode == GameMode::PgnReplay && pgn.as_ref().is_some_and(|p| p.show_eval_graph);
     if restricted || (!eval.visible && !graph) {
+        *built_from = None;
         evaluations.pending = None;
         evaluations.worker = None;
         if restricted {
@@ -71,39 +93,53 @@ pub fn update_eval_bar(
         }
         return;
     }
-    let positions = if *game_mode == GameMode::PgnReplay {
-        replay
-            .as_ref()
-            .map(|r| r.fen_snapshots.clone())
-            .unwrap_or_default()
-    } else {
-        let mut game = xfchess_rules::Game::default();
-        let mut positions = Vec::with_capacity(history.len());
-        for record in history.iter() {
-            if game.play_uci(&record.uci()).is_err() {
-                positions.clear();
-                break;
+    let replaying = *game_mode == GameMode::PgnReplay;
+    let snapshots = replay.as_ref().map_or(0, |r| r.fen_snapshots.len());
+    let up_to_date = !evaluations.positions.is_empty()
+        && built_from.as_ref().is_some_and(|key| {
+            key.matches(replaying, history.len(), snapshots, engine.current_fen())
+        });
+    if !up_to_date {
+        let positions = if *game_mode == GameMode::PgnReplay {
+            replay
+                .as_ref()
+                .map(|r| r.fen_snapshots.clone())
+                .unwrap_or_default()
+        } else {
+            let mut game = xfchess_rules::Game::default();
+            let mut positions = Vec::with_capacity(history.len());
+            for record in history.iter() {
+                if game.play_uci(&record.uci()).is_err() {
+                    positions.clear();
+                    break;
+                }
+                positions.push(game.fen());
             }
-            positions.push(game.fen());
+            if positions.last().map(String::as_str) != Some(engine.current_fen()) {
+                positions = vec![engine.current_fen().to_string()];
+            }
+            positions
+        };
+        if positions != evaluations.positions {
+            let common = positions
+                .iter()
+                .zip(&evaluations.positions)
+                .take_while(|(a, b)| a == b)
+                .count();
+            evaluations.pending = None;
+            evaluations.scores.truncate(common);
+            evaluations.mates.truncate(common);
+            evaluations.failed.retain(|ply| *ply < common);
+            evaluations.scores.resize(positions.len(), None);
+            evaluations.mates.resize(positions.len(), None);
+            evaluations.positions = positions;
         }
-        if positions.last().map(String::as_str) != Some(engine.current_fen()) {
-            positions = vec![engine.current_fen().to_string()];
-        }
-        positions
-    };
-    if positions != evaluations.positions {
-        let common = positions
-            .iter()
-            .zip(&evaluations.positions)
-            .take_while(|(a, b)| a == b)
-            .count();
-        evaluations.pending = None;
-        evaluations.scores.truncate(common);
-        evaluations.mates.truncate(common);
-        evaluations.failed.retain(|ply| *ply < common);
-        evaluations.scores.resize(positions.len(), None);
-        evaluations.mates.resize(positions.len(), None);
-        evaluations.positions = positions;
+        *built_from = Some(PositionKey {
+            replay: replaying,
+            moves: history.len(),
+            snapshots,
+            fen: engine.current_fen().to_string(),
+        });
     }
     let current = if *game_mode == GameMode::PgnReplay {
         replay.as_ref().map_or(0, |r| r.current_ply)

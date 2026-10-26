@@ -64,7 +64,7 @@ pub(super) fn render_checkmate_banner(
 pub fn draw_offer_ui(
     mut contexts: bevy_egui::EguiContexts,
     pending: Res<crate::game::systems::network_move::PendingDrawOffer>,
-    mut draw_response: bevy::prelude::MessageWriter<crate::game::events::DrawResponseEvent>,
+    mut draw_response: bevy::prelude::MessageWriter<crate::game::events::DrawActionRequest>,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
 ) {
     let Some(from) = pending.from_player.as_ref() else {
@@ -113,10 +113,9 @@ pub fn draw_offer_ui(
                         )
                         .clicked()
                     {
-                        draw_response.write(crate::game::events::DrawResponseEvent {
+                        draw_response.write(crate::game::events::DrawActionRequest {
                             player: local_player.clone(),
-                            accepted: true,
-                            remote: false,
+                            kind: crate::game::events::DrawActionKind::Accept,
                         });
                     }
 
@@ -134,10 +133,9 @@ pub fn draw_offer_ui(
                         )
                         .clicked()
                     {
-                        draw_response.write(crate::game::events::DrawResponseEvent {
+                        draw_response.write(crate::game::events::DrawActionRequest {
                             player: local_player,
-                            accepted: false,
-                            remote: false,
+                            kind: crate::game::events::DrawActionKind::Decline,
                         });
                     }
                 });
@@ -369,6 +367,9 @@ pub fn disconnect_recovery_banner(
     game_mode: Res<crate::core::GameMode>,
     p2p_conn: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
     game_over: Res<crate::game::resources::GameOverState>,
+    mut refresh: bevy::prelude::MessageWriter<
+        crate::multiplayer::network::online_game_session::RefreshGameState,
+    >,
 ) {
     let is_online = matches!(
         *game_mode,
@@ -418,22 +419,10 @@ pub fn disconnect_recovery_banner(
                         .color(egui::Color32::from_rgb(255, 180, 180)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("Refresh state").clicked() {
-                        if let Some(conn) = p2p_conn.as_ref() {
-                            if let Some(game_id) = conn.game_id {
-                                let base = crate::multiplayer::network::vps::vps_base();
-                                crate::core::net_task::spawn_detached("game_ui", move || {
-                                    let url = format!("{}/api/games/{}/state", base, game_id);
-                                    if let Ok(resp) = reqwest::blocking::get(&url) {
-                                        info!(
-                                            "[RECONNECT] Fetched state for game {}: {}",
-                                            game_id,
-                                            resp.status()
-                                        );
-                                    }
-                                });
-                            }
-                        }
+                    if ui.small_button("Reconnect now").clicked() {
+                        refresh.write(
+                            crate::multiplayer::network::online_game_session::RefreshGameState,
+                        );
                     }
                 });
             });

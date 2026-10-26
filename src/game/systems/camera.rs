@@ -456,6 +456,67 @@ pub fn camera_rotate_on_turn_system(
     }
 }
 
+/// The 3D view is framed for the design window: the camera sits 11.5 above and 10 behind
+/// the board centre, with Bevy's default 45 degree vertical field of view.
+const DESIGN_HEIGHT: f32 = 11.5;
+const DESIGN_BEHIND: f32 = 10.0;
+const BASE_FOV: f32 = std::f32::consts::FRAC_PI_4;
+/// Wider than this the edges of the board stretch noticeably.
+const MAX_FOV: f32 = 1.75;
+
+/// The vertical field of view that keeps the 3D board clear of both side panels.
+///
+/// The board is centred in the window and the left panel covers its left edge, so what
+/// is free for it is `width - 2 * panel` (the same on the right, which keeps it centred).
+/// At the design size and any wider window that is plenty; in a narrow or square window
+/// the board would be cut off, so the view is zoomed out just enough to fit. Height
+/// needs no help: the board scales with it already. Sizes are logical pixels.
+pub fn fov_to_fit(window_width: f32, window_height: f32, panel_width: f32) -> f32 {
+    if !(window_width > 0.0 && window_height > 0.0) {
+        return BASE_FOV;
+    }
+    let distance = DESIGN_HEIGHT.hypot(DESIGN_BEHIND);
+    let (sin_tilt, cos_tilt) = (DESIGN_HEIGHT / distance, DESIGN_BEHIND / distance);
+    let half_tan = (BASE_FOV / 2.0).tan();
+    let pixels_per_unit = window_height / (2.0 * distance * half_tan);
+    // 8 squares, widened for the near edge in perspective and the pieces.
+    let board_width = 8.0 * pixels_per_unit * 1.25;
+    // The board foreshortened by the tilt, plus the height of the pieces.
+    let board_height = (8.0 * sin_tilt + 1.5 * cos_tilt) * pixels_per_unit * 1.1;
+    let free_width = (window_width - 2.0 * panel_width).max(window_width * 0.3);
+    let shrink = (free_width / board_width)
+        .min(0.95 * window_height / board_height)
+        .min(1.0);
+    (2.0 * (half_tan / shrink).atan()).min(MAX_FOV)
+}
+
+/// Keep the 3D board in view as the window changes shape.
+pub fn fit_board_camera(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    zoom: Res<crate::ui::responsive::UiZoom>,
+    mut cameras: Query<(&mut Projection, &Camera), With<BoardCamera>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let panel = crate::ui::styles::Layout::SIDE_PANEL_WIDTH * zoom.0;
+    let fov = fov_to_fit(window.width(), window.height(), panel);
+    for (mut projection, camera) in &mut cameras {
+        if !camera.is_active {
+            continue;
+        }
+        let needs_update = match &*projection {
+            Projection::Perspective(perspective) => (perspective.fov - fov).abs() > 1e-4,
+            _ => false,
+        };
+        if needs_update {
+            if let Projection::Perspective(perspective) = &mut *projection {
+                perspective.fov = fov;
+            }
+        }
+    }
+}
+
 pub fn setup_game_camera(
     mut commands: Commands,
     persistent_camera: Res<crate::PersistentEguiCamera>,
@@ -859,5 +920,45 @@ mod tests {
         }
 
         assert_eq!(target_zoom, 13.0);
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    #[test]
+    fn the_design_window_and_wider_keep_the_designed_view() {
+        let panel = 260.0;
+        assert_eq!(fov_to_fit(1280.0, 720.0, panel), BASE_FOV);
+        assert_eq!(fov_to_fit(1920.0, 1080.0, panel * 1.5), BASE_FOV);
+        assert_eq!(fov_to_fit(2560.0, 1080.0, panel * 1.5), BASE_FOV);
+    }
+
+    #[test]
+    fn a_square_window_zooms_out_so_the_board_clears_the_panels() {
+        let fov = fov_to_fit(900.0, 900.0, 208.0);
+        assert!(fov > BASE_FOV);
+        // The board then fits in the width left between the panels.
+        let distance = DESIGN_HEIGHT.hypot(DESIGN_BEHIND);
+        let pixels_per_unit = 900.0 / (2.0 * distance * (fov / 2.0).tan());
+        assert!(8.0 * pixels_per_unit * 1.25 <= 900.0 - 2.0 * 208.0 + 1.0);
+    }
+
+    #[test]
+    fn narrower_never_means_a_tighter_view() {
+        let mut last = fov_to_fit(1600.0, 800.0, 260.0);
+        for width in [1400.0, 1200.0, 1000.0, 900.0, 800.0] {
+            let fov = fov_to_fit(width, 800.0, 260.0);
+            assert!(fov >= last - 1e-6, "{width}px");
+            last = fov;
+        }
+    }
+
+    #[test]
+    fn the_view_never_stretches_past_the_limit_and_survives_nonsense() {
+        assert!(fov_to_fit(300.0, 900.0, 260.0) <= MAX_FOV);
+        assert_eq!(fov_to_fit(0.0, 0.0, 260.0), BASE_FOV);
+        assert_eq!(fov_to_fit(f32::NAN, 720.0, 260.0), BASE_FOV);
     }
 }

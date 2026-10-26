@@ -10,11 +10,13 @@ use solana_sdk::pubkey::Pubkey;
 use tokio::sync::oneshot;
 use xfchess_game::state::{Game, GameStatus};
 
-use crate::engine::board_state::ChessEngine;
-use crate::multiplayer::systems::fen_ply;
+use crate::multiplayer::session_restore::{
+    opponent_node, replay_moves, restore_session, MoveReplay, RestoredSession, SessionTargets,
+    SessionTransitions,
+};
 use crate::rendering::pieces::PieceColor;
 
-pub const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+pub use crate::multiplayer::session_restore::START_FEN;
 
 /// Moves the log may be ahead of the chain (unrecorded batch). Beyond this the
 /// gap is not a normal batching lag and is refused for investigation.
@@ -85,14 +87,6 @@ impl ResumeError {
     }
 }
 
-fn mover_of(fen_before: &str) -> PieceColor {
-    if fen_before.split_whitespace().nth(1) == Some("b") {
-        PieceColor::Black
-    } else {
-        PieceColor::White
-    }
-}
-
 /// Plan a resume. `chain_move_count`/`game` come from the authoritative Game
 /// account (the ER copy while delegated); `events` is the backend log.
 pub fn plan_resume(
@@ -151,58 +145,18 @@ pub fn plan_resume(
         });
     }
 
-    let mut engine = ChessEngine::default();
-    let mut prev = START_FEN.to_string();
-    let mut my_moves = 0u32;
-    let mut opponent_moves = 0u32;
-    let mut my_head = "0".to_string();
-    let mut opponent_head = "0".to_string();
-    let mut applied_versions = Vec::with_capacity(moves.len());
-    let mut chain_fen = START_FEN.to_string();
-    for (i, m) in moves.iter().enumerate() {
-        engine
-            .set_from_fen(&prev)
-            .map_err(|e| ResumeError::InvalidLog(format!("position before move {}: {e}", i + 1)))?;
-        engine.rebuild_legal_move_cache();
-        if !engine.is_move_legal_by_uci(&m.uci) {
-            return Err(ResumeError::InvalidLog(format!(
-                "move {} ({}) is illegal",
-                i + 1,
-                m.uci
-            )));
-        }
-        if fen_ply(&m.fen_after) != Some(i as u64 + 1) {
-            return Err(ResumeError::InvalidLog(format!(
-                "move {} reports the wrong ply ({})",
-                i + 1,
-                m.fen_after
-            )));
-        }
-        let version = braid_chess::version_hash(&m.fen_after, m.move_number);
-        if mover_of(&prev) == my_color {
-            my_moves += 1;
-            my_head = version.clone();
-        } else {
-            opponent_moves += 1;
-            opponent_head = version.clone();
-        }
-        applied_versions.push(version);
-        prev = m.fen_after.clone();
-        if i + 1 == chain {
-            chain_fen = prev.clone();
-        }
-    }
+    let replay = replay_moves(my_color, &moves, chain).map_err(ResumeError::InvalidLog)?;
 
     Ok(ResumePlan {
         game_id: game.game_id,
         my_color,
-        fen: prev,
-        my_moves,
-        opponent_moves,
-        my_head,
-        opponent_head,
-        applied_versions,
-        chain_fen,
+        fen: replay.fen,
+        my_moves: replay.my_moves,
+        opponent_moves: replay.opponent_moves,
+        my_head: replay.my_head,
+        opponent_head: replay.opponent_head,
+        applied_versions: replay.applied_versions,
+        chain_fen: replay.checkpoint_fen,
         chain_move_count,
         unrecorded: moves[chain..]
             .iter()
@@ -220,6 +174,8 @@ struct ResumeInputs {
     plan: ResumePlan,
     /// Next `record_move` nonce from the chain (delegated games only).
     next_nonce: Option<u64>,
+    /// Host and joiner transport node ids, when the backend recorded them.
+    nodes: Option<(String, String)>,
 }
 
 fn gather(game_id: u64, wallet: Pubkey, rpc_url: String) -> Result<ResumeInputs, ResumeError> {
@@ -311,9 +267,19 @@ fn gather(game_id: u64, wallet: Pubkey, rpc_url: String) -> Result<ResumeInputs,
     } else {
         None
     };
-    Ok(ResumeInputs { plan, next_nonce })
+    // Best effort: without them the game still resumes, it just cannot watch for
+    // the opponent until they show up on the mesh.
+    let nodes = crate::multiplayer::vps_client::fetch_game_nodes(&game_id.to_string())
+        .unwrap_or_else(|e| {
+            warn!("[RESUME] could not look up the opponent node: {e}");
+            None
+        });
+    Ok(ResumeInputs {
+        plan,
+        next_nonce,
+        nodes,
+    })
 }
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum ResumeStatus {
     #[default]
@@ -330,8 +296,6 @@ pub enum ResumeStatus {
 pub struct ResumeState {
     pub status: ResumeStatus,
     rx: Option<oneshot::Receiver<Result<ResumeInputs, ResumeError>>>,
-    /// Position to apply to the engine once the resumed board has spawned.
-    pending_engine_fen: Option<String>,
 }
 
 impl ResumeState {
@@ -355,34 +319,17 @@ impl ResumeState {
 
 #[derive(SystemParam)]
 pub struct ResumeTargets<'w> {
-    online_session: ResMut<'w, crate::multiplayer::network::online_game_session::OnlineGameSession>,
-    network_config: Res<'w, crate::multiplayer::types::NetworkConfig>,
-    network_state: Option<Res<'w, crate::multiplayer::OnlineNetworkState>>,
-    p2p: ResMut<'w, crate::multiplayer::network::p2p::P2PConnectionState>,
+    session: SessionTargets<'w>,
     sync: ResMut<'w, crate::multiplayer::solana::addon::SolanaGameSync>,
     competitive: ResMut<'w, crate::multiplayer::solana::addon::CompetitiveMatchState>,
     rollup: ResMut<'w, crate::multiplayer::rollup::manager::EphemeralRollupManager>,
     bridge: ResMut<'w, crate::multiplayer::rollup::bridge::RollupNetworkBridge>,
-    causal: ResMut<'w, crate::multiplayer::types::CausalChainState>,
-    pending: ResMut<'w, crate::multiplayer::types::PendingMoveBuffer>,
-    barrier: ResMut<'w, crate::multiplayer::types::OnlineStartBarrier>,
-    resume_board: ResMut<'w, crate::rendering::pieces::ResumeBoard>,
-    time_control: ResMut<'w, crate::game::resources::active_time_control::ActiveTimeControl>,
-}
-
-#[derive(SystemParam)]
-pub struct ResumeTransitions<'w> {
-    ai_config: ResMut<'w, crate::game::ai::resource::ChessAIResource>,
-    core_mode: ResMut<'w, crate::core::GameMode>,
-    next_state: ResMut<'w, NextState<crate::core::GameState>>,
-    menu_state: ResMut<'w, NextState<crate::core::MenuState>>,
-    started: MessageWriter<'w, crate::game::events::GameStartedEvent>,
 }
 
 pub(crate) fn poll_resume(
     mut resume: ResMut<ResumeState>,
     mut t: ResumeTargets,
-    mut go: ResumeTransitions,
+    mut go: SessionTransitions,
 ) {
     let Some(rx) = resume.rx.as_mut() else {
         return;
@@ -401,8 +348,12 @@ pub(crate) fn poll_resume(
     resume.rx = None;
     match result {
         Ok(inputs) => {
-            apply_plan(&inputs.plan, inputs.next_nonce, &mut t, &mut go);
-            resume.pending_engine_fen = Some(inputs.plan.fen.clone());
+            let peer = inputs
+                .nodes
+                .as_ref()
+                .zip(t.session.local_node_id())
+                .and_then(|(nodes, local)| opponent_node(nodes, &local));
+            apply_plan(&inputs.plan, inputs.next_nonce, peer, &mut t, &mut go);
             resume.status = ResumeStatus::Resumed(inputs.plan.game_id);
         }
         Err(e) => {
@@ -418,59 +369,37 @@ pub(crate) fn poll_resume(
 fn apply_plan(
     plan: &ResumePlan,
     next_nonce: Option<u64>,
+    peer_node_id: Option<String>,
     t: &mut ResumeTargets,
-    go: &mut ResumeTransitions,
+    go: &mut SessionTransitions,
 ) {
-    use crate::multiplayer::network::online_game_session::{numeric_game_id, start_session};
-
     let game_id = plan.game_id;
-    let wager_sol = plan.wager_lamports as f64 / 1_000_000_000.0;
-    if let Some(network_state) = t.network_state.as_deref() {
-        start_session(
-            &mut t.online_session,
-            t.network_config.vps_base_url.clone(),
-            game_id.to_string(),
-            wager_sol,
-            network_state,
-        );
-    }
-    // Continue this player's own Braid/gossip lane where the log ends.
-    t.online_session.next_move_number = plan.my_moves + 1;
-    t.online_session.next_nonce = plan.my_moves as u64 + 1;
-    t.online_session.last_published_move_version = plan.my_head.clone();
-    t.online_session.last_move_uci = plan.last_move_uci.clone();
-
-    let net_game_id = numeric_game_id(&game_id.to_string());
-    // Log replay on resubscribe must not re-apply moves the snapshot already has.
-    t.causal
-        .applied_versions
-        .entry(net_game_id)
-        .or_default()
-        .extend(plan.applied_versions.iter().cloned());
-    t.causal.resume_seeds.insert(
-        net_game_id,
-        (plan.opponent_moves as u64, plan.opponent_head.clone()),
-    );
-    t.pending.sequencers.insert(
-        net_game_id,
-        crate::multiplayer::network::reorder::NonceSequencer::starting_at(
-            plan.opponent_moves as u64 + 1,
-            crate::multiplayer::types::PendingMoveBuffer::MAX_BUFFERED,
-        ),
-    );
-    // Both players' presence was proven on chain when the game went Active.
-    *t.barrier = crate::multiplayer::types::OnlineStartBarrier {
-        game_id: net_game_id,
-        local_ready: true,
-        remote_ready: true,
-        start_confirmed: true,
-        ready_sent: true,
-        start_sent: true,
+    let replay = MoveReplay {
+        fen: plan.fen.clone(),
+        my_moves: plan.my_moves,
+        opponent_moves: plan.opponent_moves,
+        my_head: plan.my_head.clone(),
+        opponent_head: plan.opponent_head.clone(),
+        applied_versions: plan.applied_versions.clone(),
+        checkpoint_fen: plan.chain_fen.clone(),
     };
-
-    t.p2p.is_host = plan.my_color == PieceColor::White;
-    t.p2p.player_color = Some(plan.my_color);
-    t.p2p.status = crate::multiplayer::network::p2p::P2PConnectionStatus::InGame;
+    // Both players' presence was proven on chain when the game went Active.
+    restore_session(
+        &RestoredSession {
+            session_game_id: game_id.to_string(),
+            game_id,
+            my_color: plan.my_color,
+            replay: &replay,
+            last_move_uci: plan.last_move_uci.clone(),
+            wager_sol: plan.wager_lamports as f64 / 1_000_000_000.0,
+            base_time_seconds: plan.base_time_seconds,
+            increment_seconds: plan.increment_seconds,
+            time_control: None,
+            peer_node_id,
+        },
+        &mut t.session,
+        go,
+    );
 
     t.sync.game_id = Some(game_id);
     t.sync.wager_amount = plan.wager_lamports;
@@ -495,21 +424,6 @@ fn apply_plan(
         None => {}
     }
 
-    t.resume_board.fen = Some(plan.fen.clone());
-    if plan.base_time_seconds > 0 {
-        t.time_control.control = crate::game::time_control::TimeControl::Custom {
-            base_seconds: plan.base_time_seconds.min(u32::MAX as u64) as u32,
-            increment_seconds: plan.increment_seconds,
-        };
-    }
-    crate::multiplayer::network::game_id_store::set(game_id);
-
-    go.ai_config.mode = crate::game::ai::resource::AiMode::Multiplayer;
-    *go.core_mode = crate::core::GameMode::OnlineMultiplayer;
-    go.started
-        .write(crate::game::events::GameStartedEvent { game_id });
-    go.next_state.set(crate::core::GameState::InGame);
-    go.menu_state.set(crate::core::MenuState::Main);
     info!(
         "[RESUME] Game {game_id} resumed as {:?}: {} moves ({} recorded on chain, {} re-queued)",
         plan.my_color,
@@ -519,50 +433,78 @@ fn apply_plan(
     );
 }
 
-/// Once the resumed position's pieces exist, put the engine and turn state on
-/// the same position (entering `InGame` reset them to the start position).
-fn apply_resume_board(
-    mut resume: ResMut<ResumeState>,
-    pieces_spawned: Res<crate::rendering::pieces::PiecesSpawned>,
-    mut resume_board: ResMut<crate::rendering::pieces::ResumeBoard>,
-    mut engine: ResMut<ChessEngine>,
-    mut current_turn: ResMut<crate::game::resources::CurrentTurn>,
-    mut turn_context: ResMut<crate::game::resources::TurnStateContext>,
-) {
-    if !pieces_spawned.spawned {
-        return;
-    }
-    let Some(fen) = resume.pending_engine_fen.take() else {
-        return;
-    };
-    if let Err(e) = engine.set_from_fen(&fen) {
-        error!("[RESUME] could not load resumed position {fen}: {e}");
-        return;
-    }
-    engine.rebuild_legal_move_cache();
-    let side = engine.side_to_move();
-    let fullmove = fen
-        .split_whitespace()
-        .nth(5)
-        .and_then(|n| n.parse::<u32>().ok())
-        .unwrap_or(1);
-    current_turn.color = side;
-    current_turn.move_number = fullmove;
-    turn_context.current_player = side;
-    turn_context.move_number = fullmove;
-    resume_board.fen = None;
-    info!("[RESUME] Board restored to {fen}");
-}
-
-fn clear_resume_on_exit(
-    mut resume: ResMut<ResumeState>,
-    mut resume_board: ResMut<crate::rendering::pieces::ResumeBoard>,
-) {
-    resume.pending_engine_fen = None;
+fn clear_resume_on_exit(mut resume: ResMut<ResumeState>) {
     if matches!(resume.status, ResumeStatus::Resumed(_)) {
         resume.status = ResumeStatus::Idle;
     }
-    resume_board.fen = None;
+}
+
+/// The main-menu offer to resume a wagered game that is still running. The Solana
+/// lobby shows the same offer on its own screen; this one is for the landing screen,
+/// where someone who restarted the app after a crash will be.
+fn wagered_resume_prompt(
+    mut contexts: bevy_egui::EguiContexts,
+    mut lobby: ResMut<crate::multiplayer::solana::lobby::SolanaLobbyState>,
+    mut resume: ResMut<ResumeState>,
+    solana: Option<Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>>,
+) {
+    use bevy_egui::egui;
+
+    let Some(game_id) = lobby.rejoin_game_id else {
+        return;
+    };
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+    let wallet = solana.as_ref().and_then(|s| s.wallet_pubkey);
+    let checking = resume.is_checking();
+    let failure = match &resume.status {
+        ResumeStatus::Failed {
+            game_id: id,
+            message,
+        } if *id == game_id => Some(message.clone()),
+        _ => None,
+    };
+
+    let mut rejoin = false;
+    let mut dismiss = false;
+    egui::Window::new("wagered_resume_prompt")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_TOP, [0.0, 16.0])
+        .show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Game {game_id} is still in progress. Its clock keeps running."
+                ))
+                .strong(),
+            );
+            if let Some(message) = &failure {
+                ui.colored_label(egui::Color32::from_rgb(255, 160, 120), message);
+            }
+            ui.horizontal(|ui| {
+                if checking {
+                    ui.spinner();
+                    ui.label("Verifying game…");
+                } else if ui
+                    .add_enabled(wallet.is_some(), egui::Button::new("Resume game"))
+                    .clicked()
+                {
+                    rejoin = true;
+                }
+                if ui.button("Dismiss").clicked() {
+                    dismiss = true;
+                }
+            });
+        });
+
+    if rejoin {
+        if let Some(wallet) = wallet {
+            resume.request(game_id, wallet, lobby.cached_rpc_url.clone());
+        }
+    }
+    if dismiss {
+        lobby.rejoin_game_id = None;
+    }
 }
 
 pub struct ResumePlugin;
@@ -574,11 +516,11 @@ impl Plugin for ResumePlugin {
                 Update,
                 poll_resume.in_set(crate::core::schedule::SessionSet::Match),
             )
+            .add_systems(OnExit(crate::core::GameState::InGame), clear_resume_on_exit)
             .add_systems(
-                Update,
-                apply_resume_board.in_set(crate::core::schedule::MoveSource::Resume),
-            )
-            .add_systems(OnExit(crate::core::GameState::InGame), clear_resume_on_exit);
+                bevy_egui::EguiPrimaryContextPass,
+                wagered_resume_prompt.run_if(in_state(crate::core::MenuState::Main)),
+            );
     }
 }
 
@@ -741,9 +683,13 @@ mod tests {
         events.extend(log());
         events.push(ChessMessage::OfferDraw {
             player: "white".into(),
+            ply: 3,
+            at_ms: 1,
         });
         events.push(ChessMessage::DeclineDraw {
             player: "black".into(),
+            ply: 3,
+            at_ms: 2,
         });
         assert!(plan_resume(&game(w, b, GameStatus::Active, 3), 3, true, &w, &events).is_ok());
     }

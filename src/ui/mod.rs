@@ -6,6 +6,7 @@ pub mod egui_ext;
 pub mod game;
 pub mod menus;
 pub mod performance;
+pub mod responsive;
 pub mod spectator_mode;
 pub mod styles;
 pub mod system_params;
@@ -31,6 +32,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(performance::PerformanceMonitorPlugin);
+        app.add_plugins(responsive::ResponsiveUiPlugin);
         app.add_plugins(compliance_modal::CompliancePlugin);
         app.add_plugins(profile_onboarding::ProfileOnboardingPlugin);
         app.add_plugins(popup::PopupPlugin);

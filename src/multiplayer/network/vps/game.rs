@@ -446,6 +446,12 @@ pub fn get_seat(game_id: u64) -> Result<Option<SeatLease>, String> {
 /// Return all durable game events in order. Propagate errors so unreachable logs
 /// are distinguishable from empty ones.
 pub fn fetch_game_events(game_id: u64) -> Result<Vec<braid_chess::ChessMessage>, String> {
+    fetch_game_events_by_id(&game_id.to_string())
+}
+
+/// The full event log of a game keyed by its session id (lobby games may use
+/// non-numeric ids).
+pub fn fetch_game_events_by_id(game_id: &str) -> Result<Vec<braid_chess::ChessMessage>, String> {
     let response = client()?
         .get(format!("{}/game/{}/moves", vps_base(), game_id))
         .send()
@@ -456,6 +462,30 @@ pub fn fetch_game_events(game_id: u64) -> Result<Vec<braid_chess::ChessMessage>,
     response
         .json::<Vec<braid_chess::ChessMessage>>()
         .map_err(|e| format!("fetch_game_events parse: {e}"))
+}
+
+/// The (host, joiner) transport node ids recorded when a lobby game started, or `None`
+/// for a game that never registered them (direct connections) or an older backend.
+pub fn fetch_game_nodes(game_id: &str) -> Result<Option<(String, String)>, String> {
+    #[derive(Deserialize)]
+    struct NodesResp {
+        host_node_id: String,
+        joiner_node_id: String,
+    }
+    let response = client()?
+        .get(format!("{}/game/{}/nodes", vps_base(), game_id))
+        .send()
+        .map_err(|e| format!("fetch_game_nodes: {e}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!("fetch_game_nodes: HTTP {}", response.status()));
+    }
+    let nodes = response
+        .json::<NodesResp>()
+        .map_err(|e| format!("fetch_game_nodes parse: {e}"))?;
+    Ok(Some((nodes.host_node_id, nodes.joiner_node_id)))
 }
 
 pub fn fetch_move_log(game_id: u64) -> Result<Vec<braid_chess::MovePayload>, String> {

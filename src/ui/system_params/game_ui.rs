@@ -74,8 +74,8 @@ pub struct GameUIParams<'w, 's> {
     pub increment_flash: Res<'w, crate::ui::game::game_ui::IncrementFlash>,
     pub pending_draw: Res<'w, crate::game::systems::network_move::PendingDrawOffer>,
     pub turn_ctx: Res<'w, crate::game::resources::TurnStateContext>,
-    pub resign_writer: bevy::prelude::MessageWriter<'w, crate::game::events::ResignEvent>,
-    pub draw_writer: bevy::prelude::MessageWriter<'w, crate::game::events::DrawOfferEvent>,
+    pub resign_writer: bevy::prelude::MessageWriter<'w, crate::game::events::ResignRequest>,
+    pub draw_writer: bevy::prelude::MessageWriter<'w, crate::game::events::DrawActionRequest>,
     pub first_move_deadline: Res<'w, crate::game::resources::FirstMoveDeadline>,
     pub chat_state: ResMut<'w, crate::ui::game::chat_ui::ChatState>,
     pub chat_writer:

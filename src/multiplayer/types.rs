@@ -153,6 +153,9 @@ pub struct OnlineStartBarrier {
     pub start_confirmed: bool,
     pub ready_sent: bool,
     pub start_sent: bool,
+    /// The opponent's `GameStartConfirmed` arrived, which proves it received our
+    /// `GameReady`. Until then `GameReady` is re-sent in case it was lost.
+    pub remote_started: bool,
 }
 
 impl OnlineStartBarrier {
@@ -203,6 +206,7 @@ mod start_barrier_tests {
             start_confirmed: true,
             ready_sent: true,
             start_sent: true,
+            remote_started: true,
         };
 
         barrier.reset(43);
@@ -213,6 +217,7 @@ mod start_barrier_tests {
         assert!(!barrier.start_confirmed);
         assert!(!barrier.ready_sent);
         assert!(!barrier.start_sent);
+        assert!(!barrier.remote_started);
     }
 }
 

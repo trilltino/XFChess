@@ -309,6 +309,7 @@ fn online_premoves_require_start_seat_and_delegation_at_queue_and_execution() ->
             start_confirmed: started,
             ready_sent: started,
             start_sent: started,
+            remote_started: started,
         });
         board.app.insert_resource(SolanaGameSync {
             game_id: Some(42),

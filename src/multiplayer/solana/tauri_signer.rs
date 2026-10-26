@@ -1,4 +1,3 @@
-use xfchess_client_compat::prelude::*;
 use bevy::prelude::info;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -9,6 +8,7 @@ use solana_sdk::{
     signature::{Keypair, NullSigner, Signature, Signer},
     transaction::{Transaction, VersionedTransaction},
 };
+use xfchess_client_compat::prelude::*;
 
 const SIGN_TIMEOUT_SECS: u64 = 120;
 

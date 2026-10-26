@@ -267,6 +267,12 @@ pub fn build_app(game_config: GameConfig) -> Result<App, std::io::Error> {
                     fit_canvas_to_parent: true,
                     prevent_default_event_handling: false,
                     position: WindowPosition::Centered(MonitorSelection::Current),
+                    // Below this the panels and the board no longer fit together.
+                    resize_constraints: bevy::window::WindowResizeConstraints {
+                        min_width: 960.0,
+                        min_height: 600.0,
+                        ..default()
+                    },
                     ..default()
                 }),
                 ..default()

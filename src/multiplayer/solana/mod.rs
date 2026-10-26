@@ -2,6 +2,7 @@
 //! through the wallet bridge, tournaments, money movement and recovery.
 
 pub mod addon;
+pub mod chain_actions;
 pub mod global_session_manager;
 pub mod integration;
 pub mod lobby;

@@ -63,16 +63,16 @@ impl OnlineGameSession {
 }
 
 #[derive(Message, Debug, Clone)]
-pub struct PublishOnlineResign {
-    pub player: String,
-}
-
-#[derive(Message, Debug, Clone)]
 pub struct PublishOnlineChat {
     pub player: String,
     pub text: String,
     pub timestamp_ms: u64,
 }
+
+/// Ask the transport to reconnect now instead of waiting out its backoff: the
+/// player pressed "Refresh state" on the connection-lost banner.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct RefreshGameState;
 
 #[derive(Message, Debug, Clone)]
 pub struct OnlineChatMessage {
@@ -87,9 +87,9 @@ impl Plugin for OnlineGameSessionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OnlineGameSession>()
             .init_resource::<OnlineStartBarrier>()
-            .add_message::<PublishOnlineResign>()
             .add_message::<PublishOnlineChat>()
             .add_message::<OnlineChatMessage>()
+            .add_message::<RefreshGameState>()
             .add_systems(
                 Update,
                 drain_chat_messages
@@ -103,8 +103,8 @@ impl Plugin for OnlineGameSessionPlugin {
                     retry_pending_writes,
                     publish_local_move,
                     publish_clock_on_move,
-                    handle_publish_resign,
                     handle_publish_chat,
+                    handle_publish_game_actions,
                     drain_clock_to_spectator,
                 )
                     .chain()
@@ -129,13 +129,43 @@ fn reset_start_barrier(mut barrier: ResMut<OnlineStartBarrier>) {
     barrier.reset(0);
 }
 
+/// How often an unacknowledged `GameReady` is sent again, and how many times at most.
+const READY_RESEND_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+const READY_RESEND_LIMIT: u32 = 150;
+
+#[derive(Default)]
+pub struct ReadyResend {
+    game_id: u64,
+    /// `Time::elapsed` when the last announcement went out.
+    last_sent: Option<std::time::Duration>,
+    attempts: u32,
+}
+
+/// `GameReady` is a single gossip message. If the opponent was not yet subscribed when it
+/// went out, nothing else would ever deliver it and neither side could start.
+fn should_resend_ready(
+    barrier: &OnlineStartBarrier,
+    since_last_send: Option<std::time::Duration>,
+    attempts: u32,
+) -> bool {
+    barrier.ready_sent
+        && !barrier.remote_started
+        && attempts < READY_RESEND_LIMIT
+        && since_last_send.is_none_or(|elapsed| elapsed >= READY_RESEND_INTERVAL)
+}
+
 pub fn announce_game_readiness(
     session: Res<OnlineGameSession>,
     mut barrier: ResMut<OnlineStartBarrier>,
+    mut resend: Local<ReadyResend>,
+    time: Res<Time>,
     pieces: Query<&crate::rendering::pieces::Piece>,
     network_state: Res<crate::multiplayer::OnlineNetworkState>,
     game_mode: Res<crate::core::GameMode>,
     #[cfg(feature = "solana")] wallet: Option<Res<crate::multiplayer::solana::addon::SolanaWallet>>,
+    #[cfg(feature = "solana")] solana_state: Option<
+        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
     #[cfg(feature = "solana")] sync: Option<Res<crate::multiplayer::solana::addon::SolanaGameSync>>,
     #[cfg(feature = "solana")] resolver: Option<
         Res<crate::multiplayer::rollup::magicblock::MagicBlockResolver>,
@@ -149,13 +179,36 @@ pub fn announce_game_readiness(
     if barrier.game_id != game_id {
         barrier.reset(game_id);
     }
-    if barrier.ready_sent || pieces.iter().count() < 32 {
+    if resend.game_id != game_id {
+        *resend = ReadyResend {
+            game_id,
+            ..ReadyResend::default()
+        };
+    }
+    if pieces.iter().count() < 32 {
+        return;
+    }
+    let resending = barrier.ready_sent;
+    if resending
+        && !should_resend_ready(
+            &barrier,
+            resend
+                .last_sent
+                .map(|sent| time.elapsed().saturating_sub(sent)),
+            resend.attempts,
+        )
+    {
         return;
     }
 
     #[cfg(feature = "solana")]
     let player_pubkey = {
-        let Some(wallet) = wallet.as_ref().and_then(|wallet| wallet.pubkey) else {
+        let on_chain = sync.as_ref().is_some_and(|sync| sync.game_id.is_some());
+        let Some(wallet) = ready_pubkey(
+            wallet.as_ref().and_then(|wallet| wallet.pubkey),
+            solana_state.as_ref().and_then(|state| state.wallet_pubkey),
+            on_chain,
+        ) else {
             return;
         };
         if sync.as_ref().is_some_and(|sync| sync.requires_delegation)
@@ -183,6 +236,19 @@ pub fn announce_game_readiness(
         })
         .is_ok()
     {
+        resend.last_sent = Some(time.elapsed());
+        if resending {
+            resend.attempts += 1;
+            if resend.attempts == READY_RESEND_LIMIT {
+                warn!("[START] Opponent never acknowledged readiness for game {game_id}; giving up re-sending");
+            } else {
+                info!(
+                    "[START] Re-sent readiness for game {game_id} (attempt {}); opponent has not confirmed",
+                    resend.attempts
+                );
+            }
+            return;
+        }
         barrier.ready_sent = true;
         info!("[START] Local player ready for game {game_id}; waiting for opponent");
         if barrier.remote_ready
@@ -198,6 +264,103 @@ pub fn announce_game_readiness(
             barrier.start_confirmed = true;
             info!("[START] Sent synchronized start for game {game_id}");
         }
+    }
+}
+
+/// The pubkey announced in `GameReady`. A wallet connected through the wallet bridge
+/// is recorded in `SolanaIntegrationState` only, so both sources are consulted. A game
+/// that is not on-chain does not need a wallet: skipping the announcement for a player
+/// without one would leave both clients waiting on the start barrier forever.
+#[cfg(feature = "solana")]
+fn ready_pubkey(
+    wallet: Option<solana_sdk::pubkey::Pubkey>,
+    integration: Option<solana_sdk::pubkey::Pubkey>,
+    on_chain: bool,
+) -> Option<solana_sdk::pubkey::Pubkey> {
+    wallet
+        .or(integration)
+        .or_else(|| (!on_chain).then(solana_sdk::pubkey::Pubkey::default))
+}
+
+#[cfg(all(test, feature = "solana"))]
+mod ready_pubkey_tests {
+    use super::ready_pubkey;
+    use solana_sdk::pubkey::Pubkey;
+
+    #[test]
+    fn a_bridge_connected_wallet_is_announced() {
+        let bridged = Pubkey::new_unique();
+        assert_eq!(ready_pubkey(None, Some(bridged), true), Some(bridged));
+        assert_eq!(ready_pubkey(None, Some(bridged), false), Some(bridged));
+    }
+
+    #[test]
+    fn the_wallet_resource_wins_when_both_are_set() {
+        let (wallet, bridged) = (Pubkey::new_unique(), Pubkey::new_unique());
+        assert_eq!(
+            ready_pubkey(Some(wallet), Some(bridged), true),
+            Some(wallet)
+        );
+    }
+
+    #[test]
+    fn a_casual_game_starts_without_a_wallet_but_an_on_chain_game_does_not() {
+        assert_eq!(ready_pubkey(None, None, false), Some(Pubkey::default()));
+        assert_eq!(ready_pubkey(None, None, true), None);
+    }
+}
+
+#[cfg(test)]
+mod ready_resend_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn sent() -> OnlineStartBarrier {
+        OnlineStartBarrier {
+            game_id: 1,
+            local_ready: true,
+            ready_sent: true,
+            ..OnlineStartBarrier::default()
+        }
+    }
+
+    #[test]
+    fn nothing_is_resent_before_the_first_announcement() {
+        let barrier = OnlineStartBarrier::default();
+        assert!(!should_resend_ready(&barrier, None, 0));
+    }
+
+    #[test]
+    fn an_unacknowledged_ready_is_resent_once_the_interval_has_passed() {
+        let barrier = sent();
+        assert!(!should_resend_ready(
+            &barrier,
+            Some(Duration::from_millis(500)),
+            0
+        ));
+        assert!(should_resend_ready(
+            &barrier,
+            Some(READY_RESEND_INTERVAL),
+            0
+        ));
+    }
+
+    #[test]
+    fn resending_stops_once_the_opponent_has_confirmed() {
+        let mut barrier = sent();
+        barrier.remote_started = true;
+        assert!(!should_resend_ready(
+            &barrier,
+            Some(READY_RESEND_INTERVAL * 5),
+            3
+        ));
+    }
+
+    #[test]
+    fn resending_is_bounded() {
+        let barrier = sent();
+        assert!(should_resend_ready(&barrier, None, READY_RESEND_LIMIT - 1));
+        assert!(!should_resend_ready(&barrier, None, READY_RESEND_LIMIT));
     }
 }
 
@@ -240,6 +403,7 @@ fn retry_pending_writes(
     network: Res<crate::multiplayer::OnlineNetworkState>,
     braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
     time: Res<Time>,
+    mut refresh: MessageReader<RefreshGameState>,
     mut delay: Local<f32>,
     #[cfg(feature = "solana")] solana_state: Option<
         Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
@@ -251,6 +415,10 @@ fn retry_pending_writes(
     if !session.active || !session.is_configured() {
         *delay = 0.;
         return;
+    }
+    // A refresh retries the outbox now rather than at the next 30 s tick.
+    if refresh.read().count() > 0 {
+        *delay = 0.;
     }
     *delay -= time.delta_secs();
     if *delay > 0. {
@@ -475,70 +643,6 @@ pub fn start_session(
     }
 }
 
-fn handle_publish_resign(
-    mut session: ResMut<OnlineGameSession>,
-    mut reader: MessageReader<PublishOnlineResign>,
-    network_state: Res<crate::multiplayer::OnlineNetworkState>,
-    braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
-    #[cfg(feature = "solana")] solana_state: Option<
-        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
-    >,
-    #[cfg(feature = "solana")] game_sync: Option<
-        Res<crate::multiplayer::solana::addon::SolanaGameSync>,
-    >,
-) {
-    if !session.is_configured() {
-        reader.clear();
-        return;
-    }
-    for event in reader.read() {
-        let game_id_u64 = numeric_game_id(&session.game_id);
-        let winner = if event.player == "white" {
-            "black"
-        } else {
-            "white"
-        };
-        let nonce = session.next_nonce;
-        session.next_nonce = session.next_nonce.saturating_add(1);
-
-        let msg = NetworkMessage::Resign {
-            game_id: game_id_u64,
-            winner: winner.to_string(),
-            nonce,
-        };
-        let node_b58 = network_state
-            .node_id
-            .as_ref()
-            .map(|id| bs58::encode(id.as_bytes()).into_string())
-            .unwrap_or_default();
-        // Use wallet identity for on-chain games and Iroh identity for casual participant checks.
-        #[cfg(feature = "solana")]
-        let braid_sender_identity =
-            braid_sender_identity(solana_state.as_ref(), game_sync.as_ref(), &node_b58);
-        #[cfg(feature = "solana")]
-        let braid_session_token = braid_session_token(game_sync.as_ref());
-        #[cfg(not(feature = "solana"))]
-        let braid_sender_identity = braid_sender_identity(&node_b58);
-        #[cfg(not(feature = "solana"))]
-        let braid_session_token = String::new();
-        crate::multiplayer::network::braid_transport::publish_resign(
-            session.base_url.clone(),
-            session.game_id.clone(),
-            braid_sender_identity,
-            braid_session_token,
-            event.player.clone(),
-            braid.heads(),
-        );
-        if let Some(ref tx) = network_state.message_sender {
-            if let Err(e) = tx.send(msg) {
-                warn!("[online-session] Resign send failed: {e}");
-            } else {
-                info!("[online-session] Resign sent (game {game_id_u64}) via gossip+braid");
-            }
-        }
-    }
-}
-
 fn handle_publish_chat(
     session: Res<OnlineGameSession>,
     mut reader: MessageReader<PublishOnlineChat>,
@@ -594,6 +698,113 @@ fn handle_publish_chat(
                 warn!("[online-session] Chat send failed: {e}");
             }
         }
+    }
+}
+
+/// Put our draw offers, acceptances, refusals and resignations on the Braid log. Gossip
+/// tells a connected opponent at once; the log is what reaches one who is offline, and
+/// what a later resume reads to learn the game was already over.
+fn handle_publish_game_actions(
+    session: Res<OnlineGameSession>,
+    mut offers: MessageReader<crate::game::events::DrawOfferEvent>,
+    mut responses: MessageReader<crate::game::events::DrawResponseEvent>,
+    mut resigns: MessageReader<crate::game::events::ResignEvent>,
+    engine: Res<crate::engine::board_state::ChessEngine>,
+    network_state: Res<crate::multiplayer::OnlineNetworkState>,
+    braid: Res<crate::multiplayer::network::braid_transport::BraidTransportState>,
+    #[cfg(feature = "solana")] solana_state: Option<
+        Res<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
+    >,
+    #[cfg(feature = "solana")] game_sync: Option<
+        Res<crate::multiplayer::solana::addon::SolanaGameSync>,
+    >,
+) {
+    use braid_chess::ChessMessage;
+
+    if !session.is_configured() {
+        offers.clear();
+        responses.clear();
+        resigns.clear();
+        return;
+    }
+    let ply = crate::game::systems::network_move::position_ply(&engine);
+    let at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64);
+
+    let mut outgoing: Vec<ChessMessage> = Vec::new();
+    for event in offers.read().filter(|event| !event.remote) {
+        outgoing.push(ChessMessage::OfferDraw {
+            player: event.player.clone(),
+            ply,
+            at_ms,
+        });
+    }
+    for event in responses.read().filter(|event| !event.remote) {
+        outgoing.push(if event.accepted {
+            ChessMessage::AcceptDraw {
+                player: event.player.clone(),
+                ply,
+                at_ms,
+            }
+        } else {
+            ChessMessage::DeclineDraw {
+                player: event.player.clone(),
+                ply,
+                at_ms,
+            }
+        });
+    }
+    let resigning: Vec<String> = resigns
+        .read()
+        .filter(|event| !event.remote)
+        .map(|event| {
+            if event.winner == "white" {
+                "black"
+            } else {
+                "white"
+            }
+            .to_string()
+        })
+        .collect();
+    if outgoing.is_empty() && resigning.is_empty() {
+        return;
+    }
+
+    let node_b58 = network_state
+        .node_id
+        .as_ref()
+        .map(|id| bs58::encode(id.as_bytes()).into_string())
+        .unwrap_or_default();
+    // Participant-checked server-side like moves — see `braid_sender_identity`.
+    #[cfg(feature = "solana")]
+    let braid_sender_identity =
+        braid_sender_identity(solana_state.as_ref(), game_sync.as_ref(), &node_b58);
+    #[cfg(feature = "solana")]
+    let braid_session_token = braid_session_token(game_sync.as_ref());
+    #[cfg(not(feature = "solana"))]
+    let braid_sender_identity = braid_sender_identity(&node_b58);
+    #[cfg(not(feature = "solana"))]
+    let braid_session_token = String::new();
+    for message in outgoing {
+        crate::multiplayer::network::braid_transport::publish_draw(
+            session.base_url.clone(),
+            session.game_id.clone(),
+            braid_sender_identity.clone(),
+            braid_session_token.clone(),
+            message,
+            braid.heads(),
+        );
+    }
+    for player in resigning {
+        crate::multiplayer::network::braid_transport::publish_resign(
+            session.base_url.clone(),
+            session.game_id.clone(),
+            braid_sender_identity.clone(),
+            braid_session_token.clone(),
+            player,
+            braid.heads(),
+        );
     }
 }
 

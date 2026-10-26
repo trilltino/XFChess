@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use tracing::{info, warn};
 
-pub(super) fn data_dir() -> PathBuf {
+pub(crate) fn data_dir() -> PathBuf {
     #[cfg(target_os = "android")]
     let base =
         crate::core::android_paths::internal_data_dir().unwrap_or_else(|| PathBuf::from("."));

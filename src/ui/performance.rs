@@ -6,15 +6,37 @@ use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 
 use super::styles::UiColors;
 
+/// How often the numbers are redrawn. Redrawing every frame makes the digits flicker
+/// even when the frame rate is steady, and nobody can read a value that changes 60 times
+/// a second.
+const REFRESH_SECS: f64 = 0.5;
+
+#[derive(Clone, Copy)]
+struct Reading {
+    fps: f64,
+    frame_ms: f64,
+}
+
 #[derive(Resource)]
 struct PerformanceMonitor {
     visible: bool,
+    shown: Option<Reading>,
+    shown_at: f64,
 }
 
 impl Default for PerformanceMonitor {
     fn default() -> Self {
-        Self { visible: true }
+        Self {
+            visible: true,
+            shown: None,
+            shown_at: f64::NEG_INFINITY,
+        }
     }
+}
+
+/// Whether the displayed reading is old enough to replace.
+fn refresh_due(shown_at: f64, now: f64) -> bool {
+    now - shown_at >= REFRESH_SECS
 }
 
 pub struct PerformanceMonitorPlugin;
@@ -37,7 +59,8 @@ fn toggle_monitor(keyboard: Res<ButtonInput<KeyCode>>, mut monitor: ResMut<Perfo
 fn draw_monitor(
     mut contexts: EguiContexts,
     diagnostics: Res<DiagnosticsStore>,
-    monitor: Res<PerformanceMonitor>,
+    time: Res<Time<Real>>,
+    mut monitor: ResMut<PerformanceMonitor>,
 ) {
     if !monitor.visible {
         return;
@@ -45,12 +68,24 @@ fn draw_monitor(
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-    let frame_ms = diagnostics
-        .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
-        .and_then(|diagnostic| diagnostic.smoothed())
-        .filter(|ms| ms.is_finite() && *ms > 0.0);
-    // Derive both numbers from the same smoothed frame time so they agree.
-    let fps = frame_ms.map(|ms| 1000.0 / ms);
+    let now = time.elapsed_secs_f64();
+    if monitor.shown.is_none() || refresh_due(monitor.shown_at, now) {
+        // The mean over the diagnostic history (about two seconds), not the latest frame.
+        let measured = diagnostics
+            .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+            .and_then(|diagnostic| diagnostic.average())
+            .filter(|ms| ms.is_finite() && *ms > 0.0);
+        if let Some(frame_ms) = measured {
+            // Both numbers come from the same frame time so they agree.
+            monitor.shown = Some(Reading {
+                fps: 1000.0 / frame_ms,
+                frame_ms,
+            });
+            monitor.shown_at = now;
+        }
+    }
+    let frame_ms = monitor.shown.map(|reading| reading.frame_ms);
+    let fps = monitor.shown.map(|reading| reading.fps);
     let color = match fps {
         Some(fps) if fps >= 60.0 => UiColors::SUCCESS,
         Some(fps) if fps >= 30.0 => UiColors::WARNING,
@@ -98,4 +133,19 @@ fn draw_monitor(
                     });
                 });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_reading_holds_between_refreshes() {
+        assert!(!refresh_due(10.0, 10.2));
+        assert!(refresh_due(10.0, 10.5));
+        assert!(
+            refresh_due(f64::NEG_INFINITY, 0.0),
+            "the first reading is not held back"
+        );
+    }
 }
