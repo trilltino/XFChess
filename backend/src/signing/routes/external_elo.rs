@@ -10,6 +10,7 @@ use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{error, info, warn};
 
+use crate::signing::auth::RequireWallet;
 use crate::signing::{solana, AppState};
 
 #[derive(Deserialize)]
@@ -95,17 +96,36 @@ static PENDING_LINKS: Lazy<Mutex<std::collections::HashMap<String, PendingLink>>
     Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 pub fn external_elo_routes() -> Router<AppState> {
+    Router::new().route("/external-elo/status/{pubkey}", get(link_status))
+}
+
+/// Linking rewrites a wallet's on-chain rating, so the caller must mount these behind
+/// `require_relay_or_jwt`; each handler also checks the token's wallet.
+pub fn external_elo_protected_routes() -> Router<AppState> {
     Router::new()
         .route("/external-elo/link/start", post(link_start))
         .route("/external-elo/link/confirm", post(link_confirm))
-        .route("/external-elo/status/{pubkey}", get(link_status))
         .route("/external-elo/sync", post(link_sync))
+}
+
+fn require_caller_is(caller: &RequireWallet, pubkey: &str) -> Result<(), (StatusCode, String)> {
+    if caller.0 == pubkey {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            "Authenticated wallet does not match the wallet this request acts on".to_string(),
+        ))
+    }
 }
 
 async fn link_start(
     State(_state): State<AppState>,
+    caller: RequireWallet,
     Json(req): Json<LinkStartReq>,
 ) -> Result<Json<LinkStartResp>, (StatusCode, String)> {
+    // A link rewrites the named wallet's on-chain rating, so only that wallet may start one.
+    require_caller_is(&caller, &req.pubkey)?;
     // Validate pubkey
     let _pk = Pubkey::from_str(&req.pubkey)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid pubkey: {}", e)))?;
@@ -179,10 +199,21 @@ async fn link_start(
 
 async fn link_confirm(
     State(state): State<AppState>,
+    caller: RequireWallet,
     Json(req): Json<LinkConfirmReq>,
 ) -> Result<Json<LinkConfirmResp>, (StatusCode, String)> {
     let pending = {
         let mut links = PENDING_LINKS.lock();
+        // Another wallet's confirm attempt must not consume the owner's link.
+        if links
+            .get(&req.link_id)
+            .is_some_and(|l| l.pubkey != caller.0)
+        {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "Authenticated wallet does not own this link".to_string(),
+            ));
+        }
         links.remove(&req.link_id)
     };
 
@@ -405,8 +436,10 @@ async fn link_status(
 
 async fn link_sync(
     State(state): State<AppState>,
+    caller: RequireWallet,
     Json(req): Json<SyncReq>,
 ) -> Result<Json<SyncResp>, (StatusCode, String)> {
+    require_caller_is(&caller, &req.pubkey)?;
     let player_pk = Pubkey::from_str(&req.pubkey)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid pubkey: {}", e)))?;
 

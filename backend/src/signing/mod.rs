@@ -129,6 +129,18 @@ impl AppState {
         vault_pool: sqlx::SqlitePool,
         tournament_store: Arc<TournamentStore>,
     ) -> anyhow::Result<Self> {
+        Self::new_with_background_tasks(config, pool, vault_pool, tournament_store, true)
+    }
+
+    /// Allows headless harnesses to build the real service graph without starting
+    /// network-backed rate refreshes or periodic sweep tasks.
+    pub fn new_with_background_tasks(
+        config: SigningConfig,
+        pool: sqlx::SqlitePool,
+        vault_pool: sqlx::SqlitePool,
+        tournament_store: Arc<TournamentStore>,
+        enable_background_tasks: bool,
+    ) -> anyhow::Result<Self> {
         // Initialize the encryption vault before the store so persisted session keys
         // are encrypted at rest.
         let identity_vault =
@@ -217,7 +229,9 @@ impl AppState {
 
         // Refresh fee exchange rates in the background so payment requests do not wait on external feeds.
         let rate_cache = routes::rates::RateCache::default();
-        rate_cache.spawn_background_refresh();
+        if enable_background_tasks {
+            rate_cache.spawn_background_refresh();
+        }
         let metrics = Arc::new(crate::telemetry::metrics::Metrics::new());
 
         let solana_rpc_url = config.solana_rpc_url.clone();
@@ -233,7 +247,9 @@ impl AppState {
         let presence = Arc::new(PresenceStore::new());
 
         let invite_store = Arc::new(parking_lot::RwLock::new(HashMap::new()));
-        social::routes::spawn_invite_store_sweep(invite_store.clone());
+        if enable_background_tasks {
+            social::routes::spawn_invite_store_sweep(invite_store.clone());
+        }
 
         Ok(Self {
             config: Arc::new(config),
@@ -409,7 +425,7 @@ pub fn build_router(state: AppState) -> Router<AppState> {
             "/api/global-session",
             crate::signing::routes::global_session::global_session_protected_routes().layer(
                 axum::middleware::from_fn_with_state(
-                    state,
+                    state.clone(),
                     crate::infrastructure::require_relay_or_jwt,
                 ),
             ),
@@ -428,6 +444,15 @@ pub fn build_router(state: AppState) -> Router<AppState> {
         .nest(
             "/api",
             crate::signing::routes::external_elo::external_elo_routes(),
+        )
+        .nest(
+            "/api",
+            crate::signing::routes::external_elo::external_elo_protected_routes().layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    crate::infrastructure::require_relay_or_jwt,
+                ),
+            ),
         )
         // Lichess OAuth 2.0 + PKCE flow (primary)
         .nest(

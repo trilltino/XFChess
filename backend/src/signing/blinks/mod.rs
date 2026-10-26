@@ -15,7 +15,7 @@ pub use core::{
 };
 
 // Re-export routes
-pub use routes::blinks_routes;
+pub use routes::{blinks_admin_routes, blinks_routes};
 
 // PDA seeds - used across multiple submodules
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";

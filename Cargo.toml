@@ -48,7 +48,6 @@ members = [
     "tools/cu_benchmark",
     "programs/*",
     "tauri",
-    "tauri/viz/src-tauri",
     "backend",
 ]
 
@@ -60,6 +59,19 @@ strip = "debuginfo" # Strip debuginfo from the resulting binary (reduces .exe si
 # Enable high optimizations for dependencies (incl. Bevy), but not for our code:
 [profile.dev.package."*"]
 opt-level = 3
+
+# Coverage builds prioritize instrumentation and compile time over frame rate.
+[profile.coverage]
+inherits = "dev"
+opt-level = 0
+debug = 2
+strip = "none"
+
+[profile.coverage.package."*"]
+opt-level = 0
+
+[profile.coverage.build-override]
+opt-level = 0
 
 # Optimize build scripts and proc-macros to reduce compilation time.
 [profile.dev.build-override]

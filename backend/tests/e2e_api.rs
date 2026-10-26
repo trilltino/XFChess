@@ -1,17 +1,13 @@
+mod common;
 use anyhow::Context as _;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use common::{spawn_app, spawn_app_on, unique_db_url, TestApp};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use axum::Router;
-use serde_json::{json, Value};
-use tower::ServiceExt; // for `oneshot`
 
-use backend::db::repository::GameRepository;
-use backend::infrastructure::{build_app_router, initialize_pools, run_migrations};
-use backend::signing::storage::tournament::TournamentStore;
-use backend::signing::{AppState, SigningConfig};
+use serde_json::{json, Value};
+
+
 use tokio::sync::Mutex;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -136,170 +132,6 @@ async fn cu_benchmark_runs_100_games_through_backend() -> anyhow::Result<()> {
     server.abort();
 
     Ok(())
-}
-
-fn unique_db_url(tag: &str) -> String {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("sqlite:file:xfchess_e2e_{tag}_{n}_{nanos}?mode=memory&cache=shared")
-}
-
-fn test_config() -> SigningConfig {
-    SigningConfig {
-        port: 0,
-        solana_rpc_url: "http://127.0.0.1:9".into(),
-        solana_mainnet_rpc_url: None,
-        er_rpc_url: "http://127.0.0.1:9".into(),
-        magic_router_rpc_url: "http://127.0.0.1:9".into(),
-        program_id: "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU".into(),
-        jwt_secret: "test-secret-not-for-production".into(),
-        identity_encryption_key: "0".repeat(64),
-        identity_salt: "0".repeat(64),
-        fee_payer_keys: vec![],
-        vps_authority_key: None,
-        kyc_authority_key: None,
-        link_authority_key: None,
-        treasury_authority_pubkey: "9jpjASzudVvpbgw5G7zCf7o6EvCw4ejRVcEN1aBLq4Kd".to_string(),
-        admin_token: Some("test-admin-token".into()),
-        tournament_fee_recipient: "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C".into(),
-        usdc_mint_pubkey: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".into(),
-        lichess_client_id: String::new(),
-        allowed_origins: vec![],
-    }
-}
-
-struct TestApp {
-    state: AppState,
-}
-
-impl TestApp {
-    fn router(&self) -> Router {
-        build_app_router(self.state.clone()).with_state(self.state.clone())
-    }
-
-    async fn get(&self, uri: &str) -> anyhow::Result<(StatusCode, Value)> {
-        Ok({
-            let req = Request::builder()
-                .uri(uri)
-                .method("GET")
-                .body(Body::empty())
-                .context("test setup failed")?;
-            self.send(req).await?
-        })
-    }
-
-    async fn post_json(&self, uri: &str, body: &Value) -> anyhow::Result<(StatusCode, Value)> {
-        Ok({
-            let req = Request::builder()
-                .uri(uri)
-                .method("POST")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_vec(body).context("test setup failed")?,
-                ))
-                .context("test setup failed")?;
-            self.send(req).await?
-        })
-    }
-
-    async fn admin_request(
-        &self,
-        method: &str,
-        uri: &str,
-        body: Option<&Value>,
-    ) -> anyhow::Result<(StatusCode, Value)> {
-        Ok({
-            let mut builder = Request::builder()
-                .uri(uri)
-                .method(method)
-                .header("X-API-Key", "dev");
-            let body = match body {
-                Some(b) => {
-                    builder = builder.header("content-type", "application/json");
-                    Body::from(serde_json::to_vec(b).context("test setup failed")?)
-                }
-                None => Body::empty(),
-            };
-            let req = builder.body(body).context("test setup failed")?;
-            self.send(req).await?
-        })
-    }
-
-    async fn send(&self, req: Request<Body>) -> anyhow::Result<(StatusCode, Value)> {
-        Ok({
-            let resp = self
-                .router()
-                .oneshot(req)
-                .await
-                .context("test setup failed")?;
-            let status = resp.status();
-            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-                .await
-                .context("test setup failed")?;
-            let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-            (status, value)
-        })
-    }
-
-    async fn get_text(&self, uri: &str) -> anyhow::Result<(StatusCode, String)> {
-        Ok({
-            let req = Request::builder()
-                .uri(uri)
-                .method("GET")
-                .body(Body::empty())
-                .context("test setup failed")?;
-            let resp = self
-                .router()
-                .oneshot(req)
-                .await
-                .context("test setup failed")?;
-            let status = resp.status();
-            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-                .await
-                .context("test setup failed")?;
-            (status, String::from_utf8_lossy(&bytes).into_owned())
-        })
-    }
-
-    fn repo(&self) -> GameRepository {
-        GameRepository::new(self.state.store.pool())
-    }
-}
-
-async fn spawn_app() -> anyhow::Result<TestApp> {
-    spawn_app_on(&unique_db_url("session"), &unique_db_url("vault")).await
-}
-
-/// Build a fresh AppState over existing SQLite databases to simulate restart.
-/// Shared in-memory databases survive while an earlier pool remains open.
-async fn spawn_app_on(session_url: &str, vault_url: &str) -> anyhow::Result<TestApp> {
-    Ok({
-        let pools = initialize_pools(session_url, vault_url)
-            .await
-            .context("init pools")?;
-        run_migrations(&pools).await.context("run migrations")?;
-
-        let tournament_store = TournamentStore::new(pools.session_pool.clone()).await?;
-
-        let state = AppState::new(
-            test_config(),
-            pools.session_pool.clone(),
-            pools.vault_pool.clone(),
-            Arc::new(tournament_store),
-        )?;
-        // Same startup step as `server::run`: restore persisted relay rooms.
-        state
-            .p2p_relay_store
-            .hydrate(&state.p2p_relay)
-            .await
-            .context("hydrate relay rooms")?;
-
-        TestApp { state }
-    })
 }
 
 #[tokio::test]
@@ -634,17 +466,27 @@ async fn completed_game_surfaces_in_history() -> anyhow::Result<()> {
 async fn dispute_notify_then_status() -> anyhow::Result<()> {
     let app = spawn_app().await?;
     let game_id = 5150;
+    let token = app.state.jwt.issue("WALLET_CHALLENGER")?;
+    let notice = json!({
+        "game_id": game_id,
+        "challenger_wallet": "WALLET_CHALLENGER",
+        "reason": "suspected engine use",
+        "tx_signature": "sig-abc"
+    });
+
+    // Filing requires the challenger's own token.
+    let (status, _) = app
+        .send_auth("POST", "/dispute/notify", None, Some(&notice))
+        .await?;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let other = app.state.jwt.issue("WALLET_OTHER")?;
+    let (status, _) = app
+        .send_auth("POST", "/dispute/notify", Some(&other), Some(&notice))
+        .await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 
     let (status, body) = app
-        .post_json(
-            "/dispute/notify",
-            &json!({
-                "game_id": game_id,
-                "challenger_wallet": "WALLET_CHALLENGER",
-                "reason": "suspected engine use",
-                "tx_signature": "sig-abc"
-            }),
-        )
+        .send_auth("POST", "/dispute/notify", Some(&token), Some(&notice))
         .await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], json!(true));

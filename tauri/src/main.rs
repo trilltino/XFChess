@@ -173,3 +173,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
   Ok(())
 }
+#[cfg(test)]
+#[path = "../../scripts/coverage/router_inventory.rs"]
+#[allow(dead_code)]
+#[rustfmt::skip] // Shared source follows the root crate's four-space style.
+mod coverage;

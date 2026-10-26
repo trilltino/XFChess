@@ -576,6 +576,63 @@ async fn serve_wallet_ui(State(s): State<LocalState>, uri: axum::http::Uri) -> i
   super::assets::serve_wallet(&s.app, &s.wallet_ui_dist_path, uri.path(), sid).await
 }
 
+fn bridge_routes() -> Router<LocalState> {
+  let router = Router::new()
+    .route("/pending", get(get_pending))
+    .route("/pending/stream", get(get_pending_stream))
+    .route("/resolved", post(post_resolved))
+    .route("/cancel", post(post_cancel))
+    .route("/wallet", post(post_wallet))
+    .route("/wallet/disconnect", post(post_wallet_disconnect))
+    .route("/hide", post(post_hide))
+    .route("/close", post(post_close))
+    .route("/status", get(get_status))
+    .route("/api/wallet/open", post(open_wallet))
+    .route("/token", get(get_token).post(post_token))
+    .route("/wallet-ui", get(serve_wallet_ui))
+    .route("/wallet-ui/", get(serve_wallet_ui))
+    .route("/wallet-ui/{*path}", get(serve_wallet_ui))
+    .route("/api/consent", get(api_get_consent).post(api_post_consent))
+    .route("/api/auth/login", post(api_login))
+    .route("/api/auth/register", post(api_register))
+    .route("/api/auth/login-email", post(api_login_email))
+    .route("/api/auth/register-email", post(api_register_email))
+    .route("/api/auth/link-wallet", post(api_link_wallet))
+    .route("/api/auth/sync-profile", post(api_sync_profile))
+    .route("/api/auth/add-email", post(api_add_email))
+    .route("/api/auth/me", get(api_me))
+    .route("/api/auth/username", axum::routing::patch(api_set_username))
+    .route("/api/auth/check-wallet/{pubkey}", get(api_check_wallet))
+    .route("/api/auth/init-profile-tx", post(api_init_profile_tx))
+    .route("/api/auth/broadcast-tx", post(api_broadcast_tx))
+    .route("/api/fresh-blockhash", get(api_fresh_blockhash))
+    .route("/api/simulate-tx", post(api_simulate_tx))
+    .route("/api/game/launch", post(api_game_launch))
+    .route("/api/open-profile-step", post(api_open_profile_step))
+    .route("/api/needs-profile-step", get(api_needs_profile_step))
+    .route("/api/set-backend-url", post(api_set_backend_url))
+    .route("/api/backend-url", get(api_get_backend_url))
+    .route("/api/ready", post(api_ready))
+    .route("/api/debug-log", post(api_debug_log));
+
+  // Serve the admin UI only when compiled with tournament-admin.
+  #[cfg(feature = "tournament-admin")]
+  let router = router
+    .route(
+      "/tournament-admin",
+      axum::routing::get(serve_tournament_admin),
+    )
+    .route(
+      "/tournament-admin/",
+      axum::routing::get(serve_tournament_admin),
+    )
+    .route(
+      "/tournament-admin/{*path}",
+      axum::routing::get(serve_tournament_admin),
+    );
+  router
+}
+
 pub(crate) async fn http_server(listener: TcpListener, app: tauri::AppHandle) {
   use tauri::Manager;
   let pending = app.state::<PendingTx>().inner().clone();
@@ -642,59 +699,7 @@ pub(crate) async fn http_server(listener: TcpListener, app: tauri::AppHandle) {
     needs_profile_step: Arc::new(std::sync::atomic::AtomicBool::new(false)),
   };
 
-  let router = Router::new()
-    .route("/pending", get(get_pending))
-    .route("/pending/stream", get(get_pending_stream))
-    .route("/resolved", post(post_resolved))
-    .route("/cancel", post(post_cancel))
-    .route("/wallet", post(post_wallet))
-    .route("/wallet/disconnect", post(post_wallet_disconnect))
-    .route("/hide", post(post_hide))
-    .route("/close", post(post_close))
-    .route("/status", get(get_status))
-    .route("/api/wallet/open", post(open_wallet))
-    .route("/token", get(get_token).post(post_token))
-    .route("/wallet-ui", get(serve_wallet_ui))
-    .route("/wallet-ui/", get(serve_wallet_ui))
-    .route("/wallet-ui/{*path}", get(serve_wallet_ui))
-    .route("/api/consent", get(api_get_consent).post(api_post_consent))
-    .route("/api/auth/login", post(api_login))
-    .route("/api/auth/register", post(api_register))
-    .route("/api/auth/login-email", post(api_login_email))
-    .route("/api/auth/register-email", post(api_register_email))
-    .route("/api/auth/link-wallet", post(api_link_wallet))
-    .route("/api/auth/sync-profile", post(api_sync_profile))
-    .route("/api/auth/add-email", post(api_add_email))
-    .route("/api/auth/me", get(api_me))
-    .route("/api/auth/username", axum::routing::patch(api_set_username))
-    .route("/api/auth/check-wallet/{pubkey}", get(api_check_wallet))
-    .route("/api/auth/init-profile-tx", post(api_init_profile_tx))
-    .route("/api/auth/broadcast-tx", post(api_broadcast_tx))
-    .route("/api/fresh-blockhash", get(api_fresh_blockhash))
-    .route("/api/simulate-tx", post(api_simulate_tx))
-    .route("/api/game/launch", post(api_game_launch))
-    .route("/api/open-profile-step", post(api_open_profile_step))
-    .route("/api/needs-profile-step", get(api_needs_profile_step))
-    .route("/api/set-backend-url", post(api_set_backend_url))
-    .route("/api/backend-url", get(api_get_backend_url))
-    .route("/api/ready", post(api_ready))
-    .route("/api/debug-log", post(api_debug_log));
-
-  // Serve the admin UI only when compiled with tournament-admin.
-  #[cfg(feature = "tournament-admin")]
-  let router = router
-    .route(
-      "/tournament-admin",
-      axum::routing::get(serve_tournament_admin),
-    )
-    .route(
-      "/tournament-admin/",
-      axum::routing::get(serve_tournament_admin),
-    )
-    .route(
-      "/tournament-admin/{*path}",
-      axum::routing::get(serve_tournament_admin),
-    );
+  let router = bridge_routes();
 
   let router = router
     .layer(axum::middleware::from_fn(
@@ -753,5 +758,31 @@ pub(crate) async fn http_server(listener: TcpListener, app: tauri::AppHandle) {
   tracing::info!(port = http_port(), "Wallet HTTP bridge listening");
   if let Err(error) = axum::serve(listener, router).await {
     tracing::error!(%error, "Wallet HTTP bridge failed");
+  }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+  #[test]
+  fn export_real_bridge_route_inventory() -> Result<(), Box<dyn std::error::Error>> {
+    let rows =
+      crate::coverage::runtime_routes(&super::bridge_routes()).map_err(std::io::Error::other)?;
+    assert!(rows.len() >= 37, "bridge inventory unexpectedly shrank");
+    let out = std::env::var_os("XFCHESS_COVERAGE_DIR")
+      .map(std::path::PathBuf::from)
+      .unwrap_or_else(|| {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+          .join("../target/coverage/desktop/surfaces")
+      });
+    std::fs::create_dir_all(&out)?;
+    let rows: Vec<_> = rows
+      .into_iter()
+      .map(|(method, path)| serde_json::json!({"method": method, "path": path}))
+      .collect();
+    std::fs::write(
+      out.join("bridge-routes.json"),
+      serde_json::to_vec_pretty(&rows)?,
+    )?;
+    Ok(())
   }
 }

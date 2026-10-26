@@ -133,6 +133,7 @@ async-stream = "0.3"
 default = ["ws_subscriber"]
 ws_subscriber = []
 polling = []
+coverage = []
 
 [dev-dependencies]
 cu_benchmark = { path = "../tools/cu_benchmark" }

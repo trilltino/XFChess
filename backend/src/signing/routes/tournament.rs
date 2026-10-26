@@ -155,8 +155,13 @@ fn format_label(format: &TournamentFormat) -> String {
 async fn subscribe_node(
     Path(id): Path<u64>,
     State(state): State<AppState>,
+    caller: RequireWallet,
     Json(req): Json<SubscribeNodeReq>,
 ) -> Result<Json<SubscribeNodeRes>, StatusCode> {
+    // A node id is bound to the player's wallet; nobody may rebind another player's.
+    if caller.0 != req.player {
+        return Err(StatusCode::FORBIDDEN);
+    }
     // Register player's node_id for the tournament
     let ok = state
         .tournament_store
@@ -2071,9 +2076,7 @@ pub fn tournaments_routes() -> Router<AppState> {
 }
 
 pub fn tournament_gossip_routes() -> Router<AppState> {
-    Router::new()
-        .route("/{id}/subscribe-node", post(subscribe_node))
-        .route("/{id}/bootstrap-peers", get(get_bootstrap_peers))
+    Router::new().route("/{id}/bootstrap-peers", get(get_bootstrap_peers))
 }
 
 pub fn tournament_routes() -> Router<AppState> {
@@ -2096,6 +2099,8 @@ pub fn tournament_join_routes() -> Router<AppState> {
         .route("/{id}/build-leave-tx", post(build_leave_transaction))
         .route("/{id}/leave", post(leave_tournament))
         .route("/{id}/register-node", post(register_node))
+        // Binds a node id to the caller's own wallet.
+        .route("/{id}/subscribe-node", post(subscribe_node))
         .route(
             "/{id}/session-create-game",
             post(tournament_session_create_game),

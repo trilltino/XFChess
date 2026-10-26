@@ -22,9 +22,13 @@ const FROM_EMAIL: &str = "noreply@xfchess.com";
 
 // Use paths relative to the /dispute and /admin/dispute router prefixes.
 pub fn dispute_routes() -> Router<AppState> {
-    Router::new()
-        .route("/notify", post(notify_dispute))
-        .route("/{game_id}", get(get_dispute_status))
+    Router::new().route("/{game_id}", get(get_dispute_status))
+}
+
+/// Filing a dispute names the challenger, so the caller must mount this behind
+/// `require_relay_or_jwt`; the handler also checks the token's wallet.
+pub fn dispute_notify_routes() -> Router<AppState> {
+    Router::new().route("/notify", post(notify_dispute))
 }
 
 pub fn admin_dispute_routes() -> Router<AppState> {
@@ -65,8 +69,13 @@ pub struct ResolveDisputeResp {
 
 pub async fn notify_dispute(
     State(state): State<AppState>,
+    caller: crate::signing::auth::RequireWallet,
     Json(req): Json<NotifyDisputeReq>,
 ) -> Result<Json<NotifyDisputeResp>, StatusCode> {
+    // The row and the operator email name the challenger, so only that wallet may file it.
+    if caller.0 != req.challenger_wallet {
+        return Err(StatusCode::FORBIDDEN);
+    }
     let pool = state.store.pool();
     let disputes = DisputeRepository::new(pool.clone());
 

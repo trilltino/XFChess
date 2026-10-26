@@ -48,8 +48,12 @@ pub fn blinks_routes() -> Router<AppState> {
             "/tournament/{id}/chain/onboarding",
             get(get_onboarding_chain),
         )
-        // Admin-only — requires X-API-Key header (enforced by the admin middleware)
-        .route("/admin/tournament/{id}/start", post(start_tournament))
+}
+
+/// Returns authority-signed transactions, so the caller must mount it behind the admin
+/// middleware (`build_app_router` does). It must not join `blinks_routes`, which is public.
+pub fn blinks_admin_routes() -> Router<AppState> {
+    Router::new().route("/admin/tournament/{id}/start", post(start_tournament))
 }
 
 #[derive(Deserialize)]

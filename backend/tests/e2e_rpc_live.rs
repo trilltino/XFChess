@@ -5,23 +5,21 @@ use std::str::FromStr;
 
 const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
 
-fn skip_unless_configured(test_name: &str) -> bool {
-    if std::env::var("SOLANA_RPC_URL").is_ok() {
-        return false;
-    }
-    eprintln!(
-        "[skip] {test_name}: SOLANA_RPC_URL is not set — export a real RPC URL \
-         (Triton devnet endpoint + x-token in prod/staging) to run this tier"
+fn require_configured(test_name: &str) -> anyhow::Result<()> {
+    let url = std::env::var("SOLANA_RPC_URL").with_context(|| {
+        format!("{test_name}: SOLANA_RPC_URL is required for explicit live tests")
+    })?;
+    anyhow::ensure!(
+        !url.trim().is_empty(),
+        "{test_name}: SOLANA_RPC_URL is empty"
     );
-    true
+    Ok(())
 }
 
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
 fn primary_rpc_reports_healthy() -> anyhow::Result<()> {
-    if skip_unless_configured("primary_rpc_reports_healthy") {
-        return Ok(());
-    }
+    require_configured("primary_rpc_reports_healthy")?;
     let url = backend::signing::solana::rpc::rpc_url_or_devnet();
     println!("[e2e_rpc_live] probing primary RPC: {}", redact_url(&url));
     make_rpc(&url)?
@@ -34,9 +32,7 @@ fn primary_rpc_reports_healthy() -> anyhow::Result<()> {
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
 fn deployed_program_account_is_reachable_via_failover() -> anyhow::Result<()> {
-    if skip_unless_configured("deployed_program_account_is_reachable_via_failover") {
-        return Ok(());
-    }
+    require_configured("deployed_program_account_is_reachable_via_failover")?;
     let program_id =
         solana_sdk::pubkey::Pubkey::from_str(PROGRAM_ID).context("valid program id constant")?;
 
@@ -55,9 +51,7 @@ fn deployed_program_account_is_reachable_via_failover() -> anyhow::Result<()> {
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
 fn fallback_url_is_independently_reachable() -> anyhow::Result<()> {
-    if skip_unless_configured("fallback_url_is_independently_reachable") {
-        return Ok(());
-    }
+    require_configured("fallback_url_is_independently_reachable")?;
     // Confirms the fallback endpoint is itself alive, so a real primary outage
     // would actually have somewhere to fail over to.
     let fb = fallback_rpc_url();
@@ -72,9 +66,7 @@ fn fallback_url_is_independently_reachable() -> anyhow::Result<()> {
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
 fn debug_transaction_reports_real_on_chain_outcome() -> anyhow::Result<()> {
-    if skip_unless_configured("debug_transaction_reports_real_on_chain_outcome") {
-        return Ok(());
-    }
+    require_configured("debug_transaction_reports_real_on_chain_outcome")?;
     // Pin a real finalized devnet program transaction; update it after a devnet reset.
     const KNOWN_GOOD_SIG: &str =
         "2riEGnPfQQcvWRdnSDnW1kNMLU5TtpYE1CktsrLz9gssbrNZ1VyjwSXQk55fwUqQPiN5NQprsLU2A2Yxgv9pVDQM";
@@ -112,9 +104,7 @@ fn debug_transaction_reports_real_on_chain_outcome() -> anyhow::Result<()> {
 #[test]
 #[ignore = "hits a live RPC endpoint (Triton in prod/staging) — opt in with --ignored"]
 fn debug_transaction_reports_real_on_chain_failure() -> anyhow::Result<()> {
-    if skip_unless_configured("debug_transaction_reports_real_on_chain_failure") {
-        return Ok(());
-    }
+    require_configured("debug_transaction_reports_real_on_chain_failure")?;
     // Pin a finalized failed transaction to verify success detection. Re-pin after devnet resets.
     const KNOWN_FAILED_SIG: &str =
         "3tzUrvpK9ViBwc4fuHgLZ3fJGmiRjotF416dxrtgXEMYBfpiH4dukRk8G3jXMvzsBW72Gp8Y6JE9UeP3F9UWfNa2";
@@ -238,9 +228,7 @@ async fn live_send(
 #[tokio::test]
 #[ignore = "hits a live RPC endpoint and spends real devnet SOL (airdrop) — opt in with --ignored"]
 async fn init_profile_flow_flips_onchain_username_set() -> anyhow::Result<()> {
-    if skip_unless_configured("init_profile_flow_flips_onchain_username_set") {
-        return Ok(());
-    }
+    require_configured("init_profile_flow_flips_onchain_username_set")?;
     let rpc_url = std::env::var("SOLANA_RPC_URL").context("checked by skip_unless_configured")?;
     let router = spawn_live_app(&rpc_url).await?;
 
@@ -369,9 +357,7 @@ async fn init_profile_flow_flips_onchain_username_set() -> anyhow::Result<()> {
 #[tokio::test]
 #[ignore = "hits a live RPC endpoint and spends real devnet SOL (3 on-chain inits) — opt in with --ignored"]
 async fn admin_creates_tournament_and_game_client_can_see_it() -> anyhow::Result<()> {
-    if skip_unless_configured("admin_creates_tournament_and_game_client_can_see_it") {
-        return Ok(());
-    }
+    require_configured("admin_creates_tournament_and_game_client_can_see_it")?;
     let rpc_url = std::env::var("SOLANA_RPC_URL").context("checked by skip_unless_configured")?;
     let router = spawn_live_app(&rpc_url).await?;
 

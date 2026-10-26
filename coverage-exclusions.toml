@@ -1,0 +1,28 @@
+# Consumed by scripts/coverage/run-rust.mjs. Keep exclusions narrow and justified.
+[[exclude]]
+pattern = '(^|/)(examples|target)/'
+reason = 'Examples and generated build output are outside the maintained test surface.'
+
+[[exclude]]
+pattern = '(^|/)(main|build)\.rs$|/src/bin/|/backend/src/signing_server(_http)?\.rs$'
+reason = 'Binary entry points and build scripts wire together tested components.'
+
+[[exclude]]
+pattern = '/src/rendering/|/src/audio/'
+reason = 'Rendering and audio need visual or device validation rather than line targets.'
+
+[[exclude]]
+pattern = '/tools/cu_benchmark/'
+reason = 'Cluster benchmark and load-generation flows are measured separately.'
+
+[[exclude]]
+pattern = '/programs/xfchess-game-sbf/'
+reason = 'SBF loader entry point; program-test executes the deployed binary without host instrumentation.'
+
+# Do not exclude all of programs/xfchess-game: host chess/state code is measurable.
+# Do not exclude ui/ or states/: their transitions are explicit WP5 work items.
+
+[[exclude]]
+groups = ['contract']
+pattern = '/programs/xfchess-game/src/(account_ix/|common/|constants\.rs|crank_ix/|delegation_ix/|elo/|errors\.rs|events\.rs|game_ix/|governance_ix/|lib\.rs|lifecycle/|magicblock/|moves_ix/|recovery_ix\.rs|tournament_ix/)'
+reason = 'The contract lane executes handlers in SBF; its line denominator is host chess/state helpers only, with instruction/mutation coverage tracked separately.'

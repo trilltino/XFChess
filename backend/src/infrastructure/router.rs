@@ -4,7 +4,9 @@ use crate::infrastructure::auth_middleware::{
 use crate::signing::routes::admin::admin_routes;
 use crate::signing::routes::archive::archive_routes;
 use crate::signing::routes::casual_games::casual_games_routes;
-use crate::signing::routes::dispute::{admin_dispute_routes, dispute_routes};
+use crate::signing::routes::dispute::{
+    admin_dispute_routes, dispute_notify_routes, dispute_routes,
+};
 use crate::signing::routes::game_log::routes as game_log_routes;
 use crate::signing::routes::history::history_routes;
 use crate::signing::routes::kyc::kyc_routes;
@@ -110,15 +112,25 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                 .layer(middleware::from_fn(require_api_key)),
         );
 
-    let dispute_router = base.clone().nest("/dispute", dispute_routes()).nest(
-        "/admin/dispute",
-        admin_dispute_routes()
-            .layer(middleware::from_fn_with_state(
+    let dispute_router = base
+        .clone()
+        .nest("/dispute", dispute_routes())
+        .nest(
+            "/dispute",
+            dispute_notify_routes().layer(middleware::from_fn_with_state(
                 signing_state.clone(),
-                persist_admin_request,
-            ))
-            .layer(middleware::from_fn(require_api_key)),
-    );
+                require_relay_or_jwt,
+            )),
+        )
+        .nest(
+            "/admin/dispute",
+            admin_dispute_routes()
+                .layer(middleware::from_fn_with_state(
+                    signing_state.clone(),
+                    persist_admin_request,
+                ))
+                .layer(middleware::from_fn(require_api_key)),
+        );
 
     let metrics_router = base.route(
         "/metrics",
@@ -166,7 +178,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
     let social_router =
         social_routes(signing_state.invite_store.clone()).with_state(signing_state.clone());
 
-    signing_router
+    let router = signing_router
         .merge(tournament_router)
         .merge(matchmaking_router)
         .nest("/api", mail_router)
@@ -188,6 +200,16 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         )
         .merge(
             admin_routes()
+                .with_state(signing_state.clone())
+                .layer(middleware::from_fn_with_state(
+                    signing_state.clone(),
+                    persist_admin_request,
+                ))
+                .layer(middleware::from_fn(require_api_key)),
+        )
+        .nest(
+            "/api/actions",
+            crate::signing::blinks::blinks_admin_routes()
                 .with_state(signing_state.clone())
                 .layer(middleware::from_fn_with_state(
                     signing_state.clone(),
@@ -243,7 +265,11 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
         )
         .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
             tower_http::request_id::MakeRequestUuid,
-        ))
+        ));
+
+    #[cfg(feature = "coverage")]
+    let router = router.layer(middleware::from_fn(crate::coverage::record_hit));
+    router
 }
 
 fn cors_layer(allowed_origins: &[String]) -> tower_http::cors::CorsLayer {
