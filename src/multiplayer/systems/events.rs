@@ -132,13 +132,37 @@ pub fn handle_network_events(
                     // NonceSequencer has already ordered and replay-checked moves before this point.
                     let game_id = msg.game_id();
 
+                    // The opponent can announce readiness while this client is still in the menu,
+                    // before the local session binds the barrier to the game. Bind it to the
+                    // announced game now: binding later resets the barrier and would erase
+                    // the readiness that already arrived.
+                    if matches!(
+                        msg,
+                        NetworkMessage::GameReady { .. }
+                            | NetworkMessage::GameStartConfirmed { .. }
+                    ) && start_barrier.game_id == 0
+                    {
+                        start_barrier.reset(game_id);
+                    }
+
+                    // A `GameStartConfirmed` is only sent after the sender saw our `GameReady`,
+                    // so it ends our re-sending of it.
+                    if let NetworkMessage::GameStartConfirmed { start_token, .. } = msg {
+                        if *start_token == format!("game-{game_id}")
+                            && start_barrier.game_id == game_id
+                        {
+                            start_barrier.remote_started = true;
+                        }
+                    }
+
                     match msg {
                         NetworkMessage::GameReady {
                             game_id: ready_game,
                             player_pubkey,
                             ready_token,
                         } if *ready_game == game_id
-                            && *ready_token == format!("game-{game_id}") =>
+                            && *ready_token == format!("game-{game_id}")
+                            && start_barrier.game_id == game_id =>
                         {
                             let wallet_allowed = match causal.verified_wallets.get(ready_game) {
                                 Some((white, black)) => {
@@ -148,6 +172,8 @@ pub fn handle_network_events(
                                 None => true,
                             };
                             if wallet_allowed {
+                                // A repeat means the sender never saw our start confirmation.
+                                let repeat = start_barrier.remote_ready;
                                 start_barrier.remote_ready = true;
                                 info!("[START] Remote player ready for game {game_id}");
                                 if start_barrier.local_ready && !start_barrier.start_sent {
@@ -164,6 +190,13 @@ pub fn handle_network_events(
                                             info!("[START] Sent synchronized start for game {game_id}");
                                         }
                                     }
+                                } else if repeat && start_barrier.start_sent {
+                                    if let Some(tx) = &network_state.message_sender {
+                                        let _ = tx.send(NetworkMessage::GameStartConfirmed {
+                                            game_id,
+                                            start_token: format!("game-{game_id}"),
+                                        });
+                                    }
                                 }
                             } else {
                                 warn!(
@@ -176,6 +209,7 @@ pub fn handle_network_events(
                             start_token,
                         } if *start_game == game_id
                             && *start_token == format!("game-{game_id}")
+                            && start_barrier.game_id == game_id
                             && start_barrier.local_ready
                             && start_barrier.remote_ready =>
                         {
@@ -652,6 +686,8 @@ mod dual_transport_dedup_property_tests {
         });
         app.add_message::<NetworkEvent>();
         app.add_message::<ResignEvent>();
+        app.add_message::<crate::game::events::DrawOfferEvent>();
+        app.add_message::<crate::game::events::DrawResponseEvent>();
         app.add_message::<crate::multiplayer::network::online_game_session::OnlineChatMessage>();
         app.add_message::<NetworkMoveEvent>();
         app.add_systems(
@@ -885,6 +921,92 @@ mod verified_wallets_roster_tests {
             .ok_or("participant roster missing")?;
         assert!(roster.contains(&white_signing.to_bytes().to_vec()));
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod start_barrier_binding_tests {
+    use super::*;
+    use crate::multiplayer::types::OnlineStartBarrier;
+
+    fn app_with(
+        barrier: OnlineStartBarrier,
+    ) -> (App, tokio::sync::mpsc::UnboundedSender<NetworkEvent>) {
+        let mut app = App::new();
+        app.insert_resource(CausalChainState::default());
+        app.insert_resource(PendingMoveBuffer::default());
+        app.insert_resource(barrier);
+        app.add_message::<NetworkEvent>();
+        app.add_message::<ResignEvent>();
+        app.add_systems(Update, handle_network_events);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<NetworkEvent>();
+        app.insert_resource(OnlineNetworkState {
+            event_receiver: Some(rx),
+            ..Default::default()
+        });
+        (app, tx)
+    }
+
+    fn ready(game_id: u64) -> NetworkEvent {
+        NetworkEvent::MessageReceived(NetworkMessage::GameReady {
+            game_id,
+            player_pubkey: Default::default(),
+            ready_token: format!("game-{game_id}"),
+        })
+    }
+
+    fn start(game_id: u64) -> NetworkEvent {
+        NetworkEvent::MessageReceived(NetworkMessage::GameStartConfirmed {
+            game_id,
+            start_token: format!("game-{game_id}"),
+        })
+    }
+
+    #[test]
+    fn readiness_that_arrives_before_the_session_is_bound_is_kept(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (mut app, tx) = app_with(OnlineStartBarrier::default());
+        tx.send(ready(55))?;
+        app.update();
+
+        let barrier = app.world().resource::<OnlineStartBarrier>();
+        assert_eq!(barrier.game_id, 55, "bound to the announced game");
+        assert!(barrier.remote_ready);
+        // announce_game_readiness resets the barrier only when its id differs.
+        assert!(barrier.game_id == 55);
+        Ok(())
+    }
+
+    #[test]
+    fn a_start_confirmation_before_binding_still_ends_the_resending(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (mut app, tx) = app_with(OnlineStartBarrier::default());
+        tx.send(start(55))?;
+        app.update();
+
+        let barrier = app.world().resource::<OnlineStartBarrier>();
+        assert_eq!(barrier.game_id, 55);
+        assert!(barrier.remote_started);
+        Ok(())
+    }
+
+    #[test]
+    fn messages_for_another_game_do_not_touch_a_bound_barrier(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut barrier = OnlineStartBarrier::default();
+        barrier.reset(7);
+        barrier.local_ready = true;
+        let (mut app, tx) = app_with(barrier);
+        tx.send(ready(55))?;
+        tx.send(start(55))?;
+        app.update();
+
+        let barrier = app.world().resource::<OnlineStartBarrier>();
+        assert_eq!(barrier.game_id, 7);
+        assert!(!barrier.remote_ready);
+        assert!(!barrier.remote_started);
+        assert!(!barrier.start_confirmed);
         Ok(())
     }
 }

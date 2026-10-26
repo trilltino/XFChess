@@ -147,6 +147,28 @@ impl Plugin for P2PConnectionPlugin {
     }
 }
 
+/// Ask the gossip mesh to reach a peer whose node id is already known (a game
+/// restored after a restart, or a refresh), joining it to every tracked topic.
+/// Returns whether the request was handed to the mesh.
+pub fn bootstrap_known_peer(network_state: &OnlineNetworkState, peer_node_id: &str) -> bool {
+    let Some(sender) = &network_state.bootstrap_sender else {
+        return false;
+    };
+    let Ok(bytes) = bs58::decode(peer_node_id).into_vec() else {
+        warn!("[P2P] Peer node id is not valid base58");
+        return false;
+    };
+    let Ok(bytes) = <[u8; 32]>::try_from(bytes.as_slice()) else {
+        warn!("[P2P] Peer node id is not 32 bytes");
+        return false;
+    };
+    let Ok(endpoint_id) = iroh::EndpointId::from_bytes(&bytes) else {
+        warn!("[P2P] Peer node id is not a valid endpoint");
+        return false;
+    };
+    sender.send(endpoint_id).is_ok()
+}
+
 fn handle_host_game(
     mut events: MessageReader<HostGameEvent>,
     mut connection_state: ResMut<P2PConnectionState>,
@@ -295,6 +317,8 @@ fn handle_network_events(
     mut core_mode: ResMut<crate::core::GameMode>,
     mut ai_config: ResMut<crate::game::ai::ChessAIResource>,
     player_identity: Res<crate::states::main_menu::PlayerIdentity>,
+    session: Option<Res<crate::multiplayer::network::online_game_session::OnlineGameSession>>,
+    state: Option<Res<State<GameState>>>,
     #[cfg(feature = "solana")] mut solana_sync: Option<
         ResMut<crate::multiplayer::solana::addon::SolanaGameSync>,
     >,
@@ -302,11 +326,20 @@ fn handle_network_events(
         ResMut<crate::multiplayer::solana::addon::CompetitiveMatchState>,
     >,
 ) {
+    let in_game_scene = state.is_some_and(|s| *s.get() == GameState::InGame);
     for event in network_events.read() {
         match event {
             NetworkEvent::PeerConnected(peer_id) => {
                 info!("PeerConnected: {}", peer_id);
                 network_state.connected_peers.insert(peer_id.clone());
+                // Our opponent is back: a dropped link must not stay "lost" for the rest of the game.
+                if connection_state.status == P2PConnectionStatus::Disconnected
+                    && connection_state.game_id.is_some()
+                    && connection_state.peer_node_id.as_deref() == Some(peer_id.as_str())
+                {
+                    info!("[P2P] Opponent {peer_id} reconnected — link restored");
+                    connection_state.status = P2PConnectionStatus::InGame;
+                }
                 // If we are connecting and this is the peer we want to connect to
                 if let P2PConnectionStatus::Connecting = connection_state.status {
                     if Some(peer_id.clone()) == connection_state.peer_node_id {
@@ -357,6 +390,23 @@ fn handle_network_events(
                 }
             }
             NetworkEvent::MessageReceived(msg) => {
+                // Any traffic for the running game proves the link is up again. This also
+                // covers resumed games, which have no peer node id to match a PeerConnected.
+                if in_game_scene
+                    && connection_state.status == P2PConnectionStatus::Disconnected
+                    && session.as_ref().is_some_and(|s| {
+                        s.active
+                            && crate::multiplayer::network::online_game_session::numeric_game_id(
+                                &s.game_id,
+                            ) == msg.game_id()
+                    })
+                {
+                    info!(
+                        "[P2P] Traffic for game {} resumed — link restored",
+                        msg.game_id()
+                    );
+                    connection_state.status = P2PConnectionStatus::InGame;
+                }
                 match msg {
                     NetworkMessage::GameInvite {
                         game_id,
@@ -503,57 +553,64 @@ fn handle_network_events(
                         initial_fen: _,
                         white_display,
                         black_display,
-                    }
-                        if connection_state.game_id == Some(*game_id) => {
-                            if connection_state.drive_game_start {
-                                info!(
-                                    "Game {} started! White: {}, Black: {}",
-                                    game_id, white_player, black_player
-                                );
-                                // Fill the other side's display name when it first arrives in this handshake.
-                                if connection_state.opponent_display_name.is_none() {
-                                    let opponent_name = match connection_state.player_color {
-                                        Some(PieceColor::White) => black_display.clone(),
-                                        _ => white_display.clone(),
-                                    };
-                                    if !opponent_name.is_empty() {
-                                        connection_state.opponent_display_name =
-                                            Some(opponent_name);
-                                    }
+                    } if connection_state.game_id == Some(*game_id) => {
+                        if connection_state.drive_game_start {
+                            info!(
+                                "Game {} started! White: {}, Black: {}",
+                                game_id, white_player, black_player
+                            );
+                            // Fill the other side's display name when it first arrives in this handshake.
+                            if connection_state.opponent_display_name.is_none() {
+                                let opponent_name = match connection_state.player_color {
+                                    Some(PieceColor::White) => black_display.clone(),
+                                    _ => white_display.clone(),
+                                };
+                                if !opponent_name.is_empty() {
+                                    connection_state.opponent_display_name = Some(opponent_name);
                                 }
-                                connection_state.status = P2PConnectionStatus::InGame;
-                                *core_mode = crate::core::GameMode::OnlineMultiplayer;
-                                ai_config.mode = crate::game::ai::resource::AiMode::Multiplayer;
+                            }
+                            connection_state.status = P2PConnectionStatus::InGame;
+                            *core_mode = crate::core::GameMode::OnlineMultiplayer;
+                            ai_config.mode = crate::game::ai::resource::AiMode::Multiplayer;
 
-                                // Clear on-chain context left by a previous Solana lobby or tournament match.
-                                #[cfg(feature = "solana")]
-                                crate::multiplayer::solana::addon::clear_on_chain_game_state(
-                                    solana_sync.as_deref_mut(),
-                                    competitive.as_deref_mut(),
-                                );
+                            // Clear on-chain context left by a previous Solana lobby or tournament match.
+                            #[cfg(feature = "solana")]
+                            crate::multiplayer::solana::addon::clear_on_chain_game_state(
+                                solana_sync.as_deref_mut(),
+                                competitive.as_deref_mut(),
+                            );
 
-                                game_started.write(GameStartedEvent { game_id: *game_id });
+                            game_started.write(GameStartedEvent { game_id: *game_id });
 
-                                next_state.set(GameState::InGame);
-                            } else {
-                                connection_state.status = P2PConnectionStatus::Connected;
-                                info!(
+                            next_state.set(GameState::InGame);
+                        } else {
+                            connection_state.status = P2PConnectionStatus::Connected;
+                            info!(
                                     "Direct link ready for game {} (non-authoritative — waiting for the real game-start signal)",
                                     game_id
                                 );
-                            }
                         }
+                    }
 
                     _ => {}
                 }
             }
-            NetworkEvent::PeerDisconnected(reason)
+            NetworkEvent::PeerDisconnected(reason) => {
+                network_state.connected_peers.remove(reason);
                 // Only meaningful mid-game: during lobby setup a dropped/failed
                 // link is already surfaced via explicit Error(...) transitions.
-                if connection_state.status == P2PConnectionStatus::InGame => {
+                // Gossip also reports neighbours that are not our opponent; those say
+                // nothing about this game. A failed broadcast of our own is not a peer id.
+                let other_peer = !reason.starts_with("Broadcast error")
+                    && connection_state
+                        .peer_node_id
+                        .as_deref()
+                        .is_some_and(|opponent| opponent != reason.as_str());
+                if connection_state.status == P2PConnectionStatus::InGame && !other_peer {
                     warn!("PeerDisconnected during game: {}", reason);
                     connection_state.status = P2PConnectionStatus::Disconnected;
                 }
+            }
             _ => {}
         }
     }

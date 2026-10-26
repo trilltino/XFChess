@@ -383,6 +383,7 @@ pub fn handle_game_control_messages(
                 draw_offer.write(crate::game::events::DrawOfferEvent {
                     player: player.clone(),
                     remote: true,
+                    ply: None,
                 });
             }
             NetworkMessage::DrawResponse {
@@ -392,6 +393,7 @@ pub fn handle_game_control_messages(
                     player: player.clone(),
                     accepted: *accepted,
                     remote: true,
+                    ply: None,
                 });
             }
             NetworkMessage::FlagTimeout { flagged_player, .. } => {

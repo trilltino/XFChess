@@ -1,4 +1,3 @@
-use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
@@ -8,6 +7,7 @@ use solana_sdk::{
 use solana_system_interface::instruction as system_instruction;
 use std::fs;
 use std::path::Path;
+use xfchess_client_compat::prelude::*;
 
 use crate::chain::{
     CHILDREN_KEYPAIR_PATH, CHILD_FUNDING_AMOUNT, MASTER_KEYPAIR_PATH, MASTER_MIN_BALANCE,

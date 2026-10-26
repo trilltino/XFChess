@@ -168,8 +168,7 @@ impl Plugin for BoardPlugin {
                 (
                     update_move_hints_system,
                     update_last_move_highlight_system,
-                    update_check_highlight_system
-                        .after(crate::game::systems::animate_capture_fade),
+                    update_check_highlight_system.after(crate::game::systems::animate_capture_fade),
                     board_view_mode_toggle_system
                         .run_if(resource_changed::<crate::game::view_mode::ViewMode>),
                 )

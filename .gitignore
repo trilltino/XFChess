@@ -120,3 +120,6 @@ xfchess-anticheat-crate-*.md
 
 # Local per-package build dir used to avoid lock contention with rust-analyzer
 /target-backend/
+
+# Python bytecode
+__pycache__/

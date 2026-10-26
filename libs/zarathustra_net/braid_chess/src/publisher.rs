@@ -41,11 +41,18 @@ impl ChessPublisher {
         )
         .await
     }
-    pub async fn publish_offer_draw(&mut self, player: &str) -> Result<(), BraidChessError> {
+    pub async fn publish_offer_draw(
+        &mut self,
+        player: &str,
+        ply: u32,
+        at_ms: u64,
+    ) -> Result<(), BraidChessError> {
         self.put(
             ChessResource::moves(&self.game_id),
             ChessMessage::OfferDraw {
                 player: player.into(),
+                ply,
+                at_ms,
             },
         )
         .await

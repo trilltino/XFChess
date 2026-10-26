@@ -12,12 +12,10 @@ use crate::game::systems::shared::{
 };
 use crate::motion::BoardEpoch;
 use crate::multiplayer::network::online_game_session::OnlineGameSession;
-use crate::multiplayer::network::protocol::NetworkMessage;
 #[cfg(feature = "solana")]
 use crate::multiplayer::rollup::magicblock::MagicBlockResolver;
 #[cfg(feature = "solana")]
 use crate::multiplayer::solana::addon::{CompetitiveMatchState, SolanaGameSync};
-use crate::multiplayer::types::OnlineNetworkState;
 use crate::rendering::pieces::{Piece, PieceColor};
 use crate::rendering::utils::Square;
 use bevy::ecs::system::SystemParam;
@@ -918,9 +916,8 @@ pub fn confirm_exit_game(
     game_mode: Res<GameMode>,
     current_turn: Res<CurrentTurn>,
     players: Res<Players>,
-    mut game_over: ResMut<GameOverState>,
-    mut resign_events: MessageWriter<crate::game::events::ResignEvent>,
-    network_state: Option<Res<OnlineNetworkState>>,
+    mut resign_requests: MessageWriter<crate::game::events::ResignRequest>,
+    p2p: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
     #[cfg(feature = "solana")] competitive_match: Option<Res<CompetitiveMatchState>>,
 ) {
     if !confirmation.pending_exit {
@@ -930,7 +927,12 @@ pub fn confirm_exit_game(
     confirmation.pending_exit = false;
     confirmation.visible = false;
 
-    let winner = match current_turn.color {
+    // Leaving resigns for the player who leaves, whoever is to move: the other side wins.
+    let leaving = p2p
+        .as_ref()
+        .and_then(|conn| conn.player_color)
+        .unwrap_or(current_turn.color);
+    let winner = match leaving {
         PieceColor::White => PieceColor::Black,
         PieceColor::Black => PieceColor::White,
     };
@@ -940,42 +942,13 @@ pub fn confirm_exit_game(
     };
 
     match *game_mode {
-        GameMode::OnlineMultiplayer => {
-            if let Some(network_state) = network_state.as_ref() {
-                if let Some(session) = network_state.active_session.as_ref() {
-                    if let (Some(sender), Some(game_state)) = (
-                        network_state.message_sender.as_ref(),
-                        session.game_state.as_ref(),
-                    ) {
-                        if let Err(error) = sender.send(NetworkMessage::Resign {
-                            game_id: game_state.game_id,
-                            winner: winner_label.to_string(),
-                            nonce: 0, // resign doesn't need strict nonce ordering
-                        }) {
-                            warn!("[INPUT] Failed to send resign message: {}", error);
-                        }
-                    }
-                }
-            } else {
-                warn!("[INPUT] Braid multiplayer exit requested without network state");
-            }
-
-            *game_over = if winner == PieceColor::White {
-                GameOverState::WhiteWonByResignation
-            } else {
-                GameOverState::BlackWonByResignation
-            };
-        }
+        // The result, the opponent notice and (in a wagered game) the chain record all
+        // follow from the request; nothing is decided here.
+        GameMode::OnlineMultiplayer => {}
         GameMode::MultiplayerCompetitive => {
             #[cfg(feature = "solana")]
             {
-                if competitive_match.as_ref().and_then(|m| m.game_id).is_some() {
-                    *game_over = if winner == PieceColor::White {
-                        GameOverState::WhiteWonByResignation
-                    } else {
-                        GameOverState::BlackWonByResignation
-                    };
-                } else {
+                if competitive_match.as_ref().and_then(|m| m.game_id).is_none() {
                     next_state.set(crate::core::GameState::MainMenu);
                     return;
                 }
@@ -997,8 +970,7 @@ pub fn confirm_exit_game(
     }
 
     let _winner_player = players.current(winner);
-    resign_events.write(crate::game::events::ResignEvent {
+    resign_requests.write(crate::game::events::ResignRequest {
         winner: winner_label.to_string(),
-        remote: false,
     });
 }

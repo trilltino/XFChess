@@ -20,7 +20,8 @@ use std::{
 
 #[derive(Clone, Copy)]
 enum Scripted {
-    /// Reject without committing.
+    /// Reject without committing. Kept for scripts that need it; none does today.
+    #[allow(dead_code)]
     Status(u16),
     /// Commit, then fail the response (a lost acknowledgement).
     CommitThenStatus(u16),

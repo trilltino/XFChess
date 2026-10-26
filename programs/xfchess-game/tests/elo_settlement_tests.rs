@@ -3,9 +3,9 @@ pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
+use crate::agave::ProgramTestBanksClientExt;
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
-use crate::agave::ProgramTestBanksClientExt;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer};
 use xfchess_game::elo::calculate_elo_update;
 use xfchess_game::state::{Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile};

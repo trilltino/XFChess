@@ -20,10 +20,11 @@ pub use client::{
 };
 pub use client_events::{emit_client_event, ClientEvent};
 pub use game::{
-    claim_seat, fetch_game_events, fetch_move_log, fetch_verified_participants,
-    get_active_game_for_wallet, get_broadcast_delay, get_game_moves_for_spectator, get_seat,
-    record_move, report_blur, vps_delegate_game, vps_fetch_move_nonce, vps_finalize_game,
-    vps_submit_dispute, vps_submit_free_rated_result, vps_undelegate_game, SeatLease,
+    claim_seat, fetch_game_events, fetch_game_events_by_id, fetch_game_nodes, fetch_move_log,
+    fetch_verified_participants, get_active_game_for_wallet, get_broadcast_delay,
+    get_game_moves_for_spectator, get_seat, record_move, report_blur, vps_delegate_game,
+    vps_fetch_move_nonce, vps_finalize_game, vps_submit_dispute, vps_submit_free_rated_result,
+    vps_undelegate_game, SeatLease,
 };
 pub use identity::{
     fetch_player_profile, get_user_status, get_user_status_async, link_wallet, register_identity,

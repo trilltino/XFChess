@@ -3,6 +3,7 @@ use super::*;
 pub(crate) fn render_moves_and_controls(
     ui: &mut egui::Ui,
     params: &mut crate::ui::system_params::game_ui::GameUIParams,
+    move_list_height: f32,
 ) {
     use crate::game::resources::TurnPhase;
 
@@ -24,18 +25,16 @@ pub(crate) fn render_moves_and_controls(
                 );
             });
 
-        // Fixed height — the list scrolls internally and never grows the
-        // panel as more moves are played.
-        const MOVE_LIST_HEIGHT: f32 = 260.0;
-
+        // Fixed height for the panel size — the list scrolls internally and never
+        // grows the panel as more moves are played.
         StyledPanel::sidebar_card()
             .fill(UiColors::BG_MID)
             .inner_margin(egui::Margin::symmetric(0, 0))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("game_moves_scroll")
-                    .max_height(MOVE_LIST_HEIGHT)
-                    .min_scrolled_height(MOVE_LIST_HEIGHT)
+                    .max_height(move_list_height)
+                    .min_scrolled_height(move_list_height)
                     .stick_to_bottom(true)
                     .show(ui, |ui| {
                         StyledPanel::sidebar_row()
@@ -56,44 +55,32 @@ pub(crate) fn render_moves_and_controls(
 
                 if !is_game_over {
                     if is_online {
-                        let draw_offered = params.pending_draw.from_player.is_some();
+                        let draw_sent = params.pending_draw.is_sent();
                         if StyledButton::outline_pill(
                             ui,
-                            if draw_offered {
-                                "DRAW SENT"
-                            } else {
-                                "OFFER DRAW"
-                            },
+                            if draw_sent { "DRAW SENT" } else { "OFFER DRAW" },
                             egui::Color32::from_rgb(210, 180, 90),
                             true,
-                            !draw_offered,
+                            !params.pending_draw.is_pending(),
                         )
                         .clicked()
                         {
-                            let player = match params.current_turn.color {
+                            // The offer names who is offering, not whose turn it is.
+                            let offering = params
+                                .p2p_conn
+                                .as_ref()
+                                .and_then(|c| c.player_color)
+                                .unwrap_or(params.current_turn.color);
+                            let player = match offering {
                                 PieceColor::White => "white".to_string(),
                                 PieceColor::Black => "black".to_string(),
                             };
                             params
                                 .draw_writer
-                                .write(crate::game::events::DrawOfferEvent {
+                                .write(crate::game::events::DrawActionRequest {
                                     player,
-                                    remote: false,
+                                    kind: crate::game::events::DrawActionKind::Offer,
                                 });
-
-                            // Record competitive draw offers on chain; the P2P event updates only the opponent UI.
-                            #[cfg(feature = "solana")]
-                            if let (Some(wallet_pubkey), Some(game_id), Some(rpc_url)) = (
-                                params.solana_wallet.as_ref().and_then(|w| w.pubkey),
-                                params.solana_sync.as_ref().and_then(|s| s.game_id),
-                                params.solana_sync.as_ref().map(|s| s.rpc_url.clone()),
-                            ) {
-                                crate::multiplayer::solana::lobby::spawn_offer_draw(
-                                    rpc_url,
-                                    wallet_pubkey,
-                                    game_id,
-                                );
-                            }
                         }
                         ui.add_space(8.0);
                     }
@@ -101,16 +88,19 @@ pub(crate) fn render_moves_and_controls(
                     if StyledButton::outline_pill(ui, "RESIGN", UiColors::DANGER, true, is_waiting)
                         .clicked()
                     {
-                        let winner = match params.current_turn.color {
+                        // Whoever clicks resigns: the winner is the other side, whatever the turn.
+                        let resigning = params
+                            .p2p_conn
+                            .as_ref()
+                            .and_then(|c| c.player_color)
+                            .unwrap_or(params.current_turn.color);
+                        let winner = match resigning {
                             PieceColor::White => "black".to_string(),
                             PieceColor::Black => "white".to_string(),
                         };
                         params
                             .resign_writer
-                            .write(crate::game::events::ResignEvent {
-                                winner,
-                                remote: false,
-                            });
+                            .write(crate::game::events::ResignRequest { winner });
                     }
                 }
             });

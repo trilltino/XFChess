@@ -14,6 +14,7 @@ use crate::multiplayer::TokioRuntime;
 
 const GENESIS_PARENT: &str = "0";
 
+mod draws;
 mod publish;
 use publish::publish;
 pub(super) use publish::retry_pending;
@@ -81,6 +82,9 @@ fn version_of(message: &ChessMessage) -> Option<String> {
         ChessMessage::SessionInfo { .. } => {
             braid_chess::version_hash(&serde_json::to_string(message).ok()?, 0)
         }
+        ChessMessage::OfferDraw { .. }
+        | ChessMessage::AcceptDraw { .. }
+        | ChessMessage::DeclineDraw { .. } => braid_chess::version_hash(&message.draw_key()?, 0),
         _ => return None,
     })
 }
@@ -132,6 +136,32 @@ pub fn publish_resign(
         ChessMessage::Resign {
             player: resigning_player,
         },
+        content_version,
+        heads,
+    );
+}
+
+/// Publish a draw offer, acceptance or refusal on the moves stream, where it is
+/// ordered with the moves it refers to and survives either player's disconnect.
+pub fn publish_draw(
+    base_url: String,
+    game_id: String,
+    sender_identity: String,
+    session_token: String,
+    message: ChessMessage,
+    heads: SharedStreamHeads,
+) {
+    let Some(content_version) = version_of(&message) else {
+        warn!("[braid] publish_draw called with a message that is not a draw action");
+        return;
+    };
+    publish(
+        base_url,
+        game_id,
+        "moves",
+        sender_identity,
+        session_token,
+        message,
         content_version,
         heads,
     );
@@ -380,6 +410,64 @@ pub fn ensure_subscribed(
     state.chat = Some(spawn(ChessResource::chat(&game_id)));
 }
 
+/// Reconnect both streams now, resuming from what was already acknowledged, instead of
+/// waiting out the supervisor's backoff (up to 30 s). Does nothing before the first
+/// subscription.
+pub fn restart_streams(
+    state: &mut BraidTransportState,
+    base_url: &str,
+    game_id: &str,
+    rt: &tokio::runtime::Handle,
+) {
+    if state.game_id != game_id || state.moves.is_none() {
+        return;
+    }
+    let respawn = |old: Option<StreamHandle>, resource: ChessResource| {
+        let cursor = old
+            .as_ref()
+            .map(|handle| handle.cursor().clone())
+            .unwrap_or_default();
+        drop(old); // cancels the old task before the new one starts
+        StreamHandle::spawn(
+            base_url.to_owned(),
+            game_id.to_owned(),
+            resource,
+            cursor,
+            SupervisorConfig::default(),
+            rt,
+        )
+    };
+    state.moves = Some(respawn(state.moves.take(), ChessResource::moves(game_id)));
+    state.chat = Some(respawn(state.chat.take(), ChessResource::chat(game_id)));
+}
+
+fn handle_refresh_game_state(
+    mut refresh: MessageReader<crate::multiplayer::network::online_game_session::RefreshGameState>,
+    mut state: ResMut<BraidTransportState>,
+    session: Res<OnlineGameSession>,
+    tokio_runtime: Res<TokioRuntime>,
+    p2p: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
+    network_state: Option<Res<crate::multiplayer::OnlineNetworkState>>,
+) {
+    if refresh.read().count() == 0 || !session.is_configured() {
+        return;
+    }
+    info!("[braid] refresh requested for game {}", session.game_id);
+    restart_streams(
+        &mut state,
+        &session.base_url,
+        &session.game_id,
+        tokio_runtime.0.handle(),
+    );
+    // The gossip mesh may have lost the opponent too.
+    if let (Some(peer), Some(network_state)) = (
+        p2p.and_then(|conn| conn.peer_node_id.clone()),
+        network_state,
+    ) {
+        crate::multiplayer::network::p2p::bootstrap_known_peer(&network_state, &peer);
+    }
+}
+
 pub fn drain_braid_messages(
     mut state: ResMut<BraidTransportState>,
     session: Res<OnlineGameSession>,
@@ -387,6 +475,9 @@ pub fn drain_braid_messages(
     mut network_events: MessageWriter<NetworkEvent>,
     mut resign_events: MessageWriter<crate::game::events::ResignEvent>,
     mut chat_events: MessageWriter<OnlineChatMessage>,
+    mut draw_offers: MessageWriter<crate::game::events::DrawOfferEvent>,
+    mut draw_responses: MessageWriter<crate::game::events::DrawResponseEvent>,
+    p2p: Option<Res<crate::multiplayer::network::p2p::P2PConnectionState>>,
 ) {
     if state.rx.is_none() && state.moves.is_none() {
         return;
@@ -548,7 +639,48 @@ pub fn drain_braid_messages(
                 #[cfg(not(feature = "solana"))]
                 let _ = (session_pubkey, expires_at);
             }
-            // Draw offers use gossip. Clock and EngineAnalysis use separate Braid streams.
+            draw @ (ChessMessage::OfferDraw { .. }
+            | ChessMessage::AcceptDraw { .. }
+            | ChessMessage::DeclineDraw { .. }) => {
+                // Gossip delivers draws live; this is the copy that survives a disconnect.
+                let local_player =
+                    p2p.as_ref()
+                        .and_then(|c| c.player_color)
+                        .map(|color| match color {
+                            crate::rendering::pieces::PieceColor::White => "white",
+                            crate::rendering::pieces::PieceColor::Black => "black",
+                        });
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| elapsed.as_millis() as u64);
+                match draws::remote_draw(&draw, local_player, now_ms) {
+                    Some(draws::RemoteDraw::Offer { player, ply }) => {
+                        draw_offers.write(crate::game::events::DrawOfferEvent {
+                            player,
+                            remote: true,
+                            ply: Some(ply),
+                        });
+                    }
+                    Some(draws::RemoteDraw::Accept { player, ply }) => {
+                        draw_responses.write(crate::game::events::DrawResponseEvent {
+                            player,
+                            accepted: true,
+                            remote: true,
+                            ply: Some(ply),
+                        });
+                    }
+                    Some(draws::RemoteDraw::Decline { player, ply }) => {
+                        draw_responses.write(crate::game::events::DrawResponseEvent {
+                            player,
+                            accepted: false,
+                            remote: true,
+                            ply: Some(ply),
+                        });
+                    }
+                    None => {}
+                }
+            }
+            // Clock and EngineAnalysis use separate Braid streams.
             _ => {}
         }
         if let Some(receipt) = receipt {
@@ -595,7 +727,11 @@ impl Plugin for BraidTransportPlugin {
             .add_message::<crate::game::events::NetworkMoveResult>()
             .add_systems(
                 Update,
-                (sync_braid_subscription, drain_braid_messages)
+                (
+                    handle_refresh_game_state,
+                    sync_braid_subscription,
+                    drain_braid_messages,
+                )
                     .chain()
                     .in_set(crate::core::schedule::ReceiveSet::Transport),
             )

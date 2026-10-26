@@ -1,4 +1,3 @@
-use xfchess_client_compat::prelude::*;
 use crate::signing::solana;
 use crate::signing::AppState;
 use axum::{
@@ -13,6 +12,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
+use xfchess_client_compat::prelude::*;
 
 static PASSWORD_WORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 

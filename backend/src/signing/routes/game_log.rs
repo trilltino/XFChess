@@ -97,6 +97,21 @@ impl GameLogState {
         Ok(true)
     }
 
+    /// The transport (iroh) node ids of a lobby game's host and joiner, recorded
+    /// when the game started. A client that restarts mid-game uses them to find
+    /// its opponent again; direct-connect games never register and have none.
+    pub async fn node_pair(&self, game_id: &str) -> Result<Option<(String, String)>, sqlx::Error> {
+        if let Some(pair) = self.casual_identities.read().await.get(game_id) {
+            return Ok(Some(pair.clone()));
+        }
+        sqlx::query_as(
+            "SELECT host_node_id, joiner_node_id FROM casual_game_participants WHERE game_id = ?",
+        )
+        .bind(game_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     fn channel_key(game_id: &str, stream: &str) -> String {
         format!("{}/{}", game_id, stream)
     }
@@ -504,6 +519,28 @@ pub fn routes() -> Router<AppState> {
         .route("/game/{game_id}/moves", get(get_moves).put(put_moves))
         .route("/game/{game_id}/chat", get(get_chat).put(put_chat))
         .route("/game/{game_id}/participants", get(get_participants))
+        .route("/game/{game_id}/nodes", get(get_nodes))
+}
+
+#[derive(Serialize)]
+struct NodesResp {
+    host_node_id: String,
+    joiner_node_id: String,
+}
+
+async fn get_nodes(State(state): State<AppState>, Path(game_id): Path<String>) -> Response {
+    match state.game_log.node_pair(&game_id).await {
+        Ok(Some((host_node_id, joiner_node_id))) => Json(NodesResp {
+            host_node_id,
+            joiner_node_id,
+        })
+        .into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            warn!("[game-log] node lookup failed for game {game_id}: {e}");
+            StatusCode::SERVICE_UNAVAILABLE.into_response()
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -1248,6 +1285,30 @@ mod tests {
             restarted.casual_identity_check("g1", "joiner").await,
             OnChainCheck::Verified
         ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn node_pair_is_served_after_a_restart_and_absent_for_unregistered_games(
+    ) -> anyhow::Result<()> {
+        let pool = migrated_pool().await?;
+        let original = GameLogState::new(pool.clone(), None);
+        original
+            .register_casual_identities("g1", "host", "joiner")
+            .await
+            .context("test setup failed")?;
+        assert_eq!(
+            original.node_pair("g1").await?,
+            Some(("host".to_string(), "joiner".to_string()))
+        );
+        drop(original);
+
+        let restarted = GameLogState::new(pool, None);
+        assert_eq!(
+            restarted.node_pair("g1").await?,
+            Some(("host".to_string(), "joiner".to_string()))
+        );
+        assert_eq!(restarted.node_pair("direct-connect").await?, None);
         Ok(())
     }
 

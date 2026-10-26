@@ -370,6 +370,23 @@ pub fn accept_draw_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Resul
     })
 }
 
+pub fn resign_ix(program_id: Pubkey, game_id: u64, player: Pubkey) -> Result<Instruction> {
+    let game_pda =
+        Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
+
+    let mut data = anchor_discriminator("resign").to_vec();
+    data.extend_from_slice(&game_id.to_le_bytes());
+
+    Ok(Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(game_pda, false),
+            AccountMeta::new_readonly(player, true),
+        ],
+        data,
+    })
+}
+
 pub fn claim_timeout_ix(program_id: Pubkey, game_id: u64, caller: Pubkey) -> Result<Instruction> {
     let game_pda =
         Pubkey::find_program_address(&[GAME_SEED, &game_id.to_le_bytes()], &program_id).0;
@@ -1111,5 +1128,75 @@ mod withdraw_expired_layout_tests {
         assert_eq!(keys(&ix.accounts), keys(&expected));
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod game_action_layout_tests {
+    use super::*;
+    use anchor_lang::{InstructionData, ToAccountMetas};
+
+    fn keys(metas: &[AccountMeta]) -> Vec<(Pubkey, bool, bool)> {
+        metas
+            .iter()
+            .map(|a| (a.pubkey, a.is_signer, a.is_writable))
+            .collect()
+    }
+
+    #[test]
+    fn resign_matches_the_program_encoding_and_account_order(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let program_id: Pubkey = PROGRAM_ID.parse()?;
+        let player = Pubkey::new_unique();
+        let ix = resign_ix(program_id, player_game(), player)?;
+        assert_eq!(
+            ix.data,
+            xfchess_game::instruction::Resign {
+                game_id: player_game()
+            }
+            .data()
+        );
+        let expected = xfchess_game::accounts::ResignGame {
+            game: ix.accounts[0].pubkey,
+            player,
+        }
+        .to_account_metas(None);
+        assert_eq!(keys(&ix.accounts), keys(&expected));
+        Ok(())
+    }
+
+    #[test]
+    fn draw_offer_and_acceptance_match_the_program_encoding(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let program_id: Pubkey = PROGRAM_ID.parse()?;
+        let player = Pubkey::new_unique();
+        let offer = offer_draw_ix(program_id, player_game(), player)?;
+        assert_eq!(
+            offer.data,
+            xfchess_game::instruction::OfferDraw {
+                game_id: player_game()
+            }
+            .data()
+        );
+        let accept = accept_draw_ix(program_id, player_game(), player)?;
+        assert_eq!(
+            accept.data,
+            xfchess_game::instruction::AcceptDraw {
+                game_id: player_game()
+            }
+            .data()
+        );
+        let expected = xfchess_game::accounts::OfferDraw {
+            game: offer.accounts[0].pubkey,
+            player,
+        }
+        .to_account_metas(None);
+        assert_eq!(keys(&offer.accounts), keys(&expected));
+        assert_eq!(keys(&accept.accounts), keys(&expected));
+        Ok(())
+    }
+
+    fn player_game() -> u64 {
+        4242
     }
 }

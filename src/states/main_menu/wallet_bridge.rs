@@ -462,6 +462,7 @@ pub(super) fn sync_bridge_pubkey_to_solana(
     mut solana_state: Option<
         ResMut<crate::multiplayer::solana::integration::state::SolanaIntegrationState>,
     >,
+    mut solana_wallet: Option<ResMut<crate::multiplayer::solana::addon::SolanaWallet>>,
 ) {
     use crate::multiplayer::solana::integration::state::{ProfileStatus, DEVNET_RPC_URL};
 
@@ -494,6 +495,10 @@ pub(super) fn sync_bridge_pubkey_to_solana(
                         current, new_pubkey
                     );
                     state.wallet_pubkey = None;
+                    if let Some(wallet) = solana_wallet.as_mut() {
+                        wallet.pubkey = None;
+                        wallet.keypair = None;
+                    }
                     state.session_keypair = None;
                     state.global_session_keypair = None;
                     state.global_session_active = false;
@@ -513,6 +518,7 @@ pub(super) fn sync_bridge_pubkey_to_solana(
 
     // Only set pubkey once — avoid overwriting if already set by other path.
     if state.wallet_pubkey.is_some() {
+        mirror_bridge_pubkey_to_wallet(&poller, state.wallet_pubkey, solana_wallet.as_deref_mut());
         return;
     }
     let Some(ref pubkey_str) = poller.known_pubkey else {
@@ -530,6 +536,105 @@ pub(super) fn sync_bridge_pubkey_to_solana(
                 DEVNET_RPC_URL.to_string(),
             ));
         }
+        mirror_bridge_pubkey_to_wallet(&poller, state.wallet_pubkey, solana_wallet.as_deref_mut());
+    }
+}
+
+/// The pubkey `SolanaWallet` should take from the bridge, if it does not hold it yet.
+///
+/// Code throughout the game reads `SolanaWallet.pubkey` to decide whether a wallet is
+/// connected, while the bridge reports into `SolanaIntegrationState`. A bridge wallet that
+/// only reached the second left readers such as the start-of-game handshake with nothing.
+/// Only a pubkey the bridge currently reports is mirrored, so a logout (which clears the
+/// bridge's key) is never undone.
+#[cfg(feature = "solana")]
+fn bridge_pubkey_for_wallet(
+    bridge: Option<&str>,
+    integration: Option<solana_sdk::pubkey::Pubkey>,
+    wallet: Option<solana_sdk::pubkey::Pubkey>,
+) -> Option<solana_sdk::pubkey::Pubkey> {
+    let bridged = bridge?.parse::<solana_sdk::pubkey::Pubkey>().ok()?;
+    (integration == Some(bridged) && wallet != Some(bridged)).then_some(bridged)
+}
+
+#[cfg(feature = "solana")]
+fn mirror_bridge_pubkey_to_wallet(
+    poller: &WalletBridgePoller,
+    integration: Option<solana_sdk::pubkey::Pubkey>,
+    wallet: Option<&mut crate::multiplayer::solana::addon::SolanaWallet>,
+) {
+    use solana_sdk::signer::Signer;
+    let Some(wallet) = wallet else {
+        return;
+    };
+    let Some(pubkey) =
+        bridge_pubkey_for_wallet(poller.known_pubkey.as_deref(), integration, wallet.pubkey)
+    else {
+        return;
+    };
+    info!("[WalletBridge] Syncing pubkey {pubkey} → SolanaWallet");
+    wallet.pubkey = Some(pubkey);
+    // A local keypair for some other wallet must not outlive the pubkey it belonged to.
+    if wallet
+        .keypair
+        .as_ref()
+        .is_some_and(|keypair| keypair.pubkey() != pubkey)
+    {
+        wallet.keypair = None;
+    }
+}
+
+#[cfg(all(test, feature = "solana"))]
+mod bridge_wallet_tests {
+    use super::bridge_pubkey_for_wallet;
+    use solana_sdk::pubkey::Pubkey;
+
+    #[test]
+    fn a_bridge_wallet_missing_from_the_wallet_resource_is_mirrored() {
+        let key = Pubkey::new_unique();
+        assert_eq!(
+            bridge_pubkey_for_wallet(Some(&key.to_string()), Some(key), None),
+            Some(key)
+        );
+    }
+
+    #[test]
+    fn nothing_changes_when_the_wallet_resource_already_matches() {
+        let key = Pubkey::new_unique();
+        assert_eq!(
+            bridge_pubkey_for_wallet(Some(&key.to_string()), Some(key), Some(key)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_switched_wallet_replaces_the_stale_one() {
+        let (old, new) = (Pubkey::new_unique(), Pubkey::new_unique());
+        assert_eq!(
+            bridge_pubkey_for_wallet(Some(&new.to_string()), Some(new), Some(old)),
+            Some(new)
+        );
+    }
+
+    #[test]
+    fn a_logout_is_not_undone() {
+        // The bridge key is cleared on logout; leftover integration state alone must not
+        // put the wallet back.
+        let key = Pubkey::new_unique();
+        assert_eq!(bridge_pubkey_for_wallet(None, Some(key), None), None);
+    }
+
+    #[test]
+    fn a_bridge_key_the_integration_state_does_not_hold_is_not_mirrored() {
+        let (bridged, other) = (Pubkey::new_unique(), Pubkey::new_unique());
+        assert_eq!(
+            bridge_pubkey_for_wallet(Some(&bridged.to_string()), Some(other), None),
+            None
+        );
+        assert_eq!(
+            bridge_pubkey_for_wallet(Some("not-a-key"), None, None),
+            None
+        );
     }
 }
 

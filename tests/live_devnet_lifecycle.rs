@@ -12,10 +12,13 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use xfchess_app::solana::instructions::{cancel_game_ix, create_game_ix, PROGRAM_ID};
+use xfchess_client_compat::prelude::*;
 
 const RPC: &str = "https://api.devnet.solana.com";
 const WAGER: u64 = 2_000_000; // 0.002 SOL (program minimum is 0.001)
 const FUND: u64 = 12_000_000;
+/// The network fee for a transaction with one signature.
+const LAMPORTS_PER_SIGNATURE: u64 = 5_000;
 
 fn send(
     rpc: &RpcClient,
@@ -25,7 +28,7 @@ fn send(
     let bh = rpc.get_latest_blockhash().context("blockhash")?;
     let tx = Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], bh);
     Ok(rpc
-        .send_and_confirm_transaction(&tx)
+        .send_sdk_and_confirm_transaction(&tx)
         .context("transaction confirmed")?
         .to_string())
 }
@@ -98,23 +101,8 @@ fn creator_cancels_unjoined_wagered_game_and_is_refunded() -> anyhow::Result<()>
         0,
         "escrow emptied"
     );
-    // Refund arrives in the same transaction; only the tx fee is spent.
-    let fee = rpc
-        .get_fee_for_message(
-            &Transaction::new_with_payer(
-                &[cancel_game_ix(
-                    program_id,
-                    creator.pubkey(),
-                    creator.pubkey(),
-                    Pubkey::default(),
-                    game_id,
-                )
-                .context(concat!(file!(), ":", line!()))?],
-                Some(&creator.pubkey()),
-            )
-            .message,
-        )
-        .context("fetch cancellation transaction fee")?;
+    // Refund arrives in the same transaction; only the single-signature fee is spent.
+    let fee = LAMPORTS_PER_SIGNATURE;
     assert_eq!(
         after_cancel + fee,
         before_cancel + WAGER,

@@ -16,7 +16,6 @@ pub mod vps;
 
 pub use online_game_session::{
     OnlineChatMessage, OnlineGameSession, OnlineGameSessionPlugin, PublishOnlineChat,
-    PublishOnlineResign,
 };
 pub use p2p::*;
 pub use protocol::*;

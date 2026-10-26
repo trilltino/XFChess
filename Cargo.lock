@@ -24568,7 +24568,3 @@ dependencies = [
  "syn 2.0.119",
  "winnow 1.0.4",
 ]
-
-[[patch.unused]]
-name = "proc-macro-error2"
-version = "2.0.1"

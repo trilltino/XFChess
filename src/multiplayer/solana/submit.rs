@@ -1,4 +1,3 @@
-use xfchess_client_compat::prelude::*;
 use bevy::prelude::warn;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSendTransactionConfig;
@@ -9,6 +8,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use std::time::{Duration, Instant};
+use xfchess_client_compat::prelude::*;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SubmitConfig {

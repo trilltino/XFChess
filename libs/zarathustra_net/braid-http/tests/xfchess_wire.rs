@@ -65,17 +65,16 @@ fn root_ranges_and_quoted_paths_preserve_the_complete_expression() -> anyhow::Re
     // A root replacement is a snapshot, so an empty range is refused when formatting.
     let rootless = Update::patched(Version::new("path"), vec![Patch::json("", "{}")]);
     assert!(format_update(&rootless).is_err());
-    for range in ["[\"fen history\"]"] {
-        let update = Update::patched(Version::new("path"), vec![Patch::json(range, "{}")]);
-        let mut message = MessageParser::new()
-            .feed(&format_update(&update).context("required operation value")?)
-            .context("required operation value")?
-            .pop()
-            .context("required operation value")?;
-        let patch = message.patches.pop().context("required operation value")?;
-        assert_eq!(patch.unit, "json");
-        assert_eq!(patch.range, range);
-    }
+    let range = "[\"fen history\"]";
+    let update = Update::patched(Version::new("path"), vec![Patch::json(range, "{}")]);
+    let mut message = MessageParser::new()
+        .feed(&format_update(&update).context("required operation value")?)
+        .context("required operation value")?
+        .pop()
+        .context("required operation value")?;
+    let patch = message.patches.pop().context("required operation value")?;
+    assert_eq!(patch.unit, "json");
+    assert_eq!(patch.range, range);
     Ok(())
 }
 

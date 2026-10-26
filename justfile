@@ -74,6 +74,10 @@ build-release:
 # Build the local release stack, including wallet, admin and web UIs
 build-all: build-wallet-ui-force build-admin-ui-force build-release build-web
 
+# Android (`just build-android`) and Linux (`just build-linux`) stay separate.
+# Build everything local: UIs, release backend/game/Tauri host, and the on-chain program
+king: build-all build-program
+
 # Cross-compile Android native library, then assemble the unsigned release APK
 build-android:
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare_stockfish_android.ps1

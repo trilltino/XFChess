@@ -56,6 +56,7 @@ impl Plugin for GamePlugin {
             .init_resource::<super::systems::board_snapshot::PendingBoardSnapshot>()
             .init_resource::<crate::input::board::InGameExitConfirmation>()
             .init_resource::<super::systems::network_move::PendingDrawOffer>()
+            .init_resource::<super::systems::network_move::ChainDrawGate>()
             .init_resource::<super::systems::network_move::PendingRematchOffer>()
             .init_resource::<crate::ui::game::ChatState>()
             .init_resource::<super::replay::PgnReplayState>()
@@ -94,6 +95,8 @@ impl Plugin for GamePlugin {
             .add_message::<crate::game::events::NetworkMoveResult>()
             .add_message::<crate::game::events::ResignEvent>()
             .add_message::<crate::game::events::DrawOfferEvent>()
+            .add_message::<crate::game::events::DrawActionRequest>()
+            .add_message::<crate::game::events::ResignRequest>()
             .add_message::<crate::game::events::DrawResponseEvent>()
             .add_message::<crate::game::events::RematchOfferEvent>()
             .add_message::<crate::game::events::RematchResponseEvent>()
@@ -124,6 +127,12 @@ impl Plugin for GamePlugin {
         app.add_systems(
             OnEnter(GameState::InGame),
             |mut pending: ResMut<PendingGameOver>| pending.active = false,
+        );
+        // A draw offer belongs to one game; it must not leak into a resumed or
+        // following one. (Chat is scoped by game id, rematch offers outlive the game.)
+        app.add_systems(
+            OnExit(GameState::InGame),
+            |mut draw: ResMut<super::systems::network_move::PendingDrawOffer>| draw.clear(),
         );
         app.add_systems(
             OnEnter(GameState::GameOver),
@@ -263,8 +272,11 @@ impl Plugin for GamePlugin {
                 update_game_timer.run_if(not_templeos),
                 crate::game::systems::network_move::handle_resign_events,
                 crate::game::systems::network_move::handle_flag_timeout_events,
+                crate::game::systems::network_move::route_draw_requests,
+                crate::game::systems::network_move::route_resign_requests,
                 crate::game::systems::network_move::watch_draw_offers,
                 crate::game::systems::network_move::handle_draw_response_events,
+                crate::game::systems::network_move::expire_draw_offers,
                 crate::game::systems::network_move::watch_rematch_offers,
                 crate::ui::game::drain_chat_messages,
                 // Keep checking until move and capture animations finish; a
@@ -446,6 +458,12 @@ impl Plugin for GamePlugin {
 
         // Reset the persistent camera only when leaving the gameplay scene;
         // InGame/GameOver transitions keep the board visible behind the popup.
+        // The board camera follows the window's shape and the width of the side panels.
+        app.add_systems(
+            Update,
+            crate::game::systems::camera::fit_board_camera
+                .run_if(in_state(crate::core::state::InGameplay)),
+        );
         app.add_systems(OnExit(InGameplay), (reset_game_camera,));
 
         // Replay cleanup
