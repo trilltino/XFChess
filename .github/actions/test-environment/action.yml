@@ -1,0 +1,26 @@
+name: Rust test environment
+description: Native dependencies and optional pinned Solana program-test fixtures
+inputs:
+  contract:
+    description: Build SBF and fetch hash-verified fixtures
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libudev-dev \
+          libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+          libwayland-dev libxkbcommon-dev libgl1-mesa-dev libssl-dev \
+          libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
+    - if: inputs.contract == 'true'
+      shell: bash
+      run: |
+        sh -c "$(curl -sSfL https://release.anza.xyz/v4.3.2/install)"
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+        cargo install cargo-build-sbf --version 4.5.0 --locked --force
+        export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
+        NO_DNA=1 cargo build-sbf --arch v0 --tools-version v1.58 --manifest-path programs/xfchess-game-sbf/Cargo.toml -- --locked
+        python3 docs/security/fetch_pass_fixture.py
+        python3 docs/security/fetch_dlp_fixture.py

@@ -1,0 +1,42 @@
+name: Offline test soak
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Full suite repetitions (Phase 0 requires 10)
+        default: '10'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  flake-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/test-environment
+        with:
+          contract: 'true'
+      - name: Build desktop assets
+        run: |
+          npm ci --prefix tauri/wallet-ui
+          npm run build --prefix tauri/wallet-ui
+          npm ci --prefix tauri/tournament-admin
+          npm run build --prefix tauri/tournament-admin
+      - name: Repeat full offline suite
+        env:
+          FLAKE_RUNS: ${{ inputs.runs }}
+        run: node scripts/coverage/repeat.mjs "$FLAKE_RUNS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flake-audit
+          path: target/coverage/flake-audit/
+          if-no-files-found: error

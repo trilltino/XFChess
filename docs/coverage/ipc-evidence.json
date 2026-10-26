@@ -1,0 +1,82 @@
+{
+  "services::ipc::close_tournament_admin": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::copy_to_clipboard": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::hide_tournament_admin": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::is_tournament_admin_maximized": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::maximize_tournament_admin": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::minimize_tournament_admin": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::open_url": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::set_tournament_admin_position": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::set_tournament_admin_size": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::set_tournament_admin_title": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::show_notification": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::show_tournament_admin": {
+    "success": [],
+    "failure": []
+  },
+  "services::ipc::toggle_maximize_tournament_admin": {
+    "success": [],
+    "failure": []
+  },
+  "show_tournament_admin_window": {
+    "success": [],
+    "failure": []
+  },
+  "show_wallet_popup_window": {
+    "success": [],
+    "failure": []
+  },
+  "windows::tournament_admin::admin_token_clear": {
+    "success": [],
+    "failure": []
+  },
+  "windows::tournament_admin::admin_token_load": {
+    "success": [],
+    "failure": []
+  },
+  "windows::tournament_admin::admin_token_save": {
+    "success": [],
+    "failure": []
+  },
+  "windows::tournament_admin::ensure_admin_tunnel": {
+    "success": [],
+    "failure": []
+  },
+  "windows::tournament_admin::kill_admin_tunnel": {
+    "success": [],
+    "failure": []
+  }
+}

@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "measured_on": "2026-10-26",
+  "status": "phase_0_in_progress",
+  "branch_coverage": "Rust branches require a nightly --branch run; null means unmeasured",
+  "surface_cells": "Only reviewed test references count. Source mentions and status observations do not.",
+  "packages": {
+    "rust:xfchess-rules:win32:engines": {
+      "state": "measured",
+      "lines": {
+        "covered": 401,
+        "total": 510,
+        "percent": 78.6275
+      },
+      "branches": {
+        "covered": 0,
+        "total": 0,
+        "percent": null
+      }
+    },
+    "rust:xfchess-stockfish:win32:engines": {
+      "state": "measured",
+      "lines": {
+        "covered": 302,
+        "total": 342,
+        "percent": 88.3041
+      },
+      "branches": {
+        "covered": 0,
+        "total": 0,
+        "percent": null
+      }
+    },
+    "js:wallet-ui:wallet-ui": {
+      "state": "measured",
+      "lines": {
+        "covered": 146,
+        "total": 711,
+        "percent": 20.5345
+      },
+      "branches": {
+        "covered": 129,
+        "total": 584,
+        "percent": 22.089
+      },
+      "functions": {
+        "covered": 37,
+        "total": 165,
+        "percent": 22.4242
+      },
+      "statements": {
+        "covered": 170,
+        "total": 821,
+        "percent": 20.7065
+      }
+    },
+    "js:tournament-admin:tournament-admin": {
+      "state": "measured",
+      "lines": {
+        "covered": 208,
+        "total": 1858,
+        "percent": 11.1948
+      },
+      "branches": {
+        "covered": 246,
+        "total": 2249,
+        "percent": 10.9382
+      },
+      "functions": {
+        "covered": 71,
+        "total": 720,
+        "percent": 9.8611
+      },
+      "statements": {
+        "covered": 261,
+        "total": 2261,
+        "percent": 11.5436
+      }
+    },
+    "js:website:website": {
+      "state": "measured",
+      "lines": {
+        "covered": 0,
+        "total": 140,
+        "percent": 0
+      },
+      "branches": {
+        "covered": 0,
+        "total": 107,
+        "percent": 0
+      },
+      "functions": {
+        "covered": 0,
+        "total": 61,
+        "percent": 0
+      },
+      "statements": {
+        "covered": 0,
+        "total": 157,
+        "percent": 0
+      }
+    }
+  },
+  "pending_packages": [
+    "braid-http",
+    "braid-iroh",
+    "braid_chess",
+    "xfchess-braid-server",
+    "swiss-pairing",
+    "xfchess-anticheat",
+    "xfchess-client-compat",
+    "cu_benchmark",
+    "xfchess-game",
+    "xfchess-game-sbf",
+    "xfchess-tauri",
+    "backend",
+    "xfchess"
+  ],
+  "surfaces": {
+    "instructions": {
+      "entrypoints": 82,
+      "cells": 410,
+      "reviewed_cells": 15
+    },
+    "ipc": {
+      "entrypoints": 20,
+      "reviewed_cells": 0
+    },
+    "backend": {
+      "state": "awaiting_runtime_inventory"
+    },
+    "bridge": {
+      "state": "awaiting_runtime_inventory"
+    }
+  },
+  "flake_audit": {
+    "state": "not_run",
+    "required_full_suite_runs": 10
+  },
+  "profile": "coverage (inherits dev; unoptimized workspace and dependencies; debug=2, strip=none)"
+}

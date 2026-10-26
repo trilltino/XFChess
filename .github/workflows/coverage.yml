@@ -1,0 +1,133 @@
+name: Coverage
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+  schedule:
+    - cron: '30 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test scripts/coverage/tooling.test.mjs
+      - run: node scripts/coverage/instructions.mjs --check
+      - run: node scripts/coverage/ipc.mjs --check
+      - run: node scripts/coverage/ignored.mjs --check
+      - run: node scripts/coverage/check-surfaces.mjs
+        env:
+          COVERAGE_BASE_REF: ${{ github.event.pull_request.base.sha }}
+
+  coverage:
+    name: Rust coverage (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [application, contract, workspace, proxy, desktop]
+    env:
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage-${{ matrix.group }}
+          workspaces: . -> target/coverage-build/${{ matrix.group }}
+      - uses: ./.github/actions/test-environment
+        with:
+          contract: ${{ matrix.group == 'contract' }}
+      - name: Build desktop assets
+        if: matrix.group == 'desktop'
+        run: |
+          npm ci --prefix tauri/wallet-ui
+          npm run build --prefix tauri/wallet-ui
+          npm ci --prefix tauri/tournament-admin
+          npm run build --prefix tauri/tournament-admin
+      - run: cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - run: node scripts/coverage/run-rust.mjs ${{ matrix.group }}
+      - run: node scripts/coverage/collect.mjs rust target/coverage/${{ matrix.group }}/llvm.json ${{ matrix.group }} target/coverage/${{ matrix.group }}/summary.json
+      - name: Enforce measured floors
+        env:
+          COVERAGE_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          COVERAGE_ALLOW_DECREASE: ${{ contains(github.event.pull_request.labels.*.name, 'coverage-allow-decrease') }}
+        run: node scripts/coverage/check-baseline.mjs target/coverage/${{ matrix.group }}/summary.json
+      - name: Verify backend runtime surface
+        if: matrix.group == 'application'
+        run: node scripts/coverage/routes.mjs backend --runtime target/coverage/application/surfaces/backend-routes.json --hits target/coverage/application/surfaces --check
+      - name: Verify bridge runtime surface
+        if: matrix.group == 'desktop'
+        run: node scripts/coverage/routes.mjs bridge --runtime target/coverage/desktop/surfaces/bridge-routes.json --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-rust-${{ matrix.group }}
+          path: target/coverage/${{ matrix.group }}/
+          if-no-files-found: error
+
+  javascript:
+    name: JS coverage (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: wallet-ui
+            directory: tauri/wallet-ui
+          - name: tournament-admin
+            directory: tauri/tournament-admin
+          - name: website
+            directory: xfchessdotcom
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --legacy-peer-deps
+        working-directory: ${{ matrix.directory }}
+      - name: Measure existing suites (website has no unit tests yet)
+        env:
+          COVERAGE_APP: ${{ matrix.name }}
+        run: |
+          if [ "$COVERAGE_APP" = website ]; then
+            npm run test:coverage -- --passWithNoTests
+          else
+            npm run test:coverage
+          fi
+        working-directory: ${{ matrix.directory }}
+      - run: node scripts/coverage/collect.mjs js ${{ matrix.directory }}/coverage/coverage-summary.json ${{ matrix.name }} target/coverage/${{ matrix.name }}.json
+      - name: Enforce measured floors
+        env:
+          COVERAGE_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          COVERAGE_ALLOW_DECREASE: ${{ contains(github.event.pull_request.labels.*.name, 'coverage-allow-decrease') }}
+        run: node scripts/coverage/check-baseline.mjs target/coverage/${{ matrix.name }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-js-${{ matrix.name }}
+          path: |
+            ${{ matrix.directory }}/coverage/
+            target/coverage/${{ matrix.name }}.json
+          if-no-files-found: error

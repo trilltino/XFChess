@@ -1,0 +1,607 @@
+{
+  "accept_draw": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "accept_friend_request": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "advance_round": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "advance_winner": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "authorize_global_session": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "authorize_session_key": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "authorize_tournament_session": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "bind_tournament_pass": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "block_user": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "cancel_game": {
+    "success": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::join_wins_the_race_then_creator_cancel_refunds_both_and_names_no_winner"
+    ],
+    "wrong_signer": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::outsider_cannot_cancel_an_abandoned_active_game_but_a_player_can"
+    ],
+    "wrong_account": [],
+    "wrong_state": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::abandoned_cancel_is_refused_before_the_window"
+    ],
+    "arithmetic_edge": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::cancel_refunds_despite_a_sub_rent_escrow_donation"
+    ]
+  },
+  "cancel_time_check": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "cancel_tournament": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "claim_stale_dispute": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "claim_timeout": {
+    "success": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::timeout_then_resignation_keeps_the_single_result"
+    ],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::resignation_then_timeout_claim_keeps_the_single_result"
+    ],
+    "arithmetic_edge": []
+  },
+  "claim_tournament_prize": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "close_friendship": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "close_tournament": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "complete_swiss_tournament": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "crank_time_check": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "create_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "create_game_v2": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "create_session": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "create_tournament_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "create_tournament_game_v2": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "delegate_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "delegate_game_v2": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "dispute_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "distribute_tournament_prizes": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "finalize_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [
+      "programs/xfchess-game/tests/global_session_settlement_tests.rs::finalize_game_rejects_mismatched_fee_payer"
+    ],
+    "wrong_state": [],
+    "arithmetic_edge": [
+      "programs/xfchess-game/tests/global_session_settlement_tests.rs::settlement_sweeps_sub_rent_escrow_donations_to_the_treasury"
+    ]
+  },
+  "force_undelegate_after_timeout": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "fund_sol_prize": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "fund_usdc_prize": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "global_create_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "global_create_game_v2": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "global_join_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "global_join_game_v2": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "global_record_move": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "init_profile": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "initialize_config": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "initialize_match": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "initialize_shards_medium": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "initialize_shards_small": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "initialize_tournament": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "initialize_tournament_escrow": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "initialize_tournament_shards": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "issue_pass_eligibility": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "join_game": {
+    "success": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::join_wins_the_race_then_creator_cancel_refunds_both_and_names_no_winner"
+    ],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::cancel_wins_the_race_then_join_fails_and_joiner_keeps_funds"
+    ],
+    "arithmetic_edge": []
+  },
+  "join_game_v2": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "leave_tournament": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "link_external_elo": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "offer_draw": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "process_undelegation": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "record_match_result": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "record_move": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "record_swiss_result": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "recover_stuck_delegation": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "recover_stuck_delegation_v2": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "register_player": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "request_force_undelegate": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "resign": {
+    "success": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::resignation_then_timeout_claim_keeps_the_single_result"
+    ],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [
+      "programs/xfchess-game/tests/lifecycle_race_tests.rs::cancelled_game_cannot_be_resigned_or_timed_out"
+    ],
+    "arithmetic_edge": []
+  },
+  "resolve_dispute": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "revoke_global_session": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "revoke_pass_eligibility": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "revoke_session": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "revoke_session_key": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "revoke_tournament_session": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "schedule_time_check": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "send_friend_request": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "session_create_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "session_create_game_v2": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "session_join_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "session_join_game_v2": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "set_pass_paused": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "set_username": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "start_tournament": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "undelegate_game": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "update_config": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "update_elo": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "verify_profile": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "withdraw_expired_wager": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "withdraw_global_session": {
+    "success": [],
+    "wrong_signer": [],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": []
+  },
+  "withdraw_treasury": {
+    "success": [
+      "programs/xfchess-game/tests/treasury_tests.rs::withdraw_treasury_happy_path"
+    ],
+    "wrong_signer": [
+      "programs/xfchess-game/tests/treasury_tests.rs::withdraw_treasury_wrong_signer_rejected"
+    ],
+    "wrong_account": [],
+    "wrong_state": [],
+    "arithmetic_edge": [
+      "programs/xfchess-game/tests/treasury_tests.rs::withdraw_treasury_rent_floor_rejected",
+      "programs/xfchess-game/tests/treasury_tests.rs::withdraw_treasury_zero_amount_rejected"
+    ]
+  }
+}
