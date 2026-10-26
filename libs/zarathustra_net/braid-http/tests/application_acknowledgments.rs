@@ -144,7 +144,7 @@ async fn wait_for(mut predicate: impl FnMut() -> bool) {
 }
 fn checkpoint(store: &Arc<Mutex<Store>>) -> ChannelCheckpoint {
     serde_json::from_slice(
-        lock(&store)
+        lock(store)
             .bytes
             .as_ref()
             .unwrap_or_else(|| panic!("the journal holds no record")),

@@ -1,4 +1,3 @@
-use xfchess_client_compat::prelude::*;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -12,6 +11,7 @@ use solana_sdk::signature::Signer;
 use std::env;
 use std::str::FromStr;
 use tracing::{error, info, warn};
+use xfchess_client_compat::prelude::*;
 
 use crate::db::repository::DisputeRepository;
 use crate::infrastructure::auth_middleware::constant_time_eq;
@@ -249,10 +249,13 @@ pub async fn recover_stuck_delegation(
         &[&authority],
         blockhash,
     );
-    let sig = rpc.send_sdk_and_confirm_transaction(&tx).await.map_err(|e| {
-        error!("[dispute] recover_stuck_delegation on-chain call failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let sig = rpc
+        .send_sdk_and_confirm_transaction(&tx)
+        .await
+        .map_err(|e| {
+            error!("[dispute] recover_stuck_delegation on-chain call failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     info!(
         "[dispute] game {} stuck-delegation escrow recovered — tx {}",

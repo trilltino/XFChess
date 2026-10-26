@@ -1,4 +1,3 @@
-use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -6,6 +5,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
+use xfchess_client_compat::prelude::*;
 
 use crate::chain::{apply_compute_budget, instructions as ix, unique_id, with_retry};
 

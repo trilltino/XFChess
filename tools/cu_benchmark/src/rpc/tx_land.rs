@@ -1,5 +1,5 @@
-use xfchess_client_compat::prelude::*;
 use std::time::{Duration, Instant};
+use xfchess_client_compat::prelude::*;
 
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;

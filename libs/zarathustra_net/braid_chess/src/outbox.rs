@@ -65,6 +65,9 @@ struct ParentMismatch {
     expected_parent: String,
 }
 
+/// Called with the stream and version the backend accepted.
+pub type AcceptedHook = Arc<dyn Fn(ChessStream, &str) + Send + Sync>;
+
 /// Application-supplied behaviour the transport cannot know.
 #[derive(Clone)]
 pub struct OutboxHooks {
@@ -75,7 +78,7 @@ pub struct OutboxHooks {
     /// Called once when the seat was taken over.
     pub on_seat_superseded: Arc<dyn Fn() + Send + Sync>,
     /// Called when the backend accepted `version` on `stream`.
-    pub on_accepted: Arc<dyn Fn(ChessStream, &str) + Send + Sync>,
+    pub on_accepted: AcceptedHook,
 }
 
 /// Where and for whom the outbox publishes.

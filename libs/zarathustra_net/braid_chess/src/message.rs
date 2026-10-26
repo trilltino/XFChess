@@ -9,14 +9,30 @@ pub enum ChessMessage {
     Resign {
         player: String,
     },
+    /// A draw offer, its acceptance or its refusal. `ply` is the position it was
+    /// made in (a move makes an offer lapse) and `at_ms` when, so a repeat of one
+    /// action dedupes while a later offer in the same position stays a new event.
+    /// Logs written before these fields existed read as `0`.
     OfferDraw {
         player: String,
+        #[serde(default)]
+        ply: u32,
+        #[serde(default)]
+        at_ms: u64,
     },
     AcceptDraw {
         player: String,
+        #[serde(default)]
+        ply: u32,
+        #[serde(default)]
+        at_ms: u64,
     },
     DeclineDraw {
         player: String,
+        #[serde(default)]
+        ply: u32,
+        #[serde(default)]
+        at_ms: u64,
     },
     Clock(ClockState),
     EngineAnalysis(EngineHint),
@@ -27,6 +43,20 @@ pub enum ChessMessage {
         signing_pubkey: String,
         expires_at: i64,
     },
+}
+
+impl ChessMessage {
+    /// Identity of a draw action; the Braid version of it is a hash of this. `None`
+    /// for every other kind of message.
+    pub fn draw_key(&self) -> Option<String> {
+        let (kind, player, ply, at_ms) = match self {
+            Self::OfferDraw { player, ply, at_ms } => ("offer_draw", player, ply, at_ms),
+            Self::AcceptDraw { player, ply, at_ms } => ("accept_draw", player, ply, at_ms),
+            Self::DeclineDraw { player, ply, at_ms } => ("decline_draw", player, ply, at_ms),
+            _ => return None,
+        };
+        Some(format!("{kind}:{player}:{ply}:{at_ms}"))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +173,36 @@ mod tests {
         let json = serde_json::to_string(&msg).context("required operation value")?;
         assert!(json.contains("\"type\":\"resign\""));
         Ok(())
+    }
+
+    #[test]
+    fn draw_messages_from_older_logs_still_decode() -> anyhow::Result<()> {
+        let decoded: ChessMessage =
+            serde_json::from_str(r#"{"type":"offer_draw","player":"white"}"#)
+                .context("required operation value")?;
+        assert!(matches!(
+            decoded,
+            ChessMessage::OfferDraw {
+                ply: 0,
+                at_ms: 0,
+                ..
+            }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn a_later_offer_in_the_same_position_has_a_different_key() {
+        let offer = |at_ms| ChessMessage::OfferDraw {
+            player: "white".into(),
+            ply: 10,
+            at_ms,
+        };
+        assert_eq!(offer(5).draw_key(), offer(5).draw_key());
+        assert_ne!(offer(5).draw_key(), offer(6).draw_key());
+        assert!(ChessMessage::Resign { player: "x".into() }
+            .draw_key()
+            .is_none());
     }
 
     #[test]

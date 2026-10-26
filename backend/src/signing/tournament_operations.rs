@@ -1,5 +1,4 @@
 //! Durable cancellation evidence shared by owner actions and scheduled expiry.
-use xfchess_client_compat::prelude::*;
 use super::{
     solana::{cancel_tournament_ix, make_rpc, transaction_fetch_config},
     storage::tournament::{TournamentStatus, TournamentStore, TournamentTransaction},
@@ -15,6 +14,7 @@ use solana_sdk::{
 };
 use sqlx::SqlitePool;
 use std::{str::FromStr, sync::Arc};
+use xfchess_client_compat::prelude::*;
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct TournamentOperation {
@@ -239,7 +239,8 @@ impl CancellationService {
         sqlx::query("UPDATE tournament_operations SET signature=?,status='submitted',updated_at=unixepoch() WHERE id=?")
             .bind(&signature).bind(&operation.id).execute(self.store.pool()).await?;
         let rpc_url = self.rpc_url.clone();
-        tokio::task::spawn_blocking(move || make_rpc(&rpc_url)?.send_sdk_transaction(&tx)).await??;
+        tokio::task::spawn_blocking(move || make_rpc(&rpc_url)?.send_sdk_transaction(&tx))
+            .await??;
         Ok("pending_reconciliation")
     }
 

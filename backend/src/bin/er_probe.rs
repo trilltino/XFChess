@@ -1,4 +1,3 @@
-use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSendTransactionConfig;
 use solana_commitment_config::CommitmentConfig;
@@ -7,6 +6,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
+use xfchess_client_compat::prelude::*;
 
 fn probe(label: &str, url: &str) {
     println!("\n=== {label} — {url}");

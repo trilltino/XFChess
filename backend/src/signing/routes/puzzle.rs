@@ -1,5 +1,5 @@
-use xfchess_client_compat::prelude::*;
 use std::str::FromStr;
+use xfchess_client_compat::prelude::*;
 
 use axum::{
     extract::{Path, Query, State},

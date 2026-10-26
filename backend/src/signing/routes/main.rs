@@ -1,4 +1,3 @@
-use xfchess_client_compat::prelude::*;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -13,6 +12,7 @@ use solana_sdk::signature::{Keypair, Signer};
 use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::{error, info, warn};
+use xfchess_client_compat::prelude::*;
 
 use crate::db::repository::GameRepository;
 use crate::signing::{solana, AppState};

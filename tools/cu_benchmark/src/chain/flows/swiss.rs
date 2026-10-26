@@ -1,10 +1,10 @@
-use xfchess_client_compat::prelude::*;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
+use xfchess_client_compat::prelude::*;
 
 use crate::chain::{
     apply_compute_budget, instructions as ix, unique_id, with_retry, TOURNAMENT_STATUS_COMPLETED,

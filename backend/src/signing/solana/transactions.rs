@@ -1,4 +1,3 @@
-use xfchess_client_compat::prelude::*;
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSendTransactionConfig;
@@ -14,6 +13,7 @@ use solana_sdk::{
 use solana_system_interface::instruction as system_instruction;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
+use xfchess_client_compat::prelude::*;
 
 fn send_and_poll(
     rpc: &RpcClient,
