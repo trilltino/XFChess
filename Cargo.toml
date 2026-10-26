@@ -51,7 +51,6 @@ members = [
     "tauri/viz/src-tauri",
     "backend",
 ]
-exclude = ["vendor/proc-macro-error2"]
 
 [profile.dev]
 opt-level = 1
@@ -305,5 +304,3 @@ unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 unexpected_cfgs = { level = "allow" }
 
-[patch.crates-io]
-proc-macro-error2 = { path = "vendor/proc-macro-error2" }

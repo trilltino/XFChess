@@ -6,8 +6,6 @@ $rustPaths = @(& git ls-files --cached --others --exclude-standard -- '*.rs' | S
 if ($LASTEXITCODE -ne 0) { throw 'Cannot enumerate owned Rust source' }
 $extractionPattern = '(?:\.\s*(?:unwrap|expect|unwrap_err|expect_err|unwrap_unchecked)\s*\(|::\s*(?:unwrap|expect|unwrap_err|expect_err|unwrap_unchecked|from_base58_string)\b)'
 foreach ($rustPath in $rustPaths) {
-    # The vendored macro dependency retains upstream source and its own lint policy.
-    if ($rustPath.StartsWith("vendor/proc-macro-error2/")) { continue }
     if (-not (Test-Path -LiteralPath $rustPath -PathType Leaf)) { continue }
     $rustSource = [System.IO.File]::ReadAllText((Join-Path $PWD $rustPath))
     $extraction = [regex]::Match($rustSource, $extractionPattern)

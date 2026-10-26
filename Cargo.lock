@@ -24106,6 +24106,7 @@ dependencies = [
  "base64 0.23.1",
  "bytemuck",
  "ephemeral-rollups-sdk",
+ "magicblock-delegation-program-api",
  "magicblock-magic-program-api 1.1.1",
  "nimzovich_engine",
  "serde",
@@ -24567,7 +24568,3 @@ dependencies = [
  "syn 2.0.119",
  "winnow 1.0.4",
 ]
-
-[[patch.unused]]
-name = "proc-macro-error2"
-version = "2.0.1"
