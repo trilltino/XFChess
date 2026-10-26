@@ -137,6 +137,12 @@ pub fn handler(ctx: Context<CancelGame>, _game_id: u64) -> Result<()> {
                 refunded_black = true;
             }
         }
+        crate::common::escrow::sweep_sub_rent_dust(
+            &ctx.accounts.escrow_pda.to_account_info(),
+            &ctx.accounts.white_authority.to_account_info(),
+            _game_id,
+            bump,
+        )?;
     }
 
     emit!(GameCancelled {

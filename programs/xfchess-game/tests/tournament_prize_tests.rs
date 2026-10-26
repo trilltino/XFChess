@@ -150,10 +150,10 @@ async fn sol_only_batch_cannot_consume_a_mixed_pool_claim() -> anyhow::Result<()
 
 #[tokio::test]
 async fn individual_mixed_pool_claim_pays_both_and_blocks_a_second_claim() -> anyhow::Result<()> {
+    use crate::agave::ProgramTestBanksClientExt;
     use anchor_lang::solana_program::{program_option::COption, program_pack::Pack};
     use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
     use anchor_spl::token::spl_token::state::{Account as TokenAccount, AccountState, Mint};
-    use crate::agave::ProgramTestBanksClientExt;
     use solana_sdk::{
         account::Account,
         instruction::Instruction,

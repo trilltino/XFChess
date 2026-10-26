@@ -101,6 +101,12 @@ pub fn handler(ctx: Context<WithdrawExpiredWager>, _game_id: u64) -> Result<()> 
                 ),
                 pot,
             )?;
+            crate::common::escrow::sweep_sub_rent_dust(
+                &ctx.accounts.escrow_pda.to_account_info(),
+                &ctx.accounts.player.to_account_info(),
+                _game_id,
+                escrow_bump,
+            )?;
         }
     }
 

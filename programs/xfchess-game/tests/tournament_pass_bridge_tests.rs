@@ -9,6 +9,7 @@ pub mod common;
 
 use anyhow::Context as _;
 
+use crate::agave::{ProgramTest, ProgramTestContext};
 use anchor_lang::{
     solana_program::instruction::AccountMeta, AccountDeserialize, InstructionData, Space,
     ToAccountMetas,
@@ -21,7 +22,6 @@ use anchor_spl::token_2022::{
     },
     ID as TOKEN_2022,
 };
-use crate::agave::{ProgramTest, ProgramTestContext};
 use solana_sdk::{
     instruction::Instruction,
     pubkey::Pubkey,

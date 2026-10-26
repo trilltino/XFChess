@@ -34,9 +34,12 @@ pub fn build_time_check_schedule_instruction(
     };
 
     let ix_data = MagicBlockInstruction::ScheduleTask(ScheduleTaskArgs {
-        task_id: task_id as i64,
-        execution_interval_millis: check_interval_millis as i64,
-        iterations: iterations as i64,
+        task_id: i64::try_from(task_id)
+            .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?,
+        execution_interval_millis: i64::try_from(check_interval_millis)
+            .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?,
+        iterations: i64::try_from(iterations)
+            .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?,
         instructions: vec![crank_ix],
     })
     .try_to_vec()
@@ -56,7 +59,8 @@ pub fn build_time_check_cancel_instruction(
     task_id: u64,
 ) -> Result<Instruction> {
     let ix_data = MagicBlockInstruction::CancelTask {
-        task_id: task_id as i64,
+        task_id: i64::try_from(task_id)
+            .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?,
     }
     .try_to_vec()
     .map_err(|_| crate::errors::GameErrorCode::InvalidArgument)?;

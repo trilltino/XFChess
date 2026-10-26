@@ -6,9 +6,9 @@ pub mod agave;
 use anyhow::Context as _;
 pub mod common;
 
+use crate::agave::ProgramTestContext;
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
-use crate::agave::ProgramTestContext;
 use solana_sdk::{
     account::AccountSharedData, clock::Clock, instruction::Instruction, pubkey::Pubkey,
     signature::Keypair, signer::Signer,
@@ -533,5 +533,198 @@ async fn cancelled_game_cannot_be_resigned_or_timed_out() -> anyhow::Result<()> 
     let g = fetch_game(&mut ctx, id).await?;
     assert_eq!(g.status, GameStatus::Cancelled);
     assert_eq!(g.result, GameResult::None);
+    Ok(())
+}
+
+/// Anyone can send lamports to the escrow address; a sub-rent remainder after
+/// the refund must be swept to the creator, not left to fail the cancel.
+#[tokio::test]
+async fn cancel_refunds_despite_a_sub_rent_escrow_donation() -> anyhow::Result<()> {
+    let id = 70_009;
+    let Table { mut ctx, white, .. } = waiting_table(id).await?;
+    let white_before = lamports(&mut ctx, white.pubkey()).await?;
+    let donation = 7u64;
+    ctx.set_account(
+        &escrow_pda(id),
+        &AccountSharedData::from(system_account(WAGER + donation)),
+    );
+    send(
+        &mut ctx,
+        cancel_ix(id, white.pubkey(), white.pubkey(), Pubkey::default()),
+        &[&white],
+    )
+    .await
+    .context("cancel must not be blocked by dust")?;
+    assert_eq!(lamports(&mut ctx, escrow_pda(id)).await?, 0);
+    assert_eq!(
+        lamports(&mut ctx, white.pubkey()).await?,
+        white_before + WAGER + donation
+    );
+    Ok(())
+}
+
+fn finalize_ix(id: u64, white: Pubkey, black: Pubkey, fee_payer: Pubkey) -> Instruction {
+    let accounts = xfchess_game::__client_accounts_end_game::EndGame {
+        game: game_pda(id).0,
+        white_profile: profile_pda(&white).0,
+        black_profile: profile_pda(&black).0,
+        white_authority: white,
+        black_authority: black,
+        escrow_pda: escrow_pda(id),
+        treasury_vault: Pubkey::find_program_address(&[b"treasury_vault"], &xfchess_game::ID).0,
+        fee_payer,
+        system_program: solana_system_interface::program::ID,
+    }
+    .to_account_metas(None);
+    Instruction {
+        program_id: xfchess_game::ID,
+        accounts,
+        data: xfchess_game::instruction::FinalizeGame { game_id: id }.data(),
+    }
+}
+
+fn rank(status: GameStatus) -> u8 {
+    match status {
+        GameStatus::Pending | GameStatus::WaitingForOpponent => 0,
+        GameStatus::Active | GameStatus::Inactive | GameStatus::Disputed => 1,
+        GameStatus::Finished => 2,
+        GameStatus::Settled | GameStatus::Cancelled | GameStatus::Expired => 3,
+    }
+}
+
+/// Model-based check: random sequences of lifecycle operations, repeats and
+/// replays included. After every step (accepted or rejected) lamports are never
+/// created, a rejected step changes nothing, and the Game never moves backwards.
+#[tokio::test]
+async fn random_operation_sequences_conserve_lamports_and_never_regress() -> anyhow::Result<()> {
+    use xfchess_game::state::GameStatus as S;
+    let base: u64 = std::env::var("LIFECYCLE_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7);
+    let treasury = Pubkey::find_program_address(&[b"treasury_vault"], &xfchess_game::ID).0;
+    let mut total_accepted = 0u32;
+    for run in 0..16u64 {
+        let seed = base.wrapping_mul(0x9E37_79B9).wrapping_add(run);
+        let id = 71_000 + run;
+        let Table {
+            mut ctx,
+            white,
+            black,
+        } = waiting_table(id).await?;
+        ctx.set_account(
+            &treasury,
+            &AccountSharedData::from(system_account(2_000_000)),
+        );
+        let payer = ctx.payer.pubkey();
+        let tracked = [
+            payer,
+            white.pubkey(),
+            black.pubkey(),
+            escrow_pda(id),
+            game_pda(id).0,
+            treasury,
+        ];
+        let mut state = seed | 1;
+        let mut next_random = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        };
+        let mut best_rank = 0u8;
+        for step in 0..14u32 {
+            let op = next_random() % 8;
+            let (label, ix, signer): (&str, Instruction, Option<&Keypair>) = match op {
+                0 | 1 => (
+                    "join",
+                    join_ix(id, black.pubkey(), white.pubkey(), payer),
+                    Some(&black),
+                ),
+                2 => (
+                    "cancel by white",
+                    cancel_ix(id, white.pubkey(), white.pubkey(), black.pubkey()),
+                    Some(&white),
+                ),
+                3 => (
+                    "cancel by black",
+                    cancel_ix(id, black.pubkey(), white.pubkey(), black.pubkey()),
+                    Some(&black),
+                ),
+                4 => (
+                    "resign by white",
+                    resign_ix(id, white.pubkey()),
+                    Some(&white),
+                ),
+                5 => (
+                    "resign by black",
+                    resign_ix(id, black.pubkey()),
+                    Some(&black),
+                ),
+                6 => (
+                    "claim timeout",
+                    claim_timeout_ix(id, white.pubkey()),
+                    Some(&white),
+                ),
+                _ => (
+                    "finalize",
+                    finalize_ix(id, white.pubkey(), black.pubkey(), payer),
+                    None,
+                ),
+            };
+            let mut before = Vec::new();
+            for key in tracked {
+                before.push(ctx.banks_client.get_account(key).await?);
+            }
+            let sum_before: u64 = before
+                .iter()
+                .map(|account| account.as_ref().map_or(0, |a| a.lamports))
+                .sum();
+            next_blockhash(&mut ctx).await?;
+            let signers: Vec<&Keypair> = signer.into_iter().collect();
+            let result = send(&mut ctx, ix, &signers).await;
+            let mut after = Vec::new();
+            for key in tracked {
+                after.push(ctx.banks_client.get_account(key).await?);
+            }
+            let sum_after: u64 = after
+                .iter()
+                .map(|account| account.as_ref().map_or(0, |a| a.lamports))
+                .sum();
+            let context = format!("seed {seed} step {step} {label}");
+            assert!(sum_after <= sum_before, "{context}: lamports were created");
+            assert!(
+                sum_before - sum_after <= 10_000,
+                "{context}: more than the transaction fee left the tracked set"
+            );
+            match result {
+                Ok(()) => total_accepted += 1,
+                Err(_) => {
+                    // Only the fee payer's balance may move on a rejected step.
+                    assert_eq!(
+                        before[1..],
+                        after[1..],
+                        "{context}: rejected step mutated state"
+                    );
+                }
+            }
+            if let Some(account) = &after[4] {
+                if account.owner == xfchess_game::ID && !account.data.is_empty() {
+                    let status = fetch_game(&mut ctx, id).await?.status;
+                    assert!(
+                        rank(status) >= best_rank,
+                        "{context}: status regressed to {status:?}"
+                    );
+                    best_rank = rank(status);
+                    if matches!(status, S::Settled) {
+                        best_rank = 3;
+                    }
+                }
+            } else {
+                best_rank = 3;
+            }
+        }
+    }
+    assert!(total_accepted > 16, "the model never made progress");
     Ok(())
 }

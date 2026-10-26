@@ -59,21 +59,60 @@ pub fn handler(
         let space = 8 + PlayerProfile::INIT_SPACE;
         let lamports = Rent::get()?.minimum_balance(space);
 
-        invoke_signed(
-            &system_instruction::create_account(
-                &player.key(),
-                &profile_info.key(),
-                lamports,
-                space as u64,
-                ctx.program_id,
-            ),
-            &[
-                player.to_account_info(),
-                profile_info.to_account_info(),
-                system_program.to_account_info(),
-            ],
-            &[&[PROFILE_SEED, player.key().as_ref(), &[bump]]],
-        )?;
+        let player_key = player.key();
+        let bump_seed = [bump];
+        let signer_seeds: &[&[u8]] = &[PROFILE_SEED, player_key.as_ref(), &bump_seed];
+        if profile_info.lamports() == 0 {
+            invoke_signed(
+                &system_instruction::create_account(
+                    &player.key(),
+                    &profile_info.key(),
+                    lamports,
+                    space as u64,
+                    ctx.program_id,
+                ),
+                &[
+                    player.to_account_info(),
+                    profile_info.to_account_info(),
+                    system_program.to_account_info(),
+                ],
+                &[signer_seeds],
+            )?;
+        } else {
+            // Anyone can pre-fund this address, and create_account rejects a
+            // funded target, so top up, allocate and assign instead.
+            let lamports_diff = lamports.saturating_sub(profile_info.lamports());
+            if lamports_diff > 0 {
+                invoke(
+                    &system_instruction::transfer(
+                        &player.key(),
+                        &profile_info.key(),
+                        lamports_diff,
+                    ),
+                    &[
+                        player.to_account_info(),
+                        profile_info.to_account_info(),
+                        system_program.to_account_info(),
+                    ],
+                )?;
+            }
+            invoke_signed(
+                &system_instruction::allocate(&profile_info.key(), space as u64),
+                &[
+                    profile_info.to_account_info(),
+                    system_program.to_account_info(),
+                ],
+                &[signer_seeds],
+            )?;
+            invoke_signed(
+                &system_instruction::assign(&profile_info.key(), ctx.program_id),
+                &[
+                    profile_info.to_account_info(),
+                    system_program.to_account_info(),
+                ],
+                &[signer_seeds],
+            )?;
+        }
     } else {
         require!(
             profile_info.owner == ctx.program_id,
