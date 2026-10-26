@@ -96,10 +96,8 @@ fn vps_authority_keypair() -> Option<Keypair> {
 #[tokio::test]
 #[ignore = "needs keys/vps_authority.json (devnet-only, gitignored) â€” see docs/development/verification.md"]
 async fn register_player_deposits_entry_fee_and_adds_to_shard() -> anyhow::Result<()> {
-    let Some(authority) = vps_authority_keypair() else {
-        eprintln!("skip: keys/vps_authority.json not present");
-        return Ok(());
-    };
+    let authority = vps_authority_keypair()
+        .context("explicit authority integration test requires keys/vps_authority.json")?;
     let ctx = common::start(vec![]).await;
 
     // Fund the authority (it pays for every account it creates below).

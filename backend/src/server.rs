@@ -63,10 +63,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Use configured DB paths; hardened production writes only to its data directory.
-    let session_db =
-        std::env::var("SESSION_DB_URL").unwrap_or_else(|_| "sqlite://sessions.db?mode=rwc".into());
-    let vault_db =
-        std::env::var("VAULT_DB_URL").unwrap_or_else(|_| "sqlite://vault.db?mode=rwc".into());
+    let session_db = std::env::var("SESSION_DB_URL")
+        .unwrap_or_else(|_| "sqlite://data/db/sessions.db?mode=rwc".into());
+    let vault_db = std::env::var("VAULT_DB_URL")
+        .unwrap_or_else(|_| "sqlite://data/db/vault.db?mode=rwc".into());
     let pools = initialize_pools(&session_db, &vault_db).await?;
     info!("[signing-server] Database pools initialized");
 

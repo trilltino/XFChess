@@ -136,7 +136,7 @@ needs a program upgrade.
 7. Spectator chat log (`spectator_overlay.rs`) has no dedup.
 8. `tests/live_devnet_lifecycle.rs` does not compile with `--features solana`
    (`get_fee_for_message` bound), which fails the second configuration of
-   `scripts/check_rust_safety.ps1`. Unrelated to this work.
+   `scripts/ci/check_rust_safety.ps1`. Unrelated to this work.
 
 ## Deploy note
 

@@ -14,5 +14,5 @@ upgrades are forwarded. Bare tournament URLs remain frontend pages; use `/api`
 for tournament API calls. Admin and metrics endpoints are private.
 
 Release publication is handled by [release.yml](../../.github/workflows/release.yml)
-and [scripts/release.ps1](../../scripts/release.ps1). Publication and VPS deployment
+and [scripts/build/release.ps1](../../scripts/build/release.ps1). Publication and VPS deployment
 are separate operations. See the [hosted verification checklist](HOSTED_BACKEND_CHECKLIST.md).

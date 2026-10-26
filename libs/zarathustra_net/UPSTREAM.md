@@ -18,7 +18,7 @@ Divergences from upstream `braid-http` (kept deliberately):
 2. `protocol::format_heartbeat` and `MessageParser::for_subscription` — bare-CRLF keep-alive between frames.
 3. Patch counts given only as `application/http-patches; count=N` are accepted, must agree with `Patches:`, and `message_to_update` treats any patch list as a patched update.
 4. Subscription updates carry the resource path; the formatter refuses empty patch ranges.
-5. Test-only `unwrap`/`expect` replaced by `?` so `scripts/check_rust_safety.ps1` passes.
+5. Test-only `unwrap`/`expect` replaced by `?` so `scripts/ci/check_rust_safety.ps1` passes.
 
 Dependency changes: `iroh`/`iroh-base` 1.3.0 → 1.4.1; in-tree `iroh-h3`, `iroh-h3-axum`,
 `iroh-h3-client` removed in favour of the published `iroh-h3-axum` =0.4.0 and

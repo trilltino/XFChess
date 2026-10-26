@@ -47,6 +47,22 @@ Mark unvalidated work as draft. Include reproduction steps and platform details
 for bugs, and a concrete user need for feature proposals. Clear commit subjects
 such as `fix: ...` or `docs: ...` help reviewers scan changes.
 
+## Test policy
+
+- Default tests run offline, using local fixtures or loopback mock servers. Do not
+  call live RPC, authentication, exchange-rate or email services from default tests.
+- Return `anyhow::Result<()>` and propagate setup errors. The Rust safety gate also
+  applies to tests: no `unwrap`, `expect`, or their error variants.
+- Drive deadlines with injected time or Tokio's paused clock; do not sleep in tests.
+- Use deterministic random seeds and print the seed or replay trace on failure.
+- Keep each test focused on one behavior or invariant. Bug fixes need regression tests.
+- Each new route, instruction, IPC command or state transition needs a coverage
+  matrix row. See [coverage tooling](scripts/coverage/README.md).
+- Every ignored test needs a reason, owner and disposition in
+  `docs/coverage/ignored-tests.json`. Fix or remove quarantined flakes within a week.
+- Explicitly running a test with missing prerequisites must fail; it must not
+  silently return success. Subprocess fixture tests run only through their parent.
+
 ## AI-assisted contributions
 
 Review and understand generated code, and be able to explain it. Include the

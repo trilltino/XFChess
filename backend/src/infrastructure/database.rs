@@ -1,4 +1,8 @@
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    SqlitePool,
+};
+use std::str::FromStr;
 use tracing::info;
 
 #[derive(Clone)]
@@ -8,6 +12,13 @@ pub struct DatabasePools {
 }
 
 async fn make_pool(url: &str) -> Result<SqlitePool, sqlx::Error> {
+    let options = SqliteConnectOptions::from_str(url)?;
+    // `mode=rwc` creates the file but not a missing parent directory.
+    if let Some(dir) = options.get_filename().parent() {
+        if !dir.as_os_str().is_empty() {
+            std::fs::create_dir_all(dir)?;
+        }
+    }
     let pool = SqlitePoolOptions::new()
         .max_connections(16)
         .min_connections(2)
@@ -34,7 +45,7 @@ async fn make_pool(url: &str) -> Result<SqlitePool, sqlx::Error> {
                 Ok(())
             })
         })
-        .connect(url)
+        .connect_with(options)
         .await?;
     Ok(pool)
 }

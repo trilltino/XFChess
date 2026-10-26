@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     // The puzzle tables live in the server's store database (server.rs).
     let db_url = std::env::var("DATABASE_URL")
         .or_else(|_| std::env::var("SESSION_DB_URL"))
-        .unwrap_or_else(|_| "sqlite://sessions.db".into());
+        .unwrap_or_else(|_| "sqlite://data/db/sessions.db".into());
     eprintln!("importing into {db_url}");
     let pool = SqlitePoolOptions::new().connect(&db_url).await?;
 

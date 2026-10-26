@@ -96,7 +96,7 @@ fn test_parser_fuzz_mutated_once() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "unbounded manual fuzz loop; owner: netcode maintainers; use bounded nightly fuzzing"]
 fn test_parser_fuzz_forever() {
     for seed in 0..=u64::MAX {
         if seed % 1000 == 0 {

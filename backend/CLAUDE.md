@@ -67,7 +67,7 @@ src/
 
 ## Database
 
-SQLite with SQLx 0.9, two databases: `sessions.db` and `vault.db` (identity/KYC). Their
+SQLite with SQLx 0.9, two databases: `data/db/sessions.db` and `data/db/vault.db` (identity/KYC). Their
 schema is in `backend/migrations/session/` and `backend/migrations/vault/`, one file per
 area. The server applies it on every start; there is no `sqlx migrate` version table.
 Every statement must be idempotent. A new column goes into its `CREATE TABLE` and into an
