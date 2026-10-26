@@ -24,15 +24,18 @@ from a prior naming convention and held *different, unused* keys — they were
 deleted 2026-07-23 after confirming none of them matched the pubkeys above or
 any current `.env` reference.
 
-## Benchmark-only keys (not part of the live program)
-
-Used exclusively by `crates/cu_benchmark` (a load-testing tool):
+## Backup encryption
 
 | File | Purpose |
 |------|---------|
-| `er-cu-master.json` | Master funding wallet for ER compute-unit benchmarks |
-| `er-cu-children.json` | Array of child keypairs funded by the master for parallel load tests |
-| `temp-fund.json` | Scratch/throwaway funding wallet used by `check_balances.rs` |
+| `backup-age-identity.txt` | age private key (public half is the `BACKUP_AGE_RECIPIENT` used to encrypt backups). Without it backups cannot be decrypted. Keep a copy off this machine. |
+
+## Benchmark keys
+
+`tools/cu_benchmark` uses `program-authority.json` as its master funding
+wallet and generates `er-cu-children.json` itself on first run. The old
+`er-cu-master.json`, `temp-fund.json` and `fee-payers/` pool were unused and
+removed 2026-10-26.
 
 ## Deploy command
 
@@ -59,7 +62,7 @@ solana transfer C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw 7 \
 
 ```bash
 # SSH into VPS and print the key
-ssh root@178.104.55.19 "cat /opt/xfchess/keys/vps-authority.json"
+ssh root@178.104.55.19 "cat /opt/xfchess/keys/vps_authority.json"
 # Paste the output into keys/vps_authority.json locally
 ```
 

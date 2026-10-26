@@ -1,5 +1,5 @@
 # Push a release tag; -Deploy also waits for CI and deploys the VPS.
-# Usage: .\scripts\release.ps1 [-Version vX.Y.Z] [-DryRun] [-Force] [-Deploy]
+# Usage: .\scripts\build\release.ps1 [-Version vX.Y.Z] [-DryRun] [-Force] [-Deploy]
 
 param(
     [string]$Version,
@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ROOT = Split-Path $PSScriptRoot -Parent
+$ROOT = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Set-Location $ROOT
 
 $PUBLIC_REPO = "trilltino/XFChess"

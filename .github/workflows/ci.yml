@@ -18,7 +18,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Verify Rust source extraction policy
-        run: pwsh -NoProfile -File scripts/check_rust_safety.ps1 -InventoryOnly
+        run: pwsh -NoProfile -File scripts/ci/check_rust_safety.ps1 -InventoryOnly
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends \
@@ -33,7 +33,7 @@ jobs:
           cargo check -p backend --all-targets
           cargo check -p xfchess-game
       - name: Verify application engine dependency boundary
-        run: pwsh -NoProfile -File scripts/check_engine_dependencies.ps1
+        run: pwsh -NoProfile -File scripts/ci/check_engine_dependencies.ps1
 
   fmt:
     name: Format
@@ -64,10 +64,6 @@ jobs:
         with:
           name: tauri-tournament-admin-dist
           path: tauri/tournament-admin/dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: tauri-viz-dist
-          path: tauri/viz/dist
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends \
@@ -82,7 +78,7 @@ jobs:
           cargo clippy -p xfchess-game -- -D warnings
           cargo clippy -p xfchess-game --tests -- -D warnings
       - name: Enforce Rust safety policy
-        run: pwsh -NoProfile -File scripts/check_rust_safety.ps1
+        run: pwsh -NoProfile -File scripts/ci/check_rust_safety.ps1
 
   rust-safety-windows:
     name: Windows native Rust safety
@@ -107,16 +103,11 @@ jobs:
         with:
           name: tauri-tournament-admin-dist
           path: tauri/tournament-admin/dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: tauri-viz-dist
-          path: tauri/viz/dist
       - name: Check desktop and wallet platform paths
-        run: pwsh -NoProfile -File scripts/check_rust_safety.ps1 -PlatformOnly
+        run: pwsh -NoProfile -File scripts/ci/check_rust_safety.ps1 -PlatformOnly
       - name: Test native wallet and benchmark safeguards
         run: |
           cargo test --locked -p xfchess-tauri --features production,wallet,tournament-admin
-          cargo test --locked -p xfchess-viz
 
   test:
     name: Test Suite
@@ -194,7 +185,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [tournament-admin, wallet-ui, viz]
+        app: [tournament-admin, wallet-ui]
     defaults:
       run:
         working-directory: tauri/${{ matrix.app }}

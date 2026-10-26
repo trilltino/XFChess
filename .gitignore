@@ -50,6 +50,7 @@ temp/
 
 dist/
 build/
+!/scripts/build/
 release/
 
 /index.html
@@ -101,7 +102,6 @@ tauri/gen/
 !xfchessdotcom/package-lock.json
 !tauri/wallet-ui/package-lock.json
 !tauri/tournament-admin/package-lock.json
-!tauri/viz/package-lock.json
 
 # Keep the Anchor IDL: frontend CI cannot regenerate it without the Solana toolchain.
 xfchessdotcom/src/lib/*.json
@@ -123,3 +123,8 @@ xfchess-anticheat-crate-*.md
 
 # Python bytecode
 __pycache__/
+
+# Coverage reports are CI artifacts; only baselines and matrices are committed.
+**/coverage/
+!docs/coverage/
+!scripts/coverage/

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0.."
+cd /d "%~dp0..\.."
 set ROOT=%cd%
 set STAGE=%ROOT%\release\linux
 set IMAGE=xfchess-linux

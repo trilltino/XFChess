@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = Split-Path $PSScriptRoot -Parent
+$root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $stage = Join-Path $root "release/$Target"
 $profile = if ($Debug) { 'debug' } else { 'release' }
 $buildFlags = if ($Debug) { @() } else { @('--release') }

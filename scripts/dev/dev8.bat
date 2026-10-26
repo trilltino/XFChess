@@ -9,7 +9,7 @@ echo Start just dev first to have the backend running.
 echo.
 
 set SCRIPT_DIR=%~dp0
-for %%i in ("%SCRIPT_DIR%..") do set "ROOT=%%~fi"
+for %%i in ("%SCRIPT_DIR%..\..") do set "ROOT=%%~fi"
 set "RELEASE_DIR=%ROOT%\target\debug"
 set "DATA_ROOT=%ROOT%\dev8_data"
 

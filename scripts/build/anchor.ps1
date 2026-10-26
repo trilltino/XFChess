@@ -2,7 +2,7 @@
 param([switch]$Deploy)
 
 $ErrorActionPreference = 'Stop'
-$root = Split-Path $PSScriptRoot -Parent
+$root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $image = 'xfchess-anchor-builder'
 $solanaConfig = Join-Path $env:USERPROFILE '.config/solana'
 

@@ -2,7 +2,9 @@
 
 Use the root `justfile` as the command menu on Windows. Install with
 `cargo install just`, then run `just` from the repository to list tasks.
-Scripts here implement workflows that need more than a few commands.
+Scripts here implement workflows that need more than a few commands, grouped as
+`build/` (package, release, Anchor, Linux, Android prep), `ci/` (CI checks), `dev/`
+(local launchers and cleanup) and `verify/` (devnet and load checks), plus `coverage/`.
 The RPC load test requires PowerShell 7 (`pwsh`) for parallel requests.
 
 | Task | Command |
@@ -40,6 +42,6 @@ remain directly callable with PowerShell for parameters containing spaces.
 
 The former `build*.bat`, `run_offline.bat`, and `start-tournament-admin.bat`
 entry points are replaced by the recipes above. The two Anchor Docker
-scripts are merged into `anchor.ps1`; both package variants into `package.ps1`;
-both release variants into `release.ps1`; wallet cleanup into
-`kill_stale_xfchess_dev.ps1 -WalletOnly`.
+scripts are merged into `build/anchor.ps1`; both package variants into `build/package.ps1`;
+both release variants into `build/release.ps1`; wallet cleanup into
+`dev/kill_stale_xfchess_dev.ps1 -WalletOnly`.

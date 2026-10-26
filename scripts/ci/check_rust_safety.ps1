@@ -15,12 +15,14 @@ foreach ($rustPath in $rustPaths) {
     }
 }
 Write-Output 'Rust source extraction inventory: clean'
+& node scripts/coverage/ignored.mjs --check
+if ($LASTEXITCODE -ne 0) { throw 'Ignored test audit failed' }
 if ($InventoryOnly) { return }
 
 $configurations = @(
     @('-p', 'xfchess'),
     @('-p', 'xfchess', '--features', 'solana'),
-    @('-p', 'xfchess-tauri', '-p', 'xfchess-viz'),
+    @('-p', 'xfchess-tauri'),
     @('-p', 'xfchess-tauri', '--features', 'production,wallet,tournament-admin')
 )
 

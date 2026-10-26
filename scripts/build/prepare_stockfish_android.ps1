@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$workspaceDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$workspaceDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $binaryPath = Join-Path $workspaceDirectory 'mobile/app/src/main/jniLibs/arm64-v8a/libstockfish.so'
 if (Test-Path -LiteralPath $binaryPath -PathType Leaf) { return }
 

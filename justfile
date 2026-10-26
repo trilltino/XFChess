@@ -41,11 +41,11 @@ check-specs *args:
 
 # Stop all running XFChess processes (PID file first, then port owner, then name)
 kill:
-    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/kill_stale_xfchess_dev.ps1"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/dev/kill_stale_xfchess_dev.ps1"
 
 # Close only stale wallet browser popups
 kill-wallets:
-    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/kill_stale_xfchess_dev.ps1" -WalletOnly
+    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/dev/kill_stale_xfchess_dev.ps1" -WalletOnly
 
 
 # Build backend signing-server (debug)
@@ -80,22 +80,22 @@ king: build-all build-program
 
 # Cross-compile Android native library, then assemble the unsigned release APK
 build-android:
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare_stockfish_android.ps1
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build/prepare_stockfish_android.ps1
     cargo ndk -t arm64-v8a -P 31 -o mobile/app/src/main/jniLibs build --release --lib --features solana
     @Get-ChildItem -LiteralPath mobile/app/src/main/jniLibs/arm64-v8a -Filter *.so | Where-Object { $_.Name -notin @('libxfchess_app.so', 'libstockfish.so') } | Remove-Item -Force -ErrorAction Stop
     Set-Location mobile; ./gradlew.bat assembleRelease
 
 # Build and extract a Linux game folder via Docker
 build-linux:
-    cmd /c scripts\build_linux.bat
+    cmd /c scripts\build\build_linux.bat
 
 # Stage a Windows folder: local includes backend; dev uses a remote backend
 package target="local" *args:
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -Target {{target}} {{args}}
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build/package.ps1 -Target {{target}} {{args}}
 
 # Push branch + release tag; add -Deploy to wait for CI and deploy the VPS
 release *args:
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 {{args}}
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build/release.ps1 {{args}}
 
 # Build wallet UI (only if dist is missing or forced)
 build-wallet-ui:
@@ -231,24 +231,6 @@ web-stack: kill build-backend build-web-ui
     @Write-Host "========================================" -ForegroundColor Cyan
 
 
-# Install visualiser deps (only if node_modules is missing)
-build-viz-ui:
-    @if (-not (Test-Path "viz/node_modules/.bin/vite")) { \
-        Write-Host "[BUILD] Installing Visualiser dependencies..." -ForegroundColor Cyan; \
-        Set-Location viz; npm install; Set-Location .. \
-    } else { \
-        Write-Host "[BUILD] Visualiser node_modules exists, skipping" \
-    }
-
-# Run the standalone Tauri network visualiser (Triton RPC benchmark + topology)
-viz: build-viz-ui
-    @Write-Host "[VIZ] Launching XFChess Network Visualiser..." -ForegroundColor Cyan
-    Set-Location viz; npm run tauri dev
-
-# Build the visualiser as a distributable installer (bundle under viz/src-tauri/target)
-viz-build: build-viz-ui
-    Set-Location viz; npm run tauri build
-
 # Run the CLI RPC benchmark — text output, no GUI (uses $SOLANA_RPC_URL from .env)
 viz-bench:
     cargo run -p cu_benchmark --bin triton-bench -- read-load
@@ -346,11 +328,11 @@ build-program:
 
 # Build program and IDL in the Linux Anchor toolchain container
 build-program-docker:
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/anchor.ps1
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build/anchor.ps1
 
 # Build and deploy using the Linux Anchor toolchain and local Solana config
 deploy-program-docker:
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/anchor.ps1 -Deploy
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build/anchor.ps1 -Deploy
 
 # Deploy to devnet
 deploy-devnet:
@@ -358,7 +340,7 @@ deploy-devnet:
 
 # Compare local program bytes with devnet (read-only)
 verify-program *args:
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify_devnet_program.ps1 {{args}}
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/verify_devnet_program.ps1 {{args}}
 
 
 # Start local Prometheus + Grafana monitoring stack
@@ -380,7 +362,7 @@ check-backend:
     cargo check -p backend
 
 # Download the CC0 Lichess puzzle dump and upsert it into the local store DB
-# (backend/sessions.db). Admin curation survives re-imports.
+# (backend/data/db/sessions.db). Admin curation survives re-imports.
 puzzles-refresh min_rating="600" max_dev="90":
     Invoke-WebRequest https://database.lichess.org/lichess_db_puzzle.csv.zst -OutFile target/lichess_db_puzzle.csv.zst
     cargo build -p backend --bin import_puzzles --release
@@ -419,12 +401,12 @@ db-reset:
     @Write-Host "[DB] Resetting local databases..." -ForegroundColor Yellow
     @Stop-Process -Name "signing-server" -Force -ErrorAction SilentlyContinue
     @Start-Sleep -Milliseconds 300
-    @Remove-Item -Force backend/sessions.db -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/vault.db -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/sessions.db-shm -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/sessions.db-wal -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/vault.db-shm -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/vault.db-wal -ErrorAction SilentlyContinue
+    @Remove-Item -Force backend/data/db/sessions.db -ErrorAction SilentlyContinue
+    @Remove-Item -Force backend/data/db/vault.db -ErrorAction SilentlyContinue
+    @Remove-Item -Force backend/data/db/sessions.db-shm -ErrorAction SilentlyContinue
+    @Remove-Item -Force backend/data/db/sessions.db-wal -ErrorAction SilentlyContinue
+    @Remove-Item -Force backend/data/db/vault.db-shm -ErrorAction SilentlyContinue
+    @Remove-Item -Force backend/data/db/vault.db-wal -ErrorAction SilentlyContinue
     @Write-Host "[DB] Done — databases will be recreated with migrations on next backend start" -ForegroundColor Green
 
 
@@ -455,20 +437,19 @@ logs:
 
 # Tail wallet signing diagnostics
 wallet-logs *args:
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tail_wallet_signing.ps1 {{args}}
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/tail_wallet_signing.ps1 {{args}}
 
 # Launch eight isolated tournament participants; start 'just dev' first
 dev8:
-    cmd /c scripts\dev8.bat
+    cmd /c scripts\dev\dev8.bat
 
 # Exercise tournament RPC load (requires PowerShell 7; uses ADMIN_API_KEY)
 test-triton *args:
-    pwsh -NoProfile -File scripts/test_triton_load.ps1 {{args}}
+    pwsh -NoProfile -File scripts/verify/test_triton_load.ps1 {{args}}
 
 # Clean all build artifacts
 clean:
     cargo clean
     @if (Test-Path "xfchessdotcom/dist") { Remove-Item -Recurse -Force xfchessdotcom/dist }
-    @if (Test-Path "viz/dist") { Remove-Item -Recurse -Force viz/dist }
     @if (Test-Path "tauri/wallet-ui/dist") { Remove-Item -Recurse -Force tauri/wallet-ui/dist }
     @if (Test-Path "tauri/tournament-admin/dist") { Remove-Item -Recurse -Force tauri/tournament-admin/dist }
