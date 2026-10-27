@@ -123,3 +123,35 @@ Still not done: M0 native reports and ten-run soak, M1 seams, M2 money tests, th
 - Still Open and deliberately not changed, because shipped clients call them without a token and the
   change cannot be verified without driving the UI: `broadcast-tx`, friends/presence/social poll,
   p2p lobby, `client-events`, and legacy `PUT /game/{id}/moves|chat`.
+
+## Update 2026-10-27 (no route is left without a credential check)
+
+The 15 pinned credential-less routes are closed; `route_auth.rs` has no `Open` class any more
+(14 tests, a new `Node` class replaces it).
+
+- **Node identity** (`backend/src/signing/node_auth.rs`): lobby relay, social graph, client events
+  and casual game writes are keyed by a network node id, which is the base58 ed25519 public key of
+  the client's node. The client proves it holds that key with a self-issued token in `X-Node-Auth`
+  (`v1.<node_id>.<unix_seconds>.<signature>`, valid for an hour, reused for 30 minutes). It is a
+  bearer credential like the JWT, so it is only safe over TLS. A presented-but-invalid token is
+  refused rather than treated as anonymous. The client attaches it to every backend call once the
+  node exists, including the Braid outbox (`vps::client::default_headers`). A pinned token vector is
+  verified on both sides so the signed bytes cannot drift.
+- **Ownership:** every node id a request names (`host_node_id`, `joiner_node_id`, `node_id`,
+  `from_node_id`, `responder_node_id`) must be the node that signed, else 403. Routes: `/p2p/announce|join|
+  accept|leave|heartbeat|poll`, `/friends*`, `PUT /presence`, `/friends/invite`, `/social/poll`,
+  `/api/client-events` (also length-capped). Presence reads and `/p2p/games` stay public;
+  `/p2p/message` keeps its own body signature.
+- **Friend requests:** only the addressee (the request's node, or the wallet it was addressed to)
+  may answer one. Before, any caller could accept or reject anyone's request. A wallet named in a
+  social call (`from_pubkey`, `pubkey`) counts only when the bearer token is for that wallet.
+  Presence freshness now uses the server clock.
+- **Game writes** (`PUT /game/{id}/moves|chat`): the sender identity must be proven by its wallet
+  token or its node token, also for unclaimed seats. A third party naming a participant is refused.
+- **`POST /api/auth/broadcast-tx`** needs a signed-in wallet token (checked before the payload).
+- **Benchmark scenarios** send `X-Node-Auth` on the lobby steps; set `BENCH_WHITE_NODE_AUTH` and
+  `BENCH_BLACK_NODE_AUTH` for live runs (see `tools/cu_benchmark/docs/system.md`).
+
+Not verified: a live two-client game against the new backend (no UI driving). A client built before
+this change cannot use the lobby, friends, presence or client-events routes until it updates, so
+deploy the backend after the client release is out, or accept that older clients lose those features.

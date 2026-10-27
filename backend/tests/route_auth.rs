@@ -6,9 +6,9 @@
 //! against the real router: admin routes reject missing, wrong and wallet-only credentials,
 //! and wallet routes reject missing, malformed, wrongly signed and expired tokens.
 //!
-//! `Open` is a deliberately visible debt: those routes have no credential check, or trust a
-//! caller-supplied identifier. `open_mutations_are_a_reviewed_set` pins them, so adding one
-//! is a conscious act rather than an accident.
+//! Node routes (lobby relay, social graph, client events) are keyed by a network node id, not a
+//! wallet: they need an `X-Node-Auth` token signed by that node's key, and every node id named
+//! in the request must be the one that signed. No route is left without a credential check.
 #![cfg(feature = "coverage")]
 
 mod common;
@@ -16,6 +16,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use jsonwebtoken::{encode, EncodingKey, Header};
+use solana_sdk::signature::{Keypair, Signer};
 use std::collections::BTreeSet;
 use tower::ServiceExt;
 
@@ -34,11 +35,11 @@ enum Class {
     /// Credential verified inside the handler (JWT, wallet signature, nonce or OAuth proof).
     /// Needs a well-formed body to reach the check, so the generic probe cannot drive it.
     Handler,
-    /// No credential check; trusts a caller-supplied identifier. Known gap, see module docs.
-    Open,
+    /// `X-Node-Auth` token signed by the node the request acts for (see `signing::node_auth`).
+    Node,
 }
 
-use Class::{Admin, Handler, Open, Public, Wallet};
+use Class::{Admin, Handler, Node, Public, Wallet};
 
 /// Paths that exist under both `/api/tournament` and `/tournament`.
 fn both(prefixes: &[&str], suffixes: &[(&str, &str, Class)]) -> Vec<(String, String, Class)> {
@@ -183,32 +184,31 @@ fn table() -> Vec<(String, String, Class)> {
         ("POST", "/puzzle/hint", Handler),
         ("GET", "/ws/auth", Handler),
         // ── No credential check: reviewed debt ──────────────────────────────────────
-        // Free transaction relay: any caller can push a signed transaction to our RPC.
-        ("POST", "/api/auth/broadcast-tx", Open),
+        // Signed-in users only; the token is checked inside the handler.
+        ("POST", "/api/auth/broadcast-tx", Handler),
         ("POST", "/api/external-elo/link/start", Wallet),
         ("POST", "/api/external-elo/link/confirm", Wallet),
         ("POST", "/api/external-elo/sync", Wallet),
-        ("POST", "/api/client-events", Open),
+        ("POST", "/api/client-events", Node),
         ("POST", "/dispute/notify", Wallet),
-        // Social routes trust the `node_id` / `responder_node_id` the caller supplies.
-        ("GET", "/friends", Open),
-        ("DELETE", "/friends/{contact_id}", Open),
-        ("POST", "/friends/invite", Open),
-        ("GET", "/friends/requests", Open),
-        ("POST", "/friends/requests", Open),
-        ("PUT", "/friends/requests/{id}", Open),
-        ("PUT", "/presence", Open),
-        ("GET", "/social/poll", Open),
-        // Relay lobby: only /p2p/message carries a signature.
-        ("POST", "/p2p/announce", Open),
-        ("POST", "/p2p/accept", Open),
-        ("POST", "/p2p/heartbeat", Open),
-        ("POST", "/p2p/join", Open),
-        ("POST", "/p2p/leave", Open),
-        ("POST", "/p2p/poll", Open),
-        // Legacy writes are allowed until a seat is claimed (see `seat_write_allowed`).
-        ("PUT", "/game/{game_id}/chat", Open),
-        ("PUT", "/game/{game_id}/moves", Open),
+        ("GET", "/friends", Node),
+        ("DELETE", "/friends/{contact_id}", Node),
+        ("POST", "/friends/invite", Node),
+        ("GET", "/friends/requests", Node),
+        ("POST", "/friends/requests", Node),
+        ("PUT", "/friends/requests/{id}", Node),
+        ("PUT", "/presence", Node),
+        ("GET", "/social/poll", Node),
+        // Relay lobby: /p2p/message carries its own signature.
+        ("POST", "/p2p/announce", Node),
+        ("POST", "/p2p/accept", Node),
+        ("POST", "/p2p/heartbeat", Node),
+        ("POST", "/p2p/join", Node),
+        ("POST", "/p2p/leave", Node),
+        ("POST", "/p2p/poll", Node),
+        // The sender must prove the identity it writes as (wallet token or node token).
+        ("PUT", "/game/{game_id}/chat", Handler),
+        ("PUT", "/game/{game_id}/moves", Handler),
     ];
     let mut rows: Vec<_> = single
         .iter()
@@ -503,42 +503,6 @@ async fn handler_routes_never_succeed_anonymously() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Pins the credential-less mutating routes. Shrinking this list is progress; growing it
-/// needs a reason in review.
-#[tokio::test]
-async fn open_mutations_are_a_reviewed_set() -> anyhow::Result<()> {
-    let app = common::spawn_app().await?;
-    let table = table();
-    let routes = runtime_routes(&app).await?;
-    let open: BTreeSet<String> = routes_of(Open, &routes, &table)
-        .into_iter()
-        .filter(|(method, _)| method != "GET")
-        .map(|(method, path)| format!("{method} {path}"))
-        .collect();
-    let expected: BTreeSet<String> = [
-        "DELETE /friends/{contact_id}",
-        "POST /api/auth/broadcast-tx",
-        "POST /api/client-events",
-        "POST /friends/invite",
-        "POST /friends/requests",
-        "POST /p2p/accept",
-        "POST /p2p/announce",
-        "POST /p2p/heartbeat",
-        "POST /p2p/join",
-        "POST /p2p/leave",
-        "POST /p2p/poll",
-        "PUT /friends/requests/{id}",
-        "PUT /game/{game_id}/chat",
-        "PUT /game/{game_id}/moves",
-        "PUT /presence",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
-    assert_eq!(open, expected);
-    Ok(())
-}
-
 async fn call_json(
     app: &common::TestApp,
     method: &str,
@@ -628,5 +592,286 @@ async fn another_wallet_cannot_confirm_a_started_link() -> anyhow::Result<()> {
         .await?;
         assert_eq!(status, StatusCode::FORBIDDEN, "{text}");
     }
+    Ok(())
+}
+
+const NODE_HEADER: &str = "x-node-auth";
+
+#[tokio::test]
+async fn node_routes_require_a_valid_node_token() -> anyhow::Result<()> {
+    let app = common::spawn_app().await?;
+    let table = table();
+    let routes = runtime_routes(&app).await?;
+    let node_routes = routes_of(Node, &routes, &table);
+    anyhow::ensure!(node_routes.len() >= 14, "node surface unexpectedly small");
+
+    let (owner, thief) = (Keypair::new(), Keypair::new());
+    let owner_id = owner.pubkey().to_string();
+    // The thief signs a token that names the owner's node id.
+    let issued_at = chrono::Utc::now().timestamp();
+    let forged = format!(
+        "v1.{owner_id}.{issued_at}.{}",
+        thief.sign_message(backend::signing::node_auth::signable(&owner_id, issued_at).as_bytes())
+    );
+    let expired = common::node_token_aged(&owner, backend::signing::node_auth::MAX_AGE_SECS + 60);
+    let wallet_token = app.state.jwt.issue(WALLET_A)?;
+    let mut failures = Vec::new();
+    for (method, path) in &node_routes {
+        let attempts: [(&str, Vec<(&str, String)>); 5] = [
+            ("no credentials", vec![]),
+            ("garbage token", vec![(NODE_HEADER, "not-a-token".into())]),
+            ("expired token", vec![(NODE_HEADER, expired.clone())]),
+            (
+                "another node signature",
+                vec![(NODE_HEADER, forged.clone())],
+            ),
+            // A wallet token proves a wallet, not a node.
+            (
+                "wallet token instead of a node token",
+                vec![bearer(&wallet_token)],
+            ),
+        ];
+        for (label, headers) in attempts {
+            let status = call(&app, method, path, &headers).await?;
+            if status != StatusCode::UNAUTHORIZED {
+                failures.push(format!("{method} {path}: {label} -> {status}"));
+            }
+        }
+        let status = call(
+            &app,
+            method,
+            path,
+            &[(NODE_HEADER, common::node_token(&owner))],
+        )
+        .await?;
+        if status == StatusCode::UNAUTHORIZED {
+            failures.push(format!("{method} {path}: a valid node token was rejected"));
+        }
+    }
+    anyhow::ensure!(failures.is_empty(), "node gate failures: {failures:#?}");
+    Ok(())
+}
+
+/// Every node id a request names must be the one that signed.
+#[tokio::test]
+async fn node_routes_reject_a_node_acting_for_another() -> anyhow::Result<()> {
+    use serde_json::json;
+    let app = common::spawn_app().await?;
+    let (me, other) = (Keypair::new(), Keypair::new());
+    let other_id = other.pubkey().to_string();
+    let cases = [
+        (
+            "POST",
+            "/p2p/announce".to_string(),
+            Some(json!({
+                "game_id": "g", "host_node_id": other_id, "display_name": "x",
+                "stake_amount": 0.0, "game_type": "P2P", "base_time_seconds": 300,
+                "increment_seconds": 0, "username": null, "elo": null,
+                "region": null, "password": null
+            })),
+        ),
+        (
+            "POST",
+            "/p2p/join".to_string(),
+            Some(json!({ "game_id": "g", "joiner_node_id": other_id, "password": null })),
+        ),
+        (
+            "POST",
+            "/p2p/accept".to_string(),
+            Some(json!({ "game_id": "g", "host_node_id": other_id })),
+        ),
+        (
+            "POST",
+            "/p2p/leave".to_string(),
+            Some(json!({ "game_id": "g", "node_id": other_id })),
+        ),
+        (
+            "POST",
+            "/p2p/heartbeat".to_string(),
+            Some(json!({ "game_id": "g", "host_node_id": other_id })),
+        ),
+        (
+            "POST",
+            "/p2p/poll".to_string(),
+            Some(json!({ "game_id": "g", "node_id": other_id, "since_index": 0 })),
+        ),
+        (
+            "POST",
+            "/friends/requests".to_string(),
+            Some(json!({
+                "from_node_id": other_id, "from_pubkey": null, "from_display": "x",
+                "to_node_id": "someone", "to_pubkey": null, "message": null
+            })),
+        ),
+        ("GET", format!("/friends/requests?node_id={other_id}"), None),
+        (
+            "PUT",
+            "/friends/requests/1".to_string(),
+            Some(json!({ "action": "accept", "responder_node_id": other_id })),
+        ),
+        ("GET", format!("/friends?node_id={other_id}"), None),
+        (
+            "DELETE",
+            format!("/friends/{WALLET_A}?node_id={other_id}"),
+            None,
+        ),
+        (
+            "PUT",
+            "/presence".to_string(),
+            Some(json!({
+                "node_id": other_id, "pubkey": null, "display_name": "x",
+                "status": "online", "game_id": null, "updated_at": chrono::Utc::now()
+            })),
+        ),
+        (
+            "POST",
+            "/friends/invite".to_string(),
+            Some(json!({
+                "game_id": "g", "from_node_id": other_id, "from_display": "x", "to_node_id": "t"
+            })),
+        ),
+        (
+            "GET",
+            format!("/social/poll?node_id={other_id}&since_index=0"),
+            None,
+        ),
+    ];
+    for (method, path, body) in cases {
+        let (status, text) = app.as_node(&me, method, &path, body.as_ref()).await?;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {text}");
+    }
+    Ok(())
+}
+
+/// Only the addressee may answer a friend request, and a wallet named in a social call counts
+/// only when the bearer token is for that wallet.
+#[tokio::test]
+async fn friend_requests_belong_to_their_addressee() -> anyhow::Result<()> {
+    use serde_json::json;
+    let app = common::spawn_app().await?;
+    let (alice, bob, mallory) = (Keypair::new(), Keypair::new(), Keypair::new());
+    let (alice_id, bob_id, mallory_id) = (
+        alice.pubkey().to_string(),
+        bob.pubkey().to_string(),
+        mallory.pubkey().to_string(),
+    );
+    let (status, request) = app
+        .as_node(
+            &alice,
+            "POST",
+            "/friends/requests",
+            Some(&json!({
+                "from_node_id": alice_id, "from_pubkey": WALLET_B, "from_display": "alice",
+                "to_node_id": bob_id, "to_pubkey": null, "message": null
+            })),
+        )
+        .await?;
+    assert_eq!(status, StatusCode::OK, "{request}");
+    // A wallet claimed without that wallet's token is dropped, not recorded.
+    assert!(request["from_pubkey"].is_null(), "{request}");
+    let id = request["id"].as_str().unwrap_or_default().to_string();
+    anyhow::ensure!(!id.is_empty(), "no request id: {request}");
+
+    let path = format!("/friends/requests/{id}");
+    for (who, who_id, expected, label) in [
+        (&mallory, &mallory_id, StatusCode::FORBIDDEN, "a stranger"),
+        (&alice, &alice_id, StatusCode::FORBIDDEN, "the sender"),
+        (&bob, &bob_id, StatusCode::OK, "the addressee"),
+    ] {
+        let body = json!({ "action": "accept", "responder_node_id": who_id });
+        let (status, text) = app.as_node(who, "PUT", &path, Some(&body)).await?;
+        assert_eq!(status, expected, "{label}: {text}");
+    }
+    Ok(())
+}
+
+/// A request addressed to a wallet is visible only to a caller holding that wallet's token.
+#[tokio::test]
+async fn requests_addressed_to_a_wallet_need_that_wallets_token() -> anyhow::Result<()> {
+    use serde_json::json;
+    let app = common::spawn_app().await?;
+    let (sender, reader) = (Keypair::new(), Keypair::new());
+    let (status, text) = app
+        .as_node(
+            &sender,
+            "POST",
+            "/friends/requests",
+            Some(&json!({
+                "from_node_id": sender.pubkey().to_string(), "from_pubkey": null,
+                "from_display": "s", "to_node_id": null, "to_pubkey": WALLET_A, "message": null
+            })),
+        )
+        .await?;
+    assert_eq!(status, StatusCode::OK, "{text}");
+
+    let path = format!(
+        "/friends/requests?node_id={}&pubkey={WALLET_A}",
+        reader.pubkey()
+    );
+    let (_, without) = app.as_node(&reader, "GET", &path, None).await?;
+    assert_eq!(without.as_array().map(Vec::len), Some(0), "{without}");
+
+    let token = app.state.jwt.issue(WALLET_A)?;
+    let request = Request::builder()
+        .method("GET")
+        .uri(&path)
+        .header(NODE_HEADER, common::node_token(&reader))
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())?;
+    let (status, with) = app.send(request).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(with.as_array().map(Vec::len), Some(1), "{with}");
+    Ok(())
+}
+
+/// A relay sender must prove the identity it writes as.
+#[tokio::test]
+async fn game_writes_must_prove_the_sender() -> anyhow::Result<()> {
+    use serde_json::json;
+    let app = common::spawn_app().await?;
+    let (host, other) = (Keypair::new(), Keypair::new());
+    let host_id = host.pubkey().to_string();
+    let chat = json!({
+        "player_pubkey": host_id,
+        "session_token": "",
+        "message": { "type": "chat", "player": host_id, "text": "hi", "timestamp_ms": 1 },
+        "content_version": "",
+        "content_parent": "",
+    });
+    let path = "/game/chat-proof/chat";
+    let anonymous = Request::builder()
+        .method("PUT")
+        .uri(path)
+        .header("content-type", "application/json")
+        .body(Body::from(chat.to_string()))?;
+    assert_eq!(app.send(anonymous).await?.0, StatusCode::UNAUTHORIZED);
+    // Another node's token does not vouch for the named sender.
+    assert_eq!(
+        app.as_node(&other, "PUT", path, Some(&chat)).await?.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_ne!(
+        app.as_node(&host, "PUT", path, Some(&chat)).await?.0,
+        StatusCode::UNAUTHORIZED
+    );
+    Ok(())
+}
+
+/// Broadcasting spends our RPC quota: signed-in users only, checked before the payload.
+#[tokio::test]
+async fn broadcast_tx_requires_a_signed_in_user() -> anyhow::Result<()> {
+    use serde_json::json;
+    let app = common::spawn_app().await?;
+    let body = json!({ "tx_b64": "AA==" });
+    let anonymous = Request::builder()
+        .method("POST")
+        .uri("/api/auth/broadcast-tx")
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))?;
+    assert_eq!(app.send(anonymous).await?.0, StatusCode::UNAUTHORIZED);
+    let token = app.state.jwt.issue(WALLET_A)?;
+    let (status, text) = call_json(&app, "POST", "/api/auth/broadcast-tx", &token, body).await?;
+    // Past the gate: the payload is rejected as a transaction instead.
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
     Ok(())
 }

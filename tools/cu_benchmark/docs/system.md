@@ -14,7 +14,10 @@ execution inputs must match its fingerprint. Each stage is a separate experiment
 The backend example runs 100 casual games with legal Fool's Mate moves, two
 spectators per game, persisted move logs and authenticated result recording.
 Set `BENCH_WHITE_WALLET`, `BENCH_BLACK_WALLET`, `BENCH_WHITE_TOKEN` and
-`BENCH_BLACK_TOKEN` using existing test accounts. It reuses two players; use
+`BENCH_BLACK_TOKEN` using existing test accounts. The lobby steps act for a network node,
+so also set `BENCH_WHITE_NODE_AUTH` and `BENCH_BLACK_NODE_AUTH` to `X-Node-Auth` tokens
+(`v1.<node_id>.<unix_seconds>.<base58 signature>`, valid for an hour) signed by the wallet
+keys, since the scenario uses each wallet as its node id. It reuses two players; use
 `actors` for a different player mix. The local E2E test also exercises wallet
 login and captures the returned bearer tokens into each game's private context.
 It writes `cu_benchmark-backend-e2e.json` under the operating system's temporary

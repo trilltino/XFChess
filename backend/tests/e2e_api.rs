@@ -7,7 +7,6 @@ use axum::http::{Request, StatusCode};
 
 use serde_json::{json, Value};
 
-
 use tokio::sync::Mutex;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -49,7 +48,10 @@ async fn cu_benchmark_runs_100_games_through_backend() -> anyhow::Result<()> {
     .context("test setup failed")?;
     config["backend_url"] = json!(base);
     config["stages"] = json!([{"name":"100-games","games":100,"concurrency":10}]);
-    config["variables"] = json!({"white_wallet":white.pubkey().to_string(),"black_wallet":black.pubkey().to_string()});
+    config["variables"] = json!({
+        "white_wallet": white.pubkey().to_string(), "black_wallet": black.pubkey().to_string(),
+        "white_node_auth": common::node_token(&white), "black_node_auth": common::node_token(&black)
+    });
     let timestamp = chrono::Utc::now().timestamp() as u64;
     let message = format!("xfchess:login:{timestamp}");
     let mut login = Vec::new();
@@ -387,38 +389,56 @@ async fn broadcast_delay_gates_public_move_feed() -> anyhow::Result<()> {
 #[tokio::test]
 async fn presence_heartbeat_returns_count_and_targeted_lookup_obeys_expiry() -> anyhow::Result<()> {
     let app = spawn_app().await?;
+    let fresh_key = Keypair::new();
+    let stale_key = Keypair::new();
+    let fresh_id = fresh_key.pubkey().to_string();
+    let stale_id = stale_key.pubkey().to_string();
     let (status, body) = app
-        .admin_request(
+        .as_node(
+            &fresh_key,
             "PUT",
             "/presence",
             Some(&json!({
-                "node_id": "fresh", "pubkey": null, "display_name": "Fresh",
+                "node_id": fresh_id, "pubkey": null, "display_name": "Fresh",
                 "status": "online", "game_id": null, "updated_at": chrono::Utc::now(),
             })),
         )
         .await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["online_count"], 1);
-    let (status, body) = app.get("/presence/fresh").await?;
+    let (status, body) = app.get(&format!("/presence/{fresh_id}")).await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["node_id"], "fresh");
+    assert_eq!(body["node_id"], json!(fresh_id));
     let (status, body) = app.get("/presence/missing").await?;
     assert_eq!(status, StatusCode::OK);
     assert!(body.is_null());
+    // Freshness is the server's clock: a caller-supplied timestamp cannot keep it online.
     let (status, body) = app
-        .admin_request(
+        .as_node(
+            &stale_key,
             "PUT",
             "/presence",
             Some(&json!({
-                "node_id": "stale", "pubkey": null, "display_name": "Stale",
+                "node_id": stale_id, "pubkey": null, "display_name": "Stale",
                 "status": "online", "game_id": null,
                 "updated_at": chrono::Utc::now() - chrono::Duration::seconds(60),
             })),
         )
         .await?;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["online_count"], 1);
-    let (_, body) = app.get("/presence/stale").await?;
+    assert_eq!(body["online_count"], 2);
+    // An entry that stopped heartbeating ages out.
+    app.state
+        .presence
+        .upsert(backend::signing::social::presence::Presence {
+            node_id: stale_id.clone(),
+            pubkey: None,
+            display_name: "Stale".into(),
+            status: backend::signing::social::presence::PresenceStatus::Online,
+            game_id: None,
+            updated_at: chrono::Utc::now() - chrono::Duration::seconds(60),
+        });
+    let (_, body) = app.get(&format!("/presence/{stale_id}")).await?;
     assert!(body.is_null());
     let (_, body) = app.get("/presence").await?;
     assert_eq!(
@@ -1316,24 +1336,34 @@ fn announce_body(game_id: &str, host: &str) -> Value {
 async fn start_casual_game(
     app: &TestApp,
     game_id: &str,
-    host: &str,
-    joiner: &str,
+    host: &Keypair,
+    joiner: &Keypair,
 ) -> anyhow::Result<()> {
+    let host_id = host.pubkey().to_string();
     let (_, b) = app
-        .post_json("/p2p/announce", &announce_body(game_id, host))
-        .await?;
-    assert_eq!(b["success"], true);
-    let (_, b) = app
-        .post_json(
-            "/p2p/join",
-            &json!({ "game_id": game_id, "joiner_node_id": joiner, "password": null }),
+        .as_node(
+            host,
+            "POST",
+            "/p2p/announce",
+            Some(&announce_body(game_id, &host_id)),
         )
         .await?;
     assert_eq!(b["success"], true);
     let (_, b) = app
-        .post_json(
+        .as_node(
+            joiner,
+            "POST",
+            "/p2p/join",
+            Some(&json!({ "game_id": game_id, "joiner_node_id": joiner.pubkey().to_string(), "password": null })),
+        )
+        .await?;
+    assert_eq!(b["success"], true);
+    let (_, b) = app
+        .as_node(
+            host,
+            "POST",
             "/p2p/accept",
-            &json!({ "game_id": game_id, "host_node_id": host }),
+            Some(&json!({ "game_id": game_id, "host_node_id": host_id })),
         )
         .await?;
     assert_eq!(b["success"], true);
@@ -1351,12 +1381,16 @@ async fn drill_lobby_and_join_ack_survive_backend_restart() -> anyhow::Result<()
     let game_id = "drill-relay-1";
     let announce = announce_body(game_id, &host.pubkey().to_string());
 
-    let (_, b) = app.post_json("/p2p/announce", &announce).await?;
+    let (_, b) = app
+        .as_node(&host, "POST", "/p2p/announce", Some(&announce))
+        .await?;
     assert_eq!(b["success"], true);
     let (_, b) = app
-        .post_json(
+        .as_node(
+            &joiner,
+            "POST",
             "/p2p/join",
-            &json!({ "game_id": game_id, "joiner_node_id": joiner.pubkey().to_string(), "password": null }),
+            Some(&json!({ "game_id": game_id, "joiner_node_id": joiner.pubkey().to_string(), "password": null })),
         )
         .await?;
     assert_eq!(b["success"], true);
@@ -1376,9 +1410,11 @@ async fn drill_lobby_and_join_ack_survive_backend_restart() -> anyhow::Result<()
     let app = spawn_app_on(&session_url, &vault_url).await?;
 
     let (_, b) = app
-        .post_json(
+        .as_node(
+            &joiner,
+            "POST",
             "/p2p/poll",
-            &json!({ "game_id": game_id, "node_id": joiner.pubkey().to_string(), "since_index": 0 }),
+            Some(&json!({ "game_id": game_id, "node_id": joiner.pubkey().to_string(), "since_index": 0 })),
         )
         .await?;
     assert_eq!(b["messages"], json!([ack]), "JOIN_ACK survives the restart");
@@ -1386,9 +1422,11 @@ async fn drill_lobby_and_join_ack_survive_backend_restart() -> anyhow::Result<()
 
     // A cursor from before the restart that is past the end must not panic.
     let (s, b) = app
-        .post_json(
+        .as_node(
+            &joiner,
+            "POST",
             "/p2p/poll",
-            &json!({ "game_id": game_id, "node_id": joiner.pubkey().to_string(), "since_index": 50 }),
+            Some(&json!({ "game_id": game_id, "node_id": joiner.pubkey().to_string(), "since_index": 50 })),
         )
         .await?;
     assert_eq!(s, StatusCode::OK);
@@ -1397,13 +1435,17 @@ async fn drill_lobby_and_join_ack_survive_backend_restart() -> anyhow::Result<()
     // Heartbeat finds the room; a same-host re-announce keeps the joiner;
     // a different node cannot take the room over.
     let (_, b) = app
-        .post_json(
+        .as_node(
+            &host,
+            "POST",
             "/p2p/heartbeat",
-            &json!({ "game_id": game_id, "host_node_id": host.pubkey().to_string() }),
+            Some(&json!({ "game_id": game_id, "host_node_id": host.pubkey().to_string() })),
         )
         .await?;
     assert_eq!(b["success"], true);
-    let (_, b) = app.post_json("/p2p/announce", &announce).await?;
+    let (_, b) = app
+        .as_node(&host, "POST", "/p2p/announce", Some(&announce))
+        .await?;
     assert_eq!(b["success"], true);
     let (_, listing) = app.get("/p2p/games").await?;
     let room = listing
@@ -1414,8 +1456,11 @@ async fn drill_lobby_and_join_ack_survive_backend_restart() -> anyhow::Result<()
         .cloned()
         .context("room listed after restart")?;
     assert_eq!(room["players_joined"], 2, "re-announce kept the joiner");
-    let hijack = announce_body(game_id, &Keypair::new().pubkey().to_string());
-    let (_, b) = app.post_json("/p2p/announce", &hijack).await?;
+    let hijacker = Keypair::new();
+    let hijack = announce_body(game_id, &hijacker.pubkey().to_string());
+    let (_, b) = app
+        .as_node(&hijacker, "POST", "/p2p/announce", Some(&hijack))
+        .await?;
     assert_eq!(
         b["success"], false,
         "another node cannot overwrite the room"
@@ -1423,9 +1468,11 @@ async fn drill_lobby_and_join_ack_survive_backend_restart() -> anyhow::Result<()
 
     // The handshake completes after the restart.
     let (_, b) = app
-        .post_json(
+        .as_node(
+            &host,
+            "POST",
             "/p2p/accept",
-            &json!({ "game_id": game_id, "host_node_id": host.pubkey().to_string() }),
+            Some(&json!({ "game_id": game_id, "host_node_id": host.pubkey().to_string() })),
         )
         .await?;
     assert_eq!(b["success"], true);
@@ -1461,6 +1508,19 @@ async fn put_move(
     })
 }
 
+/// Writes a move as the node that owns `key`.
+async fn put_move_as(
+    app: &TestApp,
+    game_id: &str,
+    body: &Value,
+    key: &Keypair,
+) -> anyhow::Result<StatusCode> {
+    Ok(app
+        .as_node(key, "PUT", &format!("/game/{game_id}/moves"), Some(body))
+        .await?
+        .0)
+}
+
 async fn move_log(app: &TestApp, game_id: &str) -> anyhow::Result<Vec<Value>> {
     Ok({
         let (s, v) = app.get(&format!("/game/{game_id}/moves")).await?;
@@ -1479,15 +1539,23 @@ async fn drill_casual_game_survives_restart_without_duplicate_or_foreign_moves(
     let session_url = unique_db_url("drill_log_s");
     let vault_url = unique_db_url("drill_log_v");
     let app = spawn_app_on(&session_url, &vault_url).await?;
-    let host = Keypair::new().pubkey().to_string();
-    let joiner = Keypair::new().pubkey().to_string();
+    let host_key = Keypair::new();
+    let joiner_key = Keypair::new();
+    let host = host_key.pubkey().to_string();
+    let joiner = joiner_key.pubkey().to_string();
     let game_id = "drill-casual-1";
-    start_casual_game(&app, game_id, &host, &joiner).await?;
+    start_casual_game(&app, game_id, &host_key, &joiner_key).await?;
 
     let (m1, v1) = move_event(&host, "e2e4", FEN_E4, 1, "0");
     let (m2, v2) = move_event(&joiner, "e7e5", FEN_E4E5, 1, &v1);
-    assert_eq!(put_move(&app, game_id, &m1, None).await?, StatusCode::OK);
-    assert_eq!(put_move(&app, game_id, &m2, None).await?, StatusCode::OK);
+    assert_eq!(
+        put_move_as(&app, game_id, &m1, &host_key).await?,
+        StatusCode::OK
+    );
+    assert_eq!(
+        put_move_as(&app, game_id, &m2, &joiner_key).await?,
+        StatusCode::OK
+    );
 
     // Backend restarts mid-game.
     let app = spawn_app_on(&session_url, &vault_url).await?;
@@ -1498,22 +1566,39 @@ async fn drill_casual_game_survives_restart_without_duplicate_or_foreign_moves(
         "log survives restart"
     );
     // The joiner never saw its ack and retries the same write: idempotent.
-    assert_eq!(put_move(&app, game_id, &m2, None).await?, StatusCode::OK);
+    assert_eq!(
+        put_move_as(&app, game_id, &m2, &joiner_key).await?,
+        StatusCode::OK
+    );
     assert_eq!(
         move_log(&app, game_id).await?.len(),
         2,
         "retry is not a second move"
     );
     // A third party naming itself cannot write into the game after restart.
-    let stranger = Keypair::new().pubkey().to_string();
+    let stranger_key = Keypair::new();
+    let stranger = stranger_key.pubkey().to_string();
     let (foreign, _) = move_event(&stranger, "g1f3", FEN_NF3, 2, &v2);
     assert_eq!(
-        put_move(&app, game_id, &foreign, None).await?,
+        put_move_as(&app, game_id, &foreign, &stranger_key).await?,
         StatusCode::FORBIDDEN
+    );
+    // Naming a participant without holding its key proves nothing.
+    let (spoofed, _) = move_event(&joiner, "g1f3", FEN_NF3, 2, &v2);
+    assert_eq!(
+        put_move_as(&app, game_id, &spoofed, &stranger_key).await?,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        put_move(&app, game_id, &spoofed, None).await?,
+        StatusCode::UNAUTHORIZED
     );
     // Play continues on the persisted head.
     let (m3, _) = move_event(&host, "g1f3", FEN_NF3, 2, &v2);
-    assert_eq!(put_move(&app, game_id, &m3, None).await?, StatusCode::OK);
+    assert_eq!(
+        put_move_as(&app, game_id, &m3, &host_key).await?,
+        StatusCode::OK
+    );
     let log = move_log(&app, game_id).await?;
     assert_eq!(log.len(), 3);
     assert_eq!(log[2]["fen_after"], FEN_NF3);
@@ -1524,10 +1609,12 @@ async fn drill_casual_game_survives_restart_without_duplicate_or_foreign_moves(
 #[tokio::test]
 async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() -> anyhow::Result<()> {
     let app = spawn_app().await?;
-    let host = Keypair::new().pubkey().to_string();
-    let joiner = Keypair::new().pubkey().to_string();
+    let host_key = Keypair::new();
+    let joiner_key = Keypair::new();
+    let host = host_key.pubkey().to_string();
+    let joiner = joiner_key.pubkey().to_string();
     let game_id = "drill-seat-1";
-    start_casual_game(&app, game_id, &host, &joiner).await?;
+    start_casual_game(&app, game_id, &host_key, &joiner_key).await?;
     let host_jwt = app.state.jwt.issue(&host).context("jwt")?;
 
     // Device A holds the host seat. (The claim route checks on-chain
@@ -1544,9 +1631,16 @@ async fn drill_second_device_takes_the_seat_and_first_becomes_view_only() -> any
         StatusCode::OK
     );
 
-    // The opponent never claimed a seat: legacy behaviour.
+    // The opponent never claimed a seat: it still has to prove who it is.
     let (opp, v2) = move_event(&joiner, "e7e5", FEN_E4E5, 1, &v1);
-    assert_eq!(put_move(&app, game_id, &opp, None).await?, StatusCode::OK);
+    assert_eq!(
+        put_move(&app, game_id, &opp, None).await?,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        put_move_as(&app, game_id, &opp, &joiner_key).await?,
+        StatusCode::OK
+    );
 
     // Once claimed, the seat also needs the wallet token, not just its name.
     let (mut no_token, _) = move_event(&host, "g1f3", FEN_NF3, 2, &v2);
@@ -1622,18 +1716,25 @@ async fn casual_player_can_write_more_than_one_move_in_the_same_backend_process(
 ) -> anyhow::Result<()> {
     // Casual Iroh node IDs parse as Pubkeys but must not require on-chain session keys.
     let app = spawn_app().await?;
-    let host = Keypair::new().pubkey().to_string();
-    let joiner = Keypair::new().pubkey().to_string();
+    let host_key = Keypair::new();
+    let joiner_key = Keypair::new();
+    let host = host_key.pubkey().to_string();
+    let joiner = joiner_key.pubkey().to_string();
     let game_id = "casual-second-write";
-    start_casual_game(&app, game_id, &host, &joiner).await?;
+    start_casual_game(&app, game_id, &host_key, &joiner_key).await?;
 
     let (m1, v1) = move_event(&host, "e2e4", FEN_E4, 1, "0");
     let (m2, v2) = move_event(&joiner, "e7e5", FEN_E4E5, 1, &v1);
     let (m3, v3) = move_event(&host, "g1f3", FEN_NF3, 2, &v2);
     let fen4 = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
     let (m4, _) = move_event(&joiner, "b8c6", fen4, 2, &v3);
-    for m in [&m1, &m2, &m3, &m4] {
-        assert_eq!(put_move(&app, game_id, m, None).await?, StatusCode::OK);
+    for (m, key) in [
+        (&m1, &host_key),
+        (&m2, &joiner_key),
+        (&m3, &host_key),
+        (&m4, &joiner_key),
+    ] {
+        assert_eq!(put_move_as(&app, game_id, m, key).await?, StatusCode::OK);
     }
     assert_eq!(move_log(&app, game_id).await?.len(), 4);
 

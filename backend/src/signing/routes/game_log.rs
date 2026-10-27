@@ -591,11 +591,11 @@ async fn put_moves(
     ) {
         return StatusCode::UNPROCESSABLE_ENTITY.into_response();
     }
-    let bearer = match bearer_wallet(&state, &headers).await {
-        Ok(wallet) => wallet,
+    let proven = match proven_sender(&state, &headers, &req.sender_identity).await {
+        Ok(proven) => proven,
         Err(status) => return status.into_response(),
     };
-    put_event_handler(&state, &game_id, "moves", req, bearer).await
+    put_event_handler(&state, &game_id, "moves", req, proven).await
 }
 
 async fn get_chat(
@@ -609,6 +609,7 @@ async fn get_chat(
 async fn put_chat(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
+    headers: HeaderMap,
     Json(mut req): Json<GameEventReq>,
 ) -> Response {
     let ChessMessage::Chat(ref mut payload) = req.message else {
@@ -619,7 +620,11 @@ async fn put_chat(
         return StatusCode::UNPROCESSABLE_ENTITY.into_response();
     }
     payload.text = text;
-    put_event_handler(&state, &game_id, "chat", req, None).await
+    let proven = match proven_sender(&state, &headers, &req.sender_identity).await {
+        Ok(proven) => proven,
+        Err(status) => return status.into_response(),
+    };
+    put_event_handler(&state, &game_id, "chat", req, proven).await
 }
 
 fn wants_subscribe(headers: &HeaderMap) -> bool {
@@ -667,6 +672,24 @@ async fn bearer_wallet(
     Ok((!revoked).then_some(claims.sub))
 }
 
+/// The sender identity the caller has proven: a wallet JWT for that wallet, or an `X-Node-Auth`
+/// token for that node. `None` when the caller proved neither; a presented token that is
+/// invalid is refused outright.
+async fn proven_sender(
+    state: &AppState,
+    headers: &HeaderMap,
+    sender: &str,
+) -> Result<Option<String>, StatusCode> {
+    let node =
+        crate::signing::node_auth::node_from_headers(headers, chrono::Utc::now().timestamp())
+            .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    if node.as_deref() == Some(sender) {
+        return Ok(Some(sender.to_string()));
+    }
+    let wallet = bearer_wallet(state, headers).await?;
+    Ok(wallet.filter(|wallet| wallet == sender))
+}
+
 /// Unclaimed seats allow legacy writes. Claimed seats require both the
 /// current device ID and a JWT for the sender wallet.
 async fn seat_write_allowed(
@@ -681,7 +704,12 @@ async fn seat_write_allowed(
         .check(game_id, &req.sender_identity, req.device_id.as_deref())
         .await
     {
-        Ok(SeatCheck::Unclaimed) => Ok(()),
+        Ok(SeatCheck::Unclaimed) if bearer.as_deref() == Some(req.sender_identity.as_str()) => Ok(()),
+        Ok(SeatCheck::Unclaimed) => Err((
+            StatusCode::UNAUTHORIZED,
+            "writes must prove the sender: send the wallet token or X-Node-Auth for the sender identity"
+                .to_string(),
+        )),
         Ok(SeatCheck::Holder) if bearer.as_deref() == Some(req.sender_identity.as_str()) => Ok(()),
         Ok(SeatCheck::Holder) => Err((
             StatusCode::UNAUTHORIZED,
@@ -716,11 +744,17 @@ async fn put_event_handler(
     }
     // Moves, resignations and draw actions only from the device holding the
     // sender's seat; chat stays open to every device the player signed in on.
-    if !matches!(req.message, ChessMessage::Chat(_)) {
-        if let Err((status, msg)) = seat_write_allowed(state, game_id, &req, bearer).await {
-            warn!("[game-log] rejected event for game {game_id}: {msg}");
-            return (status, msg).into_response();
+    if matches!(req.message, ChessMessage::Chat(_)) {
+        if bearer.as_deref() != Some(req.sender_identity.as_str()) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "chat must prove the sender: send the wallet token or X-Node-Auth for the sender identity",
+            )
+                .into_response();
         }
+    } else if let Err((status, msg)) = seat_write_allowed(state, game_id, &req, bearer).await {
+        warn!("[game-log] rejected event for game {game_id}: {msg}");
+        return (status, msg).into_response();
     }
 
     let kind = kind_of(&req.message);

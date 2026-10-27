@@ -1116,8 +1116,11 @@ struct BroadcastTxResp {
 
 async fn broadcast_tx(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<BroadcastTxReq>,
 ) -> Result<Json<BroadcastTxResp>, (StatusCode, String)> {
+    // The relay spends our RPC quota, so it is for signed-in users only.
+    authed_wallet(&state, &headers).await?;
     use base64::engine::general_purpose;
     use base64::Engine as _;
     use solana_client::rpc_config::RpcSendTransactionConfig;

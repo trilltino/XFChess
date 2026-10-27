@@ -8,7 +8,7 @@ Status of this document: written 2026-10-26 from a static survey (test counts, C
 file-level inventory). No coverage had been measured at the time of that survey.
 Phase 0 is now collecting the first real numbers; targets remain provisional until it lands.
 
-Execution started 2026-10-26 (first WP2 slice, the route-auth matrix, landed the same day; see EXECUTION.md). Measured results, validation and remaining milestone
+Execution started 2026-10-26 (WP2 route-auth matrix landed the same day and every route now has a credential check as of 2026-10-27; see EXECUTION.md). Measured results, validation and remaining milestone
 criteria are tracked in [coverage/EXECUTION.md](coverage/EXECUTION.md). M0 is not
 complete until every package has a report and the ten-run flake audit has passed.
 

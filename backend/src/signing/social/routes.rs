@@ -13,7 +13,9 @@ use parking_lot::RwLock;
 
 use super::friends::{Contact, FriendRequest};
 use super::presence::{Presence, PresenceStatus};
+use crate::signing::node_auth::{attach_node_identity, RequireNode};
 use crate::signing::AppState;
+use axum::http::HeaderMap;
 
 #[derive(Deserialize)]
 pub struct SendFriendRequestBody {
@@ -98,8 +100,14 @@ fn err(msg: impl Into<String>) -> (StatusCode, Json<ErrorBody>) {
     )
 }
 
+/// Presence reads are public. Everything keyed by a node id requires that node's `X-Node-Auth`
+/// token, so one player cannot read or change another's requests, contacts, presence or invites.
 pub fn social_routes(invite_store: InviteStore) -> Router<AppState> {
-    Router::new()
+    let public = Router::new()
+        .route("/presence", get(get_presence))
+        .route("/presence/summary", get(get_presence_summary))
+        .route("/presence/{node_id}", get(get_node_presence));
+    let node_routes = Router::new()
         .route(
             "/friends/requests",
             post(send_friend_request).get(list_pending_requests),
@@ -107,34 +115,56 @@ pub fn social_routes(invite_store: InviteStore) -> Router<AppState> {
         .route("/friends/requests/{id}", put(respond_friend_request))
         .route("/friends", get(list_friends))
         .route("/friends/{contact_id}", delete(remove_friend))
-        .route("/presence", get(get_presence).put(update_presence))
-        .route("/presence/summary", get(get_presence_summary))
-        .route("/presence/{node_id}", get(get_node_presence))
+        .route("/presence", put(update_presence))
         .route(
             "/friends/invite",
             post({
                 let store = invite_store.clone();
-                move |state, body| push_lobby_invite(state, body, store)
+                move |state, node, body| push_lobby_invite(state, node, body, store)
             }),
         )
         .route(
             "/social/poll",
             get({
                 let store = invite_store;
-                move |state, query| poll_social(state, query, store)
+                move |state, node, query| poll_social(state, node, query, store)
             }),
         )
+        .layer(axum::middleware::from_fn(attach_node_identity));
+    public.merge(node_routes)
+}
+
+/// A wallet claimed in a social request counts only when the caller's bearer token is for that
+/// wallet; otherwise it is dropped, so nobody can read or file requests as someone else's wallet.
+async fn verified_wallet(
+    state: &AppState,
+    headers: &HeaderMap,
+    claimed: Option<&str>,
+) -> Option<String> {
+    let claimed = claimed?;
+    let wallet = crate::signing::routes::auth::authed_wallet(state, headers)
+        .await
+        .ok()?;
+    (wallet == claimed).then_some(wallet)
+}
+
+fn forbidden(error: (StatusCode, String)) -> (StatusCode, Json<ErrorBody>) {
+    (error.0, Json(ErrorBody { error: error.1 }))
 }
 
 async fn send_friend_request(
     State(state): State<AppState>,
+    node: RequireNode,
+    headers: HeaderMap,
     Json(body): Json<SendFriendRequestBody>,
 ) -> Result<Json<FriendRequest>, (StatusCode, Json<ErrorBody>)> {
+    node.owns(&body.from_node_id).map_err(forbidden)?;
+    let from_pubkey = verified_wallet(&state, &headers, body.from_pubkey.as_deref()).await;
     state
         .friends
         .send_request(
             body.from_node_id,
-            body.from_pubkey,
+            from_pubkey,
             body.from_display,
             body.to_node_id,
             body.to_pubkey,
@@ -147,11 +177,15 @@ async fn send_friend_request(
 
 async fn list_pending_requests(
     State(state): State<AppState>,
+    node: RequireNode,
+    headers: HeaderMap,
     Query(q): Query<FriendQuery>,
 ) -> Result<Json<Vec<FriendRequest>>, (StatusCode, Json<ErrorBody>)> {
+    node.owns(&q.node_id).map_err(forbidden)?;
+    let pubkey = verified_wallet(&state, &headers, q.pubkey.as_deref()).await;
     state
         .friends
-        .get_pending_requests(&q.node_id, q.pubkey.as_deref())
+        .get_pending_requests(&q.node_id, pubkey.as_deref())
         .await
         .map(Json)
         .map_err(|e| err(e.to_string()))
@@ -160,8 +194,26 @@ async fn list_pending_requests(
 async fn respond_friend_request(
     Path(request_id): Path<String>,
     State(state): State<AppState>,
+    node: RequireNode,
+    headers: HeaderMap,
     Json(body): Json<RespondBody>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorBody>)> {
+    node.owns(&body.responder_node_id).map_err(forbidden)?;
+    let wallet = crate::signing::routes::auth::authed_wallet(&state, &headers)
+        .await
+        .ok();
+    // Only the addressee may answer: the request's node, or the wallet it was addressed to.
+    if !state
+        .friends
+        .is_addressee(&request_id, &node.0, wallet.as_deref())
+        .await
+        .map_err(|e| err(e.to_string()))?
+    {
+        return Err(forbidden((
+            StatusCode::FORBIDDEN,
+            "This friend request is not addressed to you".to_string(),
+        )));
+    }
     let accept = body.action == "accept";
     state
         .friends
@@ -173,8 +225,10 @@ async fn respond_friend_request(
 
 async fn list_friends(
     State(state): State<AppState>,
+    node: RequireNode,
     Query(q): Query<FriendQuery>,
 ) -> Result<Json<Vec<Contact>>, (StatusCode, Json<ErrorBody>)> {
+    node.owns(&q.node_id).map_err(forbidden)?;
     let mut contacts = state
         .friends
         .get_contacts(&q.node_id)
@@ -194,8 +248,10 @@ async fn list_friends(
 async fn remove_friend(
     Path(contact_id): Path<String>,
     State(state): State<AppState>,
+    node: RequireNode,
     Query(q): Query<FriendQuery>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorBody>)> {
+    node.owns(&q.node_id).map_err(forbidden)?;
     state
         .friends
         .remove_contact(&q.node_id, &contact_id)
@@ -230,17 +286,27 @@ async fn get_node_presence(
 
 async fn update_presence(
     State(state): State<AppState>,
-    Json(p): Json<Presence>,
-) -> Json<serde_json::Value> {
+    node: RequireNode,
+    headers: HeaderMap,
+    Json(mut p): Json<Presence>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
+    node.owns(&p.node_id).map_err(forbidden)?;
+    p.pubkey = verified_wallet(&state, &headers, p.pubkey.as_deref()).await;
+    // Freshness decides who counts as online, so the clock is the server's, not the caller's.
+    p.updated_at = Utc::now();
     state.presence.upsert(p);
-    Json(serde_json::json!({ "online_count": state.presence.count_online() }))
+    Ok(Json(
+        serde_json::json!({ "online_count": state.presence.count_online() }),
+    ))
 }
 
 async fn push_lobby_invite(
     State(_state): State<AppState>,
+    node: RequireNode,
     Json(body): Json<LobbyInviteBody>,
     store: InviteStore,
-) -> StatusCode {
+) -> Result<StatusCode, (StatusCode, Json<ErrorBody>)> {
+    node.owns(&body.from_node_id).map_err(forbidden)?;
     let invite = LobbyInvite {
         game_id: body.game_id,
         from_node_id: body.from_node_id,
@@ -257,21 +323,23 @@ async fn push_lobby_invite(
             invites.drain(0..overflow);
         }
     }
-    StatusCode::OK
+    Ok(StatusCode::OK)
 }
 
 async fn poll_social(
     State(_state): State<AppState>,
+    node: RequireNode,
     Query(q): Query<SocialPollQuery>,
     store: InviteStore,
-) -> Json<SocialPollResponse> {
+) -> Result<Json<SocialPollResponse>, (StatusCode, Json<ErrorBody>)> {
+    node.owns(&q.node_id).map_err(forbidden)?;
     let map = store.read();
     let all = map.get(&q.node_id).map(|v| v.as_slice()).unwrap_or(&[]);
     let since = q.since_index.unwrap_or(0);
     let invites = all.get(since..).unwrap_or(&[]).to_vec();
     let next_index = since + invites.len();
-    Json(SocialPollResponse {
+    Ok(Json(SocialPollResponse {
         invites,
         next_index,
-    })
+    }))
 }

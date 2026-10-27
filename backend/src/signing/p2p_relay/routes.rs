@@ -8,6 +8,7 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 
+use crate::signing::node_auth::{attach_node_identity, RequireNode};
 use crate::signing::AppState;
 
 use super::types::{
@@ -27,23 +28,34 @@ pub struct LobbyFilter {
     pub sort: Option<String>,
 }
 
+/// Listing and region are public and `/p2p/message` carries its own signature. Every other route
+/// acts for the node named in its body, so it needs that node's `X-Node-Auth` token.
 pub fn p2p_routes() -> Router<AppState> {
-    Router::new()
+    let node_routes = Router::new()
         .route("/p2p/announce", post(announce_game))
-        .route("/p2p/games", get(list_games))
         .route("/p2p/join", post(join_game))
         .route("/p2p/accept", post(accept_join))
         .route("/p2p/leave", post(leave_game))
         .route("/p2p/heartbeat", post(heartbeat_game))
-        .route("/p2p/message", post(send_message))
         .route("/p2p/poll", post(poll_messages))
+        .layer(axum::middleware::from_fn(attach_node_identity));
+    Router::new()
+        .route("/p2p/games", get(list_games))
+        .route("/p2p/message", post(send_message))
         .route("/region", get(get_region))
+        .merge(node_routes)
+}
+
+fn owns(node: &RequireNode, claimed: &str) -> Result<(), StatusCode> {
+    node.owns(claimed).map_err(|(status, _)| status)
 }
 
 pub async fn announce_game(
     State(state): State<AppState>,
+    node: RequireNode,
     Json(req): Json<AnnounceGameRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
+    owns(&node, &req.host_node_id)?;
     let password_hash = req.password.as_deref().map(|p| {
         use argon2::{
             password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
@@ -187,8 +199,10 @@ pub async fn list_games(
 
 pub async fn join_game(
     State(state): State<AppState>,
+    node: RequireNode,
     Json(req): Json<JoinGameRequest>,
 ) -> Result<AxumJson<JoinGameResponse>, StatusCode> {
+    owns(&node, &req.joiner_node_id)?;
     let rejected = || {
         Ok(AxumJson(JoinGameResponse {
             success: false,
@@ -251,8 +265,10 @@ pub async fn join_game(
 
 pub async fn accept_join(
     State(state): State<AppState>,
+    node: RequireNode,
     Json(req): Json<AcceptJoinReq>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
+    owns(&node, &req.host_node_id)?;
     let (saved, joiner_node_id) = {
         let mut games = state.p2p_relay.write();
 
@@ -296,8 +312,10 @@ pub async fn accept_join(
 
 pub async fn leave_game(
     State(state): State<AppState>,
+    node: RequireNode,
     Json(req): Json<LeaveGameRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
+    owns(&node, &req.node_id)?;
     let saved = {
         let mut games = state.p2p_relay.write();
 
@@ -398,8 +416,10 @@ fn page_from(messages: &[String], since_index: usize) -> (Vec<String>, usize) {
 
 pub async fn poll_messages(
     State(state): State<AppState>,
+    node: RequireNode,
     Json(req): Json<PollMessagesRequest>,
 ) -> Result<AxumJson<PollMessagesResponse>, StatusCode> {
+    owns(&node, &req.node_id)?;
     let relay_state = state.p2p_relay;
     let games = relay_state.read();
 
@@ -428,8 +448,10 @@ pub async fn poll_messages(
 
 pub async fn heartbeat_game(
     State(state): State<AppState>,
+    node: RequireNode,
     Json(req): Json<HeartbeatRequest>,
 ) -> Result<AxumJson<AnnounceGameResponse>, StatusCode> {
+    owns(&node, &req.host_node_id)?;
     let saved = {
         let mut games = state.p2p_relay.write();
 

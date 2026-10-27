@@ -166,6 +166,22 @@ impl FriendManager {
             .collect())
     }
 
+    /// Whether `node_id` (or the verified `wallet`) is who the request was sent to.
+    pub async fn is_addressee(
+        &self,
+        request_id: &str,
+        node_id: &str,
+        wallet: Option<&str>,
+    ) -> Result<bool> {
+        let (to_node, to_pubkey): (Option<String>, Option<String>) =
+            sqlx::query_as("SELECT to_node_id, to_pubkey FROM friend_requests WHERE id = ?")
+                .bind(request_id)
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(to_node.as_deref() == Some(node_id)
+            || matches!((to_pubkey.as_deref(), wallet), (Some(to), Some(w)) if to == w))
+    }
+
     pub async fn respond_to_request(
         &self,
         request_id: &str,

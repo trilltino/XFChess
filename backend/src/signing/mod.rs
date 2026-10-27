@@ -11,6 +11,7 @@ pub mod identity;
 pub mod lichess_puzzles;
 pub mod linkage;
 pub mod move_auth;
+pub mod node_auth;
 pub mod orchestrator;
 pub mod p2p_relay;
 pub mod privy;

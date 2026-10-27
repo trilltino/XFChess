@@ -101,6 +101,8 @@ pub fn initialize_braid_network(
 
         let node_id = node.node_id();
         info!("[NET] BraidIrohNode spawned successfully (ID: {})", node_id);
+        // From here every backend call proves it is this node (lobby, friends, game writes).
+        crate::multiplayer::network::vps::set_node_key(Some(raw_bytes));
 
         event_tx_clone
             .send(NetworkEvent::NetworkInitialized {

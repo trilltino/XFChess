@@ -1,6 +1,7 @@
 use axum::{http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 
+use crate::signing::node_auth::{attach_node_identity, RequireNode};
 use crate::signing::AppState;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -22,12 +23,43 @@ pub struct ClientEventReq {
 }
 
 pub fn client_events_routes() -> Router<AppState> {
-    Router::new().route("/client-events", post(record_client_event))
+    Router::new()
+        .route("/client-events", post(record_client_event))
+        .layer(axum::middleware::from_fn(attach_node_identity))
 }
 
-async fn record_client_event(Json(event): Json<ClientEventReq>) -> StatusCode {
+/// Longest accepted field; an event is a log line, not a document.
+const MAX_FIELD_LEN: usize = 256;
+
+fn has_oversized_field(event: &ClientEventReq) -> bool {
+    [
+        Some(&event.event),
+        event.wallet_pubkey.as_ref(),
+        event.game_id.as_ref(),
+        event.role.as_ref(),
+        event.session_kind.as_ref(),
+        event.reason.as_ref(),
+        event.client_version.as_ref(),
+        event.platform.as_ref(),
+        event.backend_region.as_ref(),
+        event.tournament_id.as_ref(),
+        event.action.as_ref(),
+        event.signature.as_ref(),
+        event.status.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|field| field.len() > MAX_FIELD_LEN)
+}
+
+/// Events are attributed to the node that sent them, so a caller cannot write log lines as
+/// someone else; `wallet_pubkey` is the caller's own claim and is logged as such.
+async fn record_client_event(node: RequireNode, Json(event): Json<ClientEventReq>) -> StatusCode {
+    if has_oversized_field(&event) {
+        return StatusCode::UNPROCESSABLE_ENTITY;
+    }
     let event_json = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
-    tracing::info!(target: "client_events", "{}", event_json);
+    tracing::info!(target: "client_events", node_id = %node.0, "{}", event_json);
     StatusCode::ACCEPTED
 }
 

@@ -13,14 +13,16 @@
                       "white_wallet":  "${env:BENCH_WHITE_WALLET}",
                       "black_wallet":  "${env:BENCH_BLACK_WALLET}",
                       "white_token":  "${env:BENCH_WHITE_TOKEN}",
-                      "black_token":  "${env:BENCH_BLACK_TOKEN}"
+                      "black_token":  "${env:BENCH_BLACK_TOKEN}",
+    "white_node_auth": "${env:BENCH_WHITE_NODE_AUTH}",
+    "black_node_auth": "${env:BENCH_BLACK_NODE_AUTH}"
                   },
     "workflow":  {
                      "setup":  [
                                    {
                                        "name":  "announce",
                                        "method":  "POST",
-                                       "path":  "/p2p/announce",
+                                       "path":  "/p2p/announce", "headers": { "X-Node-Auth": "${white_node_auth}" },
                                        "body":  {
                                                     "game_id":  "${game_id}",
                                                     "host_node_id":  "${white_wallet}",
@@ -37,7 +39,7 @@
                                    {
                                        "name":  "join",
                                        "method":  "POST",
-                                       "path":  "/p2p/join",
+                                       "path":  "/p2p/join", "headers": { "X-Node-Auth": "${black_node_auth}" },
                                        "body":  {
                                                     "game_id":  "${game_id}",
                                                     "joiner_node_id":  "${black_wallet}"
@@ -49,7 +51,7 @@
                                    {
                                        "name":  "accept",
                                        "method":  "POST",
-                                       "path":  "/p2p/accept",
+                                       "path":  "/p2p/accept", "headers": { "X-Node-Auth": "${white_node_auth}" },
                                        "body":  {
                                                     "game_id":  "${game_id}",
                                                     "host_node_id":  "${white_wallet}"

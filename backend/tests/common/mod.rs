@@ -176,3 +176,42 @@ pub async fn spawn_app_on(session_url: &str, vault_url: &str) -> anyhow::Result<
         TestApp { state }
     })
 }
+
+/// An `X-Node-Auth` token proving `key`'s node id, issued `age_secs` ago.
+pub fn node_token_aged(key: &solana_sdk::signature::Keypair, age_secs: i64) -> String {
+    use solana_sdk::signature::Signer as _;
+    let node_id = key.pubkey().to_string();
+    let issued_at = chrono::Utc::now().timestamp() - age_secs;
+    let signature =
+        key.sign_message(backend::signing::node_auth::signable(&node_id, issued_at).as_bytes());
+    format!("v1.{node_id}.{issued_at}.{signature}")
+}
+
+pub fn node_token(key: &solana_sdk::signature::Keypair) -> String {
+    node_token_aged(key, 0)
+}
+
+impl TestApp {
+    /// A request made as the network node that owns `key`.
+    pub async fn as_node(
+        &self,
+        key: &solana_sdk::signature::Keypair,
+        method: &str,
+        uri: &str,
+        body: Option<&Value>,
+    ) -> anyhow::Result<(StatusCode, Value)> {
+        let mut builder = Request::builder()
+            .uri(uri)
+            .method(method)
+            .header("x-node-auth", node_token(key));
+        let body = match body {
+            Some(b) => {
+                builder = builder.header("content-type", "application/json");
+                Body::from(serde_json::to_vec(b).context("test setup failed")?)
+            }
+            None => Body::empty(),
+        };
+        self.send(builder.body(body).context("test setup failed")?)
+            .await
+    }
+}

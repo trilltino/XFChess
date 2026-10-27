@@ -442,9 +442,14 @@ pub fn p2p_leave_game_fast(game_id: String, node_id: &str) -> Result<(), String>
         .build()
         .map_err(|e| format!("vps p2p_leave (fast) client build: {e}"))?;
 
-    let resp = client
+    // This one-off client has no default headers, so it carries the login and node proofs itself.
+    let mut request = client
         .post(format!("{}/p2p/leave", vps_base()))
-        .json(&P2PLeaveReq { game_id, node_id })
+        .json(&P2PLeaveReq { game_id, node_id });
+    for (name, value) in super::client::auth_headers() {
+        request = request.header(name, value);
+    }
+    let resp = request
         .send()
         .map_err(|e| format!("vps p2p_leave (fast): {e}"))?;
 

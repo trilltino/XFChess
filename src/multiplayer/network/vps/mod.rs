@@ -15,8 +15,8 @@ pub mod tournament;
 
 // Re-exports preserving the flat `crate::multiplayer::network::vps::*` API.
 pub use client::{
-    auth_headers, client, client_fast, fetch_sol_usd_rate, logout, set_auth_token, vps_base,
-    vps_ws_base, wallet_bridge_port, SolUsdRateResponse,
+    auth_headers, client, client_fast, fetch_sol_usd_rate, logout, set_auth_token, set_node_key,
+    vps_base, vps_ws_base, wallet_bridge_port, SolUsdRateResponse,
 };
 pub use client_events::{emit_client_event, ClientEvent};
 pub use game::{

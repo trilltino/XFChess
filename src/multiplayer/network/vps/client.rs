@@ -4,6 +4,53 @@ const VPS_PROD_URL: &str = "https://xfchess.com";
 
 static AUTH_TOKEN: RwLock<Option<String>> = RwLock::new(None);
 
+/// The key this install's network node was created from. Its public half is the node id the
+/// lobby relay, social graph and casual game log identify us by.
+struct NodeKey {
+    signing: ed25519_dalek::SigningKey,
+    node_id: String,
+    /// `(issued_at, token)`: reused until it is half-way to expiry so the pooled HTTP client
+    /// (which is rebuilt whenever its default headers change) is not replaced on every call.
+    token: Option<(i64, String)>,
+}
+
+static NODE_KEY: RwLock<Option<NodeKey>> = RwLock::new(None);
+
+/// How long a node token is reused; the backend accepts one for an hour.
+const NODE_TOKEN_REUSE_SECS: i64 = 30 * 60;
+
+pub fn set_node_key(secret: Option<[u8; 32]>) {
+    if let Ok(mut guard) = NODE_KEY.write() {
+        *guard = secret.map(|bytes| {
+            let signing = ed25519_dalek::SigningKey::from_bytes(&bytes);
+            let node_id = bs58::encode(signing.verifying_key().as_bytes()).into_string();
+            NodeKey {
+                signing,
+                node_id,
+                token: None,
+            }
+        });
+    }
+}
+
+/// `v1.<node_id>.<issued_at>.<signature>`, signed over what `backend::signing::node_auth`
+/// verifies. Everything that acts for this node (lobby, friends, presence, game writes) sends it.
+fn node_token(now: i64) -> Option<String> {
+    use ed25519_dalek::Signer as _;
+    let mut guard = NODE_KEY.write().ok()?;
+    let key = guard.as_mut()?;
+    if let Some((issued_at, token)) = &key.token {
+        if now - issued_at < NODE_TOKEN_REUSE_SECS {
+            return Some(token.clone());
+        }
+    }
+    let signable = format!("xfchess-node-auth-v1:{}:{}", key.node_id, now);
+    let signature = bs58::encode(key.signing.sign(signable.as_bytes()).to_bytes()).into_string();
+    let token = format!("v1.{}.{}.{}", key.node_id, now, signature);
+    key.token = Some((now, token.clone()));
+    Some(token)
+}
+
 pub fn set_auth_token(token: Option<String>) {
     if let Ok(mut guard) = AUTH_TOKEN.write() {
         *guard = token;
@@ -68,6 +115,16 @@ fn default_headers() -> reqwest::header::HeaderMap {
             if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
                 h.insert(reqwest::header::AUTHORIZATION, value);
             }
+        }
+    }
+    // Proof of the network node id, for the routes that have no wallet.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or_default();
+    if let Some(token) = node_token(now) {
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(&token) {
+            h.insert("X-Node-Auth", value);
         }
     }
     // Legacy relay secret matching RELAY_SHARED_SECRET, sent with JWTs
@@ -204,6 +261,54 @@ pub fn fetch_sol_usd_rate() -> Result<SolUsdRateResponse, String> {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    /// The node key is process-global, so tests that set it take turns.
+    static NODE_KEY_TESTS: Mutex<()> = Mutex::new(());
+
+    /// Issued at t=1000 for the key `[7; 32]`. Ed25519 is deterministic, so this is exact.
+    const PINNED_TOKEN: &str = "v1.GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB.1000.4gHhj4H43dJeVWhjFZgTGo1p24TDwtiD8Box3AEzXRsmTQ3BUi3WV4pw8tYGrgLSkRywFhRCpZmJE8dthWQoRu7M";
+
+    #[test]
+    fn node_token_has_the_shape_the_backend_verifies() {
+        let _turn = NODE_KEY_TESTS.lock();
+        use ed25519_dalek::Verifier as _;
+        set_node_key(Some([7u8; 32]));
+        let token = node_token(1_000).unwrap_or_default();
+        let parts: Vec<&str> = token.split('.').collect();
+        assert_eq!(parts.len(), 4, "{token}");
+        // Also verified by the backend in `signing::node_auth` tests: the two must not drift.
+        assert_eq!(token, PINNED_TOKEN);
+        assert_eq!(parts[0], "v1");
+        assert_eq!(parts[2], "1000");
+        // The same bytes the backend rebuilds: prefix, node id, issue time.
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        assert_eq!(
+            parts[1],
+            bs58::encode(key.verifying_key().as_bytes()).into_string()
+        );
+        let signature = bs58::decode(parts[3]).into_vec().unwrap_or_default();
+        let signature = ed25519_dalek::Signature::from_slice(&signature);
+        assert!(signature.is_ok());
+        let signable = format!("xfchess-node-auth-v1:{}:1000", parts[1]);
+        assert!(signature
+            .map(|signature| key
+                .verifying_key()
+                .verify(signable.as_bytes(), &signature)
+                .is_ok())
+            .unwrap_or(false));
+        set_node_key(None);
+    }
+
+    #[test]
+    fn node_token_is_reused_until_half_expiry() {
+        let _turn = NODE_KEY_TESTS.lock();
+        set_node_key(Some([9u8; 32]));
+        let first = node_token(1_000);
+        assert_eq!(node_token(1_000 + NODE_TOKEN_REUSE_SECS - 1), first);
+        assert_ne!(node_token(1_000 + NODE_TOKEN_REUSE_SECS), first);
+        set_node_key(None);
+        assert_eq!(node_token(1_000), None);
+    }
 
     #[test]
     fn pool_reuses_connections_and_replaces_auth_on_login_and_logout(
