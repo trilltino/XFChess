@@ -16,7 +16,7 @@ fn idl_path() -> PathBuf {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     // XFChess monorepo layout first, then the extracted contracts repository.
     [
-        root.join("../../xfchessdotcom/src/lib/xfchess_game.json"),
+        root.join("../../apps/website/src/lib/xfchess_game.json"),
         root.join("../../idl/xfchess_game.json"),
     ]
     .into_iter()
@@ -168,7 +168,7 @@ fn every_idl_discriminator_is_the_anchor_derivation_of_its_name() -> anyhow::Res
     let instructions = idl["instructions"].as_array().cloned().unwrap_or_default();
     assert_eq!(
         instructions.len(),
-        82,
+        71,
         "instruction count is part of the ABI"
     );
     for ix in &instructions {
@@ -209,8 +209,8 @@ fn compiled_discriminators_agree_with_the_idl_for_representative_instructions() 
         xfchess_game::instruction::ForceUndelegateAfterTimeout::DISCRIMINATOR
     );
     assert_eq!(
-        discriminator("recover_stuck_delegation_v2"),
-        xfchess_game::instruction::RecoverStuckDelegationV2::DISCRIMINATOR
+        discriminator("recover_stuck_delegation"),
+        xfchess_game::instruction::RecoverStuckDelegation::DISCRIMINATOR
     );
     Ok(())
 }

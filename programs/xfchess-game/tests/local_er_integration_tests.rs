@@ -164,8 +164,8 @@ fn delegate_move_undelegate_restores_exact_game_bytes_and_retains_identity() -> 
         &payer,
         &[&white],
         ix(
-            xfchess_game::accounts::CreateGameV2 {
-                legacy: xfchess_game::accounts::CreateGame {
+            xfchess_game::accounts::CreateGame {
+                core: xfchess_game::accounts::CreateGameCore {
                     game,
                     escrow_pda: escrow,
                     player: white.pubkey(),
@@ -175,7 +175,7 @@ fn delegate_move_undelegate_restores_exact_game_bytes_and_retains_identity() -> 
                 recovery_identity: identity,
             }
             .to_account_metas(None),
-            xfchess_game::instruction::CreateGameV2 {
+            xfchess_game::instruction::CreateGame {
                 game_id,
                 wager_amount: 10_000_000,
                 match_type: MatchType::Rated,
@@ -191,8 +191,8 @@ fn delegate_move_undelegate_restores_exact_game_bytes_and_retains_identity() -> 
         &payer,
         &[&black],
         ix(
-            xfchess_game::accounts::JoinGameV2 {
-                legacy: xfchess_game::accounts::JoinGame {
+            xfchess_game::accounts::JoinGame {
+                core: xfchess_game::accounts::JoinGameCore {
                     game,
                     player_profile: profile(&black.pubkey()),
                     escrow_pda: escrow,
@@ -204,7 +204,7 @@ fn delegate_move_undelegate_restores_exact_game_bytes_and_retains_identity() -> 
                 recovery_identity: identity,
             }
             .to_account_metas(None),
-            xfchess_game::instruction::JoinGameV2 { game_id }.data(),
+            xfchess_game::instruction::JoinGame { game_id }.data(),
         ),
     )?;
     let session = Pubkey::find_program_address(
@@ -246,8 +246,8 @@ fn delegate_move_undelegate_restores_exact_game_bytes_and_retains_identity() -> 
         &payer,
         &[],
         ix(
-            xfchess_game::accounts::DelegateGameV2 {
-                legacy: xfchess_game::accounts::DelegateGameCtx {
+            xfchess_game::accounts::DelegateGame {
+                core: xfchess_game::accounts::DelegateGameCtx {
                     game,
                     payer: payer.pubkey(),
                     owner_program: program,
@@ -261,7 +261,7 @@ fn delegate_move_undelegate_restores_exact_game_bytes_and_retains_identity() -> 
                 recovery_identity: identity,
             }
             .to_account_metas(None),
-            xfchess_game::instruction::DelegateGameV2 {
+            xfchess_game::instruction::DelegateGame {
                 game_id,
                 valid_until: 600,
             }

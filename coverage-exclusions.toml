@@ -4,11 +4,11 @@ pattern = '(^|/)(examples|target)/'
 reason = 'Examples and generated build output are outside the maintained test surface.'
 
 [[exclude]]
-pattern = '(^|/)(main|build)\.rs$|/src/bin/|/backend/src/signing_server(_http)?\.rs$'
+pattern = '(^|/)(main|build)\.rs$|/src/bin/|/services/backend/src/signing_server(_http)?\.rs$'
 reason = 'Binary entry points and build scripts wire together tested components.'
 
 [[exclude]]
-pattern = '/src/rendering/|/src/audio/'
+pattern = '/crates/xfchess-client-bevy/src/rendering/|/crates/xfchess-client-bevy/src/audio/'
 reason = 'Rendering and audio need visual or device validation rather than line targets.'
 
 [[exclude]]

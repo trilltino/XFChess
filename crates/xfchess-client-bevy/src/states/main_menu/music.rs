@@ -1,0 +1,275 @@
+use bevy::audio::{AudioSinkPlayback, PlaybackMode, Volume};
+use bevy::prelude::*;
+
+use crate::core::GameState;
+
+const BASE_VOLUME: f32 = 0.30;
+const FADE_PER_SEC: f32 = 0.12;
+
+#[derive(Resource)]
+pub struct MenuMusic {
+    tracks: Vec<Handle<AudioSource>>,
+    titles: Vec<&'static str>,
+    index: usize,
+    muted: bool,
+    volume: f32,
+    skip_requested: bool,
+    widget_hidden: bool,
+}
+
+impl FromWorld for MenuMusic {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.resource::<AssetServer>();
+        // (asset path, display title)
+        let entries: [(&str, &str); 5] = [
+            ("audio/menu/gymnopedie_no1.mp3", "Satie — Gymnopédie No. 1"),
+            ("audio/menu/gnossienne_no1.mp3", "Satie — Gnossienne No. 1"),
+            (
+                "audio/menu/chopin_prelude_no4.mp3",
+                "Chopin — Prelude Op. 28 No. 4",
+            ),
+            (
+                "audio/menu/chopin_preludes_1_2_3.mp3",
+                "Chopin — Preludes Op. 28 Nos. 1–3",
+            ),
+            (
+                "audio/menu/chopin_preludes_10_11_12.mp3",
+                "Chopin — Preludes Op. 28 Nos. 10–12",
+            ),
+        ];
+        Self {
+            tracks: entries.iter().map(|(p, _)| asset_server.load(*p)).collect(),
+            titles: entries.iter().map(|(_, t)| *t).collect(),
+            index: 0,
+            muted: false,
+            volume: BASE_VOLUME,
+            skip_requested: false,
+            widget_hidden: false,
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct MenuMusicVoice {
+    current: f32,
+    target: f32,
+    outgoing: bool,
+    has_played: bool,
+}
+
+fn spawn_voice(commands: &mut Commands, music: &MenuMusic, index: usize) {
+    let Some(handle) = music.tracks.get(index) else {
+        return;
+    };
+    let target = if music.muted { 0.0 } else { music.volume };
+    commands.spawn((
+        AudioPlayer::new(handle.clone()),
+        PlaybackSettings {
+            mode: PlaybackMode::Once,
+            volume: Volume::Linear(0.0),
+            ..default()
+        },
+        MenuMusicVoice {
+            current: 0.0,
+            target,
+            outgoing: false,
+            has_played: false,
+        },
+        DespawnOnExit(GameState::MainMenu),
+        Name::new("MenuMusicVoice"),
+    ));
+}
+
+pub fn start_menu_music(
+    mut commands: Commands,
+    music: Res<MenuMusic>,
+    voices: Query<(), With<MenuMusicVoice>>,
+) {
+    if music.tracks.is_empty() || !voices.is_empty() {
+        return;
+    }
+    spawn_voice(&mut commands, &music, music.index);
+}
+
+pub fn drive_menu_music(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut music: ResMut<MenuMusic>,
+    mut voices: Query<(Entity, &mut MenuMusicVoice, &mut AudioSink)>,
+) {
+    let dt = time.delta_secs();
+    let step = FADE_PER_SEC * dt;
+    let mut advance = false;
+
+    for (entity, mut voice, mut sink) in voices.iter_mut() {
+        // The active voice tracks the live mute state; outgoing voices fade to 0.
+        if !voice.outgoing {
+            voice.target = if music.muted { 0.0 } else { music.volume };
+        }
+        if music.muted && !voice.outgoing {
+            // Mute is instant — a 2.5s fade-out reads as "the button did nothing".
+            // Unmuting still eases back in via the normal ramp below.
+            voice.current = 0.0;
+        } else if voice.current < voice.target {
+            voice.current = (voice.current + step).min(voice.target);
+        } else if voice.current > voice.target {
+            voice.current = (voice.current - step).max(voice.target);
+        }
+        sink.set_volume(Volume::Linear(voice.current));
+
+        if !sink.empty() {
+            voice.has_played = true;
+        }
+
+        if voice.outgoing {
+            // Faded out — drop it.
+            if voice.current <= 0.001 {
+                commands.entity(entity).despawn();
+            }
+        } else if voice.has_played && sink.empty() {
+            // Active track finished on its own — move to the next.
+            commands.entity(entity).despawn();
+            advance = true;
+        }
+    }
+
+    // Skip: fade the active voice out and crossfade into the next.
+    if music.skip_requested {
+        music.skip_requested = false;
+        for (_e, mut voice, _s) in voices.iter_mut() {
+            if !voice.outgoing {
+                voice.outgoing = true;
+                voice.target = 0.0;
+            }
+        }
+        advance = true;
+    }
+
+    if advance && !music.tracks.is_empty() {
+        music.index = (music.index + 1) % music.tracks.len();
+        spawn_voice(&mut commands, &music, music.index);
+    }
+}
+
+pub fn menu_music_widget(
+    mut contexts: bevy_egui::EguiContexts,
+    mut music: ResMut<MenuMusic>,
+    dialogs: Res<super::dialogs::MenuDialogs>,
+) {
+    use bevy_egui::egui;
+
+    if music.widget_hidden {
+        return; // honour a closed widget
+    }
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    let title = music.titles.get(music.index).copied().unwrap_or("");
+
+    egui::Area::new("menu_music_widget".into())
+        .enabled(!dialogs.is_open())
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-20.0, 20.0))
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                // Paint the speaker so it works with the menu's limited font glyphs.
+                let (icon, resp) =
+                    ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+                let color = if music.muted {
+                    egui::Color32::from_rgb(120, 120, 130)
+                } else {
+                    egui::Color32::from_rgb(205, 205, 215)
+                };
+                let point = |x, y| icon.min + egui::vec2(x, y);
+                let stroke = egui::Stroke::new(1.5, color);
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_max(point(3.0, 9.0), point(7.0, 15.0)),
+                    1.0,
+                    color,
+                );
+                ui.painter().add(egui::Shape::convex_polygon(
+                    vec![
+                        point(6.0, 9.0),
+                        point(12.0, 4.0),
+                        point(12.0, 20.0),
+                        point(6.0, 15.0),
+                    ],
+                    color,
+                    egui::Stroke::NONE,
+                ));
+                if music.muted {
+                    ui.painter()
+                        .line_segment([point(16.0, 9.0), point(22.0, 15.0)], stroke);
+                    ui.painter()
+                        .line_segment([point(16.0, 15.0), point(22.0, 9.0)], stroke);
+                } else {
+                    for (x, spread) in [(15.0, 4.0), (18.0, 7.0)] {
+                        ui.painter().add(egui::Shape::line(
+                            vec![
+                                point(x, 12.0 - spread),
+                                point(x + 2.0, 12.0 - spread * 0.5),
+                                point(x + 2.5, 12.0),
+                                point(x + 2.0, 12.0 + spread * 0.5),
+                                point(x, 12.0 + spread),
+                            ],
+                            stroke,
+                        ));
+                    }
+                }
+                let resp = resp.on_hover_text(if music.muted {
+                    "Unmute music"
+                } else {
+                    "Mute music"
+                });
+                if resp.clicked() {
+                    music.muted = !music.muted;
+                }
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(title)
+                        .size(11.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(205, 205, 215, 140)),
+                );
+
+                ui.add_space(4.0);
+                // Skip → next track (chevron renders fine in OpenSans).
+                let next = ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("›")
+                            .size(15.0)
+                            .color(egui::Color32::from_rgba_unmultiplied(205, 205, 215, 160)),
+                    )
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::NONE),
+                );
+                if next.clicked() {
+                    music.skip_requested = true;
+                }
+                if next.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+
+                ui.add_space(2.0);
+                // Close → hide the widget for the session (music keeps playing).
+                let close = ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("X")
+                            .size(11.0)
+                            .color(egui::Color32::from_rgba_unmultiplied(205, 205, 215, 120)),
+                    )
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::NONE),
+                );
+                if close.clicked() {
+                    music.widget_hidden = true;
+                }
+                if close.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+            });
+        });
+}

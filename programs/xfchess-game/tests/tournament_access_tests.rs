@@ -116,11 +116,11 @@ fn shard0(players: Vec<Pubkey>) -> anyhow::Result<Account> {
     })
 }
 
-fn profile(authority: Pubkey, blitz: f64) -> anyhow::Result<Account> {
+fn profile(authority: Pubkey, blitz: u32) -> anyhow::Result<Account> {
     Ok({
         let p = PlayerProfile {
             authority,
-            elo_rating: 120_000.0,
+            elo_rating: 120_000,
             elo_blitz: blitz,
             ..Default::default()
         };
@@ -256,7 +256,7 @@ async fn registration_rating_comes_from_the_profile_not_the_caller() -> anyhow::
     // A 1200-rated player cannot claim 1600 to enter a 1500-2000 event.
     ctx.set_account(
         &profile_pda(&player).0,
-        &AccountSharedData::from(profile(player, 120_000.0)?),
+        &AccountSharedData::from(profile(player, 120_000)?),
     );
     let err = send(&mut ctx, register_ix(player, host, 1600), &[])
         .await
@@ -272,7 +272,7 @@ async fn registration_rating_comes_from_the_profile_not_the_caller() -> anyhow::
     // seeded by the real rating.
     ctx.set_account(
         &profile_pda(&player).0,
-        &AccountSharedData::from(profile(player, 160_000.0)?),
+        &AccountSharedData::from(profile(player, 160_000)?),
     );
     send(&mut ctx, register_ix(player, host, 0), &[])
         .await
@@ -325,7 +325,7 @@ fn waiting_game(white: Pubkey, tournament_id: Option<u64>) -> anyhow::Result<Acc
 }
 
 fn session_join_ix(white: Pubkey, player: Pubkey, session_signer: Pubkey) -> Instruction {
-    let accounts = xfchess_game::__client_accounts_session_join_game::SessionJoinGame {
+    let accounts = xfchess_game::__client_accounts_session_join_game_core::SessionJoinGameCore {
         tournament: tournament_pda().0,
         tournament_players_shard_0: shard0_pda(),
         tournament_players_shard_1: None,
@@ -390,8 +390,8 @@ async fn session_join(
                 program_account(&delegation, 8 + TournamentSessionDelegation::INIT_SPACE)?,
             ),
             (game_pda(GAME_ID).0, waiting_game(creator, game_tournament)?),
-            (profile_pda(&creator).0, profile(creator, 0.0)?),
-            (profile_pda(&joiner).0, profile(joiner, 0.0)?),
+            (profile_pda(&creator).0, profile(creator, 0)?),
+            (profile_pda(&joiner).0, profile(joiner, 0)?),
         ]);
         let mut ctx = start(accounts).await;
 

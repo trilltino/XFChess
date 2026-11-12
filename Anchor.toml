@@ -5,10 +5,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-xfchess_game = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+xfchess_game = "6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N"
 
 [programs.localnet]
-xfchess_game = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+xfchess_game = "6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N"
 
 [provider]
 cluster = "devnet"

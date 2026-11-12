@@ -88,5 +88,23 @@ pub fn handler(
     profile.lichess_last_sync = Clock::get()?.unix_timestamp;
     profile.external_elo_source = 1;
 
+    // The first link seeds the starting ratings, once. A time control that already has rated
+    // games keeps its earned rating, and later syncs only refresh the stored external values.
+    if !profile.seeded_from_external {
+        use crate::elo::rating::{
+            games_field_mut, rating_field_mut, seed_rating_from_external, RatingBucket,
+        };
+        for (bucket, external) in [
+            (RatingBucket::Bullet, bullet_centiscale),
+            (RatingBucket::Blitz, blitz_centiscale),
+            (RatingBucket::Rapid, rapid_centiscale),
+        ] {
+            if *games_field_mut(profile, bucket) == 0 {
+                *rating_field_mut(profile, bucket) = seed_rating_from_external(external);
+            }
+        }
+        profile.seeded_from_external = true;
+    }
+
     Ok(())
 }

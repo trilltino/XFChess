@@ -1,0 +1,29 @@
+[Unit]
+Description=XFChess Backend API (STAGING)
+After=network.target
+
+# Isolate staging by user, data directory, and port; see infra/ops/docs/ENVIRONMENTS.md.
+[Service]
+Type=simple
+User=xfchess-staging
+WorkingDirectory=/opt/xfchess-staging
+ExecStart=/opt/xfchess-staging/signing-server-http
+EnvironmentFile=/opt/xfchess-staging/.env
+Environment=SIGNING_BIND_ADDRESS=127.0.0.1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+UMask=0077
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/xfchess-staging/data
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

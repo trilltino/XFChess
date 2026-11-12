@@ -7,7 +7,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: services/backend/Dockerfile
     container_name: xfchess-backend
     # Bind to localhost only — Docker's iptables rules bypass UFW, so a bare
     # "8090:8090" would expose the port publicly on a VPS. Reach it via nginx.
@@ -33,7 +33,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # Monitoring is configured in ops/monitoring/docker-compose.yml.
+  # Monitoring is configured in infra/ops/monitoring/docker-compose.yml.
 
 volumes:
   backend-data:

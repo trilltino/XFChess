@@ -56,16 +56,16 @@ release/
 /index.html
 
 # Ignore stray asset build output; game assets are tracked in Git.
-/assets/*.js
-/assets/*.css
+/apps/xfchess-client/assets/*.js
+/apps/xfchess-client/assets/*.css
 
 .anchor/
 .anchor112/
 anchor-build-output.txt
 
-xfchessdotcom/node_modules/.vite/
+apps/website/node_modules/.vite/
 
-tauri/target/
+apps/tauri/target/
 
 *.so
 *.dll
@@ -79,7 +79,7 @@ tauri/target/
 *.sqlite3
 
 # Backend runtime data (e.g. subscriber emails) — never commit live user data
-backend/data/
+services/backend/data/
 
 *.pid
 .backend.pid
@@ -94,27 +94,27 @@ backend/data/
 *-keypair.json
 id.json
 
-tauri/gen/
+apps/tauri/gen/
 
 # Package lock files — kept for the npm projects CI actually builds
 # (npm ci requires a committed lockfile; there is no root npm project).
 **/package-lock.json
-!xfchessdotcom/package-lock.json
-!tauri/wallet-ui/package-lock.json
-!tauri/tournament-admin/package-lock.json
+!apps/website/package-lock.json
+!apps/tauri/wallet-ui/package-lock.json
+!apps/tauri/tournament-admin/package-lock.json
 
 # Keep the Anchor IDL: frontend CI cannot regenerate it without the Solana toolchain.
-xfchessdotcom/src/lib/*.json
-!xfchessdotcom/src/lib/xfchess_game.json
+apps/website/src/lib/*.json
+!apps/website/src/lib/xfchess_game.json
 
 xfchess-wasm/pkg/
 
 # Generated Android outputs; keep Gradle wrappers tracked.
-mobile/app/src/main/jniLibs/
-mobile/build/
-mobile/app/build/
-mobile/.gradle/
-mobile/local.properties
+apps/android/app/src/main/jniLibs/
+apps/android/build/
+apps/android/app/build/
+apps/android/.gradle/
+apps/android/local.properties
 
 xfchess-anticheat-crate-*.md
 

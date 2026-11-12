@@ -21,7 +21,7 @@ cargo run --bin xfchess
 On Windows, `just dev` launches the local stack and `just dev2` launches two
 clients. The justfile provides local-development defaults; add overrides to an
 untracked root `.env` as needed. For backend-only configuration, copy
-`backend/.env.example` to `backend/.env`. Never commit real keys. The just launch
+`services/backend/.env.example` to `services/backend/.env`. Never commit real keys. The just launch
 recipes use Windows PowerShell. On other platforms, use the component Cargo/npm
 commands and install the native libraries from CI.
 

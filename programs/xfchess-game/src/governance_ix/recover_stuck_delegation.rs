@@ -4,7 +4,7 @@ use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
-pub struct RecoverStuckDelegation<'info> {
+pub struct RecoverStuckDelegationCore<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     /// CHECK: handler verifies program ownership and an empty, recovered account.
     pub game: UncheckedAccount<'info>,
@@ -21,7 +21,7 @@ pub struct RecoverStuckDelegation<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<RecoverStuckDelegation>, _game_id: u64) -> Result<()> {
+pub fn handler(ctx: Context<RecoverStuckDelegationCore>, _game_id: u64) -> Result<()> {
     require_keys_eq!(
         *ctx.accounts.game.owner,
         crate::ID,

@@ -22,6 +22,12 @@ pub struct TimeoutClaimed {
 pub fn handler(ctx: Context<ClaimTimeout>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let now = Clock::get()?.unix_timestamp;
+    #[cfg(feature = "move-validation")]
+    if game.to_account_info().data_len() != crate::fide::LEGACY_GAME_SPACE {
+        let info = game.to_account_info();
+        crate::fide::finish_timeout(game, &info, now, false)?;
+    } else { crate::lifecycle::terminal::finish_by_timeout(game, now)?; }
+    #[cfg(not(feature = "move-validation"))]
     crate::lifecycle::terminal::finish_by_timeout(game, now)?;
     let winner = match game.result {
         GameResult::Winner(winner) => winner,

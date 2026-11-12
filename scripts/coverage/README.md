@@ -44,7 +44,7 @@ the functional gate. Do not use that flag for new suites to hide removed tests.
 
 ```text
 node scripts/coverage/collect.mjs rust target/coverage/application/llvm.json application target/coverage/application/summary.json
-node scripts/coverage/collect.mjs js tauri/wallet-ui/coverage/coverage-summary.json wallet-ui target/coverage/wallet-ui.json
+node scripts/coverage/collect.mjs js apps/tauri/wallet-ui/coverage/coverage-summary.json wallet-ui target/coverage/wallet-ui.json
 node scripts/coverage/check-baseline.mjs target/coverage/wallet-ui.json
 node --test scripts/coverage/tooling.test.mjs
 ```

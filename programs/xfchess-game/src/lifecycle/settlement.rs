@@ -1,7 +1,9 @@
 use crate::common::escrow;
 use crate::constants::*;
-use crate::elo::calculate_elo_update;
-use crate::elo::rating::{bucket_for_time_control, rating_field_mut};
+use crate::elo::k_factor::{SCORE_DRAW, SCORE_LOSS, SCORE_WIN};
+use crate::elo::rating::{bucket_for_time_control, games_field_mut, rating_field_mut};
+use crate::elo::repeat::note_rated_opponent;
+use crate::elo::{calculate_elo_update, Side};
 use crate::errors::GameErrorCode;
 use crate::game_ix::finalize::EndGame;
 use crate::lifecycle::guards;
@@ -287,21 +289,35 @@ fn update_profiles(
             black_profile.username_set = false;
         }
 
-        let sa = match result {
-            GameResult::Winner(w) => {
-                if w == game_white {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            _ => 0.5,
+        let white_score = match result {
+            GameResult::Winner(w) if w == game_white => SCORE_WIN,
+            GameResult::Winner(_) => SCORE_LOSS,
+            _ => SCORE_DRAW,
         };
-        let white_before = *rating_field_mut(white_profile, bucket);
-        let black_before = *rating_field_mut(black_profile, bucket);
-        let (new_w, new_b) = calculate_elo_update(white_before, black_before, sa);
-        *rating_field_mut(white_profile, bucket) = new_w;
-        *rating_field_mut(black_profile, bucket) = new_b;
+        // Ratings move only for staked games, so a rated game that costs nothing cannot be used
+        // to farm rating with two wallets. The result still counts toward the record below.
+        if wager_amount >= MIN_RATED_WAGER_LAMPORTS {
+            let (white_key, black_key) = (white_profile.authority, black_profile.authority);
+            let white_weight = note_rated_opponent(white_profile, &black_key);
+            let black_weight = note_rated_opponent(black_profile, &white_key);
+            let white_side = Side {
+                rating: *rating_field_mut(white_profile, bucket),
+                games: *games_field_mut(white_profile, bucket),
+                weight_pct: white_weight,
+            };
+            let black_side = Side {
+                rating: *rating_field_mut(black_profile, bucket),
+                games: *games_field_mut(black_profile, bucket),
+                weight_pct: black_weight,
+            };
+            let (new_white, new_black) = calculate_elo_update(white_side, black_side, white_score);
+            *rating_field_mut(white_profile, bucket) = new_white;
+            *rating_field_mut(black_profile, bucket) = new_black;
+            let white_games = games_field_mut(white_profile, bucket);
+            *white_games = white_games.saturating_add(1);
+            let black_games = games_field_mut(black_profile, bucket);
+            *black_games = black_games.saturating_add(1);
+        }
         white_profile.last_played = now;
         black_profile.last_played = now;
 

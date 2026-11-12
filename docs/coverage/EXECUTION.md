@@ -39,7 +39,7 @@ profile. Full application, contract and desktop runs are pending.
 - Opt-in backend request observations: method, matched path, status and test
   thread, without concrete URLs, bodies or credentials. Independent inline
   routers still need the observation layer before they contribute runtime hits.
-- Shared backend integration harness extracted to `backend/tests/common` and
+- Shared backend integration harness extracted to `services/backend/tests/common` and
   used by the existing API suite and the inventory test. It disables startup
   network refreshes/sweeps. A fake chain, upstream mocks and fake time remain M1.
 - All 18 ignored tests audited by reason, component owner role and disposition.
@@ -80,7 +80,7 @@ change to payout ordering; the policy regression test remains part of M2.
 
 ## Update 2026-10-26 (route-auth, WP2 first slice)
 
-Added `backend/tests/route_auth.rs` (feature `coverage`, 7 tests, green). It classifies every
+Added `services/backend/tests/route_auth.rs` (feature `coverage`, 7 tests, green). It classifies every
 route the real router registers (Public / Admin / Wallet / Handler / Open) and fails on any
 unclassified or stale entry, so a new endpoint cannot ship without an auth decision.
 
@@ -101,7 +101,7 @@ in `blinks_admin_routes()`, mounted behind `require_api_key` + `persist_admin_re
 `build_app_router`. Removing the layer makes `admin_routes_require_the_admin_key` fail.
 
 Also fixed while running the safety gate: a test module placed before non-test items in
-`tauri/src/wallet/http.rs` and a stale import in `backend/tests/e2e_api.rs`. Both were
+`apps/tauri/src/wallet/http.rs` and a stale import in `services/backend/tests/e2e_api.rs`. Both were
 leftovers of the earlier coverage work. `scripts/ci/check_rust_safety.ps1` is clean.
 
 Still not done: M0 native reports and ten-run soak, M1 seams, M2 money tests, the rest of M3
@@ -109,7 +109,7 @@ Still not done: M0 native reports and ten-run soak, M1 seams, M2 money tests, th
 
 ## Update 2026-10-26 (pay-first policy test, Open-route hardening)
 
-- `backend/tests/money_policy.rs` (3 tests) enforces the recorded pay-first decision: the
+- `services/backend/tests/money_policy.rs` (3 tests) enforces the recorded pay-first decision: the
   anti-cheat modules contain no payout/refund/chain-submission calls, `finalize_game` submits the
   payout before analysis is queued and never consults anti-cheat, and `record_settled_game` only
   queues analysis. These are source-level invariants; a behavioural version needs the M1 fake chain.
@@ -129,7 +129,7 @@ Still not done: M0 native reports and ten-run soak, M1 seams, M2 money tests, th
 The 15 pinned credential-less routes are closed; `route_auth.rs` has no `Open` class any more
 (14 tests, a new `Node` class replaces it).
 
-- **Node identity** (`backend/src/signing/node_auth.rs`): lobby relay, social graph, client events
+- **Node identity** (`services/backend/src/signing/node_auth.rs`): lobby relay, social graph, client events
   and casual game writes are keyed by a network node id, which is the base58 ed25519 public key of
   the client's node. The client proves it holds that key with a self-issued token in `X-Node-Auth`
   (`v1.<node_id>.<unix_seconds>.<signature>`, valid for an hour, reused for 30 minutes). It is a

@@ -128,7 +128,7 @@ Then, from the repo root on Windows:
 ```sh
 just build-android
 ```
-This fetches the Android Stockfish binary, cross-compiles the game library for `arm64-v8a`, and assembles an **unsigned** release APK in `mobile/app/build/outputs/apk/release/`. An unsigned APK cannot be installed as is. Sign it with your own key first (`apksigner`), or use a debug build from Android Studio, then install with:
+This fetches the Android Stockfish binary, cross-compiles the game library for `arm64-v8a`, and assembles an **unsigned** release APK in `apps/android/app/build/outputs/apk/release/`. An unsigned APK cannot be installed as is. Sign it with your own key first (`apksigner`), or use a debug build from Android Studio, then install with:
 ```sh
 adb install -r path/to/app.apk
 ```
@@ -144,7 +144,7 @@ You only need this if you want to change the code.
 git clone https://github.com/trilltino/XFChess.git
 cd XFChess
 cargo install just
-(cd tauri/wallet-ui && npm ci && npm run build)
+(cd apps/tauri/wallet-ui && npm ci && npm run build)
 cargo build --release --bin xfchess --features solana
 cargo build --release -p xfchess-tauri
 ```

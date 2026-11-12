@@ -1,0 +1,967 @@
+use crate::core::state::GameMode;
+use crate::game::camera_modes::CameraLockState;
+use crate::game::resources::{CurrentTurn, Players, Selection};
+use bevy::camera::visibility::RenderLayers;
+use bevy::camera::ClearColorConfig;
+use bevy::{
+    input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
+    input::touch::{Touch, Touches},
+    prelude::*,
+};
+use std::f32::consts::PI;
+
+pub const BOARD_LAYER: usize = 9;
+
+pub const UI_ONLY_LAYER: usize = 30;
+
+#[derive(Component)]
+pub struct BoardCamera;
+
+#[derive(Component, Debug, Reflect)]
+#[reflect(Component)]
+pub struct CameraController {
+    pub move_speed: f32,
+
+    pub smoothing: f32,
+
+    pub zoom_speed: f32,
+
+    pub zoom_smoothing: f32,
+
+    pub current_zoom: f32,
+
+    pub target_zoom: f32,
+
+    pub min_zoom: f32,
+
+    pub max_zoom: f32,
+
+    pub pitch: f32,
+
+    pub yaw: f32,
+
+    pub rotation_sensitivity: f32,
+
+    pub initialized: bool,
+}
+
+impl Default for CameraController {
+    fn default() -> Self {
+        Self {
+            move_speed: 12.0,
+            smoothing: 0.3,
+            zoom_speed: 2.0,
+            zoom_smoothing: 0.15, // Slower than movement for cinematic feel
+            current_zoom: 11.5,   // Pull the board in more so it reads as larger
+            target_zoom: 11.5,
+            min_zoom: 3.5,             // Keep close-up detail without clipping
+            max_zoom: 20.0, // Keep a slightly tighter overview range so the board remains dominant
+            pitch: 0.0,     // Will be initialized from Transform
+            yaw: 0.0,       // Will be initialized from Transform
+            rotation_sensitivity: 1.0, // Bevy reference default
+            initialized: false, // Needs initialization
+        }
+    }
+}
+
+pub fn camera_zoom_input_system(
+    mouse_scroll: Res<AccumulatedMouseScroll>,
+    mut query: Query<&mut CameraController>,
+) {
+    // Only process if there was scroll input this frame
+    // AccumulatedMouseScroll.delta is a Vec2 where y is vertical scroll
+    if mouse_scroll.delta.y != 0.0 {
+        for mut controller in query.iter_mut() {
+            // Positive normalized scroll decreases camera height to zoom in.
+            let zoom_delta = -mouse_scroll.delta.y * controller.zoom_speed;
+
+            controller.target_zoom = (controller.target_zoom + zoom_delta)
+                .clamp(controller.min_zoom, controller.max_zoom);
+        }
+    }
+}
+
+pub fn camera_zoom_system(mut query: Query<(&mut Transform, &mut CameraController)>) {
+    for (mut transform, mut controller) in query.iter_mut() {
+        // Smoothly interpolate current zoom toward target
+        controller.current_zoom = controller
+            .current_zoom
+            .lerp(controller.target_zoom, controller.zoom_smoothing);
+
+        transform.translation.y = controller.current_zoom;
+    }
+}
+
+pub fn camera_movement_system(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    selection: Res<Selection>,
+    mut query: Query<(&mut Transform, &CameraController)>,
+) {
+    // Disable camera movement while dragging a piece
+    if selection.is_dragging {
+        return;
+    }
+
+    for (mut transform, controller) in query.iter_mut() {
+        let mut direction = Vec3::ZERO;
+
+        // Get camera's basis vectors
+        let forward = transform.forward();
+        let right = transform.right();
+        let up = transform.up();
+
+        // When looking straight down, Forward.xz is zero; use UP for board-plane movement.
+        let is_vertical = forward.y.abs() > 0.9;
+
+        // When vertical (top-down), use UP vector for forward/backward
+        // When angled (perspective), use projected FORWARD vector
+        let forward_xz = if is_vertical {
+            Vec3::new(up.x, 0.0, up.z).normalize_or_zero()
+        } else {
+            Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero()
+        };
+
+        let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
+
+        // Accumulate movement direction based on pressed keys
+        if keyboard.pressed(KeyCode::KeyW) {
+            direction += forward_xz;
+        }
+        if keyboard.pressed(KeyCode::KeyS) {
+            direction -= forward_xz;
+        }
+        if keyboard.pressed(KeyCode::KeyD) {
+            direction += right_xz;
+        }
+        if keyboard.pressed(KeyCode::KeyA) {
+            direction -= right_xz;
+        }
+
+        // Normalize diagonal movement to prevent faster diagonal speed
+        direction = direction.normalize_or_zero();
+
+        let velocity = direction * controller.move_speed * time.delta_secs();
+        let target_position = transform.translation + velocity;
+
+        // Smoothly interpolate to target position (X and Z only)
+        // Y position is controlled by zoom system to prevent interference
+        let current_xz = Vec2::new(transform.translation.x, transform.translation.z);
+        let target_xz = Vec2::new(target_position.x, target_position.z);
+        let interpolated_xz = current_xz.lerp(target_xz, controller.smoothing);
+
+        transform.translation.x = interpolated_xz.x;
+        transform.translation.z = interpolated_xz.y;
+        // Note: Y (height) is not modified here, it's controlled by camera_zoom_system
+    }
+}
+
+pub const RADIANS_PER_DOT: f32 = 1.0 / 180.0;
+
+pub fn camera_rotation_system(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse_motion: Res<AccumulatedMouseMotion>,
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    selection: Res<Selection>,
+    mut query: Query<(&mut Transform, &mut CameraController)>,
+) {
+    // Disable camera rotation while dragging a piece
+    if selection.is_dragging {
+        return;
+    }
+
+    for (mut transform, mut controller) in query.iter_mut() {
+        if !controller.initialized {
+            let (yaw, pitch, _roll) = transform.rotation.to_euler(EulerRot::YXZ);
+            controller.yaw = yaw;
+            controller.pitch = pitch;
+            controller.initialized = true;
+            info!(
+                "[CAMERA] Initialized - pitch: {:.2}, yaw: {:.2}",
+                controller.pitch.to_degrees(),
+                controller.yaw.to_degrees()
+            );
+        }
+
+        let mut modified = false;
+
+        const KEYBOARD_ROTATION_SPEED: f32 = 2.0;
+
+        if keyboard.pressed(KeyCode::KeyQ) {
+            controller.yaw += KEYBOARD_ROTATION_SPEED * time.delta_secs();
+            modified = true;
+        }
+        if keyboard.pressed(KeyCode::KeyE) {
+            controller.yaw -= KEYBOARD_ROTATION_SPEED * time.delta_secs();
+            modified = true;
+        }
+
+        // Mouse Rotation (Right-click drag)
+        if mouse_button.pressed(MouseButton::Right) && mouse_motion.delta != Vec2::ZERO {
+            // Update pitch (up/down) with clamping to prevent gimbal lock
+            // Negative delta.y = move mouse up = look up = increase pitch
+            controller.pitch = (controller.pitch
+                - mouse_motion.delta.y * RADIANS_PER_DOT * controller.rotation_sensitivity)
+                .clamp(-PI / 2.0, PI / 2.0);
+
+            // Update yaw (left/right) - no clamping needed, wraps naturally
+            // Negative delta.x = move mouse left = look left = decrease yaw
+            controller.yaw -=
+                mouse_motion.delta.x * RADIANS_PER_DOT * controller.rotation_sensitivity;
+
+            modified = true;
+        }
+
+        if modified {
+            // Order: ZYX (roll=0, yaw, pitch) matches Bevy reference
+            transform.rotation =
+                Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+        }
+    }
+}
+
+pub fn camera_touch_gestures(
+    touches: Res<Touches>,
+    selection: Res<Selection>,
+    mut two_touch_state: Local<Option<(Vec2, f32)>>, // (previous midpoint, previous distance)
+    mut query: Query<(&mut Transform, &mut CameraController)>,
+) {
+    const TOUCH_PAN_SENSITIVITY: f32 = 0.01;
+    const TOUCH_PINCH_ZOOM_SENSITIVITY: f32 = 0.02;
+
+    let active: Vec<&Touch> = touches.iter().collect();
+
+    match active.as_slice() {
+        [touch] => {
+            two_touch_state.take();
+            if selection.is_dragging {
+                return;
+            }
+            let delta = touch.delta();
+            if delta == Vec2::ZERO {
+                return;
+            }
+            for (mut transform, controller) in query.iter_mut() {
+                let forward = transform.forward();
+                let right = transform.right();
+                let up = transform.up();
+                let is_vertical = forward.y.abs() > 0.9;
+                let forward_xz = if is_vertical {
+                    Vec3::new(up.x, 0.0, up.z).normalize_or_zero()
+                } else {
+                    Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero()
+                };
+                let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
+
+                // Negate drag to move the camera as though grabbing the board surface.
+                let world_delta = (forward_xz * delta.y - right_xz * delta.x)
+                    * TOUCH_PAN_SENSITIVITY
+                    * controller.move_speed;
+
+                transform.translation.x += world_delta.x;
+                transform.translation.z += world_delta.z;
+            }
+        }
+        [a, b] => {
+            let pos_a = a.position();
+            let pos_b = b.position();
+            let midpoint = (pos_a + pos_b) * 0.5;
+            let distance = pos_a.distance(pos_b);
+
+            if let Some((prev_midpoint, prev_distance)) = *two_touch_state {
+                let midpoint_delta = midpoint - prev_midpoint;
+                let distance_delta = distance - prev_distance;
+
+                for (mut transform, mut controller) in query.iter_mut() {
+                    if distance_delta != 0.0 {
+                        // Spreading fingers decreases target_zoom, matching scroll-up zoom direction.
+                        controller.target_zoom = (controller.target_zoom
+                            - distance_delta * TOUCH_PINCH_ZOOM_SENSITIVITY)
+                            .clamp(controller.min_zoom, controller.max_zoom);
+                    }
+
+                    if midpoint_delta != Vec2::ZERO {
+                        controller.pitch = (controller.pitch
+                            - midpoint_delta.y * RADIANS_PER_DOT * controller.rotation_sensitivity)
+                            .clamp(-PI / 2.0, PI / 2.0);
+                        controller.yaw -=
+                            midpoint_delta.x * RADIANS_PER_DOT * controller.rotation_sensitivity;
+                        transform.rotation =
+                            Quat::from_euler(EulerRot::ZYX, 0.0, controller.yaw, controller.pitch);
+                    }
+                }
+            }
+
+            *two_touch_state = Some((midpoint, distance));
+        }
+        _ => {
+            two_touch_state.take();
+        }
+    }
+}
+
+pub fn get_is_black_view(
+    players: &Players,
+    current_turn: &CurrentTurn,
+    game_mode: GameMode,
+) -> bool {
+    // In local multiplayer, flip based on whose turn it is
+    if game_mode == GameMode::MultiplayerLocal {
+        return current_turn.color == crate::rendering::pieces::PieceColor::Black;
+    }
+
+    // In other modes (SinglePlayer vs AI, Online), fix to the human player's perspective
+    if players.player_1.is_human
+        && players.player_1.color == crate::rendering::pieces::PieceColor::Black
+    {
+        return true;
+    }
+    if players.player_2.is_human
+        && players.player_2.color == crate::rendering::pieces::PieceColor::Black
+    {
+        return true;
+    }
+
+    false
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct CameraRotationState {
+    pub target_yaw: f32,
+
+    pub current_yaw: f32,
+
+    pub is_rotating: bool,
+
+    pub rotation_speed: f32,
+
+    pub last_turn_color: Option<crate::rendering::pieces::PieceColor>,
+}
+
+impl CameraRotationState {
+    pub const BOARD_CENTER: Vec3 = Vec3::new(3.5, 0.0, 3.5);
+
+    pub const DEFAULT_ROTATION_SPEED: f32 = 2.0;
+}
+
+pub fn camera_rotate_on_turn_detection_system(
+    current_turn: Res<CurrentTurn>,
+    players: Res<Players>,
+    game_mode: Res<GameMode>,
+    mut rotation_state: ResMut<CameraRotationState>,
+) {
+    // Detect turn change or initial setup
+    let turn_color = current_turn.color;
+    if rotation_state.last_turn_color == Some(turn_color) {
+        return; // No change in turn
+    }
+
+    let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
+    let is_local_pvp = *game_mode == GameMode::MultiplayerLocal;
+
+    if is_local_pvp {
+        // In local PvP, rotate camera every turn
+        rotation_state.target_yaw = if is_black_view { PI } else { 0.0 };
+        rotation_state.last_turn_color = Some(turn_color);
+        rotation_state.rotation_speed = CameraRotationState::DEFAULT_ROTATION_SPEED;
+        rotation_state.is_rotating = true;
+    } else if rotation_state.last_turn_color.is_none() {
+        // At start of game in other modes, rotate to human player's side
+        let target_yaw = if is_black_view { PI } else { 0.0 };
+
+        rotation_state.target_yaw = target_yaw;
+        rotation_state.last_turn_color = Some(turn_color);
+
+        // If we need to rotate initially, do it instantly or smoothly
+        if (target_yaw - rotation_state.current_yaw).abs() > 0.01 {
+            rotation_state.rotation_speed = CameraRotationState::DEFAULT_ROTATION_SPEED * 2.0; // Faster initial rotation
+            rotation_state.is_rotating = true;
+        }
+    } else {
+        // In single player/network, don't rotate on turn changes after initial setup
+        rotation_state.last_turn_color = Some(turn_color);
+    }
+}
+
+pub fn camera_rotate_on_turn_system(
+    time: Res<Time>,
+    mut rotation_state: ResMut<CameraRotationState>,
+    mut camera_query: Query<&mut Transform, (With<Camera3d>, With<CameraController>)>,
+) {
+    if !rotation_state.is_rotating {
+        return;
+    }
+
+    let delta_yaw = rotation_state.target_yaw - rotation_state.current_yaw;
+
+    // Normalize delta to shortest path (-PI to PI range)
+    let normalized_delta = {
+        let mut d = delta_yaw;
+        while d > PI {
+            d -= 2.0 * PI;
+        }
+        while d < -PI {
+            d += 2.0 * PI;
+        }
+        d
+    };
+
+    // Check if we're close enough to target (within 0.01 radians)
+    if normalized_delta.abs() < 0.01 {
+        rotation_state.current_yaw = rotation_state.target_yaw;
+        rotation_state.is_rotating = false;
+        info!(
+            "[CAMERA] Rotation complete - yaw: {:.2}°",
+            rotation_state.current_yaw.to_degrees()
+        );
+        return;
+    }
+
+    // Smoothly interpolate toward target
+    let rotation_delta = normalized_delta * rotation_state.rotation_speed * time.delta_secs();
+    rotation_state.current_yaw += rotation_delta;
+
+    // Normalize current_yaw to 0-2PI range
+    rotation_state.current_yaw %= 2.0 * PI;
+    if rotation_state.current_yaw < 0.0 {
+        rotation_state.current_yaw += 2.0 * PI;
+    }
+
+    for mut transform in camera_query.iter_mut() {
+        // Store original position relative to board center
+        let relative_pos = transform.translation - CameraRotationState::BOARD_CENTER;
+
+        // Calculate total rotation from initial position
+        // Initial yaw is 0, so we rotate by current_yaw
+        let rotation_quat = Quat::from_rotation_y(rotation_state.current_yaw);
+
+        // Rotate position around board center
+        let rotated_pos = rotation_quat * relative_pos;
+
+        transform.translation = CameraRotationState::BOARD_CENTER + rotated_pos;
+
+        // Update rotation to look at board center with the new yaw
+        // Extract current pitch from transform
+        let (_, current_pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+
+        // Create new rotation with updated yaw and same pitch
+        // This maintains the viewing angle while rotating around the board
+        transform.rotation = Quat::from_euler(
+            EulerRot::YXZ,
+            rotation_state.current_yaw,
+            current_pitch,
+            0.0,
+        );
+    }
+}
+
+/// The 3D view is framed for the design window: the camera sits 11.5 above and 10 behind
+/// the board centre, with Bevy's default 45 degree vertical field of view.
+const DESIGN_HEIGHT: f32 = 11.5;
+const DESIGN_BEHIND: f32 = 10.0;
+const BASE_FOV: f32 = std::f32::consts::FRAC_PI_4;
+/// Wider than this the edges of the board stretch noticeably.
+const MAX_FOV: f32 = 1.75;
+
+/// The vertical field of view that keeps the 3D board clear of both side panels.
+///
+/// The board is centred in the window and the left panel covers its left edge, so what
+/// is free for it is `width - 2 * panel` (the same on the right, which keeps it centred).
+/// At the design size and any wider window that is plenty; in a narrow or square window
+/// the board would be cut off, so the view is zoomed out just enough to fit. Height
+/// needs no help: the board scales with it already. Sizes are logical pixels.
+pub fn fov_to_fit(window_width: f32, window_height: f32, panel_width: f32) -> f32 {
+    if !(window_width > 0.0 && window_height > 0.0) {
+        return BASE_FOV;
+    }
+    let distance = DESIGN_HEIGHT.hypot(DESIGN_BEHIND);
+    let (sin_tilt, cos_tilt) = (DESIGN_HEIGHT / distance, DESIGN_BEHIND / distance);
+    let half_tan = (BASE_FOV / 2.0).tan();
+    let pixels_per_unit = window_height / (2.0 * distance * half_tan);
+    // 8 squares, widened for the near edge in perspective and the pieces.
+    let board_width = 8.0 * pixels_per_unit * 1.25;
+    // The board foreshortened by the tilt, plus the height of the pieces.
+    let board_height = (8.0 * sin_tilt + 1.5 * cos_tilt) * pixels_per_unit * 1.1;
+    let free_width = (window_width - 2.0 * panel_width).max(window_width * 0.3);
+    let shrink = (free_width / board_width)
+        .min(0.95 * window_height / board_height)
+        .min(1.0);
+    (2.0 * (half_tan / shrink).atan()).min(MAX_FOV)
+}
+
+/// Keep the 3D board in view as the window changes shape.
+pub fn fit_board_camera(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    zoom: Res<crate::ui::responsive::UiZoom>,
+    mut cameras: Query<(&mut Projection, &Camera), With<BoardCamera>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let panel = crate::ui::styles::Layout::SIDE_PANEL_WIDTH * zoom.0;
+    let fov = fov_to_fit(window.width(), window.height(), panel);
+    for (mut projection, camera) in &mut cameras {
+        if !camera.is_active {
+            continue;
+        }
+        let needs_update = match &*projection {
+            Projection::Perspective(perspective) => (perspective.fov - fov).abs() > 1e-4,
+            _ => false,
+        };
+        if needs_update {
+            if let Projection::Perspective(perspective) = &mut *projection {
+                perspective.fov = fov;
+            }
+        }
+    }
+}
+
+pub fn setup_game_camera(
+    mut commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    view_mode: Res<crate::game::view_mode::ViewMode>,
+    mut ui_cam_query: Query<&mut Camera, Without<BoardCamera>>,
+    mut board_cam_query: Query<(Entity, &mut Transform, &mut Camera), With<BoardCamera>>,
+    players: Res<Players>,
+    current_turn: Res<CurrentTurn>,
+    game_mode: Res<GameMode>,
+    mut rotation_state: ResMut<CameraRotationState>,
+) {
+    // Only configure for standard views (TempleOS handles its own camera/view)
+    if view_mode.is_templeos() {
+        return;
+    }
+
+    let is_2d = *view_mode == crate::game::view_mode::ViewMode::Standard2D;
+    let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
+    let board_center = Vec3::new(3.5, 0.0, 3.5);
+
+    // Pre-initialize CameraRotationState to the correct side so the rotation
+    // system doesn't animate from the wrong position on game start.
+    let initial_yaw = if is_black_view {
+        std::f32::consts::PI
+    } else {
+        0.0
+    };
+    rotation_state.current_yaw = initial_yaw;
+    rotation_state.target_yaw = initial_yaw;
+    rotation_state.is_rotating = false;
+    rotation_state.last_turn_color = Some(current_turn.color);
+
+    let initial_height = 11.5;
+    let distance_behind = 6.5;
+
+    let xz_dist = distance_behind + 3.5;
+    let white_ref = board_center + Vec3::new(0.0, initial_height, -xz_dist);
+    let yaw_rot = Quat::from_rotation_y(initial_yaw);
+    let camera_pos = board_center + yaw_rot * (white_ref - board_center);
+
+    let new_transform = if is_2d {
+        let height = 16.0;
+        // A steep 7-degree angle preserves rank 1 at the bottom and files a-h left to right
+        // in this right-handed coordinate system.
+        let z_behind = 2.0; // units behind the back rank
+        let camera_pos_2d = if is_black_view {
+            Vec3::new(3.5, height, 7.0 + z_behind) // behind black's rank 8
+        } else {
+            Vec3::new(3.5, height, -z_behind) // behind white's rank 1
+        };
+        Transform::from_translation(camera_pos_2d).looking_at(board_center, Vec3::Y)
+    } else {
+        Transform::from_translation(camera_pos).looking_at(board_center, Vec3::Y)
+    };
+
+    let show_3d = !is_2d;
+
+    // The UI camera draws after the board; only 2D mode clears to a dark background.
+    if let Some(entity) = persistent_camera.entity {
+        if let Ok(mut camera) = ui_cam_query.get_mut(entity) {
+            camera.order = 1;
+            camera.clear_color = if show_3d {
+                ClearColorConfig::None
+            } else {
+                ClearColorConfig::Custom(Color::srgb(0.06, 0.06, 0.08))
+            };
+        }
+        commands
+            .entity(entity)
+            .insert(RenderLayers::layer(UI_ONLY_LAYER));
+    }
+
+    // Find the existing board camera (e.g. after a 'V' view-mode toggle) or
+    // spawn it fresh (first entry into InGame).
+    let mut board_entity = None;
+    if let Ok((entity, mut transform, mut camera)) = board_cam_query.single_mut() {
+        *transform = new_transform;
+        camera.order = 0;
+        camera.is_active = show_3d;
+        board_entity = Some(entity);
+    }
+    let board_entity = board_entity.unwrap_or_else(|| {
+        commands
+            .spawn((
+                Camera3d::default(),
+                Camera {
+                    order: 0,
+                    is_active: show_3d,
+                    clear_color: ClearColorConfig::Default,
+                    ..default()
+                },
+                RenderLayers::layer(BOARD_LAYER),
+                new_transform,
+                BoardCamera,
+                crate::core::game_scene(),
+                Name::new("Board Camera"),
+            ))
+            .id()
+    });
+
+    commands.entity(board_entity).insert(CameraController {
+        current_zoom: new_transform.translation.y,
+        target_zoom: new_transform.translation.y,
+        min_zoom: if is_2d { 3.5 } else { 2.0 },
+        max_zoom: if is_2d { 17.0 } else { 20.0 },
+        initialized: false,
+        ..Default::default()
+    });
+
+    info!(
+        "[CAMERA] Board camera positioned for {} view. is_black_view: {}",
+        if is_2d { "2D" } else { "3D" },
+        is_black_view
+    );
+}
+
+pub fn reset_game_camera(
+    mut commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    mut query: Query<&mut Camera>,
+) {
+    if let Some(entity) = persistent_camera.entity {
+        if let Ok(mut camera) = query.get_mut(entity) {
+            camera.order = 0;
+            camera.viewport = None;
+            camera.clear_color = ClearColorConfig::default();
+        }
+        commands.entity(entity).remove::<RenderLayers>();
+
+        info!("[CAMERA] Reset Persistent Camera to non-gameplay state");
+    }
+}
+
+pub fn camera_reset_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    players: Res<Players>,
+    current_turn: Res<CurrentTurn>,
+    game_mode: Res<GameMode>,
+    mut query: Query<(&mut Transform, &mut CameraController)>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyR) || keyboard.just_pressed(KeyCode::KeyN) {
+        // Player color detection enabled
+        let is_black_view = get_is_black_view(&players, &current_turn, *game_mode);
+
+        for (mut transform, mut controller) in query.iter_mut() {
+            // Standard Perspective defaults
+            // Position camera along X-axis for proper chess board orientation
+            let initial_height = 16.0;
+            let distance_behind = 8.0;
+            let board_center = Vec3::new(3.5, 0.0, 3.5);
+            let default_zoom = 16.0;
+
+            let default_pos = if is_black_view {
+                // Black view: camera on +Z side looking toward -Z
+                Vec3::new(3.5, initial_height, 7.0 + distance_behind)
+            } else {
+                // White view: camera on -Z side looking toward +Z
+                Vec3::new(3.5, initial_height, -distance_behind)
+            };
+
+            *transform = Transform::from_translation(default_pos).looking_at(board_center, Vec3::Y);
+
+            controller.current_zoom = default_zoom;
+            controller.target_zoom = default_zoom;
+            // Yaw is calculated from transform automatically when initialized=false
+            controller.initialized = false;
+
+            info!(
+                "[CAMERA] Reset to {} Perspective with correct board orientation",
+                if is_black_view { "Black" } else { "White" }
+            );
+        }
+    }
+}
+
+/// Switches between the 3D and 2D board (run on V, in a game).
+pub fn view_mode_toggle_input_system(
+    mut view_mode: ResMut<crate::game::view_mode::ViewMode>,
+    commands: Commands,
+    persistent_camera: Res<crate::PersistentEguiCamera>,
+    ui_cam_query: Query<&mut Camera, Without<BoardCamera>>,
+    board_cam_query: Query<(Entity, &mut Transform, &mut Camera), With<BoardCamera>>,
+    players: Res<Players>,
+    current_turn: Res<CurrentTurn>,
+    game_mode: Res<GameMode>,
+    rotation_state: ResMut<CameraRotationState>,
+) {
+    view_mode.toggle();
+    info!("[VIEW] Toggled view mode to {:?}", *view_mode);
+
+    setup_game_camera(
+        commands,
+        persistent_camera,
+        view_mode.into(),
+        ui_cam_query,
+        board_cam_query,
+        players,
+        current_turn,
+        game_mode,
+        rotation_state,
+    );
+}
+
+pub fn camera_controls_enabled(
+    camera_lock: Res<CameraLockState>,
+    friends: Option<Res<crate::multiplayer::social::ui::FriendsUiState>>,
+) -> bool {
+    !camera_lock.locked && !friends.is_some_and(|friends| friends.open)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_camera_controller_default() {
+        let controller = CameraController::default();
+
+        assert_eq!(controller.move_speed, 12.0);
+        assert_eq!(controller.smoothing, 0.3);
+        assert_eq!(controller.zoom_speed, 2.0);
+        assert_eq!(controller.zoom_smoothing, 0.15);
+        assert_eq!(controller.current_zoom, 11.5);
+        assert_eq!(controller.target_zoom, 11.5);
+        assert_eq!(controller.min_zoom, 3.5);
+        assert_eq!(controller.max_zoom, 20.0);
+    }
+
+    #[test]
+    fn test_zoom_limits_are_logical() {
+        let controller = CameraController::default();
+
+        assert!(controller.min_zoom < controller.current_zoom);
+        assert!(controller.current_zoom < controller.max_zoom);
+        assert!(controller.min_zoom < controller.max_zoom);
+    }
+
+    #[test]
+    fn test_zoom_smoothing_is_slower_than_movement() {
+        let controller = CameraController::default();
+
+        assert!(
+            controller.zoom_smoothing < controller.smoothing,
+            "Zoom should be smoother (slower) than movement for cinematic effect"
+        );
+    }
+
+    #[test]
+    fn test_camera_controller_custom_values() {
+        let controller = CameraController {
+            move_speed: 20.0,
+            smoothing: 0.5,
+            zoom_speed: 3.0,
+            zoom_smoothing: 0.2,
+            current_zoom: 10.0,
+            target_zoom: 10.0,
+            min_zoom: 3.0,
+            max_zoom: 50.0,
+            pitch: 0.0,
+            yaw: 0.0,
+            rotation_sensitivity: 1.0,
+            initialized: false,
+        };
+
+        assert_eq!(controller.zoom_speed, 3.0);
+        assert_eq!(controller.min_zoom, 3.0);
+        assert_eq!(controller.max_zoom, 50.0);
+    }
+
+    #[test]
+    fn test_zoom_interpolation_convergence() {
+        let mut current = 15.0;
+        let target = 10.0;
+        let smoothing = 0.15;
+
+        // Simulate several frames of interpolation
+        for _ in 0..10 {
+            current = current.lerp(target, smoothing);
+        }
+
+        // Should be closer to target but not exactly at it (smooth approach)
+        assert!(current < 15.0, "Should move from start position");
+        assert!(current > 10.0, "Should not reach target instantly");
+        assert!(
+            current < 12.0,
+            "Should make significant progress after 10 frames"
+        );
+    }
+
+    #[test]
+    fn test_zoom_clamping_min() {
+        let controller = CameraController::default();
+        let attempted_zoom: f32 = 2.0; // Below min_zoom (5.0)
+
+        let clamped = attempted_zoom.clamp(controller.min_zoom, controller.max_zoom);
+
+        assert_eq!(clamped, controller.min_zoom);
+    }
+
+    #[test]
+    fn test_zoom_clamping_max() {
+        let controller = CameraController::default();
+        let attempted_zoom: f32 = 50.0; // Above max_zoom (30.0)
+
+        let clamped = attempted_zoom.clamp(controller.min_zoom, controller.max_zoom);
+
+        assert_eq!(clamped, controller.max_zoom);
+    }
+
+    #[test]
+    fn test_zoom_direction_scroll_up() {
+        let scroll_up_delta = 1.0; // Positive scroll
+        let zoom_speed = 2.0;
+        let initial_target = 15.0;
+
+        // Scroll up = zoom in = negative change
+        let new_target = initial_target + (-scroll_up_delta * zoom_speed);
+
+        assert!(
+            new_target < initial_target,
+            "Scroll up should zoom in (decrease height)"
+        );
+        assert_eq!(new_target, 13.0);
+    }
+
+    #[test]
+    fn test_zoom_direction_scroll_down() {
+        let scroll_down_delta = -1.0; // Negative scroll
+        let zoom_speed = 2.0;
+        let initial_target = 15.0;
+
+        // Scroll down = zoom out = positive change
+        let new_target = initial_target + (-scroll_down_delta * zoom_speed);
+
+        assert!(
+            new_target > initial_target,
+            "Scroll down should zoom out (increase height)"
+        );
+        assert_eq!(new_target, 17.0);
+    }
+
+    #[test]
+    fn test_zoom_speed_affects_response() {
+        let scroll_delta: f32 = 1.0;
+        let slow_speed: f32 = 1.0;
+        let fast_speed: f32 = 3.0;
+
+        let slow_change = -scroll_delta * slow_speed;
+        let fast_change = -scroll_delta * fast_speed;
+
+        assert!(
+            fast_change.abs() > slow_change.abs(),
+            "Higher zoom_speed should create larger zoom changes"
+        );
+    }
+
+    #[test]
+    fn test_camera_controller_debug() {
+        let controller = CameraController::default();
+        let debug_str = format!("{:?}", controller);
+
+        assert!(debug_str.contains("CameraController"));
+        assert!(debug_str.contains("zoom")); // Should mention zoom fields
+    }
+
+    #[test]
+    fn test_zoom_range_is_reasonable_for_chess() {
+        let controller = CameraController::default();
+
+        assert!(
+            controller.min_zoom >= 3.0,
+            "Too close might clip through board"
+        );
+        assert!(
+            controller.max_zoom <= 50.0,
+            "Too far loses board visibility"
+        );
+
+        // Range should be wide enough for varied playstyles
+        let zoom_range = controller.max_zoom - controller.min_zoom;
+        assert!(
+            zoom_range >= 15.0,
+            "Range should allow significant zoom variation"
+        );
+    }
+
+    #[test]
+    fn test_multiple_zoom_steps() {
+        let mut target_zoom: f32 = 15.0;
+        let zoom_speed: f32 = 2.0;
+        let min_zoom: f32 = 5.0;
+        let max_zoom: f32 = 30.0;
+
+        // Scroll up 3 times (zoom in)
+        for _ in 0..3 {
+            target_zoom = (target_zoom - zoom_speed).clamp(min_zoom, max_zoom);
+        }
+
+        assert_eq!(target_zoom, 9.0);
+
+        // Scroll down 2 times (zoom out)
+        for _ in 0..2 {
+            target_zoom = (target_zoom + zoom_speed).clamp(min_zoom, max_zoom);
+        }
+
+        assert_eq!(target_zoom, 13.0);
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    #[test]
+    fn the_design_window_and_wider_keep_the_designed_view() {
+        let panel = 260.0;
+        assert_eq!(fov_to_fit(1280.0, 720.0, panel), BASE_FOV);
+        assert_eq!(fov_to_fit(1920.0, 1080.0, panel * 1.5), BASE_FOV);
+        assert_eq!(fov_to_fit(2560.0, 1080.0, panel * 1.5), BASE_FOV);
+    }
+
+    #[test]
+    fn a_square_window_zooms_out_so_the_board_clears_the_panels() {
+        let fov = fov_to_fit(900.0, 900.0, 208.0);
+        assert!(fov > BASE_FOV);
+        // The board then fits in the width left between the panels.
+        let distance = DESIGN_HEIGHT.hypot(DESIGN_BEHIND);
+        let pixels_per_unit = 900.0 / (2.0 * distance * (fov / 2.0).tan());
+        assert!(8.0 * pixels_per_unit * 1.25 <= 900.0 - 2.0 * 208.0 + 1.0);
+    }
+
+    #[test]
+    fn narrower_never_means_a_tighter_view() {
+        let mut last = fov_to_fit(1600.0, 800.0, 260.0);
+        for width in [1400.0, 1200.0, 1000.0, 900.0, 800.0] {
+            let fov = fov_to_fit(width, 800.0, 260.0);
+            assert!(fov >= last - 1e-6, "{width}px");
+            last = fov;
+        }
+    }
+
+    #[test]
+    fn the_view_never_stretches_past_the_limit_and_survives_nonsense() {
+        assert!(fov_to_fit(300.0, 900.0, 260.0) <= MAX_FOV);
+        assert_eq!(fov_to_fit(0.0, 0.0, 260.0), BASE_FOV);
+        assert_eq!(fov_to_fit(f32::NAN, 720.0, 260.0), BASE_FOV);
+    }
+}

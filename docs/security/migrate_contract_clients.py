@@ -10,7 +10,7 @@ versioned = {"create_game", "join_game", "global_create_game", "global_join_game
 payouts = {"finalize_game", "withdraw_expired_wager", "cancel_game", "resolve_dispute", "claim_stale_dispute"}
 paths = [root / "src/solana/program_interface/instructions.rs",
          root / "src/multiplayer/solana/global_session_manager.rs",
-         root / "backend/src/signing/solana/instructions.rs"]
+         root / "services/backend/src/signing/solana/instructions.rs"]
 paths += list((root / "tools/cu_benchmark/src/chain/instructions").rglob("*.rs"))
 
 

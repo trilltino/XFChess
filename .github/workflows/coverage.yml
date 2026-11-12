@@ -60,10 +60,10 @@ jobs:
       - name: Build desktop assets
         if: matrix.group == 'desktop'
         run: |
-          npm ci --prefix tauri/wallet-ui
-          npm run build --prefix tauri/wallet-ui
-          npm ci --prefix tauri/tournament-admin
-          npm run build --prefix tauri/tournament-admin
+          npm ci --prefix apps/tauri/wallet-ui
+          npm run build --prefix apps/tauri/wallet-ui
+          npm ci --prefix apps/tauri/tournament-admin
+          npm run build --prefix apps/tauri/tournament-admin
       - run: cargo install cargo-llvm-cov --version 0.9.1 --locked
       - run: node scripts/coverage/run-rust.mjs ${{ matrix.group }}
       - run: node scripts/coverage/collect.mjs rust target/coverage/${{ matrix.group }}/llvm.json ${{ matrix.group }} target/coverage/${{ matrix.group }}/summary.json
@@ -93,9 +93,9 @@ jobs:
       matrix:
         include:
           - name: wallet-ui
-            directory: tauri/wallet-ui
+            directory: apps/tauri/wallet-ui
           - name: tournament-admin
-            directory: tauri/tournament-admin
+            directory: apps/tauri/tournament-admin
           - name: website
             directory: xfchessdotcom
     steps:

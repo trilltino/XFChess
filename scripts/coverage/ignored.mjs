@@ -16,7 +16,7 @@ const manifest = 'docs/coverage/ignored-tests.json';
 if (process.argv.includes('--bootstrap')) {
   if (fs.existsSync(path.join(root, manifest))) throw new Error('Ignore audit already exists');
   writeJson(manifest, found.map((row) => ({...row,
-    owner: row.id.startsWith('backend/') ? 'backend maintainers' : row.id.includes('braid-') ? 'netcode maintainers' : row.id.startsWith('programs/') ? 'contract maintainers' : 'client maintainers',
+    owner: row.id.startsWith('services/backend/') ? 'backend maintainers' : row.id.includes('braid-') ? 'netcode maintainers' : row.id.startsWith('programs/') ? 'contract maintainers' : 'client maintainers',
     disposition: /fixture|Only invoked/i.test(row.reason) ? 'subprocess-fixture' : /unbounded/.test(row.reason) ? 'manual-unbounded' : /unsupported/.test(row.reason) ? 'quarantine' : /local L1/.test(row.reason) ? 'manual-local-stack' : /braid-http checkout/.test(row.reason) ? 'manual-upstream' : /bundled native/.test(row.reason) ? 'nightly-offline' : 'nightly-live',
     prerequisites: row.reason,
   })));

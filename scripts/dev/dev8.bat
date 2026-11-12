@@ -15,16 +15,16 @@ set "DATA_ROOT=%ROOT%\dev8_data"
 
 set BACKEND_URL=http://127.0.0.1:8090
 set SIGNING_SERVICE_URL=http://127.0.0.1:8090
-:: Use exported RPC values first, then backend\.env, then public devnet.
+:: Use exported RPC values first, then services\backend\.env, then public devnet.
 if not defined SOLANA_RPC_URL (
-    for /f "tokens=1,* delims==" %%a in ('findstr /b "SOLANA_RPC_URL=" "%ROOT%\backend\.env" 2^>nul') do set "SOLANA_RPC_URL=%%b"
+    for /f "tokens=1,* delims==" %%a in ('findstr /b "SOLANA_RPC_URL=" "%ROOT%\services\backend\.env" 2^>nul') do set "SOLANA_RPC_URL=%%b"
 )
 if not defined SOLANA_RPC_URL set SOLANA_RPC_URL=https://api.devnet.solana.com
 if not defined XFCHESS_RPC_URL set XFCHESS_RPC_URL=%SOLANA_RPC_URL%
 if not defined HELIUS_API_KEY set HELIUS_API_KEY=
 set MAGIC_BLOCK_RPC_URL=https://devnet.magicblock.app
 set ER_RPC_URL=https://devnet.magicblock.app
-set PROGRAM_ID=8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU
+set PROGRAM_ID=6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N
 :: Non-production dummy values (same convention as the justfile) — never
 :: real secrets. Export these yourself first if you need real auth locally.
 if not defined JWT_SECRET set JWT_SECRET=0000000000000000000000000000000000000000000000000000000000000000

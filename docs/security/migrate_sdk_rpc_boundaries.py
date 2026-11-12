@@ -22,7 +22,7 @@ names = {
 }
 pattern = re.compile(r"\.(" + "|".join(names) + r")(?=\s*\()")
 changed = []
-for base in ("src", "backend/src", "tools/cu_benchmark/src"):
+for base in ("src", "services/backend/src", "tools/cu_benchmark/src"):
     for path in (root / base).rglob("*.rs"):
         text = path.read_text(encoding="utf-8-sig")
         updated = pattern.sub(lambda m: "." + names[m[1]], text)

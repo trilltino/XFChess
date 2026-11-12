@@ -1,0 +1,13 @@
+[package]
+name = "xfchess-client-domain"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+xfchess-rules.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,26 @@
+[package]
+name = "nimzovich_engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xfchess-adjudication = { path = "../xfchess-adjudication" }
+thiserror = { version = "=2.0.21", optional = true }
+futures-lite = { version = "=2.6.1", optional = true }
+instant = { version = "=0.1.13", features = ["wasm-bindgen"], optional = true }
+serde = { version = "=1.0.229", features = ["derive"], optional = true }
+
+[dev-dependencies]
+shakmaty = "=0.30.2"
+xfchess-adjudication = { path = "../xfchess-adjudication", features = ["shakmaty"] }
+
+[features]
+account-bytes = ["xfchess-adjudication/account-bytes"]
+default = ["std", "search"]
+std = ["thiserror", "futures-lite"]
+search = ["std"]
+salewskiChessDebug = []
+
+[lib]
+name = "nimzovich_engine"
+path = "src/lib.rs"

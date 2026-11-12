@@ -46,7 +46,7 @@ fn recover_stuck_delegation_ix(
     dispute_authority: Pubkey,
 ) -> Instruction {
     let accounts =
-        xfchess_game::__client_accounts_recover_stuck_delegation::RecoverStuckDelegation {
+        xfchess_game::__client_accounts_recover_stuck_delegation_core::RecoverStuckDelegationCore {
             game: game_pda(game_id).0,
             escrow_pda: escrow_pda(game_id).0,
             treasury_vault: treasury_vault_pda().0,
@@ -229,7 +229,7 @@ async fn recovery_v2_authority_cannot_substitute_either_player() -> anyhow::Resu
             black_recipient,
             xfchess_game::constants::dispute_authority::ID,
         );
-        ix.data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+        ix.data = xfchess_game::instruction::RecoverStuckDelegation { game_id: GAME_ID }.data();
         ix.accounts
             .push(solana_sdk::instruction::AccountMeta::new(record.0, false));
         let err = execute_authority_fixture(&mut ctx, ix).await?;
@@ -268,7 +268,7 @@ async fn recovery_v2_pays_verified_wagers_and_preserves_extra_lamports() -> anyh
         black,
         xfchess_game::constants::dispute_authority::ID,
     );
-    ix.data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+    ix.data = xfchess_game::instruction::RecoverStuckDelegation { game_id: GAME_ID }.data();
     ix.accounts
         .push(solana_sdk::instruction::AccountMeta::new(record.0, false));
     let mut tx =

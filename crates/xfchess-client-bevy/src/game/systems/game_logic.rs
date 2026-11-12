@@ -1,0 +1,351 @@
+use crate::engine::board_state::ChessEngine;
+use crate::game::components::{FadingCapture, GamePhase};
+use crate::game::resources::*;
+use crate::motion::PieceMotion;
+use crate::rendering::pieces::PieceColor;
+use bevy::prelude::*;
+
+pub fn update_game_phase(
+    mut game_phase: ResMut<CurrentGamePhase>,
+    mut game_over: ResMut<GameOverState>,
+    pieces_query: Query<(
+        Entity,
+        &crate::rendering::pieces::Piece,
+        &crate::game::components::HasMoved,
+    )>,
+    mut engine: ResMut<ChessEngine>,
+    view_mode: Res<crate::game::view_mode::ViewMode>,
+) {
+    // Skip game phase checks in TempleOS mode (no pieces = empty board)
+    if view_mode.is_templeos() {
+        debug!("[GAME] Skipping game phase check - TempleOS mode (no pieces)");
+        return;
+    }
+
+    // Deferred spawning can leave the query empty on the first frame;
+    // evaluating it would falsely end the game as a stalemate.
+    if pieces_query.is_empty() {
+        trace!("[GAME] Skipping game phase check - pieces not yet flushed into world");
+        return;
+    }
+
+    let previous_phase = game_phase.0;
+
+    // Skip ECS-to-engine sync if execute_move already did it this frame.
+    // Reuse the legal-move cache until the turn changes.
+    if engine.synced_this_move {
+        engine.synced_this_move = false;
+        if !engine.move_cache_valid {
+            engine.rebuild_legal_move_cache();
+        }
+    } else if !engine.move_cache_valid {
+        // Initial build: pieces just spawned but no move has been made yet.
+        engine.sync_ecs_to_engine(&pieces_query);
+        engine.rebuild_legal_move_cache();
+    } else {
+        return;
+    }
+
+    let in_check = engine.is_check();
+    let has_legal_moves = engine.has_legal_moves();
+    // Determine the result from the engine side-to-move; CurrentTurn can lag
+    // one frame behind a remotely applied move.
+    let side_to_move = engine.side_to_move();
+
+    if !has_legal_moves && in_check {
+        game_phase.0 = GamePhase::Checkmate;
+        *game_over = match side_to_move {
+            PieceColor::White => GameOverState::BlackWon,
+            PieceColor::Black => GameOverState::WhiteWon,
+        };
+        info!("[GAME] ========== CHECKMATE! ==========");
+        info!("[GAME] {:?} is in checkmate!", side_to_move);
+    } else if !has_legal_moves {
+        game_phase.0 = GamePhase::Stalemate;
+        *game_over = GameOverState::Stalemate;
+        info!("[GAME] ========== STALEMATE! ==========");
+    } else if let Some(state) = engine
+        .automatic_termination()
+        .and_then(GameOverState::from_automatic)
+    {
+        // Dead position, fivefold repetition and the 75-move rule end the game by
+        // themselves. Threefold and 50-move are claims, never terminal here.
+        *game_over = state;
+        info!("[GAME] Automatic draw: {}", state.message());
+    } else if in_check {
+        if previous_phase != GamePhase::Check {
+            game_phase.0 = GamePhase::Check;
+            info!("[GAME] ========== CHECK DETECTED ==========");
+            info!("[GAME] {:?} King is under attack!", side_to_move);
+        } else {
+            game_phase.0 = GamePhase::Check;
+        }
+    } else {
+        if previous_phase == GamePhase::Check {
+            info!("[GAME] Check escaped! Game continues normally");
+        }
+        game_phase.0 = GamePhase::Playing;
+    }
+}
+
+pub fn update_game_timer(
+    mut timer: ResMut<GameTimer>,
+    mut game_over: ResMut<GameOverState>,
+    time: Res<Time>,
+    current_turn: Res<CurrentTurn>,
+    game_phase: Res<CurrentGamePhase>,
+    active_tc: Res<crate::game::resources::active_time_control::ActiveTimeControl>,
+    ai_config: Res<crate::game::ai::resource::ChessAIResource>,
+    game_mode: Res<crate::core::GameMode>,
+    mut flag_timeout: MessageWriter<crate::game::events::FlagTimeoutEvent>,
+    engine: Res<ChessEngine>,
+    ai_status: Option<Res<crate::game::ai::systems::AIEngineStatus>>,
+) {
+    if ai_status
+        .as_ref()
+        .is_some_and(|status| status.error.is_some())
+    {
+        return;
+    }
+
+    // Puzzles are untimed here; the server measures solve time itself.
+    if !timer.is_running
+        || !matches!(game_phase.0, GamePhase::Playing | GamePhase::Check)
+        || *game_mode == crate::core::GameMode::Puzzle
+    {
+        return;
+    }
+
+    // In AI games, skip clock decrement when it is the AI's turn.
+    if active_tc.ai_game {
+        if let crate::game::ai::resource::AiMode::VsAI { ai_color } = ai_config.mode {
+            if current_turn.color == ai_color {
+                return;
+            }
+        }
+    }
+
+    let delta = time.delta_secs();
+    match current_turn.color {
+        PieceColor::White => {
+            let time_before = timer.white_time_left;
+            timer.white_time_left -= delta;
+
+            if time_before > 10.0 && timer.white_time_left <= 10.0 {
+                warn!("[TIMER] White has 10 seconds remaining!");
+            } else if time_before > 30.0 && timer.white_time_left <= 30.0 {
+                info!("[TIMER] White has 30 seconds remaining");
+            }
+
+            if timer.white_time_left <= 0.0 {
+                timer.white_time_left = 0.0;
+                timer.is_running = false;
+                *game_over = GameOverState::from_flag_fall(engine.match_record(), true);
+                info!("[TIMER] ========== TIME OUT! ==========");
+                info!(
+                    "[TIMER] White ran out of time! Final: W:{:.1}s B:{:.1}s",
+                    timer.white_time_left, timer.black_time_left
+                );
+                info!("[TIMER] {}", game_over.message());
+                info!(
+                    "[TIMER] Move #{} | Black WINS by timeout!",
+                    current_turn.move_number
+                );
+                // Notify opponent in multiplayer
+                if matches!(
+                    *game_mode,
+                    crate::core::GameMode::OnlineMultiplayer
+                        | crate::core::GameMode::MultiplayerCompetitive
+                ) {
+                    flag_timeout.write(crate::game::events::FlagTimeoutEvent {
+                        flagged_player: "white".to_string(),
+                        remote: false,
+                    });
+                }
+            }
+        }
+        PieceColor::Black => {
+            let time_before = timer.black_time_left;
+            timer.black_time_left -= delta;
+
+            if time_before > 10.0 && timer.black_time_left <= 10.0 {
+                warn!("[TIMER] Black has 10 seconds remaining!");
+            } else if time_before > 30.0 && timer.black_time_left <= 30.0 {
+                info!("[TIMER] Black has 30 seconds remaining");
+            }
+
+            if timer.black_time_left <= 0.0 {
+                timer.black_time_left = 0.0;
+                timer.is_running = false;
+                *game_over = GameOverState::from_flag_fall(engine.match_record(), false);
+                info!("[TIMER] ========== TIME OUT! ==========");
+                info!(
+                    "[TIMER] Black ran out of time! Final: W:{:.1}s B:{:.1}s",
+                    timer.white_time_left, timer.black_time_left
+                );
+                info!("[TIMER] {}", game_over.message());
+                info!(
+                    "[TIMER] Move #{} | White WINS by timeout!",
+                    current_turn.move_number
+                );
+                // Notify opponent in multiplayer
+                if matches!(
+                    *game_mode,
+                    crate::core::GameMode::OnlineMultiplayer
+                        | crate::core::GameMode::MultiplayerCompetitive
+                ) {
+                    flag_timeout.write(crate::game::events::FlagTimeoutEvent {
+                        flagged_player: "black".to_string(),
+                        remote: false,
+                    });
+                }
+            }
+        }
+    }
+}
+
+pub fn check_game_over_state(
+    game_over: Res<GameOverState>,
+    state: Res<State<crate::core::GameState>>,
+    mut pending: ResMut<PendingGameOver>,
+    animations: Query<(), (With<PieceMotion>, Without<FadingCapture>)>,
+    fades: Query<(), With<FadingCapture>>,
+    game_mode: Res<crate::core::GameMode>,
+) {
+    // A puzzle's last move often mates; its result screen is the puzzle HUD.
+    if *game_mode == crate::core::GameMode::Puzzle {
+        return;
+    }
+    // Wait for animations and capture fades before ending the game so the last move remains visible.
+    if *state.get() == crate::core::GameState::InGame
+        && game_over.is_game_over()
+        && animations.is_empty()
+        && fades.is_empty()
+        && !pending.active
+    {
+        info!(
+            "[GAME] Game over condition met ({:?}) - showing 'press Enter to see game stats' prompt",
+            *game_over
+        );
+        pending.active = true;
+    }
+}
+
+pub fn confirm_game_over_prompt(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    state: Res<State<crate::core::GameState>>,
+    game_over: Res<GameOverState>,
+    mut pending: ResMut<PendingGameOver>,
+    mut next_state: ResMut<NextState<crate::core::GameState>>,
+) {
+    if *state.get() != crate::core::GameState::InGame
+        || !pending.active
+        || !game_over.is_game_over()
+    {
+        return;
+    }
+    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+        info!("[GAME] Game over acknowledged - transitioning to GameOver state");
+        pending.active = false;
+        next_state.set(crate::core::GameState::GameOver);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::components::HasMoved;
+    use crate::rendering::pieces::{Piece, PieceType};
+
+    fn evaluate(pieces: &[(PieceColor, PieceType, u8, u8)], halfmove_clock: u32) -> GameOverState {
+        let mut app = App::new();
+        let mut engine = ChessEngine::default();
+        engine.halfmove_clock = halfmove_clock;
+        app.insert_resource(engine);
+        app.init_resource::<CurrentGamePhase>();
+        app.init_resource::<GameOverState>();
+        app.init_resource::<crate::game::view_mode::ViewMode>();
+        for &(color, kind, x, y) in pieces {
+            app.world_mut().spawn((
+                Piece::new(color, kind, x, y),
+                HasMoved {
+                    moved: true,
+                    move_count: 1,
+                },
+            ));
+        }
+        app.add_systems(Update, update_game_phase);
+        app.update();
+        *app.world().resource::<GameOverState>()
+    }
+
+    #[test]
+    fn bare_kings_are_a_dead_position() {
+        let state = evaluate(
+            &[
+                (PieceColor::White, PieceType::King, 4, 2),
+                (PieceColor::Black, PieceType::King, 4, 5),
+            ],
+            0,
+        );
+        assert_eq!(state, GameOverState::DeadPosition);
+    }
+
+    #[test]
+    fn quiet_halfmoves_only_make_a_claim_available_until_the_seventy_fifth_move() {
+        let pieces = [
+            (PieceColor::White, PieceType::King, 4, 2),
+            (PieceColor::White, PieceType::Rook, 0, 0),
+            (PieceColor::Black, PieceType::King, 4, 5),
+        ];
+        assert_eq!(evaluate(&pieces, 99), GameOverState::Playing);
+        assert_eq!(evaluate(&pieces, 100), GameOverState::Playing);
+        assert_eq!(evaluate(&pieces, 149), GameOverState::Playing);
+        assert_eq!(evaluate(&pieces, 150), GameOverState::SeventyFiveMoveRule);
+    }
+}
+
+#[cfg(test)]
+mod game_over_prompt_tests {
+    use super::*;
+    use crate::motion::{MotionStyle, MoveTransaction, PieceMotion};
+    use bevy::math::Vec2;
+
+    fn app_with_game_over() -> App {
+        let mut app = App::new();
+        app.insert_resource(GameOverState::WhiteWon);
+        app.insert_resource(State::new(crate::core::GameState::InGame));
+        app.init_resource::<PendingGameOver>();
+        app.insert_resource(crate::core::GameMode::SinglePlayer);
+        app.add_systems(Update, check_game_over_state);
+        app
+    }
+
+    #[test]
+    fn the_prompt_waits_for_the_final_move_to_finish_drawing() -> Result<(), String> {
+        let mut app = app_with_game_over();
+        let mover = app
+            .world_mut()
+            .spawn(PieceMotion {
+                tx: MoveTransaction::new(
+                    Vec2::new(0.0, 0.0),
+                    Vec2::new(0.0, 2.0),
+                    0.4,
+                    MotionStyle::GAMEPLAY,
+                ),
+                epoch: 0,
+                promoted_from: None,
+                started_at: Default::default(),
+            })
+            .id();
+        app.update();
+        // Game over is already authoritative; only the prompt is held back.
+        assert!(app.world().resource::<GameOverState>().is_game_over());
+        assert!(!app.world().resource::<PendingGameOver>().active);
+
+        app.world_mut().entity_mut(mover).remove::<PieceMotion>();
+        app.update();
+        assert!(app.world().resource::<PendingGameOver>().active);
+        Ok(())
+    }
+}

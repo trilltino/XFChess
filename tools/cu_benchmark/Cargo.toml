@@ -22,7 +22,7 @@ solana-commitment-config = "3"
 solana-compute-budget-interface = "3"
 sha2 = "0.10"
 xfchess-rules.workspace = true
-swiss-pairing = { path = "../../libs/tournament/swiss-pairing" }
+swiss-pairing = { path = "../../crates/tournament/swiss-pairing" }
 ephemeral-rollups-sdk = { workspace = true }
 reqwest.workspace = true
 url.workspace = true

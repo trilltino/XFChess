@@ -17,6 +17,9 @@ production = ["move-validation", "mainnet"]
 # mainnet with production keys.
 localnet = []
 devnet = []
+# Devnet reset tool (admin_close_account). Opt-in and never with mainnet: build it only for the
+# wipe, then redeploy a build without it. See docs/DEVNET_RESET.md.
+devnet-reset = []
 mainnet = []
 idl-build = ["anchor-spl/idl-build"]
 # move-validation: enables the on-chain chess move-validation module.
@@ -35,7 +38,7 @@ anchor-spl = { workspace = true }
 solana-program = { workspace = true }
 # The on-chain engine disables default features; std is enabled only in dev tests.
 nimzovich_engine = { workspace = true, default-features = false, features = [], optional = true }
-bytemuck = { version = "=1.25.2", default-features = false, features = ["derive"], optional = true }
+bytemuck = { version = "=1.25.2", default-features = false, features = ["derive", "min_const_generics"] }
 ephemeral-rollups-sdk = { workspace = true }
 solana-security-txt = { workspace = true }
 
@@ -109,7 +112,7 @@ name = "tournament_cancel_tests"
 path = "tests/tournament_cancel_tests.rs"
 
 # Permissionless Swiss round advancement (persistency: a round can advance
-# from player signatures + a third-party crank, no backend/authority needed).
+# from player signatures + a third-party crank, no backend authority needed).
 [[test]]
 name = "tournament_round_advancement_tests"
 path = "tests/tournament_round_advancement_tests.rs"

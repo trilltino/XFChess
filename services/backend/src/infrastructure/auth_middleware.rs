@@ -1,0 +1,425 @@
+use axum::{
+    extract::{Request, State},
+    http::StatusCode,
+    middleware::Next,
+    response::Response,
+};
+use std::env;
+
+use crate::signing::auth::AuthedWallet;
+use crate::signing::AppState;
+
+tokio::task_local! {
+    pub static ADMIN_ACTOR: String;
+}
+
+pub fn current_admin_actor() -> String {
+    ADMIN_ACTOR
+        .try_with(|a| a.clone())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+fn resolve_admin_actor(provided_key: &str) -> Result<String, StatusCode> {
+    // A missing header reads as "". An empty configured key would otherwise
+    // match it and open every admin route.
+    if provided_key.is_empty() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    // A wallet sign-in session (see `admin_session`) travels in the same header as an API key.
+    if provided_key.starts_with(super::admin_session::SESSION_PREFIX) {
+        return super::admin_session::actor_for_session(provided_key);
+    }
+    if let Ok(named) = env::var("ADMIN_API_KEYS") {
+        let mut any_configured = false;
+        for pair in named.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let Some((name, key)) = pair.split_once(':') else {
+                continue;
+            };
+            if key.is_empty() {
+                continue;
+            }
+            any_configured = true;
+            if constant_time_eq(provided_key, key) {
+                return Ok(name.to_string());
+            }
+        }
+        if any_configured {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        // ADMIN_API_KEYS set but empty/unparseable — fall through to legacy.
+    }
+
+    let expected_key = match env::var("ADMIN_API_KEY") {
+        Ok(key) => key,
+        Err(env::VarError::NotPresent) => {
+            #[cfg(debug_assertions)]
+            {
+                tracing::warn!("[auth] ADMIN_API_KEY not set — defaulting to 'dev' in debug build");
+                if constant_time_eq(provided_key, "dev") {
+                    return Ok("dev-default".to_string());
+                }
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                tracing::error!("[auth] ADMIN_API_KEY not configured in production build");
+                return Err(StatusCode::SERVICE_UNAVAILABLE);
+            }
+        }
+        Err(env::VarError::NotUnicode(_)) => {
+            tracing::error!("[auth] ADMIN_API_KEY contains invalid UTF-8");
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    };
+
+    if expected_key.is_empty() {
+        tracing::error!("[auth] ADMIN_API_KEY is set but empty");
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    if constant_time_eq(provided_key, &expected_key) {
+        Ok("legacy".to_string())
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+pub async fn require_api_key(request: Request, next: Next) -> Result<Response, StatusCode> {
+    let provided_key = request
+        .headers()
+        .get("X-API-Key")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+
+    let actor = match resolve_admin_actor(&provided_key) {
+        Ok(actor) => actor,
+        Err(status) => {
+            tracing::debug!("[auth] Invalid API key provided");
+            return Err(status);
+        }
+    };
+
+    tracing::debug!("[auth] API key validated successfully (actor={actor})");
+    Ok(ADMIN_ACTOR.scope(actor, next.run(request)).await)
+}
+
+pub async fn persist_admin_request(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let skip = matches!(method, axum::http::Method::GET | axum::http::Method::HEAD);
+    let actor = current_admin_actor();
+
+    let response = next.run(request).await;
+
+    if !skip {
+        let pool = state.store.pool();
+        let status = response.status().as_u16() as i64;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let result = format!("{} -> {}", method.as_str(), status);
+        // Await audit writes so a crash cannot lose a fire-and-forget entry.
+        if let Err(e) = sqlx::query(
+            "INSERT INTO admin_audit_log (ts, actor, action, target, result, method, path, status) \
+             VALUES (?, ?, ?, '', ?, ?, ?, ?)",
+        )
+        .bind(ts)
+        .bind(&actor)
+        .bind(&path)
+        .bind(&result)
+        .bind(method.as_str())
+        .bind(&path)
+        .bind(status)
+        .execute(&pool)
+        .await
+        {
+            tracing::error!("[auth] failed to persist admin audit entry for {path}: {e}");
+        }
+    }
+
+    response
+}
+
+pub async fn require_relay_secret(request: Request, next: Next) -> Result<Response, StatusCode> {
+    use std::sync::Once;
+    static UNSET_WARNING: Once = Once::new();
+
+    let expected_secret = match env::var("RELAY_SHARED_SECRET") {
+        Ok(secret) if !secret.is_empty() => secret,
+        _ => {
+            UNSET_WARNING.call_once(|| {
+                tracing::warn!(
+                    "[auth] RELAY_SHARED_SECRET not set — relay/signing endpoints are \
+                     unauthenticated and rely on the network firewall"
+                );
+            });
+            return Ok(next.run(request).await);
+        }
+    };
+
+    let provided_secret = request
+        .headers()
+        .get("X-Relay-Secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+
+    if !constant_time_eq(provided_secret, &expected_secret) {
+        tracing::debug!("[auth] Invalid or missing X-Relay-Secret on a protected relay endpoint");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(next.run(request).await)
+}
+
+pub async fn require_relay_or_jwt(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if let Some(token) = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        if let Ok(claims) = state.jwt.verify(token) {
+            if state
+                .store
+                .token_is_revoked(&claims.sub, claims.iat)
+                .await
+                .map_err(|error| {
+                    tracing::error!("Revocation lookup failed: {error}");
+                    StatusCode::SERVICE_UNAVAILABLE
+                })?
+            {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            request.extensions_mut().insert(AuthedWallet(claims.sub));
+            return Ok(next.run(request).await);
+        }
+        // Invalid token → fall through to the relay-secret path (dual-accept).
+    }
+
+    match env::var("RELAY_SHARED_SECRET") {
+        Ok(secret) if !secret.is_empty() => {
+            let provided = request
+                .headers()
+                .get("X-Relay-Secret")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default();
+            if constant_time_eq(provided, &secret) {
+                Ok(next.run(request).await)
+            } else {
+                Err(StatusCode::UNAUTHORIZED)
+            }
+        }
+        _ => {
+            crate::telemetry::worker_metrics::AUTH_UNCONFIGURED_RELAY_REJECTED_TOTAL
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Err(StatusCode::UNAUTHORIZED)
+        }
+    }
+}
+
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+
+    let mut result = 0u8;
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        result |= x ^ y;
+    }
+
+    result == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Context as _;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::get,
+        Router,
+    };
+    use tower::ServiceExt;
+
+    #[test]
+    fn test_constant_time_eq() {
+        // Basic equality
+        assert!(constant_time_eq("secret123", "secret123"));
+        assert!(constant_time_eq("", ""));
+        assert!(constant_time_eq("a", "a"));
+
+        // Inequality
+        assert!(!constant_time_eq("secret123", "secret124"));
+        assert!(!constant_time_eq("secret", "secret123"));
+        assert!(!constant_time_eq("", "secret"));
+        assert!(!constant_time_eq("secret", ""));
+
+        // Different lengths
+        assert!(!constant_time_eq("short", "longer"));
+        assert!(!constant_time_eq("a", "ab"));
+
+        // Same length, different content
+        assert!(!constant_time_eq("abc", "def"));
+        assert!(!constant_time_eq("123", "456"));
+    }
+
+    /// Debug builds fall back to the `dev` key when none is configured, so a request
+    /// without that key is refused (release builds refuse every request with 503).
+    #[tokio::test]
+    async fn test_require_api_key_missing_env_var() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
+        std::env::remove_var("ADMIN_API_KEY");
+        std::env::remove_var("ADMIN_API_KEYS");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .body(Body::empty())
+                    .context("test setup failed")?,
+            )
+            .await
+            .context("test setup failed")?;
+
+        let expected = if cfg!(debug_assertions) {
+            StatusCode::UNAUTHORIZED
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+        assert_eq!(response.status(), expected);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn empty_configured_keys_never_authorize_a_missing_header() {
+        let _env = crate::test_env::lock().await;
+
+        std::env::remove_var("ADMIN_API_KEYS");
+        std::env::set_var("ADMIN_API_KEY", "");
+        assert!(resolve_admin_actor("").is_err());
+
+        std::env::set_var("ADMIN_API_KEYS", "ops:");
+        assert!(resolve_admin_actor("").is_err());
+
+        // An empty named key is ignored rather than treated as configured.
+        std::env::set_var("ADMIN_API_KEYS", "ops:,deploy:real-key");
+        assert!(resolve_admin_actor("").is_err());
+        assert_eq!(resolve_admin_actor("real-key"), Ok("deploy".to_string()));
+
+        std::env::remove_var("ADMIN_API_KEYS");
+        std::env::remove_var("ADMIN_API_KEY");
+    }
+
+    #[tokio::test]
+    async fn test_require_api_key_valid() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
+        std::env::remove_var("ADMIN_API_KEYS");
+        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("X-API-Key", "test-secret-key")
+                    .body(Body::empty())
+                    .context("Failed to build test request")?,
+            )
+            .await
+            .context("Failed to execute test request")?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_require_api_key_invalid() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
+        std::env::remove_var("ADMIN_API_KEYS");
+        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("X-API-Key", "wrong-key")
+                    .body(Body::empty())
+                    .context("Failed to build test request")?,
+            )
+            .await
+            .context("Failed to execute test request")?;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_require_api_key_missing_header() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
+        std::env::remove_var("ADMIN_API_KEYS");
+        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .body(Body::empty())
+                    .context("test setup failed")?,
+            )
+            .await
+            .context("test setup failed")?;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_require_api_key_empty_header() -> anyhow::Result<()> {
+        let _env = crate::test_env::lock().await;
+        std::env::remove_var("ADMIN_API_KEYS");
+        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+
+        let app = Router::new()
+            .route("/test", get(|| async { "protected" }))
+            .layer(axum::middleware::from_fn(require_api_key));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("X-API-Key", "")
+                    .body(Body::empty())
+                    .context("Failed to build test request")?,
+            )
+            .await
+            .context("Failed to execute test request")?;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        Ok(())
+    }
+}

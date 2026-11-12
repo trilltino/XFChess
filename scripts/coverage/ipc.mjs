@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { root, readJson, writeJson, checkedDocument, filesUnder, rustTests } from './lib.mjs';
 
-const source = fs.readFileSync(path.join(root, 'tauri/src/main.rs'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'apps/tauri/src/main.rs'), 'utf8');
 const block = source.split('tauri::generate_handler![')[1]?.split('])')[0];
 if (!block) throw new Error('Cannot find native invoke handler');
 const names = [...block.replace(/#\[cfg\([^\n]+\)\]/g, '').matchAll(/\b([a-z]\w*(?:::\w+)*)\s*,/g)].map((m) => m[1]).sort();
@@ -12,8 +12,8 @@ if (process.argv.includes('--bootstrap')) {
   writeJson(manifest, Object.fromEntries(names.map((name) => [name, {success: [], failure: []}])));
 }
 const evidence = readJson(manifest);
-const tests = rustTests(['tauri/src', 'tauri/tests']);
-const native = filesUnder('tauri/src', '.rs').map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
+const tests = rustTests(['apps/tauri/src', 'apps/tauri/tests']);
+const native = filesUnder('apps/tauri/src', '.rs').map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
 for (const name of names) {
   if (!evidence[name]) throw new Error(`New IPC command ${name} needs test evidence`);
   for (const cell of ['success', 'failure']) {

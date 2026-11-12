@@ -54,6 +54,7 @@ pub fn finish_by_draw_agreement(game: &mut Game, accepter: Pubkey, now: i64) -> 
         .draw_offered_by
         .ok_or(GameErrorCode::NoDrawOfferPending)?;
     require!(accepter != offerer, GameErrorCode::CannotAcceptOwnDrawOffer);
+    require!(game.move_count >= 2, GameErrorCode::DrawAgreementTooEarly);
 
     game.result = GameResult::Draw;
     game.status = GameStatus::Finished;
@@ -177,6 +178,11 @@ mod tests {
             GameStatus::Active,
             "offering alone doesn't end the game"
         );
+
+        // Article 5.2.3: both players must have moved before an agreement counts.
+        assert!(finish_by_draw_agreement(&mut game, black, 10).is_err());
+        assert_eq!(game.status, GameStatus::Active);
+        game.move_count = 2;
 
         finish_by_draw_agreement(&mut game, black, 10).context("required operation value")?;
 

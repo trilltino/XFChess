@@ -1,0 +1,163 @@
+[package]
+name = "xfchess"
+version = "0.1.0"
+edition = "2021"
+
+# Build rlib for desktop linkage and cdylib for Android GameActivity loading.
+[lib]
+name = "xfchess_app"
+path = "src/lib.rs"
+crate-type = ["lib", "cdylib"]
+
+[[bin]]
+name = "xfchess"
+path = "src/main.rs"
+test = false
+
+[[bin]]
+name = "pda"
+path = "src/bin/pda.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "read_game"
+path = "src/bin/read_game.rs"
+required-features = ["solana"]
+
+[[bin]]
+name = "debugger"
+
+path = "src/bin/debugger.rs"
+
+# Require solana for this binary; otherwise automatic discovery finds no main function.
+[[bin]]
+name = "profile_pda"
+path = "src/bin/profile_pda.rs"
+required-features = ["solana"]
+
+[features]
+default = []
+profile = ["bevy/trace_tracy", "xfchess-client-bevy/profile"]
+# FixedNode needs a newer Bevy export; keep viewport HUD anchoring opt-in
+# until the pinned release supports it.
+bevy_fixed_node = ["xfchess-client-bevy/bevy_fixed_node"]
+# Keep atmosphere opt-in until the pinned Bevy release supports multiple cameras.
+sky = ["xfchess-client-bevy/sky"]
+# Development-only unsigned gossip. Production rejects plaintext moves to require authentication.
+allow-unsigned-p2p = ["xfchess-client-bevy/allow-unsigned-p2p"]
+# Development-only TempleOS theme; excluded from default builds.
+templeos = ["xfchess-client-bevy/templeos"]
+solana = [
+    "xfchess-client-bevy/solana",
+    "xfchess-client-compat",
+    "anchor-lang",
+    "solana-sdk",
+    "solana-client",
+    "solana-program",
+    "ephemeral-rollups-sdk",
+    "solana-system-interface",
+    "solana-commitment-config",
+    "xfchess-game",
+]
+
+[dependencies]
+xfchess-client-bevy = { path = "../../crates/xfchess-client-bevy" }
+xfchess-client-compat = { workspace = true, optional = true }
+bevy.workspace = true
+bevy_sprite = { workspace = true }
+bevy_text = { workspace = true }
+bevy_ui = { workspace = true }
+image = { workspace = true }
+winit = { workspace = true }
+tokio.workspace = true
+futures-lite.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+directories = "6.0.0"
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing-appender.workspace = true
+uuid.workspace = true
+web-time.workspace = true
+reqwest.workspace = true
+anchor-lang = { workspace = true, optional = true }
+xfchess-rules = { workspace = true }
+xfchess-stockfish = { workspace = true }
+bevy_egui = { workspace = true }
+solana-sdk = { workspace = true, optional = true }
+solana-client = { workspace = true, optional = true }
+webbrowser.workspace = true
+braid_chess.workspace = true
+braid-iroh = { workspace = true, features = ["proxy"] }
+braid-http.workspace = true
+iroh-gossip.workspace = true
+sha2 = "0.10.8"
+aes-gcm = "0.10.3"
+dirs = "5.0.1"
+chrono.workspace = true
+serde_bytes.workspace = true
+iroh.workspace = true
+crossbeam-channel.workspace = true
+thiserror.workspace = true
+solana-program = { workspace = true, optional = true }
+bs58.workspace = true
+borsh.workspace = true
+anyhow = { workspace = true }
+clap.workspace = true
+egui.workspace = true
+bincode.workspace = true
+zstd.workspace = true
+futures = { workspace = true }
+base64.workspace = true
+regex.workspace = true
+parking_lot.workspace = true
+ed25519-dalek = "2"
+ephemeral-rollups-sdk = { workspace = true, optional = true }
+solana-system-interface = { version = "3", features = ["bincode"], optional = true }
+solana-commitment-config = { version = "3", optional = true }
+xfchess-game = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+undocumented_unsafe_blocks = "deny"
+# Bevy systems take one parameter per resource or query and nest query types;
+# Bevy's own lint guidance allows both.
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+# Used by the wallet bridge foreground grant â€” same feature set and
+# version as apps/tauri/Cargo.toml's own `windows` dependency.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# Match the JNI version selected by bevy_android to avoid incompatible duplicate majors.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "=0.22.4", default-features = false }
+ndk-context = "=0.1.1"
+# Send tracing events to Android logcat alongside the file log subscriber.
+paranoid-android = "=0.2.2"
+# Use log for Android bootstrap before Bevy installs the tracing subscriber.
+android_logger = "=0.15.1"
+# Use a compatible log range so transitive facade constraints can resolve together.
+log = "0.4"
+# Declare the verifier directly for Android init_with_env; initialize its
+# Context before constructing any HTTP client.
+rustls-platform-verifier = "=0.7.0"
+
+# rfd has no Android dialog backend; use the platform-gated default save path.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rfd = "0.15"
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+

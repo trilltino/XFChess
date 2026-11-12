@@ -8140,6 +8140,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "instant"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
+dependencies = [
+ "cfg-if",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "inventory"
 version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10043,7 +10055,14 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "nimzovich_engine"
 version = "0.1.0"
-source = "git+https://github.com/trilltino/xfchess-contracts.git?rev=08e430699297f7d13f94fae32128fc0bafedf778#08e430699297f7d13f94fae32128fc0bafedf778"
+dependencies = [
+ "futures-lite",
+ "instant",
+ "serde",
+ "shakmaty",
+ "thiserror 2.0.21",
+ "xfchess-adjudication",
+]
 
 [[package]]
 name = "nix"
@@ -23989,11 +24008,20 @@ dependencies = [
  "webbrowser",
  "windows 0.61.3",
  "winit",
+ "xfchess-client-bevy",
  "xfchess-client-compat",
  "xfchess-game",
  "xfchess-rules",
  "xfchess-stockfish",
  "zstd",
+]
+
+[[package]]
+name = "xfchess-adjudication"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "shakmaty",
 ]
 
 [[package]]
@@ -24035,6 +24063,81 @@ dependencies = [
 ]
 
 [[package]]
+name = "xfchess-client-bevy"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anchor-lang",
+ "android_logger",
+ "anyhow",
+ "async-trait",
+ "base64 0.23.1",
+ "bevy",
+ "bevy_egui",
+ "bevy_sprite",
+ "bevy_text",
+ "bevy_ui",
+ "bincode",
+ "borsh 1.8.1",
+ "braid-http",
+ "braid-iroh",
+ "braid_chess",
+ "bs58",
+ "chrono",
+ "clap",
+ "crossbeam-channel",
+ "directories",
+ "dirs 5.0.1",
+ "ed25519-dalek 2.2.0",
+ "egui",
+ "ephemeral-rollups-sdk",
+ "futures",
+ "futures-lite",
+ "image",
+ "iroh",
+ "iroh-gossip",
+ "jni 0.22.4",
+ "log",
+ "ndk-context",
+ "paranoid-android",
+ "parking_lot",
+ "proptest",
+ "rand 0.10.3",
+ "regex",
+ "reqwest 0.13.4",
+ "rfd",
+ "rustls-platform-verifier 0.7.0",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.10.9",
+ "solana-client",
+ "solana-commitment-config 3.1.1",
+ "solana-program 5.1.0",
+ "solana-sdk 5.0.0",
+ "solana-system-interface 3.3.0",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
+ "web-time",
+ "webbrowser",
+ "windows 0.61.3",
+ "winit",
+ "xfchess-client-compat",
+ "xfchess-client-domain",
+ "xfchess-client-network",
+ "xfchess-client-solana",
+ "xfchess-game",
+ "xfchess-platform-api",
+ "xfchess-rules",
+ "xfchess-stockfish",
+ "zstd",
+]
+
+[[package]]
 name = "xfchess-client-compat"
 version = "0.1.0"
 dependencies = [
@@ -24048,6 +24151,50 @@ dependencies = [
  "solana-transaction 5.1.0",
  "solana-transaction-status-client-types 4.3.2",
  "wincode",
+]
+
+[[package]]
+name = "xfchess-client-domain"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "xfchess-rules",
+]
+
+[[package]]
+name = "xfchess-client-network"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bincode",
+ "bs58",
+ "chrono",
+ "ed25519-dalek 2.2.0",
+ "iroh",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "solana-sdk 5.0.0",
+ "uuid",
+ "xfchess-client-domain",
+ "xfchess-platform-api",
+]
+
+[[package]]
+name = "xfchess-client-solana"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anyhow",
+ "async-trait",
+ "sha2 0.10.9",
+ "solana-sdk 5.0.0",
+ "solana-system-interface 3.3.0",
+ "xfchess-client-domain",
+ "xfchess-client-network",
+ "xfchess-game",
+ "xfchess-platform-api",
 ]
 
 [[package]]
@@ -24101,12 +24248,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "xfchess-platform-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "xfchess-rules"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "pgn-reader",
  "shakmaty",
+ "xfchess-adjudication",
 ]
 
 [[package]]
@@ -24124,8 +24279,10 @@ version = "0.1.0"
 dependencies = [
  "axum 0.8.9",
  "base64 0.22.1",
+ "bs58",
  "dirs 5.0.1",
  "dotenvy",
+ "ed25519-dalek 2.2.0",
  "futures",
  "keyring",
  "open",

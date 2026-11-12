@@ -59,7 +59,7 @@ fn global_create_game_ix(
     base_time_seconds: u64,
     increment_seconds: u16,
 ) -> Instruction {
-    let mut accounts = xfchess_game::__client_accounts_global_create_game::GlobalCreateGame {
+    let mut accounts = xfchess_game::__client_accounts_global_create_game_core::GlobalCreateGameCore {
         session_delegation: session_pda,
         session_signer,
         player,
@@ -79,7 +79,7 @@ fn global_create_game_ix(
         .0,
         false,
     ));
-    let data = xfchess_game::instruction::GlobalCreateGameV2 {
+    let data = xfchess_game::instruction::GlobalCreateGame {
         game_id,
         wager_amount,
         match_type,
@@ -375,7 +375,7 @@ async fn wallet_v2_create_join_cancel_conserves_wagers_and_closes_identity() -> 
     )
     .0;
     let payer = ctx.payer.pubkey();
-    let mut create_accounts = xfchess_game::__client_accounts_create_game::CreateGame {
+    let mut create_accounts = xfchess_game::__client_accounts_create_game_core::CreateGameCore {
         game: game_pda(game_id).0,
         escrow_pda: escrow_pda(game_id),
         player: white.pubkey(),
@@ -389,7 +389,7 @@ async fn wallet_v2_create_join_cancel_conserves_wagers_and_closes_identity() -> 
         Instruction {
             program_id: xfchess_game::ID,
             accounts: create_accounts,
-            data: xfchess_game::instruction::CreateGameV2 {
+            data: xfchess_game::instruction::CreateGame {
                 game_id,
                 wager_amount: wager,
                 match_type: MatchType::Rated,
@@ -406,7 +406,7 @@ async fn wallet_v2_create_join_cancel_conserves_wagers_and_closes_identity() -> 
         ctx.banks_client.get_balance(white.pubkey()).await?,
         1_000_000_000 - wager
     );
-    let mut join_accounts = xfchess_game::__client_accounts_join_game::JoinGame {
+    let mut join_accounts = xfchess_game::__client_accounts_join_game_core::JoinGameCore {
         game: game_pda(game_id).0,
         escrow_pda: escrow_pda(game_id),
         player_profile: player_profile_pda(&black.pubkey()),
@@ -422,7 +422,7 @@ async fn wallet_v2_create_join_cancel_conserves_wagers_and_closes_identity() -> 
         Instruction {
             program_id: xfchess_game::ID,
             accounts: join_accounts,
-            data: xfchess_game::instruction::JoinGameV2 { game_id }.data(),
+            data: xfchess_game::instruction::JoinGame { game_id }.data(),
         },
         &[&black],
     )
@@ -545,7 +545,7 @@ fn global_join_game_ix(
     white: Pubkey,
     game_id: u64,
 ) -> Instruction {
-    let accounts = xfchess_game::__client_accounts_global_join_game::GlobalJoinGame {
+    let accounts = xfchess_game::__client_accounts_global_join_game_core::GlobalJoinGameCore {
         session_delegation: session_pda,
         session_signer,
         player,

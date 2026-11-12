@@ -19,7 +19,7 @@ use anchor_lang::Discriminator;
     base_time_seconds: u64,
     increment_seconds: u16
 )]
-pub struct SessionCreateGame<'info> {
+pub struct SessionCreateGameCore<'info> {
     #[account(
         seeds = [b"tournament", tournament_id.to_le_bytes().as_ref()],
         bump = tournament.bump,
@@ -94,7 +94,7 @@ pub struct SessionCreateGame<'info> {
     reason = "Matches the deployed Anchor instruction ABI"
 )]
 pub fn handler(
-    ctx: Context<SessionCreateGame>,
+    ctx: Context<SessionCreateGameCore>,
     tournament_id: u64,
     game_id: u64,
     wager_amount: u64,
@@ -139,7 +139,7 @@ pub fn handler(
 
     let now = Clock::get()?.unix_timestamp;
 
-    let space = 8 + Game::INIT_SPACE;
+    let space = crate::fide::GAME_ACCOUNT_SPACE;
     let lamports = Rent::get()?.minimum_balance(space);
     let game_id_bytes = game_id.to_le_bytes();
     let game_bump = [ctx.bumps.game];
@@ -233,6 +233,8 @@ pub fn handler(
     data[..8].copy_from_slice(Game::DISCRIMINATOR);
     let mut writer = &mut data[8..];
     game.serialize(&mut writer)?;
+    #[cfg(feature = "move-validation")]
+    crate::fide::FideState::initialize(&mut data, &game)?;
 
     Ok(())
 }

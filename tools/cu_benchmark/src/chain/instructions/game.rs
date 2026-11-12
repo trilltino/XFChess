@@ -54,7 +54,7 @@ pub fn create_game_ix(
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
 
     // Encode create_game arguments to match game_ix/create.rs; platform_fee is u64.
-    let mut data = anchor_discriminator("create_game_v2").to_vec();
+    let mut data = anchor_discriminator("create_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&wager_amount.to_le_bytes());
     data.push(match_type);
@@ -99,7 +99,7 @@ pub fn join_game_ix(
     let white_profile_pda =
         Pubkey::find_program_address(&[PROFILE_SEED, white_player.as_ref()], &program_id).0;
 
-    let mut data = anchor_discriminator("join_game_v2").to_vec();
+    let mut data = anchor_discriminator("join_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
 
     Ok(Instruction {

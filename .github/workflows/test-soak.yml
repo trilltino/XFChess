@@ -26,10 +26,10 @@ jobs:
           contract: 'true'
       - name: Build desktop assets
         run: |
-          npm ci --prefix tauri/wallet-ui
-          npm run build --prefix tauri/wallet-ui
-          npm ci --prefix tauri/tournament-admin
-          npm run build --prefix tauri/tournament-admin
+          npm ci --prefix apps/tauri/wallet-ui
+          npm run build --prefix apps/tauri/wallet-ui
+          npm ci --prefix apps/tauri/tournament-admin
+          npm run build --prefix apps/tauri/tournament-admin
       - name: Repeat full offline suite
         env:
           FLAKE_RUNS: ${{ inputs.runs }}

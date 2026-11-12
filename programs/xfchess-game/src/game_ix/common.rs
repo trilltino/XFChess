@@ -59,6 +59,7 @@ pub fn init_game_fields(game: &mut Game, args: InitGameArgs, now: i64, bump: u8)
     game.is_delegated = false;
     game.tournament_id = args.tournament_id;
     game.nonce = 0;
+    game.draw_offered_by = None;
     Ok(())
 }
 

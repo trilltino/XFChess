@@ -14,7 +14,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Installers use a shared frontend/API domain; see ops/nginx/nginx.conf.
+  # Installers use a shared frontend/API domain; see infra/ops/nginx/nginx.conf.
   BACKEND_URL: https://xfchess.com
   SIGNING_URL: https://xfchess.com
   # Use the configured IP health endpoint with self-signed TLS until domain TLS is provisioned.
@@ -67,7 +67,7 @@ jobs:
           VITE_PRIVY_APP_ID: ${{ secrets.VITE_PRIVY_APP_ID || 'cmt4t5mz200920ekywk04lspv' }}
         run: |
           (cd xfchessdotcom && npm ci && npm run build)
-          (cd tauri/wallet-ui && npm ci && npm run build)
+          (cd apps/tauri/wallet-ui && npm ci && npm run build)
 
       - name: Build binaries (release)
         env:
@@ -82,14 +82,14 @@ jobs:
           curl.exe -fsSL --retry 3 --retry-delay 5 -m 60 -o sf.zip "https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-windows-x86-64-modern.zip"
           if ($LASTEXITCODE -ne 0) { throw "Stockfish download failed (curl exit $LASTEXITCODE)" }
           Expand-Archive -Path sf.zip -DestinationPath sf_extracted
-          New-Item -ItemType Directory -Force -Path assets/bin | Out-Null
-          Copy-Item -Force "sf_extracted\stockfish\stockfish-windows-x86-64-modern.exe" assets/bin/stockfish.exe
+          New-Item -ItemType Directory -Force -Path apps/xfchess-client/assets/bin | Out-Null
+          Copy-Item -Force "sf_extracted\stockfish\stockfish-windows-x86-64-modern.exe" apps/xfchess-client/assets/bin/stockfish.exe
 
       - name: Verify Stockfish binary
         shell: pwsh
         run: |
-          if (-not (Test-Path -LiteralPath assets/bin/stockfish.exe -PathType Leaf)) { throw "assets/bin/stockfish.exe missing after download step" }
-          $output = @("uci", "quit") | & .\assets\bin\stockfish.exe
+          if (-not (Test-Path -LiteralPath apps/xfchess-client/assets/bin/stockfish.exe -PathType Leaf)) { throw "apps/xfchess-client/assets/bin/stockfish.exe missing after download step" }
+          $output = @("uci", "quit") | & .\apps\xfchess-client\assets\bin\stockfish.exe
           if (-not ($output -match "uciok")) { throw "stockfish.exe did not respond to a UCI handshake — binary may be corrupt" }
           Write-Host "Stockfish OK"
           cargo test -p xfchess-stockfish bundled_engine -- --ignored
@@ -100,12 +100,12 @@ jobs:
         run: |
           $stage = "release/win"
           New-Item -ItemType Directory -Force -Path "$stage/assets" | Out-Null
-          Copy-Item -Recurse -Force assets/* "$stage/assets/"
+          Copy-Item -Recurse -Force apps/xfchess-client/assets/* "$stage/assets/"
           Copy-Item -Force target/release/xfchess.exe "$stage/"
           Copy-Item -Force target/release/xfchess-tauri.exe "$stage/"
           # Ship wallet-ui/dist beside the companion binary.
           New-Item -ItemType Directory -Force -Path "$stage/wallet-ui" | Out-Null
-          Copy-Item -Recurse -Force tauri/wallet-ui/dist "$stage/wallet-ui/"
+          Copy-Item -Recurse -Force apps/tauri/wallet-ui/dist "$stage/wallet-ui/"
 
       # Sign the binaries BEFORE packaging. Azure Trusted Signing path:
       - name: Sign binaries (Azure Trusted Signing)
@@ -132,7 +132,7 @@ jobs:
             "/DAPP_VERSION=${{ steps.ver.outputs.version }}" `
             "/DBACKEND_URL=${{ env.BACKEND_URL }}" `
             "/DSIGNING_URL=${{ env.SIGNING_URL }}" `
-            tauri/installer/xfchess.nsi
+            apps/tauri/installer/xfchess.nsi
 
       - name: Sign installer (Azure Trusted Signing)
         if: env.AZURE_TS_ACCOUNT != ''
@@ -192,7 +192,7 @@ jobs:
           # Same as Windows/macOS: unset ⇒ Privy compiled out of wallet-ui dist.
           VITE_PRIVY_APP_ID: ${{ secrets.VITE_PRIVY_APP_ID || 'cmt4t5mz200920ekywk04lspv' }}
         run: |
-          (cd tauri/wallet-ui && npm ci && npm run build)
+          (cd apps/tauri/wallet-ui && npm ci && npm run build)
 
       - name: Build binaries (release)
         env:
@@ -204,13 +204,13 @@ jobs:
       - name: Stage payload
         run: |
           mkdir -p release/linux/assets
-          cp -r assets/* release/linux/assets/
+          cp -r apps/xfchess-client/assets/* release/linux/assets/
           cp target/release/xfchess release/linux/xfchess
           cp target/release/xfchess-tauri release/linux/xfchess-tauri
           chmod +x release/linux/xfchess release/linux/xfchess-tauri
           # Ship wallet-ui/dist beside the companion binary.
           mkdir -p release/linux/wallet-ui
-          cp -r tauri/wallet-ui/dist release/linux/wallet-ui/
+          cp -r apps/tauri/wallet-ui/dist release/linux/wallet-ui/
           cat > release/linux/launch.sh <<EOF
           #!/bin/sh
           SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
@@ -355,7 +355,7 @@ jobs:
           VITE_PRIVY_APP_ID: ${{ secrets.VITE_PRIVY_APP_ID || 'cmt4t5mz200920ekywk04lspv' }}
         run: |
           (cd xfchessdotcom && npm ci && npm run build)
-          (cd tauri/wallet-ui && npm ci && npm run build)
+          (cd apps/tauri/wallet-ui && npm ci && npm run build)
 
       - name: Build binaries (release)
         env:
@@ -383,7 +383,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bash tauri/macos/package_macos.sh
+        run: bash apps/tauri/macos/package_macos.sh
 
       - uses: actions/upload-artifact@v4
         with:
@@ -435,12 +435,12 @@ jobs:
 
       - name: Download Stockfish (Android ARMv8)
         run: |
-          mkdir -p mobile/app/src/main/jniLibs/arm64-v8a /tmp/stockfish
+          mkdir -p apps/android/app/src/main/jniLibs/arm64-v8a /tmp/stockfish
           curl -fsSL --retry 3 --retry-delay 5 -m 120 -o /tmp/stockfish.tar \
             https://github.com/official-stockfish/Stockfish/releases/download/sf_16/stockfish-android-armv8.tar
           tar -xf /tmp/stockfish.tar -C /tmp/stockfish
-          find /tmp/stockfish -type f -name 'stockfish-android-armv8' -exec cp {} mobile/app/src/main/jniLibs/arm64-v8a/libstockfish.so \;
-          test -f mobile/app/src/main/jniLibs/arm64-v8a/libstockfish.so
+          find /tmp/stockfish -type f -name 'stockfish-android-armv8' -exec cp {} apps/android/app/src/main/jniLibs/arm64-v8a/libstockfish.so \;
+          test -f apps/android/app/src/main/jniLibs/arm64-v8a/libstockfish.so
 
       - name: Build libxfchess_app.so (release, arm64-v8a)
         env:
@@ -449,13 +449,13 @@ jobs:
           # Read ANDROID_HOME from the shell environment set by the preceding action.
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           # Build only the Android library; desktop binaries are not valid cross-compilation targets.
-          cargo ndk -t arm64-v8a -P 31 -o mobile/app/src/main/jniLibs \
+          cargo ndk -t arm64-v8a -P 31 -o apps/android/app/src/main/jniLibs \
             build --release --lib --features solana
 
       - name: Strip stray cdylib artifacts from jniLibs
         # Keep the game library and the executable Stockfish library.
         run: |
-          find mobile/app/src/main/jniLibs/arm64-v8a -name '*.so' ! -name 'libxfchess_app.so' ! -name 'libstockfish.so' -delete
+          find apps/android/app/src/main/jniLibs/arm64-v8a -name '*.so' ! -name 'libxfchess_app.so' ! -name 'libstockfish.so' -delete
 
       - name: Assemble release APK
         working-directory: mobile
@@ -466,7 +466,7 @@ jobs:
       - name: Verify game and Stockfish libraries are present in the APK
         # Verify native-library extraction settings to catch runtime permission errors.
         run: |
-          apk="mobile/app/build/outputs/apk/release/app-release-unsigned.apk"
+          apk="apps/android/app/build/outputs/apk/release/app-release-unsigned.apk"
           for library in libxfchess_app.so libstockfish.so; do
             if ! unzip -l "$apk" | grep -q "lib/arm64-v8a/$library"; then
               echo "::error::$library missing from the built APK"
@@ -477,4 +477,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: android-release-apk-unsigned
-          path: mobile/app/build/outputs/apk/release/app-release-unsigned.apk
+          path: apps/android/app/build/outputs/apk/release/app-release-unsigned.apk

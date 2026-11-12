@@ -1,0 +1,29 @@
+[package]
+name = "xfchess-client-network"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+default = []
+solana = ["dep:solana-sdk"]
+
+[dependencies]
+base64.workspace = true
+bincode.workspace = true
+bs58.workspace = true
+ed25519-dalek = "2"
+chrono.workspace = true
+iroh.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10.8"
+solana-sdk = { workspace = true, optional = true }
+uuid.workspace = true
+xfchess-client-domain = { path = "../xfchess-client-domain" }
+xfchess-platform-api = { path = "../xfchess-platform-api" }
+
+[lints]
+workspace = true

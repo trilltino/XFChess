@@ -41,7 +41,7 @@ address = re.search(r'--- IDL begin address ---\n([^\n]+)', text)
 if not address:
     raise ValueError("Missing generated program address")
 idl["address"] = re.sub(r'[^A-Za-z0-9]', '', address[1])
-if idl["address"] != "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU":
+if idl["address"] != "6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N":
     raise ValueError("Unexpected generated program address")
 # Same unambiguous module-path normalization as anchor-lang-idl's builder.
 encoded = json.dumps(idl)
@@ -57,7 +57,7 @@ for kind in ["accounts", "events", "instructions"]:
     if len(discriminators) != len(set(discriminators)):
         raise ValueError(f"Duplicate {kind} discriminator")
 
-destination = root / "xfchessdotcom/src/lib/xfchess_game.json"
+destination = root / "apps/website/src/lib/xfchess_game.json"
 previous = json.loads(destination.read_text(encoding="utf-8"))
 old_types = {item["name"]: item for item in previous["types"]}
 new_types = {item["name"]: item for item in idl["types"]}

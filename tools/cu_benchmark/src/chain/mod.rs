@@ -11,7 +11,7 @@ pub use accounts::{fetch_profile_elo, fetch_tournament_places, TOURNAMENT_STATUS
 pub use budget::apply_compute_budget;
 pub use rpc::{base_client, er_client, get_blockhash_for_accounts, with_retry};
 
-pub const PROGRAM_ID: &str = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU";
+pub const PROGRAM_ID: &str = "6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N";
 
 pub const BASE_RPC_URL: &str = "https://api.devnet.solana.com";
 

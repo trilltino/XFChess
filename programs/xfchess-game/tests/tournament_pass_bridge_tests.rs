@@ -91,7 +91,7 @@ fn code(error: GameErrorCode) -> Option<u32> {
 fn profile(player: &Pubkey, blitz: u32) -> PlayerProfile {
     PlayerProfile {
         authority: *player,
-        elo_blitz: f64::from(blitz) * 100.0,
+        elo_blitz: blitz * 100,
         is_verified: true,
         ..Default::default()
     }

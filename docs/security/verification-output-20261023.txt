@@ -278,7 +278,7 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 === xfchess-security-rules-tests.log ===
 Full-log SHA-256: 39fd44bb73f892263ba8516a5eeb86f433626e7a8ec4a55b1d2a7c39346b131d
     Finished `test` profile [unoptimized + debuginfo] target(s) in 16.83s
-     Running unittests C:\Users\isich\XFChess\libs\chess\xfchess-rules\src\lib.rs
+     Running unittests C:\Users\isich\XFChess\crates\chess\xfchess-rules\src\lib.rs
 running 2 tests
 test tests::halfmove_clock_reads_the_position ... ok
 test tests::insufficient_material_follows_the_contract_definition ... ok

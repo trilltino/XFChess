@@ -3,49 +3,29 @@ use anchor_lang::InstructionData;
 use xfchess_game::state::TournamentType;
 
 #[test]
-fn recovery_versioned_creation_keeps_argument_bytes_and_account_prefix() {
+fn creation_appends_the_recovery_record_after_the_base_accounts() {
     use anchor_lang::ToAccountMetas;
     let player = Pubkey::new_unique();
     let payer = Pubkey::new_unique();
     let game = Pubkey::new_unique();
     let escrow = Pubkey::new_unique();
     let record = Pubkey::new_unique();
-    let legacy = xfchess_game::accounts::CreateGame {
+    let base = xfchess_game::accounts::CreateGameCore {
         game,
         escrow_pda: escrow,
         player,
         fee_payer: payer,
         system_program: anchor_lang::system_program::ID,
     };
-    let mut expected = legacy.to_account_metas(None);
+    let mut expected = base.to_account_metas(None);
     expected.push(anchor_lang::solana_program::instruction::AccountMeta::new(
         record, false,
     ));
-    let versioned = xfchess_game::accounts::CreateGameV2 {
-        legacy,
+    let create = xfchess_game::accounts::CreateGame {
+        core: base,
         recovery_identity: record,
     };
-    assert_eq!(versioned.to_account_metas(None), expected);
-    let old = xfchess_game::instruction::CreateGame {
-        game_id: 42,
-        wager_amount: 10_000_000,
-        match_type: xfchess_game::state::MatchType::Rated,
-        platform_fee: 0,
-        base_time_seconds: 300,
-        increment_seconds: 5,
-    }
-    .data();
-    let new = xfchess_game::instruction::CreateGameV2 {
-        game_id: 42,
-        wager_amount: 10_000_000,
-        match_type: xfchess_game::state::MatchType::Rated,
-        platform_fee: 0,
-        base_time_seconds: 300,
-        increment_seconds: 5,
-    }
-    .data();
-    assert_ne!(&old[..8], &new[..8]);
-    assert_eq!(&old[8..], &new[8..]);
+    assert_eq!(create.to_account_metas(None), expected);
 }
 
 #[test]

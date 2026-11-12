@@ -1,0 +1,218 @@
+use std::sync::LazyLock;
+
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use tracing::warn;
+
+use crate::signing::storage::vault::{KycInput, VaultStore};
+use crate::signing::AppState;
+
+/// Tax-ID formats for the countries that require one, compiled once.
+fn get_tax_id_pattern(country: &str) -> Result<Option<&'static Regex>, StatusCode> {
+    // UK NI: AB123456C
+    static GB: LazyLock<Result<Regex, regex::Error>> =
+        LazyLock::new(|| Regex::new(r"^[A-Za-z]{2}\d{6}[A-Za-z]$"));
+    // Brazil CPF
+    static BR: LazyLock<Result<Regex, regex::Error>> =
+        LazyLock::new(|| Regex::new(r"^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$"));
+    // Germany Tax ID: 11 digits
+    static DE: LazyLock<Result<Regex, regex::Error>> = LazyLock::new(|| Regex::new(r"^\d{11}$"));
+    // Canada SIN
+    static CA: LazyLock<Result<Regex, regex::Error>> =
+        LazyLock::new(|| Regex::new(r"^\d{3}-?\d{3}-?\d{3}$"));
+    let pattern = match country {
+        "GB" => &*GB,
+        "BR" => &*BR,
+        "DE" => &*DE,
+        "CA" => &*CA,
+        _ => return Ok(None),
+    };
+    pattern.as_ref().map(Some).map_err(|error| {
+        tracing::error!("Tax ID validator unavailable: {error}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct KycRequest {
+    pub wallet_pubkey: String,
+    pub country: String,
+    pub full_name: String,
+    pub dob: String,
+    pub residence: String,
+    pub tax_id: String,
+}
+
+#[derive(Serialize)]
+pub struct OkResponse {
+    pub ok: bool,
+}
+
+#[derive(Serialize)]
+pub struct UserStatus {
+    pub has_profile: bool,
+    pub has_email: bool,
+    pub has_kyc: bool,
+    pub kyc_status: String,
+    pub cacf_compliant: bool,
+    pub can_wager: bool,
+    pub lichess_username: Option<String>,
+    pub lichess_onchain_pending: bool,
+}
+
+pub async fn submit_kyc(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<KycRequest>,
+) -> Result<Json<OkResponse>, StatusCode> {
+    crate::signing::routes::auth::require_caller_owns_wallet(
+        &state,
+        &headers,
+        req.wallet_pubkey.trim(),
+    )
+    .await
+    .map_err(|(status, msg)| {
+        warn!("[kyc] {msg}");
+        status
+    })?;
+
+    if req.wallet_pubkey.trim().is_empty()
+        || req.full_name.trim().is_empty()
+        || req.dob.trim().is_empty()
+        || req.country.trim().is_empty()
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // Validate tax ID format for supported countries
+    if let Some(pattern) = get_tax_id_pattern(&req.country)? {
+        if !pattern.is_match(&req.tax_id) {
+            // Never log raw tax IDs, including on validation failure.
+            tracing::warn!(
+                "[kyc] Invalid tax ID format for country {} (length {})",
+                req.country,
+                req.tax_id.len()
+            );
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+
+    let vault = VaultStore::new((*state.vault_pool).clone(), state.store.pool());
+    vault
+        .insert_kyc(KycInput {
+            wallet_pubkey: &req.wallet_pubkey,
+            country: &req.country,
+            full_name: &req.full_name,
+            dob: &req.dob,
+            residence: &req.residence,
+            tax_id_raw: &req.tax_id,
+            data_source: "self_submitted",
+        })
+        .await
+        .map_err(|e| {
+            tracing::error!("[kyc] DB write failed for {}: {}", req.wallet_pubkey, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // Mark as pending in users (self-submitted; no on-chain verification yet).
+    let _ = state
+        .store
+        .set_kyc_status(&req.wallet_pubkey, "pending")
+        .await;
+
+    // Persist CACF as under_review until an admin approves.
+    let _ = vault
+        .save_cacf(
+            &req.wallet_pubkey,
+            &req.country,
+            "under_review",
+            false,
+            None,
+        )
+        .await;
+
+    Ok(Json(OkResponse { ok: true }))
+}
+
+pub async fn user_status(
+    State(state): State<AppState>,
+    Path(pubkey): Path<String>,
+) -> Json<UserStatus> {
+    if pubkey.trim().is_empty() {
+        warn!("[kyc] user_status called with empty pubkey");
+    }
+
+    let vault = VaultStore::new((*state.vault_pool).clone(), state.store.pool());
+
+    // has_kyc: active record exists in kyc_records (written by both submit_kyc
+    // and identity.rs write-through, so both paths are covered).
+    let has_kyc = vault.has_kyc(&pubkey).await;
+
+    // Email-only users have wallet=""; they have no wallet account until linking one.
+    let user_row = state.store.find_user_by_wallet(&pubkey).await;
+    let has_wallet_account = user_row.is_some();
+
+    // kyc_status from users ('none' | 'pending' | 'approved')
+    let kyc_status = user_row
+        .as_ref()
+        .map(|r| r.3.as_str())
+        .unwrap_or("none")
+        .to_string();
+
+    // CACF: check persisted record for the user's country (derive from kyc_records).
+    let kyc_country = vault.get_kyc(&pubkey).await.map(|r| r.country);
+    let cacf_ok = match &kyc_country {
+        Some(c) => vault.cacf_can_wager(&pubkey, c).await,
+        None => true, // no country on record yet — don't block; CACF check is deferred
+    };
+
+    // Mainnet wagers require wallet ownership, active KYC, and applicable CACF
+    // compliance. Devnet bypasses these checks.
+    let can_wager = state.config.is_devnet() || (has_wallet_account && has_kyc && cacf_ok);
+
+    let lichess_row: Option<(String, String)> = sqlx::query_as(
+        "SELECT username, on_chain_tx FROM external_elo_links WHERE pubkey = ? AND platform = 'lichess'",
+    )
+    .bind(&pubkey)
+    .fetch_optional(&state.store.pool())
+    .await
+    .unwrap_or(None);
+    let lichess_username = lichess_row.as_ref().map(|(username, _)| username.clone());
+    let lichess_onchain_pending = lichess_row
+        .as_ref()
+        .is_some_and(|(_, tx)| tx == "offchain-pending");
+
+    Json(UserStatus {
+        has_profile: has_wallet_account || has_kyc,
+        has_email: user_row.as_ref().and_then(|r| r.2.as_ref()).is_some(),
+        has_kyc,
+        kyc_status,
+        cacf_compliant: cacf_ok,
+        can_wager,
+        lichess_username,
+        lichess_onchain_pending,
+    })
+}
+
+pub fn kyc_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/kyc/submit", post(submit_kyc))
+        .route("/api/user/status/{pubkey}", get(user_status))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_router_builds() {
+        // Just verify the route tree compiles
+        let _r: Router<AppState> = kyc_routes();
+    }
+}

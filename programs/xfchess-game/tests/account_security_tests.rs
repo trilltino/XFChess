@@ -337,10 +337,10 @@ fn profile_accounts(player: Pubkey) -> anyhow::Result<Vec<Fixture>> {
         wins: 7,
         losses: 3,
         games_played: 10,
-        elo_rating: 175_000.0,
-        elo_bullet: 160_000.0,
-        elo_blitz: 170_000.0,
-        elo_rapid: 180_000.0,
+        elo_rating: 175_000,
+        elo_bullet: 160_000,
+        elo_blitz: 170_000,
+        elo_rapid: 180_000,
         is_verified: true,
         created_at: 1234,
         ..PlayerProfile::default()
@@ -422,7 +422,7 @@ fn canonical_profile_reinitialization_preserves_accumulated_state() -> anyhow::R
                 profile.elo_blitz,
                 profile.elo_rapid
             ),
-            (175_000.0, 160_000.0, 170_000.0, 180_000.0)
+            (175_000, 160_000, 170_000, 180_000)
         );
         assert!(profile.is_verified);
         assert_eq!(profile.created_at, 1234);
@@ -698,7 +698,7 @@ fn recovery_v2_accounts(wager: u64) -> anyhow::Result<Vec<Fixture>> {
 #[test]
 fn authorized_v2_recovery_rejects_either_forged_recipient_atomically() -> anyhow::Result<()> {
     with_sbf_runtime(|| {
-        let data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+        let data = xfchess_game::instruction::RecoverStuckDelegation { game_id: GAME_ID }.data();
         for index in [3, 4] {
             let mut accounts = recovery_v2_accounts(100_000_000)?;
             accounts[index].key = Pubkey::new_unique();
@@ -717,7 +717,7 @@ fn authorized_v2_recovery_rejects_either_forged_recipient_atomically() -> anyhow
 fn authenticated_zero_wager_recovery_succeeds_preserves_donations_and_rejects_retry(
 ) -> anyhow::Result<()> {
     with_sbf_runtime(|| {
-        let data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+        let data = xfchess_game::instruction::RecoverStuckDelegation { game_id: GAME_ID }.data();
         let mut accounts = recovery_v2_accounts(0)?;
         accounts[3].lamports = 0;
         accounts[4].lamports = 0;
@@ -782,7 +782,7 @@ fn ordinary_settlement_must_supply_canonical_record_and_disables_recovery() -> a
         let record = RecoveryIdentity::try_deserialize(&mut accounts[7].data.as_slice())?;
         assert_eq!(record.status, RecoveryStatus::Closed);
         let before = accounts.clone();
-        let data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+        let data = xfchess_game::instruction::RecoverStuckDelegation { game_id: GAME_ID }.data();
         assert_eq!(
             dispatch(&mut accounts, &data)?,
             Err(code(GameErrorCode::RecoveryIdentityMismatch))
@@ -804,7 +804,7 @@ fn recovery_sweeps_sub_rent_excess_to_treasury_instead_of_failing() -> anyhow::R
         );
         let game_rent = accounts[0].lamports;
         let total_before: u64 = accounts.iter().map(|a| a.lamports).sum();
-        let data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+        let data = xfchess_game::instruction::RecoverStuckDelegation { game_id: GAME_ID }.data();
         dispatch(&mut accounts, &data)??;
         assert_eq!(
             accounts[1].lamports, 0,
@@ -858,7 +858,7 @@ fn global_join_v2_binds_authenticated_black_and_preserves_white() -> anyhow::Res
         ];
         dispatch(
             &mut accounts,
-            &xfchess_game::instruction::GlobalJoinGameV2 { game_id: GAME_ID }.data(),
+            &xfchess_game::instruction::GlobalJoinGame { game_id: GAME_ID }.data(),
         )??;
         let record = RecoveryIdentity::try_deserialize(&mut accounts[8].data.as_slice())?;
         assert_eq!(
@@ -878,27 +878,6 @@ fn global_join_v2_binds_authenticated_black_and_preserves_white() -> anyhow::Res
         assert_eq!(accounts[6].lamports, 1_010_000_000);
         Ok(())
     })
-}
-
-#[test]
-fn legacy_lifecycle_cannot_omit_or_reuse_a_v2_identity() -> anyhow::Result<()> {
-    assert!(xfchess_game::recovery_ix::require_legacy_identity_absent(&[], GAME_ID).is_err());
-    let mut accounts = recovery_v2_accounts(0)?;
-    let before = accounts[7].clone();
-    assert!(xfchess_game::recovery_ix::require_legacy_identity_absent(
-        &[accounts[7].info()],
-        GAME_ID
-    )
-    .is_err());
-    assert_eq!(accounts[7], before);
-    let mut empty = Fixture::system(before.key);
-    xfchess_game::recovery_ix::require_legacy_identity_absent(&[empty.info()], GAME_ID)?;
-    empty.key = Pubkey::new_unique();
-    assert!(
-        xfchess_game::recovery_ix::require_legacy_identity_absent(&[empty.info()], GAME_ID)
-            .is_err()
-    );
-    Ok(())
 }
 
 #[test]
@@ -939,7 +918,7 @@ fn global_session_withdraw_never_takes_rent_and_requires_the_owning_wallet() -> 
 #[test]
 fn recovery_only_runs_for_a_delegated_identity_and_never_twice() -> anyhow::Result<()> {
     with_sbf_runtime(|| {
-        let data = xfchess_game::instruction::RecoverStuckDelegationV2 { game_id: GAME_ID }.data();
+        let data = xfchess_game::instruction::RecoverStuckDelegation { game_id: GAME_ID }.data();
         for status in [
             RecoveryStatus::Waiting,
             RecoveryStatus::Ready,

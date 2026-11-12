@@ -1,0 +1,9 @@
+{
+  "artifact": "target\\deploy\\xfchess_game.so",
+  "sha256": "b66f1396c3d15be2d33f5f97fe044e141e21feadde83a2bee82641a9c5c452d4",
+  "direct_frame_accesses": 35317,
+  "minimum_offset": -4096,
+  "maximum_offset": -1,
+  "out_of_frame_accesses": [],
+  "scope": "Direct r10-relative memory accesses only; not a full verifier"
+}

@@ -7,7 +7,7 @@ use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
 #[instruction(tournament_id: u64, game_id: u64)]
-pub struct SessionJoinGame<'info> {
+pub struct SessionJoinGameCore<'info> {
     #[account(
         seeds = [b"tournament", tournament_id.to_le_bytes().as_ref()],
         bump = tournament.bump,
@@ -78,7 +78,7 @@ pub struct SessionJoinGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<SessionJoinGame>, tournament_id: u64, _game_id: u64) -> Result<()> {
+pub fn handler(ctx: Context<SessionJoinGameCore>, tournament_id: u64, _game_id: u64) -> Result<()> {
     let delegation = &mut ctx.accounts.session_delegation;
     let game = &mut ctx.accounts.game;
     let player_key = ctx.accounts.player.key();
@@ -130,6 +130,8 @@ pub fn handler(ctx: Context<SessionJoinGame>, tournament_id: u64, _game_id: u64)
     game.status = GameStatus::Active;
     game.updated_at = Clock::get()?.unix_timestamp;
     game.country_fee = final_fee;
+    #[cfg(feature = "move-validation")]
+    crate::fide::start_account_clock(&game.to_account_info(), game, now)?;
 
     if game.wager_token.is_none() {
         debit_program_pda(

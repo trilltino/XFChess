@@ -1,0 +1,8 @@
+# Wallet sign-in for the tournament-admin panel: the Rust side signs the backend's sign-in
+# challenge with a keypair file, so the secret key never reaches the webview. Only the
+# tournament-admin window may call these (capabilities/admin-wallet.json).
+
+[[permission]]
+identifier = "allow-admin-wallet"
+description = "Allows the tournament-admin window to sign an XFChess admin sign-in challenge with the connected wallet (through the wallet window) or with a keypair file."
+commands.allow = ["admin_wallet_connect", "admin_wallet_popup_sign", "admin_wallet_pubkey", "admin_wallet_sign"]

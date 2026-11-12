@@ -1,0 +1,10 @@
+{
+  "identifier": "admin-wallet",
+  "description": "Grants the tournament-admin window the commands that sign its wallet sign-in challenge. Scoped to this one window and its own pages.",
+  "windows": ["tournament-admin"],
+  "local": true,
+  "remote": {
+    "urls": ["http://localhost:*/tournament-admin/*"]
+  },
+  "permissions": ["allow-admin-wallet"]
+}

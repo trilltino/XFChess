@@ -25,7 +25,7 @@ directory and sends no chain transactions.
 
 For the configured VPS, [provider pricing](pricing.md) and
 `scenarios/hetzner-triton.json` contain researched list rates and their assumptions.
-Forward backend/exporter metrics, then run the example from a separate host:
+Forward services/backend/exporter metrics, then run the example from a separate host:
 
 ```powershell
 ssh -i "$env:USERPROFILE/.ssh/xfchess_vps" -N -L 127.0.0.1:28090:127.0.0.1:8090 -L 127.0.0.1:29100:127.0.0.1:9100 root@178.104.55.19
@@ -60,7 +60,7 @@ Whole-value substitutions preserve JSON types. Captured tokens, request bodies,
 headers and endpoint paths are excluded from reports. `X-Benchmark-Run` connects
 requests to backend logs without creating a metric series for every game.
 
-Telemetry selects Prometheus metric names and labels from backend/exporter URLs.
+Telemetry selects Prometheus metric names and labels from services/backend/exporter URLs.
 Counters track individual series, including new series and resets. Gauges report
 observed minima/maxima; CPU utilization derives busy time from all CPU modes.
 Missing required data makes capacity inconclusive. Resource/latency/error limit

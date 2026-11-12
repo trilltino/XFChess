@@ -6,11 +6,11 @@ use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
 #[instruction(game_id: u64, wager_amount: u64, match_type: MatchType, platform_fee: u64, base_time_seconds: u64, increment_seconds: u16)]
-pub struct CreateGame<'info> {
+pub struct CreateGameCore<'info> {
     #[account(
         init,
         payer = fee_payer,
-        space = 8 + Game::INIT_SPACE,
+        space = crate::fide::GAME_ACCOUNT_SPACE,
         seeds = [GAME_SEED, &game_id.to_le_bytes()],
         bump
     )]
@@ -26,7 +26,7 @@ pub struct CreateGame<'info> {
 }
 
 pub fn handler(
-    ctx: Context<CreateGame>,
+    ctx: Context<CreateGameCore>,
     game_id: u64,
     wager_amount: u64,
     match_type: MatchType,
@@ -59,6 +59,9 @@ pub fn handler(
         Clock::get()?.unix_timestamp,
         ctx.bumps.game,
     )?;
+
+    #[cfg(feature = "move-validation")]
+    crate::fide::FideState::initialize(&mut ctx.accounts.game.to_account_info().try_borrow_mut_data()?, &ctx.accounts.game)?;
 
     if wager_amount > 0 {
         anchor_lang::system_program::transfer(

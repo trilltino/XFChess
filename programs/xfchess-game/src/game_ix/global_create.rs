@@ -11,7 +11,7 @@ use anchor_lang::Discriminator;
 
 #[derive(Accounts)]
 #[instruction(game_id: u64, wager_amount: u64, match_type: MatchType, platform_fee: u64, base_time_seconds: u64, increment_seconds: u16)]
-pub struct GlobalCreateGame<'info> {
+pub struct GlobalCreateGameCore<'info> {
     #[account(
         mut,
         seeds = [GlobalSessionDelegation::SEED, player.key().as_ref()],
@@ -38,7 +38,7 @@ pub struct GlobalCreateGame<'info> {
 }
 
 pub fn handler(
-    ctx: Context<GlobalCreateGame>,
+    ctx: Context<GlobalCreateGameCore>,
     game_id: u64,
     wager_amount: u64,
     match_type: MatchType,
@@ -70,7 +70,7 @@ pub fn handler(
         GameErrorCode::GlobalSessionSpendingLimitExceeded
     );
 
-    let space = 8 + Game::INIT_SPACE;
+    let space = crate::fide::GAME_ACCOUNT_SPACE;
     let lamports = Rent::get()?.minimum_balance(space);
 
     {
@@ -172,6 +172,8 @@ pub fn handler(
     data[..8].copy_from_slice(Game::DISCRIMINATOR);
     let mut writer = &mut data[8..];
     game.serialize(&mut writer)?;
+    #[cfg(feature = "move-validation")]
+    crate::fide::FideState::initialize(&mut data, &game)?;
 
     Ok(())
 }

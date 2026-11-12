@@ -29,14 +29,14 @@ Android builds require the SDK, NDK, JDK and cargo-ndk described in
 [the Android runbook](../docs/runbooks/android-release.md).
 
 Packages land in `release/local` or `release/dev`, with a `launch.bat` entry
-point. Local packages include a copy of `backend/.env` and supply missing
+point. Local packages include a copy of `services/backend/.env` and supply missing
 development secrets in the staged copy; keep that package private. Remote
 packages default to `https://xfchess.com`. Put the Windows engine at
 `assets/bin/stockfish.exe`; packaging includes it with the assets when present.
 Installable public releases are built by CI and require the engine.
 
 `release` defaults to pushing the branch and tag. `-Deploy` waits for the
-release workflow, checks its Chrome OS asset, then calls `ops/scripts/deploy.ps1`.
+release workflow, checks its Chrome OS asset, then calls `infra/ops/scripts/deploy.ps1`.
 Use `-DryRun` to preview; `-Version vX.Y.Z` selects a version. The scripts
 remain directly callable with PowerShell for parameters containing spaces.
 

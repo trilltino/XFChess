@@ -71,7 +71,7 @@ pub fn delegate_game_ix(
     };
     let delegation_program: Pubkey = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh".parse()?;
 
-    let mut data = anchor_discriminator("delegate_game_v2").to_vec();
+    let mut data = anchor_discriminator("delegate_game").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(&valid_until.to_le_bytes());
 
@@ -307,7 +307,7 @@ pub fn recover_stuck_delegation_ix(
         Pubkey::find_program_address(&[WAGER_ESCROW_SEED, &game_id.to_le_bytes()], &program_id).0;
     let treasury_vault = Pubkey::find_program_address(&[TREASURY_VAULT_SEED], &program_id).0;
 
-    let mut data = anchor_discriminator("recover_stuck_delegation_v2").to_vec();
+    let mut data = anchor_discriminator("recover_stuck_delegation").to_vec();
     data.extend_from_slice(&game_id.to_le_bytes());
 
     Instruction {

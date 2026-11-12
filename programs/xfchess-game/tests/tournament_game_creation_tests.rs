@@ -223,7 +223,7 @@ fn create_tournament_game_ix(
     session_key: Pubkey,
 ) -> Instruction {
     let mut accounts =
-        xfchess_game::__client_accounts_create_tournament_game::CreateTournamentGame {
+        xfchess_game::__client_accounts_create_tournament_game_core::CreateTournamentGameCore {
             tournament: tournament_pda(TOURNAMENT_ID).0,
             tournament_players_shard_0: shard_pda(TOURNAMENT_ID, 0).0,
             tournament_players_shard_1: None,
@@ -242,7 +242,7 @@ fn create_tournament_game_ix(
         recovery_identity_pda(GAME_ID),
         false,
     ));
-    let data = xfchess_game::instruction::CreateTournamentGameV2 {
+    let data = xfchess_game::instruction::CreateTournamentGame {
         tournament_id: TOURNAMENT_ID,
         game_id: GAME_ID,
         session_key,
@@ -304,7 +304,7 @@ async fn tournament_session_v2_funds_game_record_and_wager_from_its_vault() -> a
         + rent.minimum_balance(8 + Game::INIT_SPACE)
         + rent.minimum_balance(8 + RecoveryIdentity::INIT_SPACE);
     ctx.set_account(&vault, &AccountSharedData::from(initial));
-    let mut accounts = xfchess_game::__client_accounts_session_create_game::SessionCreateGame {
+    let mut accounts = xfchess_game::__client_accounts_session_create_game_core::SessionCreateGameCore {
         tournament: tournament_pda(TOURNAMENT_ID).0,
         tournament_players_shard_0: shard_pda(TOURNAMENT_ID, 0).0,
         tournament_players_shard_1: None,
@@ -331,7 +331,7 @@ async fn tournament_session_v2_funds_game_record_and_wager_from_its_vault() -> a
         Instruction {
             program_id: xfchess_game::ID,
             accounts,
-            data: xfchess_game::instruction::SessionCreateGameV2 {
+            data: xfchess_game::instruction::SessionCreateGame {
                 tournament_id: TOURNAMENT_ID,
                 game_id: GAME_ID,
                 wager_amount: wager,

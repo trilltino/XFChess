@@ -10,7 +10,7 @@ fn external_elo_is_stored_in_centiscale() -> anyhow::Result<()> {
         rating::external_to_centiscale(1800).context("required operation value")?,
         180_000
     );
-    assert_eq!(rating::centiscale_to_display(180_050.0), 1801);
+    assert_eq!(rating::centiscale_to_display(180_050), 1801);
     assert!(rating::external_to_centiscale(99).is_err());
     assert!(rating::external_to_centiscale(4001).is_err());
     Ok(())
@@ -23,7 +23,7 @@ fn profile_init_preserves_existing_stats_and_verification() -> anyhow::Result<()
         authority: player,
         wins: 7,
         losses: 3,
-        elo_rating: 175_000.0,
+        elo_rating: 175_000,
         is_verified: true,
         lichess_verified: true,
         lichess_blitz: 180_000,
@@ -41,7 +41,7 @@ fn profile_init_preserves_existing_stats_and_verification() -> anyhow::Result<()
 
     assert_eq!(loaded.wins, 7);
     assert_eq!(loaded.losses, 3);
-    assert_eq!(loaded.elo_rating, 175_000.0);
+    assert_eq!(loaded.elo_rating, 175_000);
     assert!(loaded.is_verified);
     assert!(loaded.lichess_verified);
     assert_eq!(loaded.lichess_blitz, 180_000);

@@ -5,5 +5,5 @@ pub mod session_join_game;
 pub use authorize_tournament_session::{
     AuthorizeTournamentSessionArgs, AuthorizeTournamentSessionCtx, RevokeTournamentSessionCtx,
 };
-pub use session_create_game::SessionCreateGame;
-pub use session_join_game::SessionJoinGame;
+pub use session_create_game::SessionCreateGameCore;
+pub use session_join_game::SessionJoinGameCore;

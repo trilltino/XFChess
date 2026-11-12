@@ -13,6 +13,12 @@ pub fn crank_time_check(ctx: Context<CrankTimeCheck>, _data: CrankTimeCheckData)
     let now = clock.unix_timestamp;
     let slot = clock.slot;
     let game_id = game.game_id;
+    #[cfg(feature = "move-validation")]
+    if game.to_account_info().data_len() != crate::fide::LEGACY_GAME_SPACE {
+        let info = game.to_account_info();
+        crate::fide::finish_timeout(game, &info, now, true)?;
+        return Ok(());
+    }
 
     // A late run still resolves an expired game, so there is no upper bound:
     // slot height and wall-clock time are unrelated on the ER.

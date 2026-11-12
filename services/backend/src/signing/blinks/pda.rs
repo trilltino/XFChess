@@ -1,0 +1,88 @@
+use anyhow::Result;
+use solana_sdk::pubkey::Pubkey;
+
+use super::{PROFILE_SEED, TOURNAMENT_ESCROW_SEED, TOURNAMENT_SEED, TOURNAMENT_USDC_PRIZE_SEED};
+
+pub fn derive_tournament_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
+    let seeds = &[TOURNAMENT_SEED, &tournament_id.to_le_bytes()];
+    let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
+    Ok(pda)
+}
+
+pub fn derive_escrow_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
+    let seeds = &[TOURNAMENT_ESCROW_SEED, &tournament_id.to_le_bytes()];
+    let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
+    Ok(pda)
+}
+
+pub fn derive_usdc_prize_escrow_pda(tournament_id: u64, program_id: &Pubkey) -> Result<Pubkey> {
+    let seeds = &[TOURNAMENT_USDC_PRIZE_SEED, &tournament_id.to_le_bytes()];
+    let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
+    Ok(pda)
+}
+
+pub fn derive_player_profile_pda(wallet_pubkey: &Pubkey, program_id: &Pubkey) -> Result<Pubkey> {
+    let seeds = &[PROFILE_SEED, wallet_pubkey.as_ref()];
+    let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
+    Ok(pda)
+}
+
+pub fn derive_shard_pda(
+    shard_index: u8,
+    tournament_id: u64,
+    program_id: &Pubkey,
+) -> Result<Pubkey> {
+    let seeds: &[&[u8]] = &[
+        b"tourney_players",
+        &[shard_index],
+        &tournament_id.to_le_bytes(),
+    ];
+    let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
+    Ok(pda)
+}
+
+pub fn derive_match_pda(
+    tournament_id: u64,
+    match_index: u16,
+    program_id: &Pubkey,
+) -> Result<Pubkey> {
+    let seeds: &[&[u8]] = &[
+        b"t_match",
+        &tournament_id.to_le_bytes(),
+        &match_index.to_le_bytes(),
+    ];
+    let (pda, _bump) = Pubkey::find_program_address(seeds, program_id);
+    Ok(pda)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Context as _;
+    use solana_sdk::signature::Keypair;
+    use solana_sdk::signer::Signer;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_pda_derivation() -> anyhow::Result<()> {
+        let program_id = Pubkey::from_str("6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N")
+            .context("test setup failed")?;
+        let tournament_id = 1u64;
+
+        let tournament_pda =
+            derive_tournament_pda(tournament_id, &program_id).context("test setup failed")?;
+        assert_ne!(tournament_pda, program_id);
+
+        let escrow_pda =
+            derive_escrow_pda(tournament_id, &program_id).context("test setup failed")?;
+        assert_ne!(escrow_pda, program_id);
+        assert_ne!(escrow_pda, tournament_pda);
+
+        let wallet_pubkey = Keypair::new().pubkey();
+        let profile_pda =
+            derive_player_profile_pda(&wallet_pubkey, &program_id).context("test setup failed")?;
+        assert_ne!(profile_pda, program_id);
+        assert_ne!(profile_pda, wallet_pubkey);
+        Ok(())
+    }
+}

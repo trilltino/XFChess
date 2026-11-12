@@ -1,7 +1,7 @@
 # GitHub requests reviewers for these paths; branch protection controls whether approval is required.
 
-/backend/migrations/        @trilltino
+/services/backend/migrations/        @trilltino
 /programs/                  @trilltino
-/ops/                    @trilltino
-/backend/src/signing/       @trilltino
+/infra/ops/                    @trilltino
+/services/backend/src/signing/       @trilltino
 /.github/                   @trilltino

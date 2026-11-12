@@ -12,7 +12,7 @@ use anchor_lang::prelude::*;
 /// any other game).
 #[derive(Accounts)]
 #[instruction(tournament_id: u64, game_id: u64)]
-pub struct CreateTournamentGame<'info> {
+pub struct CreateTournamentGameCore<'info> {
     #[account(
         seeds = [TOURNAMENT_SEED, &tournament_id.to_le_bytes()],
         bump = tournament.bump,
@@ -43,7 +43,7 @@ pub struct CreateTournamentGame<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + Game::INIT_SPACE,
+        space = crate::fide::GAME_ACCOUNT_SPACE,
         seeds = [GAME_SEED, &game_id.to_le_bytes()],
         bump
     )]
@@ -86,7 +86,7 @@ fn session_lifetime(base_time_seconds: u64) -> i64 {
 }
 
 pub fn handler(
-    ctx: Context<CreateTournamentGame>,
+    ctx: Context<CreateTournamentGameCore>,
     tournament_id: u64,
     game_id: u64,
     session_key: Pubkey,
@@ -142,6 +142,8 @@ pub fn handler(
         ctx.bumps.game,
     )?;
     crate::lifecycle::transitions::join_waiting_game(game, black, session_key, now)?;
+    #[cfg(feature = "move-validation")]
+    crate::fide::FideState::initialize(&mut game.to_account_info().try_borrow_mut_data()?, game)?;
 
     let expires_at = now.saturating_add(session_lifetime(base_time_seconds));
     for (session, player, bump) in [

@@ -38,7 +38,7 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9]{8}", args.date):
         parser.error("--date must be YYYYMMDD")
-    program = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+    program = "6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N"
     result = account(program)
     info = result["value"]
     raw = base64.b64decode(info["data"][0], validate=True)

@@ -1,6 +1,5 @@
 pub mod config;
 pub mod dispute;
-pub mod friendship;
 pub mod game;
 pub mod global_session;
 pub mod lichess_username_record;
@@ -16,7 +15,6 @@ pub mod username_record;
 
 pub use config::*;
 pub use dispute::*;
-pub use friendship::*;
 pub use game::*;
 pub use global_session::*;
 pub use lichess_username_record::*;

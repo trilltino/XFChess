@@ -10,7 +10,7 @@ export BACKEND_URL             := "http://127.0.0.1:8090"
 export SIGNING_SERVICE_URL     := "http://127.0.0.1:8090"
 export ER_RPC_URL              := "https://devnet.magicblock.app"
 export MAGIC_BLOCK_RPC_URL     := "https://devnet.magicblock.app"
-export PROGRAM_ID              := "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU"
+export PROGRAM_ID              := "6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N"
 export TOURNAMENT_FEE_RECIPIENT    := "uLgR6Nx4KqQobj6e2mQUPeWQpMUauDRc2oz6wZg3Y6C"
 export RUST_LOG                := "info"
 
@@ -38,6 +38,12 @@ default:
 check-specs *args:
     {{if os() == "windows" { "py -3" } else { "python3" }}} specs/check.py {{args}}
 
+# Reclaim target/ space without losing the compiled dependencies (Bevy etc.):
+# drops the incremental cache, our own crates' artifacts and anything untouched for 14 days.
+trim:
+    cargo sweep --time 14 .
+    if (Test-Path target/debug/incremental) { Remove-Item -Recurse -Force target/debug/incremental }
+    cargo clean -p xfchess -p backend -p xfchess-tauri -p xfchess-game
 
 # Stop all running XFChess processes (PID file first, then port owner, then name)
 kill:
@@ -56,10 +62,13 @@ build-backend:
 build-game:
     cargo build --bin xfchess --features solana
 
-# Build Tauri host (debug). `tournament-admin` feature enables the `just admin`/
-# `just dev`/`just dev2` XFCHESS_OPEN_ADMIN auto-open — deliberately NOT passed by
-# release.yml's own `cargo build`, so the shipped consumer build stays admin-free.
+# Build Tauri host (debug) without the tournament admin panel. Only `just admin` and
+# `just admin-dev` build it in (build-tauri-admin); release.yml never does.
 build-tauri:
+    cargo build -p xfchess-tauri
+
+# Tauri host with the `tournament-admin` feature, for `just admin` / `just admin-dev` only.
+build-tauri-admin:
     cargo build -p xfchess-tauri --features tournament-admin
 
 # Build all Rust binaries (debug)
@@ -69,20 +78,20 @@ build: build-backend build-game build-tauri
 build-release:
     cargo build -p backend --bin signing-server --release
     cargo build --bin xfchess --features solana --release
-    cargo build -p xfchess-tauri --features tournament-admin --release
+    cargo build -p xfchess-tauri --release
 
-# Build the local release stack, including wallet, admin and web UIs
-build-all: build-wallet-ui-force build-admin-ui-force build-release build-web
+# Build the local release stack, including wallet and web UIs
+build-all: build-wallet-ui-force build-release build-web
 
 # Android (`just build-android`) and Linux (`just build-linux`) stay separate.
-# Build everything local: UIs, release backend/game/Tauri host, and the on-chain program
+# Build everything local: UIs, release services/backend/game/Tauri host, and the on-chain program
 king: build-all build-program
 
 # Cross-compile Android native library, then assemble the unsigned release APK
 build-android:
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build/prepare_stockfish_android.ps1
-    cargo ndk -t arm64-v8a -P 31 -o mobile/app/src/main/jniLibs build --release --lib --features solana
-    @Get-ChildItem -LiteralPath mobile/app/src/main/jniLibs/arm64-v8a -Filter *.so | Where-Object { $_.Name -notin @('libxfchess_app.so', 'libstockfish.so') } | Remove-Item -Force -ErrorAction Stop
+    cargo ndk -t arm64-v8a -P 31 -o apps/android/app/src/main/jniLibs build --release --lib --features solana
+    @Get-ChildItem -LiteralPath apps/android/app/src/main/jniLibs/arm64-v8a -Filter *.so | Where-Object { $_.Name -notin @('libxfchess_app.so', 'libstockfish.so') } | Remove-Item -Force -ErrorAction Stop
     Set-Location mobile; ./gradlew.bat assembleRelease
 
 # Build and extract a Linux game folder via Docker
@@ -99,38 +108,38 @@ release *args:
 
 # Build wallet UI (only if dist is missing or forced)
 build-wallet-ui:
-    @if (-not (Test-Path "tauri/wallet-ui/dist")) { \
+    @if (-not (Test-Path "apps/tauri/wallet-ui/dist")) { \
         Write-Host "[BUILD] Building Wallet UI..." -ForegroundColor Cyan; \
-        Set-Location tauri/wallet-ui; npm install; npm run build; Set-Location ../.. \
+        Set-Location apps/tauri/wallet-ui; npm install; npm run build; Set-Location ../.. \
     } else { \
         Write-Host "[BUILD] Wallet UI dist exists, skipping (run 'just build-wallet-ui-force' to rebuild)" \
     }
 
 # Build tournament admin UI dist (only if missing) — served by the Tauri shell
 build-admin-ui:
-    @if (-not (Test-Path "tauri/tournament-admin/dist")) { \
+    @if (-not (Test-Path "apps/tauri/tournament-admin/dist")) { \
         Write-Host "[BUILD] Building Tournament Admin UI..." -ForegroundColor Cyan; \
-        Set-Location tauri/tournament-admin; npm install; npm run build; Set-Location ../.. \
+        Set-Location apps/tauri/tournament-admin; npm install; npm run build; Set-Location ../.. \
     } else { \
         Write-Host "[BUILD] Tournament Admin dist exists, skipping (run 'just build-admin-ui-force' to rebuild)" \
     }
 
 # Force-rebuild tournament admin UI
 build-admin-ui-force:
-    Set-Location tauri/tournament-admin; npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; exit $LASTEXITCODE
+    Set-Location apps/tauri/tournament-admin; npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; exit $LASTEXITCODE
 
 # Admin panel with hot reload on :5176 via XFCHESS_ADMIN_DEV_URL
-admin-dev: build-tauri build-backend
+admin-dev: build-tauri-admin build-backend
     @$root = (Get-Location).Path; \
      $bin = "{{bin}}"; \
      if (-not (netstat -aon | Select-String ":8090.*LISTENING")) { \
          Write-Host "[ADMIN-DEV] No backend on :8090 - starting one" -ForegroundColor Yellow; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root\backend'; & '$root\$bin\signing-server.exe'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root\services\backend'; & '$root\$bin\signing-server.exe'" -WindowStyle Normal; \
          Start-Sleep -Seconds 2 \
      }; \
      if (-not (netstat -aon | Select-String ":5176.*LISTENING")) { \
          Write-Host "[ADMIN-DEV] Starting Vite dev server on :5176" -ForegroundColor Cyan; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root\tauri\tournament-admin'; npm install; npm run dev" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root\apps\tauri\tournament-admin'; npm install; npm run dev" -WindowStyle Normal; \
          Start-Sleep -Seconds 4 \
      } else { \
          Write-Host "[ADMIN-DEV] Vite already running on :5176" -ForegroundColor Green \
@@ -142,26 +151,26 @@ admin-dev: build-tauri build-backend
 
 # Install web frontend dependencies (only if node_modules is missing)
 build-web-ui:
-    @if (-not (Test-Path "xfchessdotcom/node_modules/.bin/vite")) { \
+    @if (-not (Test-Path "apps/website/node_modules/.bin/vite")) { \
         Write-Host "[BUILD] Installing Web Frontend dependencies..." -ForegroundColor Cyan; \
-        Set-Location xfchessdotcom; npm install; Set-Location .. \
+        Set-Location apps/website; npm install; Set-Location ../.. \
     } else { \
         Write-Host "[BUILD] Web Frontend node_modules exists, skipping" \
     }
 
 # Force-rebuild wallet UI
 build-wallet-ui-force:
-    Set-Location tauri/wallet-ui; npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; exit $LASTEXITCODE
+    Set-Location apps/tauri/wallet-ui; npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; exit $LASTEXITCODE
 
 # Build web frontend (production)
 build-web:
-    Set-Location xfchessdotcom; npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; exit $LASTEXITCODE
+    Set-Location apps/website; npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; exit $LASTEXITCODE
 
 
 # Run backend only (builds first)
 backend: build-backend
     @Write-Host "[BACKEND] Starting signing-server on :8090" -ForegroundColor Cyan
-    Set-Location backend; ../{{bin}}/signing-server.exe
+    Set-Location services/backend; ../../{{bin}}/signing-server.exe
 
 # Run game client only (builds first)
 game: build-game
@@ -184,15 +193,15 @@ profile: build-profile
 
 # Run web frontend dev server
 web:
-    Set-Location xfchessdotcom; npm run dev
+    Set-Location apps/website; npm run dev
 
 # Open the admin desktop window after rebuilding its UI; admin-dev enables HMR
-admin: build-admin-ui-force build-tauri build-backend
+admin: build-admin-ui-force build-tauri-admin build-backend
     @$root = (Get-Location).Path; \
      $bin = "{{bin}}"; \
      if (-not (netstat -aon | Select-String ":8090.*LISTENING")) { \
          Write-Host "[ADMIN] No backend on :8090 - starting one in a new window" -ForegroundColor Yellow; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root\backend'; & '$root\$bin\signing-server.exe'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root\services\backend'; & '$root\$bin\signing-server.exe'" -WindowStyle Normal; \
          Start-Sleep -Seconds 2 \
      }; \
      try { \
@@ -216,14 +225,14 @@ web-stack: kill build-backend build-web-ui
      $root = (Get-Location).Path; \
      if ($wt) { \
          Write-Host "[LAUNCH] Using Windows Terminal tabs" -ForegroundColor Green; \
-         & $wt -w 0 nt --title "Backend" -d "$root/backend" powershell -NoProfile -NoExit -Command "& '$root/$bin/signing-server.exe'"; \
+         & $wt -w 0 nt --title "Backend" -d "$root/services/backend" powershell -NoProfile -NoExit -Command "& '$root/$bin/signing-server.exe'"; \
          Start-Sleep -Seconds 2; \
-         & $wt -w 0 nt --title "Web Frontend" -d "$root/xfchessdotcom" powershell -NoProfile -NoExit -Command "npm run dev" \
+         & $wt -w 0 nt --title "Web Frontend" -d "$root/apps/website" powershell -NoProfile -NoExit -Command "npm run dev" \
      } else { \
          Write-Host "[LAUNCH] Windows Terminal not found, using separate windows" -ForegroundColor Yellow; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/backend'; & '$root/$bin/signing-server.exe'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/services/backend'; & '$root/$bin/signing-server.exe'" -WindowStyle Normal; \
          Start-Sleep -Seconds 2; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/xfchessdotcom'; npm run dev" -WindowStyle Normal \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/apps/website'; npm run dev" -WindowStyle Normal \
      }
     @Write-Host ""
     @Write-Host "Backend:      http://127.0.0.1:8090" -ForegroundColor White
@@ -237,7 +246,7 @@ viz-bench:
 
 
 # Build everything then launch full local stack (uses Windows Terminal tabs if available)
-dev: kill build build-wallet-ui build-admin-ui build-web-ui
+dev: kill build build-wallet-ui build-web-ui
     @Write-Host "" -ForegroundColor White
     @Write-Host "========================================" -ForegroundColor Cyan
     @Write-Host " XFChess Local Dev Stack" -ForegroundColor Cyan
@@ -249,51 +258,50 @@ dev: kill build build-wallet-ui build-admin-ui build-web-ui
      $tmp = Join-Path $env:TEMP 'XFChess-dev'; \
      New-Item -ItemType Directory -Force -Path $tmp | Out-Null; \
      $env_common = "`$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:BACKEND_URL='{{BACKEND_URL}}'; `$env:RUST_LOG='{{RUST_LOG}}'; `$env:HELIUS_API_KEY='{{HELIUS_API_KEY}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:XFCHESS_WEB_URL='http://localhost:5173'"; \
-     Set-Content -Path "$tmp\dev-tauri.ps1" -Value "$env_common; `$env:XFCHESS_OPEN_ADMIN='1'; Set-Location '$root'; & '$root/$bin/xfchess-tauri.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev-tauri.ps1" -Value "$env_common; Set-Location '$root'; & '$root/$bin/xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$tmp\dev-game.ps1"  -Value "$env_common; Set-Location '$root'; & '$root/$bin/xfchess.exe'" -Encoding utf8; \
      if ($wt) { \
          Write-Host "[LAUNCH] Using Windows Terminal tabs" -ForegroundColor Green; \
-         & $wt -w 0 nt --title "Backend" -d "$root/backend" powershell -NoProfile -NoExit -Command "& '$root/$bin/signing-server.exe'"; \
+         & $wt -w 0 nt --title "Backend" -d "$root/services/backend" powershell -NoProfile -NoExit -Command "& '$root/$bin/signing-server.exe'"; \
          Start-Sleep -Seconds 2; \
-         & $wt -w 0 nt --title "Wallet UI" -d "$root/tauri/wallet-ui" powershell -NoProfile -NoExit -Command "npm run dev"; \
+         & $wt -w 0 nt --title "Wallet UI" -d "$root/apps/tauri/wallet-ui" powershell -NoProfile -NoExit -Command "npm run dev"; \
          Start-Sleep -Seconds 1; \
          & $wt -w 0 nt --title "Tauri" -d "$root" powershell -NoProfile -NoExit -File "$tmp\dev-tauri.ps1"; \
          Start-Sleep -Seconds 1; \
          & $wt -w 0 nt --title "Game" -d "$root" powershell -NoProfile -NoExit -File "$tmp\dev-game.ps1"; \
-         & $wt -w 0 nt --title "Web Frontend" -d "$root/xfchessdotcom" powershell -NoProfile -NoExit -Command "npm run dev" \
+         & $wt -w 0 nt --title "Web Frontend" -d "$root/apps/website" powershell -NoProfile -NoExit -Command "npm run dev" \
      } else { \
          Write-Host "[LAUNCH] Windows Terminal not found, using separate windows" -ForegroundColor Yellow; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/backend'; & '$root/$bin/signing-server.exe'" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/services/backend'; & '$root/$bin/signing-server.exe'" -WindowStyle Normal; \
          Start-Sleep -Seconds 2; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/tauri/wallet-ui'; npm run dev" -WindowStyle Normal; \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/apps/tauri/wallet-ui'; npm run dev" -WindowStyle Normal; \
          Start-Sleep -Seconds 1; \
          Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev-tauri.ps1'" -WindowStyle Minimized; \
          Start-Sleep -Seconds 1; \
          Start-Process powershell -ArgumentList "-NoProfile -NoExit -File '$tmp\dev-game.ps1'" -WindowStyle Normal; \
-         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/xfchessdotcom'; npm run dev" -WindowStyle Normal \
+         Start-Process powershell -ArgumentList "-NoProfile -NoExit -Command Set-Location '$root/apps/website'; npm run dev" -WindowStyle Normal \
      }
     @Write-Host ""
     @Write-Host "Backend:          http://127.0.0.1:8090" -ForegroundColor White
     @Write-Host "Wallet UI (dev):  http://localhost:5174" -ForegroundColor White
     @Write-Host "Wallet Bridge:    http://localhost:7454" -ForegroundColor White
     @Write-Host "Web Frontend:     http://localhost:5173" -ForegroundColor White
-    @Write-Host "Tournament Admin: desktop window opens automatically — local token: dev" -ForegroundColor White
     @Write-Host "Program ID:       {{PROGRAM_ID}}" -ForegroundColor White
     @Write-Host "========================================" -ForegroundColor Cyan
 
 # Launch two game instances sharing one backend — P1 window and P2 window, each with tabs
-dev2: kill build build-wallet-ui build-admin-ui build-web-ui
+dev2: kill build build-wallet-ui build-web-ui
     @$root = (Get-Location).Path; \
      $bin = ("{{bin}}" -replace '/', '\'); \
      $tmp = Join-Path $env:TEMP 'XFChess-dev'; \
      New-Item -ItemType Directory -Force -Path $tmp | Out-Null; \
      $env_common = "`$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:BACKEND_URL='{{BACKEND_URL}}'; `$env:RUST_LOG='{{RUST_LOG}}'; `$env:HELIUS_API_KEY='{{HELIUS_API_KEY}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:XFCHESS_WEB_URL='http://localhost:5173'"; \
-     Set-Content -Path "$tmp\dev2-backend.ps1"   -Value "Set-Location '$root\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:IDENTITY_ENCRYPTION_KEY='{{IDENTITY_ENCRYPTION_KEY}}'; `$env:IDENTITY_SALT='{{IDENTITY_SALT}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:FEE_PAYER_KEYS='{{FEE_PAYER_KEYS}}'; `$env:VPS_AUTHORITY_KEY='{{VPS_AUTHORITY_KEY}}'; `$env:KYC_AUTHORITY_KEY='{{KYC_AUTHORITY_KEY}}'; `$env:TOURNAMENT_FEE_RECIPIENT='{{TOURNAMENT_FEE_RECIPIENT}}'; `$env:ADMIN_API_KEY='{{ADMIN_API_KEY}}'; `$env:RUST_LOG='{{RUST_LOG}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
-     Set-Content -Path "$tmp\dev2-wallet-p1.ps1" -Value "Set-Location '$root\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
-     Set-Content -Path "$tmp\dev2-tauri-p1.ps1"  -Value "$env_common; `$env:XFCHESS_OPEN_ADMIN='1'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-backend.ps1"   -Value "Set-Location '$root\services\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:IDENTITY_ENCRYPTION_KEY='{{IDENTITY_ENCRYPTION_KEY}}'; `$env:IDENTITY_SALT='{{IDENTITY_SALT}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:FEE_PAYER_KEYS='{{FEE_PAYER_KEYS}}'; `$env:VPS_AUTHORITY_KEY='{{VPS_AUTHORITY_KEY}}'; `$env:KYC_AUTHORITY_KEY='{{KYC_AUTHORITY_KEY}}'; `$env:TOURNAMENT_FEE_RECIPIENT='{{TOURNAMENT_FEE_RECIPIENT}}'; `$env:ADMIN_API_KEY='{{ADMIN_API_KEY}}'; `$env:RUST_LOG='{{RUST_LOG}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-wallet-p1.ps1" -Value "Set-Location '$root\apps\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-tauri-p1.ps1"  -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$tmp\dev2-game-p1.ps1"   -Value "$env_common; `$env:XFCHESS_NODE_KEY_PATH='$tmp\node_key_p1'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
-     Set-Content -Path "$tmp\dev2-web.ps1"        -Value "Set-Location '$root\xfchessdotcom'; npm run dev" -Encoding utf8; \
-     Set-Content -Path "$tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7474'; Set-Location '$root\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-web.ps1"        -Value "Set-Location '$root\apps/website'; npm run dev" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7474'; Set-Location '$root\apps\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
      Set-Content -Path "$tmp\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_NODE_KEY_PATH='$tmp\node_key_p2'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
      $wt = (Get-Command wt -ErrorAction SilentlyContinue).Source; \
@@ -319,7 +327,6 @@ dev2: kill build build-wallet-ui build-admin-ui build-web-ui
     @Write-Host "  [P1] Backend :8090  Wallet UI :5174  Bridge :7454  (window: XFChess P1)" -ForegroundColor Cyan
     @Write-Host "  [P2] Wallet UI :5175  Bridge :7474  (window: XFChess P2)" -ForegroundColor Yellow
     @Write-Host "  Web Frontend: http://localhost:5173" -ForegroundColor White
-    @Write-Host "  Tournament Admin: desktop window opens automatically from P1 — local token: dev" -ForegroundColor Green
 
 
 # Build Solana program without Anchor IDL generation (works on Windows)
@@ -345,12 +352,12 @@ verify-program *args:
 
 # Start local Prometheus + Grafana monitoring stack
 monitoring:
-    docker compose -f ops/monitoring/docker-compose.local.yml up -d
+    docker compose -f infra/ops/monitoring/docker-compose.local.yml up -d
     @Write-Host "Grafana: http://localhost:3000" -ForegroundColor Green
 
 # Stop monitoring stack
 monitoring-down:
-    docker compose -f ops/monitoring/docker-compose.local.yml down
+    docker compose -f infra/ops/monitoring/docker-compose.local.yml down
 
 
 # Fast type-check all workspace crates (no codegen — much faster than build)
@@ -362,11 +369,11 @@ check-backend:
     cargo check -p backend
 
 # Download the CC0 Lichess puzzle dump and upsert it into the local store DB
-# (backend/data/db/sessions.db). Admin curation survives re-imports.
+# (services/backend/data/db/sessions.db). Admin curation survives re-imports.
 puzzles-refresh min_rating="600" max_dev="90":
     Invoke-WebRequest https://database.lichess.org/lichess_db_puzzle.csv.zst -OutFile target/lichess_db_puzzle.csv.zst
     cargo build -p backend --bin import_puzzles --release
-    Set-Location backend; ../target/release/import_puzzles.exe ../target/lichess_db_puzzle.csv.zst --min-rating {{min_rating}} --max-dev {{max_dev}}
+    Set-Location services/backend; ../../target/release/import_puzzles.exe ../../target/lichess_db_puzzle.csv.zst --min-rating {{min_rating}} --max-dev {{max_dev}}
 
 # Run all workspace tests
 test:
@@ -382,7 +389,7 @@ test-e2e:
 
 # Live RPC smoke tests (Tier T2) — hits whatever SOLANA_RPC_URL is actually set
 # to (Triton One in prod/staging). Needs a real RPC URL exported first; each
-# test skips itself harmlessly if unset. See backend/tests/e2e_rpc_live.rs.
+# test skips itself harmlessly if unset. See services/backend/tests/e2e_rpc_live.rs.
 test-rpc-live:
     cargo test -p backend --test e2e_rpc_live -- --ignored --nocapture
 
@@ -393,7 +400,7 @@ test-program:
 # Format + clippy
 lint:
     cargo fmt
-    cargo clippy
+    cargo clippy --workspace
 
 
 # Wipe local SQLite databases (sessions + vault) for a clean dev state
@@ -401,12 +408,12 @@ db-reset:
     @Write-Host "[DB] Resetting local databases..." -ForegroundColor Yellow
     @Stop-Process -Name "signing-server" -Force -ErrorAction SilentlyContinue
     @Start-Sleep -Milliseconds 300
-    @Remove-Item -Force backend/data/db/sessions.db -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/data/db/vault.db -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/data/db/sessions.db-shm -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/data/db/sessions.db-wal -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/data/db/vault.db-shm -ErrorAction SilentlyContinue
-    @Remove-Item -Force backend/data/db/vault.db-wal -ErrorAction SilentlyContinue
+    @Remove-Item -Force services/backend/data/db/sessions.db -ErrorAction SilentlyContinue
+    @Remove-Item -Force services/backend/data/db/vault.db -ErrorAction SilentlyContinue
+    @Remove-Item -Force services/backend/data/db/sessions.db-shm -ErrorAction SilentlyContinue
+    @Remove-Item -Force services/backend/data/db/sessions.db-wal -ErrorAction SilentlyContinue
+    @Remove-Item -Force services/backend/data/db/vault.db-shm -ErrorAction SilentlyContinue
+    @Remove-Item -Force services/backend/data/db/vault.db-wal -ErrorAction SilentlyContinue
     @Write-Host "[DB] Done — databases will be recreated with migrations on next backend start" -ForegroundColor Green
 
 
@@ -414,7 +421,7 @@ db-reset:
 watch-backend:
     @Write-Host "[WATCH] Watching backend for changes (cargo-watch)..." -ForegroundColor Cyan
     @Write-Host "        Install if missing: cargo install cargo-watch" -ForegroundColor DarkGray
-    cargo watch -w backend/src -w crates -x "build -p backend --bin signing-server"
+    cargo watch -w services/backend/src -w crates -x "build -p backend --bin signing-server"
 
 
 # Open all local service URLs in the default browser (tournament admin is a desktop window: 'just admin')
@@ -432,7 +439,7 @@ port-check:
 
 # Tail the backend log (if redirected to file)
 logs:
-    @if (Test-Path "backend/backend.log") { Get-Content backend/backend.log -Wait -Tail 50 } \
+    @if (Test-Path "services/backend/backend.log") { Get-Content services/backend/backend.log -Wait -Tail 50 } \
      else { Write-Host "No backend.log found — logs go to the terminal window" }
 
 # Tail wallet signing diagnostics
@@ -450,6 +457,6 @@ test-triton *args:
 # Clean all build artifacts
 clean:
     cargo clean
-    @if (Test-Path "xfchessdotcom/dist") { Remove-Item -Recurse -Force xfchessdotcom/dist }
-    @if (Test-Path "tauri/wallet-ui/dist") { Remove-Item -Recurse -Force tauri/wallet-ui/dist }
-    @if (Test-Path "tauri/tournament-admin/dist") { Remove-Item -Recurse -Force tauri/tournament-admin/dist }
+    @if (Test-Path "apps/website/dist") { Remove-Item -Recurse -Force apps/website/dist }
+    @if (Test-Path "apps/tauri/wallet-ui/dist") { Remove-Item -Recurse -Force apps/tauri/wallet-ui/dist }
+    @if (Test-Path "apps/tauri/tournament-admin/dist") { Remove-Item -Recurse -Force apps/tauri/tournament-admin/dist }

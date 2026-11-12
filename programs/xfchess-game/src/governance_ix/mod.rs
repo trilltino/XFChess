@@ -6,5 +6,5 @@ pub mod resolve;
 
 pub use claim_stale_dispute::ClaimStaleDispute;
 pub use dispute::DisputeGame;
-pub use recover_stuck_delegation::RecoverStuckDelegation;
+pub use recover_stuck_delegation::RecoverStuckDelegationCore;
 pub use resolve::ResolveDispute;

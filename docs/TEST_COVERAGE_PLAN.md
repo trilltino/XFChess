@@ -46,18 +46,18 @@ trees, and `tools/cu_benchmark` flows that need a live cluster.
 |---|---|---|
 | `programs/xfchess-game` | ~300 in 43 files | All 72 instructions are referenced by at least one test file (name match; not proof each has a negative test). Strong. |
 | `libs/` | ~310 | Rules have perft; anti-cheat 49; braid network crates ~210. |
-| `backend/` | ~365 (259 in `signing/`, 38 in `backend/tests/`) | See route matrix below. |
+| `services/backend/` | ~365 (259 in `signing/`, 38 in `services/backend/tests/`) | See route matrix below. |
 | `src/` client | ~540 | `multiplayer` 163; `states`+`ui`+`rendering`+`input` only 72 across 91 files. |
 | `tests/` | 63 | Bevy resource/type tests; `systems_tests.rs` has 1 test; `live_devnet_lifecycle.rs` is `#[ignore]`. |
-| `tauri/` | 11 | 35 bridge routes, tests only in `process`, `requests`, `assets`, `mod`, `tournament_admin`. |
+| `apps/tauri/` | 11 | 35 bridge routes, tests only in `process`, `requests`, `assets`, `mod`, `tournament_admin`. |
 | JS | wallet-ui 5, tournament-admin 8, website 4 specs | No coverage tooling configured. |
-| `mobile/` | 0 | Kotlin `MainActivity` only. |
+| `apps/android/` | 0 | Kotlin `MainActivity` only. |
 | Ignored tests | 18 | Live devnet/RPC; nothing runs them on a schedule. |
 | Coverage tooling | none in CI | `cargo-tarpaulin` is installed on the dev machine only. |
 
 **HTTP route matrix (crude).** A script that greps each of the 188 distinct backend route
-literals against `backend/tests/` found 172 with no mention. This is an *upper bound* on
-what is untested: inline tests in `backend/src/signing` (259) and path building inside
+literals against `services/backend/tests/` found 172 with no mention. This is an *upper bound* on
+what is untested: inline tests in `services/backend/src/signing` (259) and path building inside
 `e2e_api.rs` can cover routes this match misses. Phase 0 replaces it with a real matrix
 (Section 3). Notable clusters with no obvious coverage: `/game/*` (delegate, finalize,
 undelegate, recover, seat, moves), `/session/*`, `/tournament/{id}/*` (register,
@@ -70,7 +70,7 @@ claim-prize, withdraw, round, reseed, manual-pair), `/money-actions*`, `/auth/li
 `multiplayer/solana/lobby/polling.rs` (480), `multiplayer/solana/tournament/polling.rs`
 (442), `multiplayer/rollup/bridge/delegation.rs` (423),
 `multiplayer/solana/integration/systems/global_session.rs` (441),
-`backend/src/signing/routes/{admin,money_actions,lichess_oauth,external_elo,dispute,wallet,global_session}.rs`.
+`services/backend/src/signing/routes/{admin,money_actions,lichess_oauth,external_elo,dispute,wallet,global_session}.rs`.
 
 ---
 
@@ -93,7 +93,7 @@ every package and a tracking file is committed.
   llvm-cov through the existing differential tests.
 
 **0.2 JS coverage**
-- `vitest run --coverage` (v8 provider) in `tauri/wallet-ui`, `tauri/tournament-admin` and
+- `vitest run --coverage` (v8 provider) in `apps/tauri/wallet-ui`, `apps/tauri/tournament-admin` and
   `xfchessdotcom`, reported in CI, no threshold yet.
 
 **0.3 Surface matrices (generated, committed, checked in CI)**
@@ -160,7 +160,7 @@ live networks.
 - **P-3 Backend test harness.** A shared builder producing an `AppState` with in-memory/temp
   SQLite, the fake chain client, a `wiremock` server for Privy/Lichess/RPC proxy/mailer, and
   helpers to mint a wallet-signed JWT and an admin token. Today `e2e_api.rs` builds its own;
-  extract to `backend/tests/common/`.
+  extract to `services/backend/tests/common/`.
 - **P-4 Bevy headless harness.** A helper creating a minimal `App` (no window, no render) with
   the plugins a given system needs, the fake chain client, and the fake clock, in
   `tests/common/`. The existing `systems_tests.rs` is the pattern.
@@ -183,7 +183,7 @@ On-chain (extend `programs/xfchess-game/tests/`):
 - Dust and rounding at every division (fee splits, prize splits for 2/4/N players, ties).
 - Zero-move and one-move games for every terminal path (the closed gap must stay closed).
 
-Backend (`backend/tests/money.rs`, new):
+Backend (`services/backend/tests/money.rs`, new):
 - `money_actions` create/list/by-scope/get/idempotency/replay: same request twice yields one
   action; a crash between "record" and "send" is recoverable and never double-sends.
 - `/game/finalize`, `/game/delegate`, `/game/undelegate`, `/game/{id}/recover`,
@@ -224,7 +224,7 @@ client path verified in CI against the fake chain (and once manually on devnet).
   `auth/rotate-token`).
 - Input validation: oversized bodies, malformed JSON, wrong content type, unicode/length
   limits on usernames, negative and overflow amounts; rate-limit behaviour where one exists.
-- **Tauri bridge** (`tauri/src/wallet/tests/` or `tauri/tests/`): 35 routes through the real
+- **Tauri bridge** (`apps/tauri/src/wallet/tests/` or `apps/tauri/tests/`): 35 routes through the real
   Axum router with `tower::ServiceExt::oneshot`. Cases: foreign `Origin` gets no CORS
   allowance and no token, `/token` and `/pending*` reject unauthenticated callers, path
   traversal on `/wallet-ui/{*path}` returns 400, only one popup at a time, `/status`
@@ -255,7 +255,7 @@ Tauri bridge.
 - **Delegation/ER bridge (`rollup/bridge/delegation.rs`) and global session:** every state
   transition and every error branch with the fake chain, including undelegation recovery.
 - **Spectator resync** already has 3 tests; add gap, duplicate and late-join cases.
-- **DB:** migration tests that apply `backend/migrations` from empty and from the previous
+- **DB:** migration tests that apply `services/backend/migrations` from empty and from the previous
   release's schema, and idempotency (apply twice). Query tests for the hot paths with
   realistic row counts to catch accidental table scans.
 

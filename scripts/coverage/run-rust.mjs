@@ -42,7 +42,7 @@ fs.mkdirSync(env.XFCHESS_COVERAGE_DIR, { recursive: true });
 const ignore = ['--ignore-filename-regex', patterns.join('|')];
 const selection = [...groups[group]];
 selection.push('--profile', 'coverage');
-if (group === 'application') selection.push('--features', 'backend/coverage');
+if (group === 'application') selection.push('--features', 'services/backend/coverage');
 const branch = process.argv.includes('--branch') ? ['--branch'] : [];
 run('cargo', ['llvm-cov', '--locked', ...selection, ...branch, ...ignore, '--json', '--output-path', path.join(out, 'llvm.json'), ...(group === 'contract' ? ['--', '--test-threads=1'] : [])], { env });
 for (const [format, file] of [['--lcov', 'lcov.info'], ['--html', 'html']]) {

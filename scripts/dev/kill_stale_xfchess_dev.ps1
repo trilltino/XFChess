@@ -30,7 +30,7 @@ if ($WalletOnly) { return }
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Write-Host "[CLEANUP] Stopping all stale XFChess dev processes..." -ForegroundColor Cyan
 
-$pidFile = Join-Path $root 'backend/.backend.pid'
+$pidFile = Join-Path $root 'services/backend/.backend.pid'
 if (Test-Path $pidFile) {
     $oldPid = Get-Content $pidFile -ErrorAction SilentlyContinue
     if ($oldPid) {

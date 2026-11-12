@@ -7,7 +7,7 @@ use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
-pub struct GlobalJoinGame<'info> {
+pub struct GlobalJoinGameCore<'info> {
     #[account(
         mut,
         seeds = [GlobalSessionDelegation::SEED, player.key().as_ref()],
@@ -42,7 +42,7 @@ pub struct GlobalJoinGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
+pub fn handler(ctx: Context<GlobalJoinGameCore>, _game_id: u64) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let session = &ctx.accounts.session_delegation;
     let game = &ctx.accounts.game;
@@ -105,6 +105,8 @@ pub fn handler(ctx: Context<GlobalJoinGame>, _game_id: u64) -> Result<()> {
         .ok_or(GameErrorCode::ArithmeticOverflow)?;
     game.last_move_timestamp = now;
     game.updated_at = now;
+    #[cfg(feature = "move-validation")]
+    crate::fide::start_account_clock(&game.to_account_info(), game, now)?;
 
     Ok(())
 }

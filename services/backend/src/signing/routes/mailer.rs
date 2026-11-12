@@ -1,0 +1,271 @@
+use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::env;
+use std::io::Write;
+use std::path::PathBuf;
+use tracing::{error, info, warn};
+
+#[derive(Deserialize, Serialize, Default)]
+pub struct SignUpRequest {
+    pub email: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub wallet_pubkey: Option<String>,
+    #[serde(default)]
+    pub referral: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct MailResponse {
+    pub ok: bool,
+    pub queued: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MailJob {
+    pub email: String,
+    pub template: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+pub enum EmailKind<'a> {
+    Confirmation { name: &'a str },
+}
+
+impl EmailKind<'_> {
+    fn subject(&self) -> String {
+        match self {
+            EmailKind::Confirmation { .. } => "Welcome to XFChess".to_string(),
+        }
+    }
+
+    fn html(&self) -> String {
+        match self {
+            EmailKind::Confirmation { name } => shell(
+                "Welcome to XFChess",
+                &format!(
+                    "<p>Hey {name},</p>\
+                     <p>Thanks for signing up for XFChess. Download the game from \
+                     <a href=\"https://xfchess.com/play\" style=\"color:#14f195;\">xfchess.com/play</a> \
+                     for Windows, macOS, Linux or Chrome OS, and you can start with free games \
+                     or play the chess computer straight away.</p>\
+                     <p>Some features need a connected Solana wallet; the app shows what is \
+                     required when you get there.</p>\
+                     <p>See you on the board,<br/>— The XFChess Team</p>",
+                    name = html_escape(name),
+                ),
+            ),
+        }
+    }
+}
+
+fn shell(heading: &str, body_html: &str) -> String {
+    format!(
+        "<!doctype html><html><body style=\"margin:0;background:#0d0d0f;padding:32px 0;\
+         font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e6e6e6;\">\
+         <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\">\
+         <table role=\"presentation\" width=\"520\" cellpadding=\"0\" cellspacing=\"0\" \
+         style=\"background:#151519;border:1px solid #26262c;border-radius:16px;overflow:hidden;\">\
+         <tr><td style=\"padding:28px 32px;border-bottom:1px solid #26262c;\">\
+         <span style=\"font-size:20px;font-weight:800;color:#fff;\">XF<span style=\"color:#14f195;\">Chess</span></span>\
+         </td></tr>\
+         <tr><td style=\"padding:32px;\">\
+         <h1 style=\"margin:0 0 16px;font-size:22px;color:#fff;\">{heading}</h1>\
+         <div style=\"font-size:15px;line-height:1.7;color:#b8b8bf;\">{body}</div>\
+         </td></tr>\
+         <tr><td style=\"padding:20px 32px;border-top:1px solid #26262c;font-size:12px;color:#6b6b73;\">\
+         XFChess — Decentralised chess on Solana.\
+         </td></tr>\
+         </table></td></tr></table></body></html>",
+        heading = html_escape(heading),
+        body = body_html,
+    )
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+pub async fn send_email(to: &str, kind: EmailKind<'_>) -> Result<bool, String> {
+    let api_key = match env::var("RESEND_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            warn!("[mailer] RESEND_API_KEY not set — skipping send to {}", to);
+            return Ok(false);
+        }
+    };
+
+    let from =
+        env::var("MAIL_FROM").unwrap_or_else(|_| "XFChess <onboarding@resend.dev>".to_string());
+    let url =
+        env::var("RESEND_API_URL").unwrap_or_else(|_| "https://api.resend.com/emails".to_string());
+
+    let payload = json!({
+        "from": from,
+        "to": [to],
+        "subject": kind.subject(),
+        "html": kind.html(),
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .timeout(std::time::Duration::from_secs(10))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+
+    if resp.status().is_success() {
+        info!("[mailer] sent email to {}", to);
+        Ok(true)
+    } else {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        Err(format!("provider error {status}: {body}"))
+    }
+}
+
+fn append_jsonl(file: &str, value: &impl Serialize) {
+    let path = PathBuf::from("data").join(file);
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            warn!("[mailer] mkdir {} failed: {}", parent.display(), e);
+            return;
+        }
+    }
+    let line = match serde_json::to_string(value) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("[mailer] serialize failed: {}", e);
+            return;
+        }
+    };
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut f) => {
+            let _ = writeln!(f, "{}", line);
+        }
+        Err(e) => warn!("[mailer] open {} failed: {}", path.display(), e),
+    }
+}
+
+fn valid_email(email: &str) -> bool {
+    let e = email.trim();
+    e.len() >= 3
+        && e.len() <= 254
+        && e.contains('@')
+        && e.split('@').count() == 2
+        && e.split('@')
+            .nth(1)
+            .map(|d| d.contains('.'))
+            .unwrap_or(false)
+}
+
+async fn enqueue_email(
+    pool: &sqlx::SqlitePool,
+    template: &str,
+    email: &str,
+    name: Option<String>,
+) -> bool {
+    let job = MailJob {
+        email: email.to_string(),
+        template: template.to_string(),
+        name,
+    };
+    let day = chrono::Utc::now().format("%Y-%m-%d");
+    let dedupe = format!("email:{template}:{email}:{day}");
+    match crate::tasks::queue::enqueue(pool, "email.send", &job, Some(&dedupe)).await {
+        Ok(Some(_)) => true,
+        Ok(None) => {
+            info!("[mailer] duplicate {template} for {email} today — not re-queued");
+            true // already queued/sent today; from the caller's view this is success
+        }
+        Err(e) => {
+            error!("[mailer] enqueue failed: {}", e);
+            false
+        }
+    }
+}
+
+pub async fn handle_email_job(job: crate::tasks::queue::Job) -> Result<(), String> {
+    let mail: MailJob = job.parse().map_err(|e| format!("bad payload: {e}"))?;
+    let kind = match mail.template.as_str() {
+        "confirmation" => EmailKind::Confirmation {
+            name: mail.name.as_deref().unwrap_or("Player"),
+        },
+        other => return Err(format!("unknown email template '{other}'")),
+    };
+    // No email key is a completed no-op in development; provider errors receive bounded retries.
+    send_email(&mail.email, kind).await.map(|_| ())
+}
+
+pub async fn send_confirmation(
+    State(app): State<crate::signing::AppState>,
+    Json(req): Json<SignUpRequest>,
+) -> Result<Json<MailResponse>, StatusCode> {
+    if !valid_email(&req.email) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    append_jsonl("subscribers.jsonl", &req);
+
+    let name = req
+        .username
+        .clone()
+        .unwrap_or_else(|| req.email.split('@').next().unwrap_or("Player").to_string());
+
+    let queued = enqueue_email(&app.store.pool(), "confirmation", &req.email, Some(name)).await;
+    Ok(Json(MailResponse { ok: true, queued }))
+}
+
+pub fn mailer_routes() -> Router<crate::signing::AppState> {
+    Router::new().route("/signup", post(send_confirmation))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_email_accepts_normal() {
+        assert!(valid_email("a@b.com"));
+        assert!(valid_email("user.name@domain.co.uk"));
+        assert!(valid_email("user+tag@example.com"));
+    }
+
+    #[test]
+    fn valid_email_rejects_bad() {
+        assert!(!valid_email(""));
+        assert!(!valid_email("nope"));
+        assert!(!valid_email("no@domain"));
+        assert!(!valid_email("a@@b.com"));
+    }
+
+    #[test]
+    fn templates_render_non_empty() {
+        let html = EmailKind::Confirmation { name: "Ada" }.html();
+        assert!(html.contains("Ada"));
+        assert!(html.contains("https://xfchess.com/play"));
+        // An email-only signup has no profile yet, so the welcome must not claim one.
+        assert!(!html.contains("profile is live"));
+    }
+
+    #[test]
+    fn html_escape_neutralises_tags() {
+        assert_eq!(html_escape("<b>&"), "&lt;b&gt;&amp;");
+    }
+
+    #[test]
+    fn routes_build() {
+        let _ = mailer_routes();
+    }
+}

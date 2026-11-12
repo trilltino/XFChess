@@ -181,8 +181,8 @@ impl Player {
     fn profile(&self) -> PlayerProfile {
         PlayerProfile {
             authority: self.key(),
-            elo_blitz: f64::from(self.blitz) * 100.0,
-            elo_rating: f64::from(self.classical) * 100.0,
+            elo_blitz: self.blitz * 100,
+            elo_rating: self.classical * 100,
             ..Default::default()
         }
     }

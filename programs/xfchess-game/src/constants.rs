@@ -19,13 +19,14 @@ pub const USERNAME_SEED: &[u8] = b"username";
 pub const LICHESS_USERNAME_SEED: &[u8] = b"lichess_username";
 
 #[constant]
-pub const FRIENDSHIP_SEED: &[u8] = b"friendship";
-
-#[constant]
 pub const WAGER_ESCROW_SEED: &[u8] = b"escrow";
 
 #[constant]
 pub const SESSION_DELEGATION_SEED: &[u8] = b"session_delegation";
+
+/// Smallest wager that moves ratings. Below it a rated game still settles and counts toward
+/// the record, but cannot be used to farm rating for free. Product policy: tune before mainnet.
+pub const MIN_RATED_WAGER_LAMPORTS: u64 = 1_000_000;
 
 pub const TOURNAMENT_SEED: &[u8] = b"tournament";
 pub const TOURNAMENT_PLAYERS_SEED: &[u8] = b"tourney_players";

@@ -12,11 +12,11 @@ pub mod timeout;
 
 pub use accept_draw::AcceptDraw;
 pub use cancel::CancelGame;
-pub use create::CreateGame;
+pub use create::CreateGameCore;
 pub use finalize::EndGame;
-pub use global_create::GlobalCreateGame;
-pub use global_join::GlobalJoinGame;
-pub use join::JoinGame;
+pub use global_create::GlobalCreateGameCore;
+pub use global_join::GlobalJoinGameCore;
+pub use join::JoinGameCore;
 pub use offer_draw::OfferDraw;
 pub use resign::ResignGame;
 pub use timeout::ClaimTimeout;

@@ -1,0 +1,16 @@
+[package]
+name = "xfchess-adjudication"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Allocation-free standard chess adjudication primitives"
+
+[dependencies]
+shakmaty = { version = "=0.30.2", optional = true, default-features = false }
+bytemuck = { version = "=1.25.2", optional = true, default-features = false, features = ["derive", "min_const_generics"] }
+
+[features]
+account-bytes = ["dep:bytemuck"]
+
+[lints]
+workspace = true

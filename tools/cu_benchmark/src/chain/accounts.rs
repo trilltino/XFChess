@@ -13,16 +13,14 @@ pub fn fetch_profile_elo(
     profile_elo(&account.data)
 }
 
+/// The classical rating in hundredths of a point: the first field after the authority and the
+/// four u32 counters (wins, losses, draws, games played). Fixed-size fields lead the
+/// account, so this does not depend on the length of any string.
 fn profile_elo(data: &[u8]) -> anyhow::Result<f64> {
     check_discriminator(data, "PlayerProfile")?;
     let mut cursor = BorshCursor::new(data);
-    cursor.take(8 + 32)?;
-    let country_len = cursor.u32()? as usize;
-    anyhow::ensure!(country_len <= 2, "invalid profile country length");
-    cursor.take(country_len + 4 * 4)?;
-    let elo = f64::from_le_bytes(cursor.take(8)?.try_into()?);
-    anyhow::ensure!(elo.is_finite(), "invalid profile rating");
-    Ok(elo)
+    cursor.take(8 + 32 + 4 * 4)?;
+    Ok(f64::from(cursor.u32()?))
 }
 
 fn check_discriminator(data: &[u8], name: &str) -> anyhow::Result<()> {
@@ -161,22 +159,20 @@ mod tests {
     use anyhow::Context;
 
     #[test]
-    fn profile_rating_follows_variable_length_country() -> anyhow::Result<()> {
-        for country in ["", "GB"] {
-            let mut data = Sha256::digest("account:PlayerProfile")[..8].to_vec();
-            data.extend([0; 32]);
-            data.extend((country.len() as u32).to_le_bytes());
-            data.extend(country.as_bytes());
-            data.extend([0; 16]);
-            data.extend(1400f64.to_le_bytes());
-            assert_eq!(
-                profile_elo(&data).context(concat!(file!(), ":", line!()))?,
-                1400.0
-            );
-            assert!(profile_elo(&data[..data.len() - 1]).is_err());
-            data[0] ^= 1;
-            assert!(profile_elo(&data).is_err());
-        }
+    fn profile_rating_is_read_from_the_fixed_prefix() -> anyhow::Result<()> {
+        let mut data = Sha256::digest("account:PlayerProfile")[..8].to_vec();
+        data.extend([0; 32]);
+        data.extend([0; 16]);
+        data.extend(140_000u32.to_le_bytes());
+        // Whatever follows (other counters, strings of any length) is ignored.
+        data.extend([7; 40]);
+        assert_eq!(
+            profile_elo(&data).context(concat!(file!(), ":", line!()))?,
+            140_000.0
+        );
+        assert!(profile_elo(&data[..8 + 32 + 16 + 3]).is_err());
+        data[0] ^= 1;
+        assert!(profile_elo(&data).is_err());
         Ok(())
     }
 }

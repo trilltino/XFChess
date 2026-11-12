@@ -3,7 +3,7 @@
 # from a larger prior ProgramData allocation. Usage: just verify-program [-Build]
 
 param(
-    [string]$ProgramId = "8tevgspityTTG45KvvRtWV4GZ2kuGDBYWMXouFGquyDU",
+    [string]$ProgramId = "6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N",
     [string]$RpcUrl    = "https://api.devnet.solana.com",
     [string]$LocalSo   = "target/deploy/xfchess_game.so",
     [switch]$Build

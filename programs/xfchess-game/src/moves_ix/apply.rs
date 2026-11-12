@@ -94,7 +94,7 @@ pub fn apply_recorded_move(
                 game.status = GameStatus::Finished;
             }
             MoveOutcome::Playing => {
-                if game.halfmove_clock >= 100 {
+                if game.halfmove_clock >= 150 {
                     game.result = GameResult::Draw;
                     game.status = GameStatus::Finished;
                 }
@@ -199,6 +199,8 @@ mod tests {
     fn offerers_own_move_keeps_the_offer_open_for_the_reply() -> anyhow::Result<()> {
         let mut game = active_game();
         let (white, black) = (game.white, game.black);
+        // Black has already moved once, so white's move completes the two-move minimum.
+        game.move_count = 1;
         game.draw_offered_by = Some(white);
 
         play(&mut game, white, "e2e4").map_err(|_| anyhow::anyhow!("fixture move was rejected"))?;

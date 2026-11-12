@@ -1,0 +1,23 @@
+[package]
+name = "xfchess-client-solana"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+sha2 = "0.10.8"
+solana-sdk.workspace = true
+solana-system-interface = { version = "3", features = ["bincode"] }
+xfchess-client-domain = { path = "../xfchess-client-domain" }
+xfchess-client-network = { path = "../xfchess-client-network", features = ["solana"] }
+xfchess-platform-api = { path = "../xfchess-platform-api" }
+
+[dev-dependencies]
+anchor-lang.workspace = true
+xfchess-game.workspace = true
+
+[lints]
+workspace = true

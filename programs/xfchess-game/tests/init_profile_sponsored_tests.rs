@@ -178,10 +178,10 @@ fn existing_profile(authority: Pubkey) -> PlayerProfile {
         authority,
         wins: 5,
         games_played: 9,
-        elo_rating: 1_750.0,
-        elo_bullet: 1_700.0,
-        elo_blitz: 1_720.0,
-        elo_rapid: 1_740.0,
+        elo_rating: 1_750,
+        elo_bullet: 1_700,
+        elo_blitz: 1_720,
+        elo_rapid: 1_740,
         is_verified: true,
         created_at: 77,
         ..PlayerProfile::default()
@@ -370,7 +370,7 @@ async fn existing_profile_update_preserves_stats_and_verification() -> anyhow::R
         (after.wins, after.games_played, after.created_at),
         (5, 9, 77)
     );
-    assert_eq!(after.elo_rating, 1_750.0);
+    assert_eq!(after.elo_rating, 1_750);
     Ok(())
 }
 

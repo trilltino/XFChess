@@ -4,7 +4,7 @@ Source: [braid-reborn](https://github.com/trilltino/braid-reborn) `master` @
 `b53066b2926c5b0134f2d7043a1b1aa61fefdd7c` (MIT OR Apache-2.0). Target base:
 `origin/main` @ `d0bac0cedb2ff7bd981779ac0b26aee802715308`. File-by-file mapping:
 [`INVENTORY.csv`](INVENTORY.csv). Provenance and the dependency table:
-[`libs/zarathustra_net/UPSTREAM.md`](../../libs/zarathustra_net/UPSTREAM.md).
+[`crates/network/UPSTREAM.md`](../../crates/network/UPSTREAM.md).
 
 ## Before and after
 

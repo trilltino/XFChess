@@ -17,7 +17,7 @@ number below comes from a command run in this session unless marked
 | Deployed code hash | first 1,152,400 bytes of ProgramData = `f60ce59fc4ac7cd02a83e520c54b75ea9d44c6127a986fa8efb01b3e431f74fe`, rest zero padding (re-dumped today) |
 | **Reproducible build** | `git archive fb168600` + `cargo build-sbf 4.4.0 --arch v0 --tools-version v1.58 -- --locked` on this Windows machine gives **1,152,400 bytes, SHA-256 `f60ce59f…f74fe`, byte-identical to the deployed program** |
 | Extraction repo build | same command on contracts `6c533c26`: 1,152,920 bytes (`3fa28e58…`), **+520 bytes**. The only printable-string differences are three embedded source paths (`src\on_chain*.rs` vs `crates\nimzovich_engine\src\on_chain*.rs`): the engine is a git dependency in XFChess and a path dependency in the extraction, so the binaries are not interchangeable as release evidence |
-| IDL | `xfchessdotcom/src/lib/xfchess_game.json` is byte-identical to contracts `idl/xfchess_game.json`; 82 instructions |
+| IDL | `apps/website/src/lib/xfchess_game.json` is byte-identical to contracts `idl/xfchess_game.json`; 82 instructions |
 | Client builders | `src/solana/program_interface/instructions.rs` identical to contracts `clients/rust/instructions.rs` |
 | `AGENTS.md` | none exists in either repository |
 | Working-tree program (this session's changes, pinned toolchain) | 1,156,240 bytes, `e6ab6731…a358e`, +3,840 bytes (+0.33 %) over the deployed binary |
@@ -125,7 +125,7 @@ Not measured: heap use, per-instruction stack frames, worst-case CU (largest tou
 - `cargo audit` on the workspace lockfile: 11 vulnerabilities (crypto-bigint 0.5.5, curve25519-dalek 3.2.0, ed25519-dalek 1.0.1, quick-xml 0.37.5/0.39.2, rkyv 0.7.46, rsa 0.9.10, ruzstd 0.8.2, webbrowser 1.1.0) plus 21 unmaintained/unsound/yanked warnings. Of these only `crypto-bigint` (via `solana-secp256k1-recover`) and `rkyv` (via `magicblock-delegation-program-api`) are in the `xfchess-game-sbf` dependency tree; the dalek versions are not. Reachability from program code was not re-analysed beyond the existing `sbpf-*-reachability-20261024.txt` records.
 - CI (`.github/workflows/ci.yml`) edits: clippy now also runs over the test targets, the built program's SHA-256 and size are logged, and a hash-pinned Delegation Program fixture is fetched (`docs/security/fetch_dlp_fixture.py`, tested against devnet; pinned `1bc71771…b00f`, 502,240 bytes). The existing `cargo audit` job stays advisory.
 - The contracts repository's own workflow (`contracts.yml`) is not edited here; it needs the same fixture step and `--tests` clippy if it is kept as a release gate.
-- Deployment: none performed. Deploying this change set needs the usual review (authority, cluster, program ID, ProgramData hash, backend/client sync). No instruction data, account order, PDA seed, error code or account layout changed (the ABI snapshot test passes unchanged).
+- Deployment: none performed. Deploying this change set needs the usual review (authority, cluster, program ID, ProgramData hash, services/backend/client sync). No instruction data, account order, PDA seed, error code or account layout changed (the ABI snapshot test passes unchanged).
 
 ## 6. Decisions needed
 

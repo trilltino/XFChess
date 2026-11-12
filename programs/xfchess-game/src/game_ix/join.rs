@@ -5,7 +5,7 @@ use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
 #[instruction(game_id: u64)]
-pub struct JoinGame<'info> {
+pub struct JoinGameCore<'info> {
     #[account(mut, seeds = [GAME_SEED, &game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
     #[account(mut, seeds = [PROFILE_SEED, player.key().as_ref()], bump)]
@@ -22,7 +22,7 @@ pub struct JoinGame<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
+pub fn handler(ctx: Context<JoinGameCore>, _game_id: u64) -> Result<()> {
     let game = &mut ctx.accounts.game;
     let player = ctx.accounts.player.key();
     let fee_payer = ctx.accounts.fee_payer.key();
@@ -34,6 +34,8 @@ pub fn handler(ctx: Context<JoinGame>, _game_id: u64) -> Result<()> {
 
     let now = Clock::get()?.unix_timestamp;
     crate::lifecycle::transitions::join_waiting_game(game, player, fee_payer, now)?;
+    #[cfg(feature = "move-validation")]
+    crate::fide::start_account_clock(&game.to_account_info(), game, now)?;
 
     if game.wager_amount > 0 && game.wager_token.is_none() {
         anchor_lang::system_program::transfer(

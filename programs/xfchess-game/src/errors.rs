@@ -262,11 +262,6 @@ pub enum GameErrorCode {
     )]
     GameStillInProgress,
 
-    #[msg("Friendship parties must be distinct and passed in canonical (sorted) order.")]
-    InvalidFriendPair,
-    #[msg("Friend request is not pending.")]
-    FriendNotPending,
-
     #[msg("This board's result has already been recorded for the current round.")]
     BoardAlreadyRecorded,
 
@@ -349,6 +344,18 @@ pub enum GameErrorCode {
         "The recovery identity does not match this game's original players, wager, or lifecycle."
     )]
     RecoveryIdentityMismatch,
+    #[msg("This legacy Game has no verified FIDE history; only legacy exit/recovery is supported.")]
+    LegacyGameRules,
+    #[msg("The versioned FIDE state is malformed or inconsistent with Game.")]
+    InvalidFideState,
+    #[msg("The authoritative clock is expired, paused, uninitialized or non-monotonic.")]
+    InvalidFideClock,
+    #[msg("The claim is stale, duplicated or inconsistent with its formal declaration.")]
+    InvalidFideClaim,
+    #[msg("The previously declared legal move must be played.")]
+    DeclaredMoveRequired,
+    #[msg("Both players must make at least one move before a draw agreement.")]
+    DrawAgreementTooEarly,
 }
 
 pub use GameErrorCode as XfchessGameError;

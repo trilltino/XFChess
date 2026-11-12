@@ -1,0 +1,109 @@
+[package]
+name = "xfchess-client-bevy"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+default = []
+profile = ["bevy/trace_tracy"]
+bevy_fixed_node = []
+sky = []
+allow-unsigned-p2p = []
+templeos = []
+solana = [
+    "dep:xfchess-client-solana",
+    "xfchess-client-network/solana",
+    "dep:xfchess-client-compat",
+    "dep:anchor-lang",
+    "dep:solana-sdk",
+    "dep:solana-client",
+    "dep:solana-program",
+    "dep:ephemeral-rollups-sdk",
+    "dep:solana-system-interface",
+    "dep:solana-commitment-config",
+    "dep:xfchess-game",
+]
+
+[dependencies]
+xfchess-client-domain = { path = "../xfchess-client-domain" }
+xfchess-client-network = { path = "../xfchess-client-network" }
+xfchess-client-solana = { path = "../xfchess-client-solana", optional = true }
+xfchess-platform-api = { path = "../xfchess-platform-api" }
+xfchess-client-compat = { workspace = true, optional = true }
+bevy.workspace = true
+bevy_sprite.workspace = true
+bevy_text.workspace = true
+bevy_ui.workspace = true
+image.workspace = true
+winit.workspace = true
+tokio.workspace = true
+futures-lite.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+directories = "6.0.0"
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing-appender.workspace = true
+uuid.workspace = true
+web-time.workspace = true
+reqwest.workspace = true
+anchor-lang = { workspace = true, optional = true }
+xfchess-rules.workspace = true
+xfchess-stockfish.workspace = true
+bevy_egui.workspace = true
+solana-sdk = { workspace = true, optional = true }
+solana-client = { workspace = true, optional = true }
+webbrowser.workspace = true
+braid_chess.workspace = true
+braid-iroh = { workspace = true, features = ["proxy"] }
+braid-http.workspace = true
+iroh-gossip.workspace = true
+sha2 = "0.10.8"
+aes-gcm = "0.10.3"
+dirs = "5.0.1"
+chrono.workspace = true
+serde_bytes.workspace = true
+iroh.workspace = true
+crossbeam-channel.workspace = true
+thiserror.workspace = true
+solana-program = { workspace = true, optional = true }
+bs58.workspace = true
+borsh.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+egui.workspace = true
+bincode.workspace = true
+zstd.workspace = true
+futures.workspace = true
+base64.workspace = true
+regex.workspace = true
+parking_lot.workspace = true
+ed25519-dalek = "2"
+ephemeral-rollups-sdk = { workspace = true, optional = true }
+solana-system-interface = { version = "3", features = ["bincode"], optional = true }
+solana-commitment-config = { version = "3", optional = true }
+xfchess-game = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "=0.22.4", default-features = false }
+ndk-context = "=0.1.1"
+paranoid-android = "=0.2.2"
+android_logger = "=0.15.1"
+log = "0.4"
+rustls-platform-verifier = "=0.7.0"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rfd = "0.15"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

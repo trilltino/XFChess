@@ -1,5 +1,5 @@
 target/
-/assets/bin/
+/apps/xfchess-client/assets/bin/
 **/*.rs.bk
 *.pdb
 
@@ -20,6 +20,8 @@ Thumbs.db
 .env
 .env.*
 .env.local
+
+keys/
 
 .git/
 .gitignore

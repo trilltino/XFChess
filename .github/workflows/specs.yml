@@ -5,34 +5,34 @@ on:
     branches: [main, develop]
     paths:
       - specs/**
-      - src/multiplayer/systems/events.rs
-      - src/multiplayer/systems/mesh.rs
-      - src/multiplayer/types.rs
-      - src/multiplayer/network/online_game_session.rs
-      - src/multiplayer/network/braid_transport/**
-      - src/multiplayer/network/braid_transport.rs
-      - src/game/systems/network_move.rs
-      - backend/src/signing/routes/game_log/**
-      - backend/src/signing/routes/game_log.rs
-      - libs/zarathustra_net/braid_chess/src/journal.rs
-      - libs/zarathustra_net/braid_chess/src/subscriber.rs
+      - crates/xfchess-client-bevy/src/multiplayer/systems/events.rs
+      - crates/xfchess-client-bevy/src/multiplayer/systems/mesh.rs
+      - crates/xfchess-client-bevy/src/multiplayer/types.rs
+      - crates/xfchess-client-bevy/src/multiplayer/network/online_game_session.rs
+      - crates/xfchess-client-bevy/src/multiplayer/network/braid_transport/**
+      - crates/xfchess-client-bevy/src/multiplayer/network/braid_transport.rs
+      - crates/xfchess-client-bevy/src/game/systems/network_move.rs
+      - services/backend/src/signing/routes/game_log/**
+      - services/backend/src/signing/routes/game_log.rs
+      - crates/network/braid_chess/src/journal.rs
+      - crates/network/braid_chess/src/subscriber.rs
       - programs/xfchess-game/src/moves_ix/**
       - justfile
       - .github/workflows/specs.yml
   pull_request:
     paths:
       - specs/**
-      - src/multiplayer/systems/events.rs
-      - src/multiplayer/systems/mesh.rs
-      - src/multiplayer/types.rs
-      - src/multiplayer/network/online_game_session.rs
-      - src/multiplayer/network/braid_transport/**
-      - src/multiplayer/network/braid_transport.rs
-      - src/game/systems/network_move.rs
-      - backend/src/signing/routes/game_log/**
-      - backend/src/signing/routes/game_log.rs
-      - libs/zarathustra_net/braid_chess/src/journal.rs
-      - libs/zarathustra_net/braid_chess/src/subscriber.rs
+      - crates/xfchess-client-bevy/src/multiplayer/systems/events.rs
+      - crates/xfchess-client-bevy/src/multiplayer/systems/mesh.rs
+      - crates/xfchess-client-bevy/src/multiplayer/types.rs
+      - crates/xfchess-client-bevy/src/multiplayer/network/online_game_session.rs
+      - crates/xfchess-client-bevy/src/multiplayer/network/braid_transport/**
+      - crates/xfchess-client-bevy/src/multiplayer/network/braid_transport.rs
+      - crates/xfchess-client-bevy/src/game/systems/network_move.rs
+      - services/backend/src/signing/routes/game_log/**
+      - services/backend/src/signing/routes/game_log.rs
+      - crates/network/braid_chess/src/journal.rs
+      - crates/network/braid_chess/src/subscriber.rs
       - programs/xfchess-game/src/moves_ix/**
       - justfile
       - .github/workflows/specs.yml

@@ -79,7 +79,7 @@ mod inner {
             seeds = [b"game", _game_id.to_le_bytes().as_ref()],
             bump,
         )]
-        /// CHECK: Canonical Game PDA; v2 validates ownership and state before the SDK changes ownership during delegation.
+        /// CHECK: Canonical Game PDA; this instruction validates ownership and state before the SDK changes ownership during delegation.
         pub game: UncheckedAccount<'info>,
 
         #[account(mut)]

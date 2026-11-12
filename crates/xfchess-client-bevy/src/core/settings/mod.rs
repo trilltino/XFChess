@@ -1,0 +1,160 @@
+pub mod persistence;
+
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Reflect)]
+pub enum DisplayMode {
+    BorderlessFullscreen,
+    BorderlessWindowed,
+    #[default]
+    Windowed,
+}
+
+impl DisplayMode {
+    pub const ALL: [Self; 3] = [
+        Self::BorderlessFullscreen,
+        Self::BorderlessWindowed,
+        Self::Windowed,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BorderlessFullscreen => "Borderless Fullscreen",
+            Self::BorderlessWindowed => "Borderless Window",
+            Self::Windowed => "Windowed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Reflect)]
+pub enum GraphicsQuality {
+    Low,
+    #[default]
+    Medium,
+    High,
+    Ultra,
+}
+
+impl GraphicsQuality {
+    pub fn bloom_enabled(self) -> bool {
+        matches!(self, Self::High | Self::Ultra)
+    }
+
+    pub fn ambient_occlusion_enabled(self) -> bool {
+        self == Self::Ultra
+    }
+
+    pub fn shadow_enabled(self) -> bool {
+        !matches!(self, Self::Low)
+    }
+
+    pub fn shadow_map_size(self) -> u32 {
+        match self {
+            Self::Low => 512,
+            Self::Medium => 1024,
+            Self::High => 2048,
+            Self::Ultra => 4096,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Reflect)]
+pub struct DynamicLightingSettings {
+    pub enabled: bool,
+    pub light_count: u32,
+    pub orbital_radius: f32,
+    pub orbital_height: f32,
+    pub orbital_speed: f32,
+    pub shadows_enabled: bool,
+    #[serde(default)]
+    pub colors: Vec<[f32; 3]>,
+}
+
+impl DynamicLightingSettings {
+    pub fn get_color(&self, index: usize) -> bevy::prelude::Color {
+        const DEFAULTS: [[f32; 3]; 6] = [
+            [1.0, 0.95, 0.85],
+            [0.95, 1.0, 0.88],
+            [1.0, 0.92, 0.80],
+            [0.90, 0.95, 1.0],
+            [1.0, 0.95, 0.85],
+            [0.95, 1.0, 0.88],
+        ];
+        let rgb = self
+            .colors
+            .get(index)
+            .copied()
+            .unwrap_or(DEFAULTS[index % DEFAULTS.len()]);
+        bevy::prelude::Color::srgb(rgb[0], rgb[1], rgb[2])
+    }
+
+    pub fn quality_cap(quality: GraphicsQuality) -> u32 {
+        match quality {
+            GraphicsQuality::Low => 2,
+            GraphicsQuality::Medium => 3,
+            GraphicsQuality::High => 4,
+            GraphicsQuality::Ultra => 6,
+        }
+    }
+}
+
+impl Default for DynamicLightingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            light_count: 4,
+            orbital_radius: 6.0,
+            orbital_height: 4.0,
+            orbital_speed: 0.3,
+            shadows_enabled: false,
+            colors: Vec::new(),
+        }
+    }
+}
+
+#[derive(Resource, Debug, Clone, Serialize, Deserialize, Reflect)]
+#[reflect(Resource)]
+pub struct GameSettings {
+    #[serde(default)]
+    pub display_mode: DisplayMode,
+
+    pub master_volume: f32,
+
+    #[serde(default)]
+    pub muted: bool,
+
+    #[serde(default)]
+    pub graphics_quality: GraphicsQuality,
+
+    #[serde(default)]
+    pub dynamic_lighting: DynamicLightingSettings,
+
+    #[serde(default)]
+    pub board_theme: u8,
+
+    #[serde(default)]
+    pub blindfold: bool,
+
+    #[serde(default)]
+    pub piece_set: u8,
+
+    #[serde(default)]
+    pub show_eval_bar: bool,
+}
+
+impl Default for GameSettings {
+    fn default() -> Self {
+        Self {
+            display_mode: DisplayMode::default(),
+            master_volume: 0.7,
+            muted: false,
+            graphics_quality: GraphicsQuality::Medium,
+            dynamic_lighting: DynamicLightingSettings::default(),
+            board_theme: 0,
+            blindfold: false,
+            piece_set: 0,
+            show_eval_bar: false,
+        }
+    }
+}

@@ -7,7 +7,9 @@ use crate::agave::ProgramTestBanksClientExt;
 use anchor_lang::{InstructionData, Space, ToAccountMetas};
 use common::*;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer};
-use xfchess_game::elo::calculate_elo_update;
+use xfchess_game::constants::MIN_RATED_WAGER_LAMPORTS;
+use xfchess_game::elo::k_factor::{SCORE_DRAW, SCORE_WIN};
+use xfchess_game::elo::{calculate_elo_update, Side};
 use xfchess_game::state::{Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile};
 
 fn treasury_vault_pda() -> Pubkey {
@@ -16,7 +18,7 @@ fn treasury_vault_pda() -> Pubkey {
 
 fn rated_profile_account(
     authority: Pubkey,
-    elo_rating: f64,
+    elo_rating: u32,
 ) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
     Ok({
         let pda = profile_pda(&authority).0;
@@ -40,6 +42,7 @@ fn settlement_game_account(
     fee_payer: Pubkey,
     result: GameResult,
     match_type: MatchType,
+    wager_amount: u64,
 ) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
     Ok({
         let (pda, bump) = game_pda(game_id);
@@ -58,7 +61,7 @@ fn settlement_game_account(
             turn: 11,
             created_at: 0,
             updated_at: 0,
-            wager_amount: 0,
+            wager_amount,
             wager_token: None,
             game_type: GameType::PvP,
             match_type,
@@ -123,14 +126,15 @@ async fn start_with_profiles(
     white: Pubkey,
     black: Pubkey,
     fee_payer: Pubkey,
-    white_elo: f64,
-    black_elo: f64,
+    white_elo: u32,
+    black_elo: u32,
     result: GameResult,
     match_type: MatchType,
+    wager: u64,
 ) -> anyhow::Result<crate::agave::ProgramTestContext> {
     Ok({
         let (game_pda_key, game_account_data) =
-            settlement_game_account(game_id, white, black, fee_payer, result, match_type)?;
+            settlement_game_account(game_id, white, black, fee_payer, result, match_type, wager)?;
         let (white_profile_pda, white_profile_data) = rated_profile_account(white, white_elo)?;
         let (black_profile_pda, black_profile_data) = rated_profile_account(black, black_elo)?;
 
@@ -138,7 +142,7 @@ async fn start_with_profiles(
             (game_pda_key, game_account_data),
             (white_profile_pda, white_profile_data),
             (black_profile_pda, black_profile_data),
-            (escrow_pda(game_id), system_account(0)),
+            (escrow_pda(game_id), system_account(wager * 2)),
             (treasury_vault_pda(), system_account(1_000_000)),
             (fee_payer, system_account(1_000_000)),
             (white, system_account(1_000_000)),
@@ -148,14 +152,23 @@ async fn start_with_profiles(
     })
 }
 
+/// A player with no rated games yet: provisional K, no repeat-opponent discount.
+fn new_side(rating: u32) -> Side {
+    Side {
+        rating,
+        games: 0,
+        weight_pct: 100,
+    }
+}
+
 #[tokio::test]
-async fn finalize_game_applies_k32_elo_update_to_winner_and_loser() -> anyhow::Result<()> {
+async fn finalize_game_applies_the_provisional_k_update_to_winner_and_loser() -> anyhow::Result<()> {
     let white = Pubkey::new_unique();
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
     let game_id = 9101u64;
-    let white_elo = 120_000.0;
-    let black_elo = 120_000.0;
+    let white_elo = 120_000;
+    let black_elo = 120_000;
 
     let mut ctx = start_with_profiles(
         game_id,
@@ -166,6 +179,7 @@ async fn finalize_game_applies_k32_elo_update_to_winner_and_loser() -> anyhow::R
         black_elo,
         GameResult::Winner(white),
         MatchType::Rated,
+        MIN_RATED_WAGER_LAMPORTS,
     )
     .await?;
 
@@ -174,19 +188,20 @@ async fn finalize_game_applies_k32_elo_update_to_winner_and_loser() -> anyhow::R
         .await
         .context("finalize_game should settle a Finished Rated game")?;
 
-    let (expected_white, expected_black) = calculate_elo_update(white_elo, black_elo, 1.0);
+    let (expected_white, expected_black) =
+        calculate_elo_update(new_side(white_elo), new_side(black_elo), SCORE_WIN);
 
     let white_profile = fetch_profile(&mut ctx, &white).await?;
     let black_profile = fetch_profile(&mut ctx, &black).await?;
 
     assert!(
-        (white_profile.elo_rating - expected_white).abs() < 1.0,
+        white_profile.elo_rating == expected_white,
         "winner's rating must match calculate_elo_update's own output: got {}, expected {}",
         white_profile.elo_rating,
         expected_white
     );
     assert!(
-        (black_profile.elo_rating - expected_black).abs() < 1.0,
+        black_profile.elo_rating == expected_black,
         "loser's rating must match calculate_elo_update's own output: got {}, expected {}",
         black_profile.elo_rating,
         expected_black
@@ -224,8 +239,8 @@ async fn finalize_game_applies_elo_update_for_a_draw() -> anyhow::Result<()> {
     let game_id = 9102u64;
     // Unequal ratings so a draw's rating shift is actually observable
     // (higher-rated white should lose a little, lower-rated black gain).
-    let white_elo = 140_000.0;
-    let black_elo = 120_000.0;
+    let white_elo = 140_000;
+    let black_elo = 120_000;
 
     let mut ctx = start_with_profiles(
         game_id,
@@ -236,6 +251,7 @@ async fn finalize_game_applies_elo_update_for_a_draw() -> anyhow::Result<()> {
         black_elo,
         GameResult::Draw,
         MatchType::Rated,
+        MIN_RATED_WAGER_LAMPORTS,
     )
     .await?;
 
@@ -244,13 +260,14 @@ async fn finalize_game_applies_elo_update_for_a_draw() -> anyhow::Result<()> {
         .await
         .context("finalize_game should settle a Finished Rated draw")?;
 
-    let (expected_white, expected_black) = calculate_elo_update(white_elo, black_elo, 0.5);
+    let (expected_white, expected_black) =
+        calculate_elo_update(new_side(white_elo), new_side(black_elo), SCORE_DRAW);
 
     let white_profile = fetch_profile(&mut ctx, &white).await?;
     let black_profile = fetch_profile(&mut ctx, &black).await?;
 
-    assert!((white_profile.elo_rating - expected_white).abs() < 1.0);
-    assert!((black_profile.elo_rating - expected_black).abs() < 1.0);
+    assert!(white_profile.elo_rating == expected_white);
+    assert!(black_profile.elo_rating == expected_black);
     assert!(
         white_profile.elo_rating < white_elo,
         "favorite drawing a lower-rated opponent must lose rating"
@@ -275,8 +292,8 @@ async fn finalize_game_does_not_change_elo_for_a_free_match() -> anyhow::Result<
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
     let game_id = 9103u64;
-    let white_elo = 120_000.0;
-    let black_elo = 120_000.0;
+    let white_elo = 120_000;
+    let black_elo = 120_000;
 
     let mut ctx = start_with_profiles(
         game_id,
@@ -287,6 +304,7 @@ async fn finalize_game_does_not_change_elo_for_a_free_match() -> anyhow::Result<
         black_elo,
         GameResult::Winner(white),
         MatchType::Free,
+        MIN_RATED_WAGER_LAMPORTS,
     )
     .await?;
 
@@ -324,8 +342,8 @@ async fn finalize_game_cannot_be_replayed_to_double_apply_elo() -> anyhow::Resul
     let black = Pubkey::new_unique();
     let fee_payer = Keypair::new();
     let game_id = 9104u64;
-    let white_elo = 120_000.0;
-    let black_elo = 120_000.0;
+    let white_elo = 120_000;
+    let black_elo = 120_000;
 
     let mut ctx = start_with_profiles(
         game_id,
@@ -336,6 +354,7 @@ async fn finalize_game_cannot_be_replayed_to_double_apply_elo() -> anyhow::Resul
         black_elo,
         GameResult::Winner(white),
         MatchType::Rated,
+        MIN_RATED_WAGER_LAMPORTS,
     )
     .await?;
 
@@ -361,5 +380,80 @@ async fn finalize_game_cannot_be_replayed_to_double_apply_elo() -> anyhow::Resul
         after_replay.elo_rating, after_first.elo_rating,
         "a rejected replay must not mutate elo_rating a second time"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn finalize_game_counts_rated_games_and_remembers_the_opponent() -> anyhow::Result<()> {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+    let fee_payer = Keypair::new();
+    let game_id = 9105u64;
+
+    let mut ctx = start_with_profiles(
+        game_id,
+        white,
+        black,
+        fee_payer.pubkey(),
+        120_000,
+        120_000,
+        GameResult::Winner(white),
+        MatchType::Rated,
+        MIN_RATED_WAGER_LAMPORTS,
+    )
+    .await?;
+    let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
+    send(&mut ctx, ix, &[])
+        .await
+        .context("finalize_game should settle a Finished Rated game")?;
+
+    let white_profile = fetch_profile(&mut ctx, &white).await?;
+    let black_profile = fetch_profile(&mut ctx, &black).await?;
+    // Base time 1800 s is the classical bucket.
+    assert_eq!(white_profile.games_classical, 1);
+    assert_eq!(black_profile.games_classical, 1);
+    assert_eq!(white_profile.games_blitz, 0);
+    assert_eq!(white_profile.last_rated_opponent, black.to_bytes()[..8]);
+    assert_eq!(black_profile.last_rated_opponent, white.to_bytes()[..8]);
+    assert_eq!(white_profile.repeat_streak, 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn finalize_game_below_the_minimum_wager_settles_but_does_not_move_ratings(
+) -> anyhow::Result<()> {
+    let white = Pubkey::new_unique();
+    let black = Pubkey::new_unique();
+    let fee_payer = Keypair::new();
+    let game_id = 9106u64;
+    let rating = 120_000;
+
+    let mut ctx = start_with_profiles(
+        game_id,
+        white,
+        black,
+        fee_payer.pubkey(),
+        rating,
+        rating,
+        GameResult::Winner(white),
+        MatchType::Rated,
+        MIN_RATED_WAGER_LAMPORTS - 1,
+    )
+    .await?;
+    let ix = finalize_game_ix(game_id, white, black, fee_payer.pubkey());
+    send(&mut ctx, ix, &[])
+        .await
+        .context("finalize_game should still settle an under-minimum rated game")?;
+
+    let white_profile = fetch_profile(&mut ctx, &white).await?;
+    let black_profile = fetch_profile(&mut ctx, &black).await?;
+    assert_eq!(white_profile.elo_rating, rating, "no rating change below the minimum");
+    assert_eq!(black_profile.elo_rating, rating);
+    assert_eq!(white_profile.games_classical, 0);
+    assert_eq!(white_profile.last_rated_opponent, [0u8; 8]);
+    // The record still counts.
+    assert_eq!(white_profile.wins, 1);
+    assert_eq!(black_profile.losses, 1);
+    assert_eq!(white_profile.games_played, 1);
     Ok(())
 }

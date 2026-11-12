@@ -52,7 +52,7 @@ fn cancel_ix(game_id: u64, player: Pubkey, white: Pubkey, black: Pubkey) -> Inst
 }
 
 fn join_ix(game_id: u64, player: Pubkey, white: Pubkey, fee_payer: Pubkey) -> Instruction {
-    let accounts = xfchess_game::__client_accounts_join_game::JoinGame {
+    let accounts = xfchess_game::__client_accounts_join_game_core::JoinGameCore {
         game: game_pda(game_id).0,
         player_profile: profile_pda(&player).0,
         escrow_pda: escrow_pda(game_id),

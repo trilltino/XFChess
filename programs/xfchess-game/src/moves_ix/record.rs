@@ -1,5 +1,6 @@
 use crate::constants::GAME_SEED;
 use crate::errors::GameErrorCode;
+#[cfg(not(feature = "move-validation"))]
 use crate::moves_ix::apply;
 use crate::state::*;
 use anchor_lang::prelude::*;
@@ -41,6 +42,12 @@ pub fn handler(
     );
 
     let timestamp = Clock::get()?.unix_timestamp;
+    #[cfg(feature = "move-validation")]
+    {
+        let info = game.to_account_info();
+        crate::fide::apply_move(game, &info, _moving_player, move_uci, next_board, nonce, parent_nonce, timestamp)?;
+    }
+    #[cfg(not(feature = "move-validation"))]
     apply::apply_recorded_move(
         game,
         _moving_player,

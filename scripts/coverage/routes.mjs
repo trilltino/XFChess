@@ -19,7 +19,7 @@ if (runtime) {
   const recorded = rows.map(key).sort();
   if (JSON.stringify(actual) !== JSON.stringify(recorded)) throw new Error(`Runtime ${surface} router differs from matrix. Add success/failure evidence for new routes; review removals.\nNew: ${actual.filter((id) => !recorded.includes(id)).join(', ')}\nRemoved: ${recorded.filter((id) => !actual.includes(id)).join(', ')}`);
 }
-const tests = rustTests(surface === 'backend' ? ['backend/tests', 'backend/src'] : ['tauri/src', 'tauri/tests']);
+const tests = rustTests(surface === 'backend' ? ['services/backend/tests', 'services/backend/src'] : ['apps/tauri/src', 'apps/tauri/tests']);
 const ids = new Set();
 for (const row of rows) {
   if (ids.has(key(row))) throw new Error(`Duplicate route ${key(row)}`);

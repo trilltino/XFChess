@@ -128,7 +128,7 @@ pub fn create_tournament_game_ix(
         .0
     };
 
-    let mut data = anchor_discriminator("create_tournament_game_v2").to_vec();
+    let mut data = anchor_discriminator("create_tournament_game").to_vec();
     data.extend_from_slice(&tournament_id.to_le_bytes());
     data.extend_from_slice(&game_id.to_le_bytes());
     data.extend_from_slice(session_key.as_ref());

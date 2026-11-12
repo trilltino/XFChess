@@ -5,102 +5,102 @@ use crate::delegation_ix::delegate::{
     DelegateGameCtxBumps,
 };
 use crate::game_ix::create::{
-    __client_accounts_create_game, __cpi_client_accounts_create_game, CreateGame, CreateGameBumps,
+    __client_accounts_create_game_core, __cpi_client_accounts_create_game_core, CreateGameCore, CreateGameCoreBumps,
 };
 use crate::game_ix::global_create::{
-    __client_accounts_global_create_game, __cpi_client_accounts_global_create_game,
-    GlobalCreateGame, GlobalCreateGameBumps,
+    __client_accounts_global_create_game_core, __cpi_client_accounts_global_create_game_core,
+    GlobalCreateGameCore, GlobalCreateGameCoreBumps,
 };
 use crate::game_ix::global_join::{
-    __client_accounts_global_join_game, __cpi_client_accounts_global_join_game, GlobalJoinGame,
-    GlobalJoinGameBumps,
+    __client_accounts_global_join_game_core, __cpi_client_accounts_global_join_game_core, GlobalJoinGameCore,
+    GlobalJoinGameCoreBumps,
 };
 use crate::game_ix::join::{
-    __client_accounts_join_game, __cpi_client_accounts_join_game, JoinGame, JoinGameBumps,
+    __client_accounts_join_game_core, __cpi_client_accounts_join_game_core, JoinGameCore, JoinGameCoreBumps,
 };
 use crate::governance_ix::recover_stuck_delegation::{
-    __client_accounts_recover_stuck_delegation, __cpi_client_accounts_recover_stuck_delegation,
-    RecoverStuckDelegation, RecoverStuckDelegationBumps,
+    __client_accounts_recover_stuck_delegation_core, __cpi_client_accounts_recover_stuck_delegation_core,
+    RecoverStuckDelegationCore, RecoverStuckDelegationCoreBumps,
 };
 use crate::tournament_ix::matches::create_tournament_game::{
-    __client_accounts_create_tournament_game, __cpi_client_accounts_create_tournament_game,
-    CreateTournamentGame, CreateTournamentGameBumps,
+    __client_accounts_create_tournament_game_core, __cpi_client_accounts_create_tournament_game_core,
+    CreateTournamentGameCore, CreateTournamentGameCoreBumps,
 };
 use crate::tournament_ix::session::session_create_game::{
-    __client_accounts_session_create_game, __cpi_client_accounts_session_create_game,
-    SessionCreateGame, SessionCreateGameBumps,
+    __client_accounts_session_create_game_core, __cpi_client_accounts_session_create_game_core,
+    SessionCreateGameCore, SessionCreateGameCoreBumps,
 };
 use crate::tournament_ix::session::session_join_game::{
-    __client_accounts_session_join_game, __cpi_client_accounts_session_join_game, SessionJoinGame,
-    SessionJoinGameBumps,
+    __client_accounts_session_join_game_core, __cpi_client_accounts_session_join_game_core, SessionJoinGameCore,
+    SessionJoinGameCoreBumps,
 };
 use crate::{errors::GameErrorCode, state::*};
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
 
 #[derive(Accounts)]
-pub struct CreateGameV2<'info> {
-    pub legacy: CreateGame<'info>,
+pub struct CreateGame<'info> {
+    pub core: CreateGameCore<'info>,
     /// CHECK: canonical, fresh System-owned PDA; initialized manually after creation.
     #[account(mut)]
     pub recovery_identity: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
-pub struct GlobalCreateGameV2<'info> {
-    pub legacy: GlobalCreateGame<'info>,
+pub struct GlobalCreateGame<'info> {
+    pub core: GlobalCreateGameCore<'info>,
     /// CHECK: canonical, fresh PDA, funded only from the validated session vault.
     #[account(mut)]
     pub recovery_identity: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
-pub struct JoinGameV2<'info> {
-    pub legacy: JoinGame<'info>,
+pub struct JoinGame<'info> {
+    pub core: JoinGameCore<'info>,
     #[account(mut)]
     pub recovery_identity: Account<'info, RecoveryIdentity>,
 }
 
 #[derive(Accounts)]
-pub struct GlobalJoinGameV2<'info> {
-    pub legacy: GlobalJoinGame<'info>,
+pub struct GlobalJoinGame<'info> {
+    pub core: GlobalJoinGameCore<'info>,
     #[account(mut)]
     pub recovery_identity: Account<'info, RecoveryIdentity>,
 }
 
 #[derive(Accounts)]
-pub struct CreateTournamentGameV2<'info> {
-    pub legacy: CreateTournamentGame<'info>,
+pub struct CreateTournamentGame<'info> {
+    pub core: CreateTournamentGameCore<'info>,
     /// CHECK: canonical fresh PDA; original handler authenticates tournament seats.
     #[account(mut)]
     pub recovery_identity: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
-pub struct SessionCreateGameV2<'info> {
-    pub legacy: SessionCreateGame<'info>,
+pub struct SessionCreateGame<'info> {
+    pub core: SessionCreateGameCore<'info>,
     /// CHECK: canonical fresh PDA; funded from the validated tournament session vault.
     #[account(mut)]
     pub recovery_identity: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
-pub struct SessionJoinGameV2<'info> {
-    pub legacy: SessionJoinGame<'info>,
+pub struct SessionJoinGame<'info> {
+    pub core: SessionJoinGameCore<'info>,
     #[account(mut)]
     pub recovery_identity: Account<'info, RecoveryIdentity>,
 }
 
 #[derive(Accounts)]
-pub struct DelegateGameV2<'info> {
-    pub legacy: DelegateGameCtx<'info>,
+pub struct DelegateGame<'info> {
+    pub core: DelegateGameCtx<'info>,
     #[account(mut)]
     pub recovery_identity: Account<'info, RecoveryIdentity>,
 }
 
 #[derive(Accounts)]
-pub struct RecoverStuckDelegationV2<'info> {
-    pub legacy: RecoverStuckDelegation<'info>,
+pub struct RecoverStuckDelegation<'info> {
+    pub core: RecoverStuckDelegationCore<'info>,
     #[account(mut)]
     pub recovery_identity: Account<'info, RecoveryIdentity>,
 }
@@ -113,19 +113,6 @@ pub fn require_identity_pda(info: &AccountInfo<'_>, game_id: u64) -> Result<u8> 
     );
     require_keys_eq!(*info.key, expected, GameErrorCode::RecoveryIdentityMismatch);
     Ok(bump)
-}
-
-/// Legacy creation/join cannot reuse or bypass a live or terminal v2 binding.
-pub fn require_legacy_identity_absent(accounts: &[AccountInfo<'_>], game_id: u64) -> Result<()> {
-    let record = accounts
-        .first()
-        .ok_or(GameErrorCode::RecoveryIdentityUnavailable)?;
-    require_identity_pda(record, game_id)?;
-    require!(
-        record.owner == &System::id() && record.data_is_empty(),
-        GameErrorCode::RecoveryIdentityMismatch
-    );
-    Ok(())
 }
 
 pub fn initialize_identity<'info>(
@@ -216,9 +203,9 @@ pub fn close_identity(accounts: &[AccountInfo<'_>], game_id: u64) -> Result<()> 
     Ok(())
 }
 
-pub fn recover(ctx: Context<RecoverStuckDelegationV2>, game_id: u64) -> Result<()> {
+pub fn recover(ctx: Context<RecoverStuckDelegation>, game_id: u64) -> Result<()> {
     require_identity_pda(&ctx.accounts.recovery_identity.to_account_info(), game_id)?;
-    let accounts = &ctx.accounts.legacy;
+    let accounts = &ctx.accounts.core;
     require!(
         accounts.game.owner == &crate::ID && accounts.game.data_is_empty(),
         GameErrorCode::GameNotStuckDelegation
@@ -266,7 +253,7 @@ pub fn recover(ctx: Context<RecoverStuckDelegationV2>, game_id: u64) -> Result<(
             recipient,
             share,
             game_id,
-            ctx.bumps.legacy.escrow_pda,
+            ctx.bumps.core.escrow_pda,
         )?;
     }
     // Sub-rent dust (e.g. a donation) would leave the escrow rent-paying and
@@ -275,7 +262,7 @@ pub fn recover(ctx: Context<RecoverStuckDelegationV2>, game_id: u64) -> Result<(
         &accounts.escrow_pda.to_account_info(),
         &accounts.treasury_vault.to_account_info(),
         game_id,
-        ctx.bumps.legacy.escrow_pda,
+        ctx.bumps.core.escrow_pda,
     )?;
     let rent = accounts.game.lamports();
     let treasury = accounts.treasury_vault.to_account_info();

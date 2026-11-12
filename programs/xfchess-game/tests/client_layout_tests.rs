@@ -4,7 +4,7 @@
     clippy::too_many_arguments,
     reason = "Imports the complete client module with instruction-ABI-shaped builders"
 )]
-#[path = "../../../src/solana/program_interface/instructions.rs"]
+#[path = "../../../crates/xfchess-client-solana/src/instructions.rs"]
 mod desktop;
 use anchor_lang::{InstructionData, ToAccountMetas};
 use solana_sdk::pubkey::Pubkey;
@@ -15,7 +15,7 @@ fn desktop_create_v2_matches_generated_arguments_and_account_order() -> anyhow::
     let player = Pubkey::new_unique();
     let payer = Pubkey::new_unique();
     let ix = desktop::create_game_ix(program, player, payer, 42, 10_000_000, 1, 0, 300, 5)?;
-    let expected = xfchess_game::instruction::CreateGameV2 {
+    let expected = xfchess_game::instruction::CreateGame {
         game_id: 42,
         wager_amount: 10_000_000,
         match_type: xfchess_game::state::MatchType::Rated,
@@ -26,8 +26,8 @@ fn desktop_create_v2_matches_generated_arguments_and_account_order() -> anyhow::
     .data();
     assert_eq!(ix.data, expected);
     let pda = |seed: &[u8]| Pubkey::find_program_address(&[seed, &42u64.to_le_bytes()], &program).0;
-    let expected = xfchess_game::accounts::CreateGameV2 {
-        legacy: xfchess_game::accounts::CreateGame {
+    let expected = xfchess_game::accounts::CreateGame {
+        core: xfchess_game::accounts::CreateGameCore {
             game: pda(b"game"),
             escrow_pda: pda(b"escrow"),
             player,
@@ -50,13 +50,13 @@ fn desktop_join_v2_matches_generated_arguments_and_account_order() -> anyhow::Re
     let ix = desktop::join_game_ix(program, player, white, payer, 42)?;
     assert_eq!(
         ix.data,
-        xfchess_game::instruction::JoinGameV2 { game_id: 42 }.data()
+        xfchess_game::instruction::JoinGame { game_id: 42 }.data()
     );
     let pda = |seed: &[u8]| Pubkey::find_program_address(&[seed, &42u64.to_le_bytes()], &program).0;
     let profile =
         |wallet: &Pubkey| Pubkey::find_program_address(&[b"profile", wallet.as_ref()], &program).0;
-    let expected = xfchess_game::accounts::JoinGameV2 {
-        legacy: xfchess_game::accounts::JoinGame {
+    let expected = xfchess_game::accounts::JoinGame {
+        core: xfchess_game::accounts::JoinGameCore {
             game: pda(b"game"),
             player_profile: profile(&player),
             escrow_pda: pda(b"escrow"),

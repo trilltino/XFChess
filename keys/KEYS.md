@@ -11,6 +11,7 @@ All `.json` files here are Solana keypairs — never commit them.
 | File | Public Address | Purpose | Network |
 |------|---------------|---------|---------|
 | `program-authority.json` | `C1vn2MT7tZotZPjUJQDf9oo3dpZZ2tr7NxYLg8jTYgkw` | Program upgrade authority — signs all `anchor deploy` | devnet |
+| `xfchess_game-program.json` | `6idpQeH5YzXUT4sg8mG8dzxdK7ytmxfEyWkzUcNJJv4N` | The program's own address keypair (its program ID). Needed once, for the first `solana program deploy --program-id`; upgrades are signed by `program-authority.json`. Replaced `8tev…` on the fresh-ID rebuild | devnet |
 | `fee-payer.json` | `2oPTbQZDtEKrojoeSsHwhz3wv2sgJYYWh2KDpVYhNtxj` | Fee payer / project wallet, admin keypair default for several `src/bin` test tools | devnet |
 | `kyc_authority.json` | `2mh7zXgZHaeDnroJQQdHnLNiierWXdn43VnATbGdATZK` | Signs `verify_profile` KYC approvals | devnet |
 | `dispute_authority.json` | `HAHgvXf6uYxTqEuUnkkzTS1EQD8sYd342zgxM2wdqpa2` | Signs `resolve_dispute`, `update_kyc_authority`, `update_fee_vault` — highest privilege | devnet |
