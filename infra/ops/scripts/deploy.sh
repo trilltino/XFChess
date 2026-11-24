@@ -85,7 +85,7 @@ save_config "$dest/config"
 if [[ -n $previous ]]; then ln -sfn "releases/$previous" "$ROOT/previous"; fi
 if [[ -e "$ROOT/ops" && ! -L "$ROOT/ops" ]]; then mv "$ROOT/ops" "$ROOT/ops.before-$release"; fi
 # Keep recovery tools available even when rolling the application back to legacy.
-ln -s "releases/$release/src/ops" "$ROOT/ops.new"
+ln -s "releases/$release/src/infra/ops" "$ROOT/ops.new"
 mv -Tf "$ROOT/ops.new" "$ROOT/ops"
 install -m 644 "$dest/src/infra/ops/backup/xfchess-backup.service" /etc/systemd/system/xfchess-backup.service
 install -m 644 "$dest/src/infra/ops/backup/xfchess-backup.timer" /etc/systemd/system/xfchess-backup.timer

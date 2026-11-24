@@ -10,7 +10,7 @@ param(
 if ($SkipBuild) { throw 'SkipBuild is no longer supported. Each release must build and verify its own commit.' }
 if ($Domain -notmatch '^(?=.{1,253}$)[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$') { throw 'Set a valid TLS domain.' }
 $connection = New-OpsConnection $Server $User $IdentityFile
-$root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$root = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
 $workspace = Join-Path ([IO.Path]::GetTempPath()) ("xfchess-deploy-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $workspace | Out-Null
 Push-Location $root
@@ -22,7 +22,7 @@ try {
     $release = "$sha-$([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))-$([guid]::NewGuid().ToString('N').Substring(0,8))"
     & git archive --format=tar.gz "--output=$workspace\source.tar.gz" HEAD
     if ($LASTEXITCODE -ne 0) { throw 'Source archive failed.' }
-    Push-Location "$root\xfchessdotcom"
+    Push-Location "$root\apps\website"
     $previousBackend = $env:VITE_BACKEND_URL
     $previousSigning = $env:SIGNING_SERVICE_URL
     try {

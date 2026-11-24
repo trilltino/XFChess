@@ -8,7 +8,7 @@ Type=oneshot
 User=xfchess
 WorkingDirectory=/opt/xfchess
 EnvironmentFile=/opt/xfchess/.env
-ExecStart=/usr/bin/bash /opt/xfchess/infra/ops/backup/backup-db.sh
+ExecStart=/usr/bin/bash /opt/xfchess/ops/backup/backup-db.sh
 
 # Hardening (this unit only reads the DBs and writes to the backups workdir).
 NoNewPrivileges=true

@@ -54,13 +54,13 @@ restore_config() {
 }
 
 install_config() {
-  local release=$1 domain=$2 src="$ROOT/releases/$1/src/ops"
+  local release=$1 domain=$2 src="$ROOT/releases/$1/src/infra/ops"
   install -d /etc/nginx/snippets /etc/nginx/conf.d
   install -m 644 "$src/nginx/routes.conf" /etc/nginx/snippets/xfchess-routes.conf
   install -m 644 "$src/nginx/proxy.conf" /etc/nginx/snippets/xfchess-proxy.conf
   install -m 644 "$src/nginx/xfchess_rate_limit.conf" /etc/nginx/conf.d/xfchess_rate_limit.conf
   sed "s/YOUR_DOMAIN/$domain/g" "$src/nginx/nginx.conf" >/etc/nginx/sites-available/xfchess
-  install -m 644 "$src/services/backend/xfchess-backend.service" /etc/systemd/system/xfchess-backend.service
+  install -m 644 "$src/backend/xfchess-backend.service" /etc/systemd/system/xfchess-backend.service
   systemctl daemon-reload
   nginx -t
 }
