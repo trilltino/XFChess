@@ -14,7 +14,9 @@ use solana_sdk::{
     signature::Keypair, signer::Signer,
 };
 use xfchess_game::errors::GameErrorCode;
-use xfchess_game::state::{Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile};
+use xfchess_game::state::{
+    Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile, RecoveryStatus,
+};
 
 const WAGER: u64 = 50_000_000;
 const PLAYER_FUNDS: u64 = 1_000_000_000;
@@ -52,7 +54,7 @@ fn cancel_ix(game_id: u64, player: Pubkey, white: Pubkey, black: Pubkey) -> Inst
 }
 
 fn join_ix(game_id: u64, player: Pubkey, white: Pubkey, fee_payer: Pubkey) -> Instruction {
-    let accounts = xfchess_game::__client_accounts_join_game_core::JoinGameCore {
+    let mut accounts = xfchess_game::__client_accounts_join_game_core::JoinGameCore {
         game: game_pda(game_id).0,
         player_profile: profile_pda(&player).0,
         escrow_pda: escrow_pda(game_id),
@@ -62,6 +64,11 @@ fn join_ix(game_id: u64, player: Pubkey, white: Pubkey, fee_payer: Pubkey) -> In
         system_program: solana_system_interface::program::ID,
     }
     .to_account_metas(None);
+    // `JoinGame` wraps the core accounts and adds the game's recovery record.
+    accounts.push(solana_sdk::instruction::AccountMeta::new(
+        recovery_identity_pda(game_id).0,
+        false,
+    ));
     Instruction {
         program_id: xfchess_game::ID,
         accounts,
@@ -122,7 +129,8 @@ fn game(
             nonce: move_count as u64,
             draw_offered_by: None,
         };
-        (pda, program_account(&g, 8 + Game::INIT_SPACE)?)
+        // The program creates every game with the FIDE rules extension; join loads it.
+        (pda, fide_game_account(&g)?)
     })
 }
 
@@ -175,6 +183,14 @@ async fn waiting_table(game_id: u64) -> anyhow::Result<Table> {
             profile(white.pubkey())?,
             profile(black.pubkey())?,
             (escrow_pda(game_id), system_account(WAGER)),
+            // Written by create_game next to the game; join binds black into it.
+            recovery_identity_account(
+                game_id,
+                white.pubkey(),
+                Pubkey::default(),
+                WAGER,
+                RecoveryStatus::Waiting,
+            )?,
         ])
         .await;
         let t = now(&mut ctx).await?;
@@ -229,7 +245,11 @@ async fn cancel_wins_the_race_then_join_fails_and_joiner_keeps_funds() -> anyhow
     .await
     .err()
     .context("join after cancellation must fail")?;
-    assert_eq!(custom_code(&err), Some(ec(GameErrorCode::GameAlreadyFull)));
+    // The recovery record refuses the join before the core handler sees the cancelled game.
+    assert_eq!(
+        custom_code(&err),
+        Some(ec(GameErrorCode::RecoveryIdentityMismatch))
+    );
     assert_eq!(
         fetch_game(&mut ctx, id).await?.status,
         GameStatus::Cancelled

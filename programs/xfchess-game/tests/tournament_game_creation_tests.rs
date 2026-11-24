@@ -299,9 +299,10 @@ async fn tournament_session_v2_funds_game_record_and_wager_from_its_vault() -> a
     let rent = anchor_lang::prelude::Rent::default();
     let reserve = rent.minimum_balance(initial.data.len());
     let wager = 10_000_000;
+    // The game account carries the FIDE rules extension.
     initial.lamports = reserve
         + wager
-        + rent.minimum_balance(8 + Game::INIT_SPACE)
+        + rent.minimum_balance(xfchess_game::fide::GAME_ACCOUNT_SPACE)
         + rent.minimum_balance(8 + RecoveryIdentity::INIT_SPACE);
     ctx.set_account(&vault, &AccountSharedData::from(initial));
     let mut accounts = xfchess_game::__client_accounts_session_create_game_core::SessionCreateGameCore {

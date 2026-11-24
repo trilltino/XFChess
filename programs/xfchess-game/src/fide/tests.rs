@@ -43,6 +43,31 @@ fn play(game: &mut Game, info: &AccountInfo<'_>, uci: [u8; 5]) -> anyhow::Result
     Ok(())
 }
 
+/// White never moves and runs past both the refund window and the 300s clock. Before the
+/// zero-move rule reached the FIDE path, the flag fall paid black both stakes.
+#[test]
+fn a_zero_move_timeout_cancels_instead_of_paying_the_side_still_on_time() -> anyhow::Result<()> {
+    let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    let window = crate::lifecycle::clock::ZERO_MOVE_REFUND_WINDOW_SECONDS;
+    let late = 100 + window + 1_000;
+    // The fixture's clock starts at 100. claim_timeout: refused inside the refund window,
+    // then cancelled with no winner.
+    fixture(start, 0, |game, info| {
+        ensure!(finish_timeout(game, info, 100 + window, false).is_err());
+        assert_eq!(game.status, GameStatus::Active);
+        ensure!(finish_timeout(game, info, late, false)?);
+        assert_eq!((game.status, game.result), (GameStatus::Cancelled, GameResult::None));
+        Ok(())
+    })?;
+    // The crank's optional check waits the same window and cancels the same way.
+    fixture(start, 0, |game, info| {
+        ensure!(!finish_timeout(game, info, 100 + window, true)?);
+        ensure!(finish_timeout(game, info, late, true)?);
+        assert_eq!((game.status, game.result), (GameStatus::Cancelled, GameResult::None));
+        Ok(())
+    })
+}
+
 #[test]
 fn third_claims_and_fifth_automatically_finishes_without_moving_money() -> anyhow::Result<()> {
     let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -167,13 +192,15 @@ fn resignation_and_timeout_resolve_with_ordinary_material_and_no_witness() -> an
         assert_eq!(game.result, GameResult::Draw);
         Ok(())
     })?;
-    fixture(start, 0, |game, info| {
+    // Timeouts after moves have been played (one halfmove fixture: 200 plies, white to move).
+    // A game nobody moved in is cancelled instead; see the zero-move test above.
+    fixture(start, 1, |game, info| {
         // White to move; 300s elapsed before the claim.
         assert!(finish_timeout(game, info, 100 + 400, true)?);
         assert_eq!(game.result, GameResult::Winner(game.black));
         Ok(())
     })?;
-    fixture("8/8/4k3/8/8/4K3/8/1N6 w - - 0 1", 0, |game, info| {
+    fixture("8/8/4k3/8/8/4K3/8/1N6 w - - 0 1", 1, |game, info| {
         assert!(finish_timeout(game, info, 100 + 400, true)?);
         assert_eq!(game.result, GameResult::Draw);
         Ok(())

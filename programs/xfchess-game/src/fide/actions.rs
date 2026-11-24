@@ -124,6 +124,15 @@ pub fn finish_resignation(game: &mut Game, info: &AccountInfo<'_>, resigner: Pub
 pub fn finish_timeout(game: &mut Game, info: &AccountInfo<'_>, now: i64, optional: bool) -> Result<bool> {
     if optional && game.status != GameStatus::Active { return Ok(false); }
     require!(game.status == GameStatus::Active, E::GameNotActive);
+    // Nobody has moved: the zero-move rule applies (refund window, then cancel with no winner),
+    // so neither side is paid for a game that never started.
+    if game.move_count == 0 {
+        return if optional {
+            crate::lifecycle::terminal::finish_by_timeout_if_expired(game, now)
+        } else {
+            crate::lifecycle::terminal::finish_by_timeout(game, now).map(|()| true)
+        };
+    }
     let mut data = info.try_borrow_mut_data()?;
     let mut state = FideState::load(&mut data, game)?;
     let clock = state.clock(game)?;

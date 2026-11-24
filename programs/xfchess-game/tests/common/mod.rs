@@ -10,7 +10,8 @@ use solana_sdk::{
 };
 use xfchess_game::chess_logic_on_chain::CompactBoard;
 use xfchess_game::state::{
-    Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile, SessionDelegation,
+    Game, GameResult, GameStatus, GameType, MatchType, PlayerProfile, RecoveryIdentity,
+    RecoveryStatus, SessionDelegation,
 };
 
 pub const PROGRAM: &str = "xfchess_game";
@@ -85,6 +86,71 @@ pub fn program_account<T: AccountSerialize>(value: &T, space: usize) -> anyhow::
     })
 }
 
+/// A `Game` account as the program creates it: the Borsh prefix followed by an initialized
+/// FIDE rules extension, `fide::GAME_ACCOUNT_SPACE` bytes in total. The program refuses a
+/// prefix-only account with `LegacyGameRules`. `FideState::initialize` accepts only a game at
+/// move 0, so a mid-game fixture is initialized from its position and then given its real
+/// ply and halfmove counters, which `FideState::load` checks against the `Game`.
+pub fn fide_game_account(game: &Game) -> anyhow::Result<Account> {
+    let mut account = program_account(game, xfchess_game::fide::GAME_ACCOUNT_SPACE)?;
+    let mut fresh = game.clone();
+    fresh.move_count = 0;
+    xfchess_game::fide::FideState::initialize(&mut account.data, &fresh)
+        .map_err(|e| anyhow::anyhow!("FIDE extension init failed: {e}"))?;
+    set_fide_counters(&mut account.data, game.move_count, game.halfmove_clock);
+    Ok(account)
+}
+
+/// Rewrite a FIDE game account's `Game` prefix in place, keeping the extension and its
+/// ply/halfmove counters in step with the edited game.
+pub fn write_game_prefix(data: &mut [u8], game: &Game) -> anyhow::Result<()> {
+    let mut prefix = Vec::new();
+    game.try_serialize(&mut prefix)
+        .context("serialize game prefix")?;
+    data.get_mut(..prefix.len())
+        .context("game account shorter than its prefix")?
+        .copy_from_slice(&prefix);
+    set_fide_counters(data, game.move_count, game.halfmove_clock);
+    Ok(())
+}
+
+/// The repetition checkpoint's ply (offset 51) and halfmove (offset 55) counters.
+fn set_fide_counters(data: &mut [u8], move_count: u16, halfmove_clock: u16) {
+    let ext = xfchess_game::fide::LEGACY_GAME_SPACE;
+    data[ext + 51..ext + 55].copy_from_slice(&u32::from(move_count).to_le_bytes());
+    data[ext + 55..ext + 57].copy_from_slice(&halfmove_clock.to_le_bytes());
+}
+
+/// The `RecoveryIdentity` record every create instruction writes next to its game.
+pub fn recovery_identity_account(
+    game_id: u64,
+    white: Pubkey,
+    black: Pubkey,
+    wager_amount: u64,
+    status: RecoveryStatus,
+) -> anyhow::Result<(Pubkey, Account)> {
+    let (key, bump) = recovery_identity_pda(game_id);
+    let record = RecoveryIdentity {
+        game_id,
+        white,
+        black,
+        wager_amount,
+        status,
+        bump,
+    };
+    Ok((
+        key,
+        program_account(&record, 8 + RecoveryIdentity::INIT_SPACE)?,
+    ))
+}
+
+pub fn recovery_identity_pda(game_id: u64) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[RecoveryIdentity::SEED, &game_id.to_le_bytes()],
+        &xfchess_game::ID,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn game_account(
     game_id: u64,
@@ -150,7 +216,7 @@ pub fn game_account_with_delegation(
             nonce,
             draw_offered_by: None,
         };
-        (pda, program_account(&g, 8 + Game::INIT_SPACE)?)
+        (pda, fide_game_account(&g)?)
     })
 }
 

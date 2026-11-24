@@ -320,12 +320,13 @@ fn waiting_game(white: Pubkey, tournament_id: Option<u64>) -> anyhow::Result<Acc
             nonce: 0,
             draw_offered_by: None,
         };
-        program_account(&game, 8 + Game::INIT_SPACE)?
+        // The program creates every game with the FIDE rules extension; join loads it.
+        fide_game_account(&game)?
     })
 }
 
 fn session_join_ix(white: Pubkey, player: Pubkey, session_signer: Pubkey) -> Instruction {
-    let accounts = xfchess_game::__client_accounts_session_join_game_core::SessionJoinGameCore {
+    let mut accounts = xfchess_game::__client_accounts_session_join_game_core::SessionJoinGameCore {
         tournament: tournament_pda().0,
         tournament_players_shard_0: shard0_pda(),
         tournament_players_shard_1: None,
@@ -345,6 +346,11 @@ fn session_join_ix(white: Pubkey, player: Pubkey, session_signer: Pubkey) -> Ins
         system_program: solana_system_interface::program::ID,
     }
     .to_account_metas(None);
+    // `SessionJoinGame` wraps the core accounts and adds the game's recovery record.
+    accounts.push(solana_sdk::instruction::AccountMeta::new(
+        recovery_identity_pda(GAME_ID).0,
+        false,
+    ));
     let data = xfchess_game::instruction::SessionJoinGame {
         tournament_id: TID,
         game_id: GAME_ID,
@@ -390,6 +396,13 @@ async fn session_join(
                 program_account(&delegation, 8 + TournamentSessionDelegation::INIT_SPACE)?,
             ),
             (game_pda(GAME_ID).0, waiting_game(creator, game_tournament)?),
+            recovery_identity_account(
+                GAME_ID,
+                creator,
+                Pubkey::default(),
+                10_000_000,
+                xfchess_game::state::RecoveryStatus::Waiting,
+            )?,
             (profile_pda(&creator).0, profile(creator, 0)?),
             (profile_pda(&joiner).0, profile(joiner, 0)?),
         ]);

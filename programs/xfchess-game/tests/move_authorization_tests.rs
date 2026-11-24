@@ -15,10 +15,13 @@ use xfchess_game::state::{Game, GameResult, GameStatus};
 
 const GAME_ID: u64 = 42;
 
+/// Edit the `Game` prefix in place; the FIDE extension and its counters stay consistent.
 fn edit_game(account: &Account, edit: impl FnOnce(&mut Game)) -> anyhow::Result<Account> {
     let mut game = Game::try_deserialize(&mut account.data.as_slice())?;
     edit(&mut game);
-    program_account(&game, account.data.len())
+    let mut edited = account.clone();
+    write_game_prefix(&mut edited.data, &game)?;
+    Ok(edited)
 }
 
 async fn game_bytes(ctx: &mut agave::ProgramTestContext) -> anyhow::Result<Account> {
@@ -133,10 +136,8 @@ async fn a_legal_move_with_a_forged_next_board_is_rejected() -> anyhow::Result<(
         .await
         .err()
         .context("forged board must fail")?;
-    assert_eq!(
-        custom_code(&err),
-        Some(ec(GameErrorCode::InvalidBoardState))
-    );
+    // FIDE verification reports any board that is not the move's result as InvalidMove.
+    assert_eq!(custom_code(&err), Some(ec(GameErrorCode::InvalidMove)));
     assert_eq!(game_bytes(&mut ctx).await?, game_acc);
     Ok(())
 }
@@ -186,17 +187,20 @@ async fn no_move_is_accepted_after_the_game_ends_or_at_the_nonce_ceiling() -> an
 }
 
 #[tokio::test]
-async fn stalemate_and_the_fifty_move_rule_end_the_game_as_a_draw() -> anyhow::Result<()> {
+async fn stalemate_and_the_seventy_five_move_rule_end_the_game_as_a_draw() -> anyhow::Result<()> {
     let session = Keypair::new();
     let (white, black) = (Pubkey::new_unique(), Pubkey::new_unique());
 
     // Qc1-c7 leaves the black king on a8 with no legal move and no check.
     let stalemate = board_from_fen("k7/8/1K6/8/8/8/8/2Q5 w - - 0 1");
-    // A quiet knight move with the clock already at 99 reaches 100 half-moves.
+    // A quiet knight move with the clock at 149 reaches the 150th reversible half-move, which
+    // ends the game (FIDE 9.6.2). At 99 it reaches 100: a fifty-move draw is then only
+    // claimable, so the game goes on.
     let opening = start_board();
-    for (label, board, mv, halfmove) in [
-        ("stalemate", stalemate, "c1c7", 0u16),
-        ("fifty-move", opening, "g1f3", 99),
+    for (label, board, mv, halfmove, ends) in [
+        ("stalemate", stalemate, "c1c7", 0u16, true),
+        ("seventy-five-move", opening, "g1f3", 149, true),
+        ("fifty-move is a claim", opening, "g1f3", 99, false),
     ] {
         let (game_key, base) =
             game_account(GAME_ID, white, black, board, 1, 0, GameStatus::Active)?;
@@ -213,8 +217,13 @@ async fn stalemate_and_the_fifty_move_rule_end_the_game_as_a_draw() -> anyhow::R
             .await
             .with_context(|| format!("{label}: the move is legal"))?;
         let game = fetch_game(&mut ctx, GAME_ID).await?;
-        assert_eq!(game.status, GameStatus::Finished, "{label}");
-        assert_eq!(game.result, GameResult::Draw, "{label}");
+        if ends {
+            assert_eq!(game.status, GameStatus::Finished, "{label}");
+            assert_eq!(game.result, GameResult::Draw, "{label}");
+        } else {
+            assert_eq!(game.status, GameStatus::Active, "{label}");
+            assert_eq!(game.halfmove_clock, 100, "{label}");
+        }
     }
     Ok(())
 }

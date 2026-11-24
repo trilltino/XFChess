@@ -278,8 +278,9 @@ async fn global_create_game_accepts_a_vault_funded_exactly_enough() -> anyhow::R
     // Both permanent accounts must be funded while preserving the vault reserve.
     let rent = anchor_lang::prelude::Rent::default();
     let reserve = rent.minimum_balance(session_account_data.data.len());
+    // The game account carries the FIDE rules extension.
     session_account_data.lamports = reserve
-        + rent.minimum_balance(8 + Game::INIT_SPACE)
+        + rent.minimum_balance(xfchess_game::fide::GAME_ACCOUNT_SPACE)
         + rent.minimum_balance(8 + xfchess_game::state::RecoveryIdentity::INIT_SPACE)
         + wager_amount;
 
@@ -534,8 +535,24 @@ fn waiting_game_account(
             nonce: 0,
             draw_offered_by: None,
         };
-        (pda, program_account(&game, 8 + Game::INIT_SPACE)?)
+        // As global_create_game leaves it: FIDE extension plus its recovery record.
+        (pda, fide_game_account(&game)?)
     })
+}
+
+/// The recovery record global_create_game writes next to a waiting game.
+fn waiting_recovery_identity(
+    game_id: u64,
+    white: Pubkey,
+    wager_amount: u64,
+) -> anyhow::Result<(Pubkey, solana_sdk::account::Account)> {
+    recovery_identity_account(
+        game_id,
+        white,
+        Pubkey::default(),
+        wager_amount,
+        xfchess_game::state::RecoveryStatus::Waiting,
+    )
 }
 
 fn global_join_game_ix(
@@ -545,7 +562,7 @@ fn global_join_game_ix(
     white: Pubkey,
     game_id: u64,
 ) -> Instruction {
-    let accounts = xfchess_game::__client_accounts_global_join_game_core::GlobalJoinGameCore {
+    let mut accounts = xfchess_game::__client_accounts_global_join_game_core::GlobalJoinGameCore {
         session_delegation: session_pda,
         session_signer,
         player,
@@ -556,6 +573,11 @@ fn global_join_game_ix(
         system_program: solana_system_interface::program::ID,
     }
     .to_account_metas(None);
+    // `GlobalJoinGame` wraps the core accounts and adds the game's recovery record.
+    accounts.push(solana_sdk::instruction::AccountMeta::new(
+        recovery_identity_pda(game_id).0,
+        false,
+    ));
     let data = xfchess_game::instruction::GlobalJoinGame { game_id }.data();
     Instruction {
         program_id: xfchess_game::ID,
@@ -584,6 +606,7 @@ async fn global_join_game_rejects_an_underfunded_session_vault() -> anyhow::Resu
     let mut ctx = start(vec![
         (session_pda, session_account_data),
         (game_pda_key, game_account_data),
+        waiting_recovery_identity(game_id, white, wager_amount)?,
         (white_profile_pda, white_profile_data),
         (black_profile_pda, black_profile_data),
     ])
@@ -622,6 +645,7 @@ async fn global_join_game_funds_wager_from_session_vault() -> anyhow::Result<()>
     let mut ctx = start(vec![
         (session_pda, session_account_data),
         (game_pda_key, game_account_data),
+        waiting_recovery_identity(game_id, white, wager_amount)?,
         (white_profile_pda, white_profile_data),
         (black_profile_pda, black_profile_data),
     ])

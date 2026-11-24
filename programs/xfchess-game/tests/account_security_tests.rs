@@ -173,6 +173,34 @@ fn game_key() -> Pubkey {
     Pubkey::find_program_address(&[GAME_SEED, &GAME_ID.to_le_bytes()], &xfchess_game::ID).0
 }
 
+fn account_not_initialized() -> ProgramError {
+    ProgramError::Custom(anchor_lang::error::ErrorCode::AccountNotInitialized as u32)
+}
+
+/// A game account as the program creates it: the Borsh prefix plus the FIDE rules extension.
+fn fide_game_fixture(game: &Game) -> anyhow::Result<Fixture> {
+    let mut account = Fixture::program(game_key(), game, xfchess_game::fide::GAME_ACCOUNT_SPACE)?;
+    xfchess_game::fide::FideState::initialize(&mut account.data, game)
+        .map_err(|e| anyhow::anyhow!("FIDE extension init failed: {e}"))?;
+    Ok(account)
+}
+
+fn recovery_identity_key() -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[RecoveryIdentity::SEED, &GAME_ID.to_le_bytes()],
+        &xfchess_game::ID,
+    )
+}
+
+/// The trailing recovery record `RecoverStuckDelegation` takes after its core accounts, as a
+/// PDA that was never created.
+fn missing_recovery_identity() -> Fixture {
+    let mut record = Fixture::system(recovery_identity_key().0);
+    record.lamports = 0;
+    record
+}
+
+/// The core `RecoverStuckDelegation` accounts; tests append the recovery record.
 fn recovery_accounts() -> Vec<Fixture> {
     let mut game = Fixture::system(game_key());
     game.owner = xfchess_game::ID;
@@ -202,16 +230,15 @@ fn authorized_recovery_without_identity_preserves_all_accounts_on_retry() -> any
         for pot in [0, 1, 2_000_000_001, u64::MAX / 2] {
             for duplicate in [false, true] {
                 let mut accounts = recovery_accounts();
+                accounts.push(missing_recovery_identity());
                 accounts[1].lamports = pot;
                 if duplicate {
                     accounts[4].key = accounts[3].key;
                 }
                 let before = accounts.clone();
                 for _ in 0..2 {
-                    assert_eq!(
-                        dispatch(&mut accounts, &data)?,
-                        Err(code(GameErrorCode::RecoveryIdentityUnavailable))
-                    );
+                    // Without a recovery record nothing proves who the players were.
+                    assert_eq!(dispatch(&mut accounts, &data)?, Err(account_not_initialized()));
                     assert_eq!(
                         accounts, before,
                         "no escrow, rent, recipient or treasury mutation"
@@ -228,6 +255,7 @@ fn recovery_rejects_unauthorized_signer_and_populated_game() -> anyhow::Result<(
     with_sbf_runtime(|| {
         let data = xfchess_game::instruction::RecoverStuckDelegation { game_id: GAME_ID }.data();
         let mut accounts = recovery_accounts();
+        accounts.push(missing_recovery_identity());
         accounts[5].key = Pubkey::new_unique();
         let before = accounts.clone();
         assert_eq!(
@@ -235,7 +263,21 @@ fn recovery_rejects_unauthorized_signer_and_populated_game() -> anyhow::Result<(
             Err(code(GameErrorCode::UnauthorizedDisputeResolution))
         );
         assert_eq!(accounts, before);
+        // A real recovery record, so the handler reaches the game check itself.
+        let (record_key, bump) = recovery_identity_key();
+        let record = RecoveryIdentity::new(
+            GAME_ID,
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            0,
+            bump,
+        )?;
         accounts = recovery_accounts();
+        accounts.push(Fixture::program(
+            record_key,
+            &record,
+            8 + RecoveryIdentity::INIT_SPACE,
+        )?);
         accounts[0].data = vec![1; 8];
         let before = accounts.clone();
         assert_eq!(
@@ -834,6 +876,9 @@ fn global_join_v2_binds_authenticated_black_and_preserves_white() -> anyhow::Res
         let mut game = waiting_game(white, NOW);
         game.wager_amount = 10_000_000;
         game.match_type = MatchType::Rated;
+        // Created games start from the standard position; the FIDE extension hashes it.
+        game.board_state =
+            xfchess_game::chess_logic_on_chain::CompactBoard::starting_position().to_bytes();
         let (record_key, bump) = Pubkey::find_program_address(
             &[RecoveryIdentity::SEED, &GAME_ID.to_le_bytes()],
             &xfchess_game::ID,
@@ -849,7 +894,7 @@ fn global_join_v2_binds_authenticated_black_and_preserves_white() -> anyhow::Res
             session[0].clone(),
             signer,
             Fixture::system(black),
-            Fixture::program(game_key(), &game, 8 + Game::INIT_SPACE)?,
+            fide_game_fixture(&game)?,
             profile_accounts(black)?[0].clone(),
             profile_accounts(white)?[0].clone(),
             Fixture::system(escrow_key),
