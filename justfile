@@ -292,8 +292,8 @@ dev: kill build build-wallet-ui build-web-ui
     @Write-Host "Program ID:       {{PROGRAM_ID}}" -ForegroundColor White
     @Write-Host "========================================" -ForegroundColor Cyan
 
-# Launch two game instances sharing one backend — P1 window and P2 window, each with tabs
-dev2: kill build build-wallet-ui build-web-ui
+# Launch two game instances sharing one backend (P1 and P2 windows, each with tabs); P1 also opens the tournament admin panel
+dev2: kill build build-tauri-admin build-wallet-ui build-admin-ui build-web-ui
     @$root = (Get-Location).Path; \
      $bin = ("{{bin}}" -replace '/', '\'); \
      $tmp = Join-Path $env:TEMP 'XFChess-dev'; \
@@ -301,9 +301,9 @@ dev2: kill build build-wallet-ui build-web-ui
      $env_common = "`$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:BACKEND_URL='{{BACKEND_URL}}'; `$env:RUST_LOG='{{RUST_LOG}}'; `$env:HELIUS_API_KEY='{{HELIUS_API_KEY}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:XFCHESS_WEB_URL='http://localhost:5173'"; \
      Set-Content -Path "$tmp\dev2-backend.ps1"   -Value "Set-Location '$root\services\backend'; `$env:JWT_SECRET='{{JWT_SECRET}}'; `$env:SIGNING_SERVICE_URL='{{SIGNING_SERVICE_URL}}'; `$env:IDENTITY_ENCRYPTION_KEY='{{IDENTITY_ENCRYPTION_KEY}}'; `$env:IDENTITY_SALT='{{IDENTITY_SALT}}'; `$env:SOLANA_RPC_URL='{{SOLANA_RPC_URL}}'; `$env:ER_RPC_URL='{{ER_RPC_URL}}'; `$env:PROGRAM_ID='{{PROGRAM_ID}}'; `$env:FEE_PAYER_KEYS='{{FEE_PAYER_KEYS}}'; `$env:VPS_AUTHORITY_KEY='{{VPS_AUTHORITY_KEY}}'; `$env:KYC_AUTHORITY_KEY='{{KYC_AUTHORITY_KEY}}'; `$env:TOURNAMENT_FEE_RECIPIENT='{{TOURNAMENT_FEE_RECIPIENT}}'; `$env:RUST_LOG='{{RUST_LOG}}'; & '$root\$bin\signing-server.exe'" -Encoding utf8; \
      Set-Content -Path "$tmp\dev2-wallet-p1.ps1" -Value "Set-Location '$root\apps\tauri\wallet-ui'; npm run dev" -Encoding utf8; \
-     Set-Content -Path "$tmp\dev2-tauri-p1.ps1"  -Value "$env_common; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-tauri-p1.ps1"  -Value "$env_common; `$env:XFCHESS_OPEN_ADMIN='1'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$tmp\dev2-game-p1.ps1"   -Value "$env_common; `$env:XFCHESS_NODE_KEY_PATH='$tmp\node_key_p1'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
-     Set-Content -Path "$tmp\dev2-web.ps1"        -Value "Set-Location '$root\apps/website'; npm run dev" -Encoding utf8; \
+     Set-Content -Path "$tmp\dev2-web.ps1"        -Value "Set-Location '$root\apps\website'; npm run dev" -Encoding utf8; \
      Set-Content -Path "$tmp\dev2-wallet-p2.ps1" -Value "`$env:VITE_BRIDGE_PORT='7474'; Set-Location '$root\apps\tauri\wallet-ui'; npx vite --port 5175" -Encoding utf8; \
      Set-Content -Path "$tmp\dev2-tauri-p2.ps1"  -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_WALLET_URL='http://localhost:5175'; Set-Location '$root'; & '$root\$bin\xfchess-tauri.exe'" -Encoding utf8; \
      Set-Content -Path "$tmp\dev2-game-p2.ps1"   -Value "$env_common; `$env:XFCHESS_WALLET_PORT='7474'; `$env:XFCHESS_NODE_KEY_PATH='$tmp\node_key_p2'; Set-Location '$root'; & '$root\$bin\xfchess.exe'" -Encoding utf8; \
@@ -330,6 +330,7 @@ dev2: kill build build-wallet-ui build-web-ui
     @Write-Host "  [P1] Backend :8090  Wallet UI :5174  Bridge :7454  (window: XFChess P1)" -ForegroundColor Cyan
     @Write-Host "  [P2] Wallet UI :5175  Bridge :7474  (window: XFChess P2)" -ForegroundColor Yellow
     @Write-Host "  Web Frontend: http://localhost:5173" -ForegroundColor White
+    @Write-Host "  Tournament Admin: opens from P1; sign in on LOCAL with an ADMIN_USERS account (just admin-password <name>)" -ForegroundColor Green
 
 
 # Build Solana program without Anchor IDL generation (works on Windows)
