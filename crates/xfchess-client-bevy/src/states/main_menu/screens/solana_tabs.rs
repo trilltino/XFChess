@@ -140,6 +140,20 @@ pub(super) fn render_create_tab(
         );
     }
 
+    // The program moves ratings only for stakes of at least MIN_RATED_WAGER_LAMPORTS.
+    let min_rated = xfchess_game::constants::MIN_RATED_WAGER_LAMPORTS;
+    if lobby.wager_lamports() < min_rated {
+        ui.label(
+            egui::RichText::new(format!(
+                "Unrated below {:.3} SOL: the result is recorded, ratings do not change.",
+                min_rated as f64 / 1_000_000_000.0
+            ))
+            .size(11.0)
+            .color(egui::Color32::from_rgb(160, 130, 80))
+            .italics(),
+        );
+    }
+
     Layout::small_space(ui);
 
     ui.label(egui::RichText::new("Time Control").size(13.0));

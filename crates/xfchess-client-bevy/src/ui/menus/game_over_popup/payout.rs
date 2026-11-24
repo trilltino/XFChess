@@ -177,7 +177,9 @@ pub fn fetch_game_payout_info(
     if let Some(sync) = solana_sync {
         if sync.wager_amount > 0 {
             payout_info.wager_amount = sync.wager_amount;
-            payout_info.is_rated = true;
+            // Settlement moves ratings only for stakes of at least MIN_RATED_WAGER_LAMPORTS.
+            payout_info.is_rated =
+                sync.wager_amount >= xfchess_game::constants::MIN_RATED_WAGER_LAMPORTS;
 
             if let Some(_comp) = competitive {
                 // Show estimates until finalization supplies confirmed fees. Keep them

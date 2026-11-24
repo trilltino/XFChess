@@ -90,6 +90,21 @@ pub fn render_game_left_panel(
     }
 }
 
+/// The program moves ratings only for games staked at `MIN_RATED_WAGER_LAMPORTS` or more;
+/// smaller stakes and tournament games (created with no stake) only update the record.
+#[cfg(feature = "solana")]
+fn competitive_game_moves_rating(params: &crate::ui::system_params::game_ui::GameUIParams) -> bool {
+    params.competitive_match.as_ref().is_some_and(|m| {
+        m.wager_lamports >= xfchess_game::constants::MIN_RATED_WAGER_LAMPORTS
+    })
+}
+
+/// Without the Solana feature there is no on-chain rating to move.
+#[cfg(not(feature = "solana"))]
+fn competitive_game_moves_rating(_: &crate::ui::system_params::game_ui::GameUIParams) -> bool {
+    false
+}
+
 fn render_match_info_card(
     ui: &mut egui::Ui,
     params: &mut crate::ui::system_params::game_ui::GameUIParams,
@@ -100,10 +115,15 @@ fn render_match_info_card(
     let game_mode = *params.game_mode;
     let tc = params.active_time_control.control;
 
-    // Every non-online mode is inherently unrated; online games show whether
-    // they're actually Rated or a Casual online match.
+    // Every non-online mode is inherently unrated. Online games (on-chain lobbies
+    // run as OnlineMultiplayer too) are Rated only when the stake moves ratings.
     let headline = match game_mode {
-        GameMode::MultiplayerCompetitive => "Rated",
+        GameMode::OnlineMultiplayer | GameMode::MultiplayerCompetitive
+            if competitive_game_moves_rating(params) =>
+        {
+            "Rated"
+        }
+        GameMode::MultiplayerCompetitive => "Unrated",
         GameMode::Spectator => "Spectating",
         GameMode::PgnReplay => "Replay",
         GameMode::Puzzle => "Puzzle",

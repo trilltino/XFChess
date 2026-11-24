@@ -102,8 +102,13 @@ pub fn game_over_popup_system(
                 if let Some(info) = payout_info.as_ref() {
                     if !info.is_rated {
                         ui.add_space(6.0);
+                        let note = if info.wager_amount > 0 {
+                            "Stake below the rated minimum — no rating change"
+                        } else {
+                            "Practice game — no rating change"
+                        };
                         ui.label(
-                            egui::RichText::new("Practice game — no rating change")
+                            egui::RichText::new(note)
                                 .size(11.0)
                                 .color(text_secondary),
                         );
