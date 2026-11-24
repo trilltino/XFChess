@@ -127,6 +127,8 @@ impl SigningConfig {
                 "SOLANA_RPC_URL must be an http(s) URL",
             ),
         ];
+        // Without a usable admin account nobody can sign in to the admin panel or the CLIs.
+        let admin_problem = crate::infrastructure::admin_session::configuration_problem();
 
         let mut problems: Vec<&str> = checks
             .into_iter()
@@ -137,17 +139,8 @@ impl SigningConfig {
             problems
                 .push("FEE_PAYER_KEYS empty — backend cannot pay transaction fees in production");
         }
-        if prod {
-            match env::var("ADMIN_API_KEY") {
-                Ok(key) if key.len() >= 32 => {}
-                Ok(_) => problems.push("ADMIN_API_KEY too short (need >= 32 characters)"),
-                Err(env::VarError::NotPresent) => {
-                    problems.push("ADMIN_API_KEY not set — refusing to start without admin auth")
-                }
-                Err(env::VarError::NotUnicode(_)) => {
-                    problems.push("ADMIN_API_KEY contains invalid UTF-8")
-                }
-            }
+        if let Some(problem) = &admin_problem {
+            problems.push(problem);
         }
         if prod && self.vps_authority_key.is_none() {
             problems.push(
@@ -219,6 +212,14 @@ mod tests {
         }
     }
 
+    /// A usable admin account, which production validation requires.
+    fn set_admin_users() -> anyhow::Result<()> {
+        let hash = crate::infrastructure::admin_session::hash_password("test password")
+            .map_err(anyhow::Error::msg)?;
+        std::env::set_var("ADMIN_USERS", format!("tino:{hash}"));
+        Ok(())
+    }
+
     #[tokio::test]
     async fn missing_authority_key_is_fine_outside_production() {
         let _env = crate::test_env::lock().await;
@@ -232,12 +233,12 @@ mod tests {
     async fn missing_authority_key_is_fatal_in_production() -> anyhow::Result<()> {
         let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
-        std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
+        set_admin_users()?;
         let mut config = base_config();
         config.vps_authority_key = None;
         let result = config.validate();
         std::env::remove_var("APP_ENV");
-        std::env::remove_var("ADMIN_API_KEY");
+        std::env::remove_var("ADMIN_USERS");
         let err = result
             .err()
             .context("missing VPS_AUTHORITY_KEY must be fatal in production")?;
@@ -246,27 +247,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn all_authority_keys_present_passes_in_production() {
+    async fn all_authority_keys_present_passes_in_production() -> anyhow::Result<()> {
         let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
-        std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
+        set_admin_users()?;
         let result = base_config().validate();
         std::env::remove_var("APP_ENV");
-        std::env::remove_var("ADMIN_API_KEY");
-        assert!(result.is_ok());
+        std::env::remove_var("ADMIN_USERS");
+        assert!(result.is_ok(), "{result:?}");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn missing_admin_api_key_is_fatal_in_production() -> anyhow::Result<()> {
+    async fn missing_or_unusable_admin_users_is_fatal_in_production() -> anyhow::Result<()> {
         let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
-        std::env::remove_var("ADMIN_API_KEY");
-        let result = base_config().validate();
+        std::env::remove_var("ADMIN_USERS");
+        let missing = base_config().validate();
+        std::env::set_var("ADMIN_USERS", "tino:plaintext-password");
+        let plaintext = base_config().validate();
         std::env::remove_var("APP_ENV");
-        let err = result
-            .err()
-            .context("missing ADMIN_API_KEY must be fatal in production")?;
-        assert!(err.contains("ADMIN_API_KEY"));
+        std::env::remove_var("ADMIN_USERS");
+        for result in [missing, plaintext] {
+            let err = result
+                .err()
+                .context("a missing or unusable ADMIN_USERS must be fatal in production")?;
+            assert!(err.contains("ADMIN_USERS"), "{err}");
+        }
         Ok(())
     }
 
@@ -274,12 +281,12 @@ mod tests {
     async fn invalid_treasury_pubkey_is_fatal_in_production() -> anyhow::Result<()> {
         let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
-        std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
+        set_admin_users()?;
         let mut config = base_config();
         config.treasury_authority_pubkey = "not-a-real-pubkey".into();
         let result = config.validate();
         std::env::remove_var("APP_ENV");
-        std::env::remove_var("ADMIN_API_KEY");
+        std::env::remove_var("ADMIN_USERS");
         let err = result
             .err()
             .context("an invalid TREASURY_AUTHORITY_PUBKEY must fail validate()")?;
@@ -291,12 +298,12 @@ mod tests {
     async fn missing_allowed_origins_is_fatal_in_production() -> anyhow::Result<()> {
         let _env = crate::test_env::lock().await;
         std::env::set_var("APP_ENV", "production");
-        std::env::set_var("ADMIN_API_KEY", "a".repeat(32));
+        set_admin_users()?;
         let mut config = base_config();
         config.allowed_origins = vec![];
         let result = config.validate();
         std::env::remove_var("APP_ENV");
-        std::env::remove_var("ADMIN_API_KEY");
+        std::env::remove_var("ADMIN_USERS");
         let err = result
             .err()
             .context("empty ALLOWED_ORIGINS must be fatal in production")?;

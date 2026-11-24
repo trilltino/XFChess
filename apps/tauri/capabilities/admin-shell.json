@@ -7,7 +7,7 @@
   "local": true,
   "remote": {
     "urls": [
-      "http://localhost:*/tournament-admin/*"
+      "http://localhost:*"
     ]
   },
   "permissions": [

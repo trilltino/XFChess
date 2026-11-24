@@ -23,7 +23,7 @@ export default function DeploymentManager() {
     <p>{error ?? (health ? `Health: ${health.status} · Version: ${health.version} · Commit: ${health.git_sha}` : "Checking backend…")}</p>
     <section>
       <h3>Production release</h3>
-      <p>Run from the repository terminal with the deployment identity authorized for root on {ops.vpsHost || "your configured VPS"}.
+      <p>Run from the repository terminal with the deployment identity authorized for root on {ops.vpsHost}.
         Deploy builds the committed source, snapshots databases and switches the backend and website together. The panel’s deploy login supports operations, not release installation.</p>
       {commands.problem ? <p role="alert">{commands.problem}</p> : <>
         <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{commands.deploy}</pre>

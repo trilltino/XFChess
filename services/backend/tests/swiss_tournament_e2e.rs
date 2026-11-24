@@ -1,3 +1,5 @@
+mod common;
+
 use anyhow::Context as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -94,7 +96,7 @@ impl TestApp {
                 .uri(uri)
                 .method("POST")
                 .header("content-type", "application/json")
-                .header("X-API-Key", "dev")
+                .header("X-Admin-Session", common::admin_session(self.router()).await?)
                 .body(Body::from(
                     serde_json::to_vec(body).context("test setup failed")?,
                 ))
@@ -319,7 +321,7 @@ async fn approve_prize_release_route_sets_the_flag() -> anyhow::Result<()> {
         .context("seeded tournament")?;
     assert!(!fetched.prize_release_approved, "should start unapproved");
 
-    // No X-API-Key → rejected before the handler runs, same as every other
+    // No admin session → rejected before the handler runs, same as every other
     // admin route.
     let (status, _) = app
         .post_json(

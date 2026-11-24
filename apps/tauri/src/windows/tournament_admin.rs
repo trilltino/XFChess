@@ -221,7 +221,7 @@ pub(crate) fn kill_admin_tunnel(app: tauri::AppHandle) {
   kill_admin_tunnel_inner(&app);
 }
 
-// The admin API key lives in the OS credential store (Windows Credential Manager,
+// The admin session token lives in the OS credential store (Windows Credential Manager,
 // macOS Keychain, Secret Service), one entry per environment, never in webview storage.
 #[cfg(feature = "tournament-admin")]
 const CREDENTIAL_SERVICE: &str = "xfchess-tournament-admin";
@@ -241,7 +241,7 @@ pub(crate) fn admin_token_load(env: String) -> Result<Option<String>, String> {
   match admin_token_entry(&env)?.get_password() {
     Ok(token) => Ok(Some(token)),
     Err(keyring::Error::NoEntry) => Ok(None),
-    Err(e) => Err(format!("could not read the saved admin key: {e}")),
+    Err(e) => Err(format!("could not read the saved admin session: {e}")),
   }
 }
 
@@ -249,11 +249,11 @@ pub(crate) fn admin_token_load(env: String) -> Result<Option<String>, String> {
 #[tauri::command]
 pub(crate) fn admin_token_save(env: String, token: String) -> Result<(), String> {
   if token.trim().is_empty() {
-    return Err("refusing to save an empty admin key".into());
+    return Err("refusing to save an empty admin session".into());
   }
   admin_token_entry(&env)?
     .set_password(&token)
-    .map_err(|e| format!("could not save the admin key: {e}"))
+    .map_err(|e| format!("could not save the admin session: {e}"))
 }
 
 #[cfg(feature = "tournament-admin")]
@@ -261,109 +261,8 @@ pub(crate) fn admin_token_save(env: String, token: String) -> Result<(), String>
 pub(crate) fn admin_token_clear(env: String) -> Result<(), String> {
   match admin_token_entry(&env)?.delete_credential() {
     Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-    Err(e) => Err(format!("could not remove the admin key: {e}")),
+    Err(e) => Err(format!("could not remove the admin session: {e}")),
   }
-}
-
-/// The only text the panel may have signed: the backend's admin sign-in challenge. Refusing
-/// anything else means this command cannot be used to sign a transaction or any other message.
-#[cfg(feature = "tournament-admin")]
-const SIGN_IN_PREFIX: &str = "XFChess admin sign-in\n";
-
-#[cfg(feature = "tournament-admin")]
-#[derive(serde::Serialize)]
-pub(crate) struct WalletSignature {
-  pubkey: String,
-  signature: String,
-}
-
-/// Loads a Solana keypair file (the JSON array of 64 bytes that `solana-keygen` writes).
-#[cfg(feature = "tournament-admin")]
-fn load_keypair(path: &str) -> Result<ed25519_dalek::SigningKey, String> {
-  let path = match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
-    Some(rest) => dirs::home_dir()
-      .ok_or("no home directory to resolve ~")?
-      .join(rest),
-    None => std::path::PathBuf::from(path),
-  };
-  if path.extension().is_none_or(|ext| ext != "json") {
-    return Err("a keypair file ends in .json".into());
-  }
-  let raw = std::fs::read_to_string(&path)
-    .map_err(|e| format!("cannot read the keypair file {}: {e}", path.display()))?;
-  let bytes: Vec<u8> = serde_json::from_str(&raw)
-    .map_err(|_| "the file is not a Solana keypair (a JSON array of 64 numbers)".to_string())?;
-  if bytes.len() != 64 {
-    return Err("the file is not a Solana keypair (expected 64 bytes)".into());
-  }
-  let secret: [u8; 32] = bytes[..32]
-    .try_into()
-    .map_err(|_| "malformed keypair".to_string())?;
-  let key = ed25519_dalek::SigningKey::from_bytes(&secret);
-  if key.verifying_key().to_bytes() != bytes[32..] {
-    return Err("the keypair file's public half does not match its secret half".into());
-  }
-  Ok(key)
-}
-
-/// The wallet connected in the wallet popup (Phantom, Solflare or an embedded wallet), the same
-/// one the game signs with. If none is connected the popup opens and this waits for the admin to
-/// connect one.
-#[cfg(feature = "tournament-admin")]
-#[tauri::command]
-pub(crate) async fn admin_wallet_connect(app: tauri::AppHandle) -> Result<String, String> {
-  if let Some(pubkey) = crate::wallet::connected_wallet(&app) {
-    return Ok(pubkey);
-  }
-  crate::wallet::open_wallet_popup(&app);
-  for _ in 0..240 {
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    if let Some(pubkey) = crate::wallet::connected_wallet(&app) {
-      return Ok(pubkey);
-    }
-  }
-  Err("No wallet was connected. Connect one in the wallet window and try again.".into())
-}
-
-/// Has the connected wallet sign the backend's sign-in challenge: the wallet window opens and the
-/// admin approves it there. Returns the signature in base58, as the backend expects.
-#[cfg(feature = "tournament-admin")]
-#[tauri::command]
-pub(crate) async fn admin_wallet_popup_sign(
-  app: tauri::AppHandle,
-  message: String,
-) -> Result<String, String> {
-  if !message.starts_with(SIGN_IN_PREFIX) {
-    return Err("only an XFChess admin sign-in challenge can be signed here".into());
-  }
-  let signature =
-    crate::wallet::sign_message_in_popup(&app, "XFChess admin sign-in", message.into_bytes())
-      .await?;
-  Ok(bs58::encode(signature).into_string())
-}
-
-/// The public address of the keypair file, so the panel can ask the backend for a challenge.
-#[cfg(feature = "tournament-admin")]
-#[tauri::command]
-pub(crate) fn admin_wallet_pubkey(path: String) -> Result<String, String> {
-  let key = load_keypair(&path)?;
-  Ok(bs58::encode(key.verifying_key().to_bytes()).into_string())
-}
-
-/// Signs the backend's sign-in challenge with the keypair file. The secret key stays here.
-#[cfg(feature = "tournament-admin")]
-#[tauri::command]
-pub(crate) fn admin_wallet_sign(path: String, message: String) -> Result<WalletSignature, String> {
-  use ed25519_dalek::Signer;
-  if !message.starts_with(SIGN_IN_PREFIX) {
-    return Err("only an XFChess admin sign-in challenge can be signed here".into());
-  }
-  let key = load_keypair(&path)?;
-  let signature = key.sign(message.as_bytes());
-  Ok(WalletSignature {
-    pubkey: bs58::encode(key.verifying_key().to_bytes()).into_string(),
-    signature: bs58::encode(signature.to_bytes()).into_string(),
-  })
 }
 
 /// Rejects tunnel parameters that ssh could parse as options or that do not look
@@ -403,8 +302,9 @@ fn validate_tunnel_args(
 
 /// The panel's URL: the loopback bridge, or a loopback dev server named by
 /// `XFCHESS_ADMIN_DEV_URL` (hot reload). Either way it is normalised to
-/// `http://localhost:<port>/tournament-admin/`, the only origin/path the admin
-/// capabilities attach to.
+/// `http://localhost:<port>/tournament-admin/`. The admin capabilities match by
+/// origin only (Tauri checks the IPC `Origin` header, which has no path); the
+/// `/tournament-admin/` path is held by the window's `on_navigation` guard.
 #[cfg(feature = "tournament-admin")]
 fn admin_window_url(dev_override: Option<&str>, bridge_port: u16) -> Result<tauri::Url, String> {
   let at_port = |port: u16| {
@@ -510,7 +410,7 @@ pub(crate) fn open_tournament_admin(_app: &tauri::AppHandle) {
 
 #[cfg(all(test, feature = "tournament-admin"))]
 mod tests {
-  use super::{admin_wallet_pubkey, admin_wallet_sign, admin_window_url, is_admin_page, validate_tunnel_args};
+  use super::{admin_window_url, is_admin_page, validate_tunnel_args};
 
   #[test]
   fn panel_url_is_always_localhost_under_tournament_admin() -> Result<(), Box<dyn std::error::Error>>
@@ -572,59 +472,40 @@ mod tests {
     assert!(validate_tunnel_args(key, "a b", "1.2.3.4", "127.0.0.1").is_err());
   }
 
-  /// A keypair file in the format `solana-keygen` writes, removed when dropped.
-  struct TempKeypair(std::path::PathBuf);
-
-  impl TempKeypair {
-    fn new(tag: &str) -> Result<Self, Box<dyn std::error::Error>> {
-      use ed25519_dalek::SigningKey;
-      let secret = [7u8; 32];
-      let public = SigningKey::from_bytes(&secret).verifying_key().to_bytes();
-      let bytes: Vec<u8> = secret.iter().chain(public.iter()).copied().collect();
-      let path = std::env::temp_dir().join(format!("xfchess-admin-wallet-test-{tag}.json"));
-      std::fs::write(&path, serde_json::to_string(&bytes)?)?;
-      Ok(Self(path))
-    }
-    fn path(&self) -> String {
-      self.0.to_string_lossy().into_owned()
-    }
-  }
-
-  impl Drop for TempKeypair {
-    fn drop(&mut self) {
-      let _ = std::fs::remove_file(&self.0);
-    }
-  }
-
+  /// Tauri matches a remote page's commands against the IPC request's `Origin` header, which
+  /// has no path. A capability URL with a path (`/tournament-admin/*`) therefore never matches
+  /// and every admin command fails with "not allowed on window". The path is enforced by
+  /// `is_admin_page` instead.
   #[test]
-  fn wallet_signs_only_the_sign_in_challenge() -> Result<(), Box<dyn std::error::Error>> {
-    use ed25519_dalek::{Signature, VerifyingKey};
-    let file = TempKeypair::new("sign")?;
-    let challenge = "XFChess admin sign-in
-wallet: w
-nonce: n
-expires: 1";
-    let signed = admin_wallet_sign(file.path(), challenge.into())?;
-    assert_eq!(signed.pubkey, admin_wallet_pubkey(file.path())?);
-    let public: [u8; 32] = bs58::decode(&signed.pubkey).into_vec()?.as_slice().try_into()?;
-    let signature: [u8; 64] = bs58::decode(&signed.signature).into_vec()?.as_slice().try_into()?;
-    VerifyingKey::from_bytes(&public)?
-      .verify_strict(challenge.as_bytes(), &Signature::from_bytes(&signature))?;
+  fn admin_capabilities_match_the_panels_ipc_origin() -> Result<(), Box<dyn std::error::Error>> {
+    use std::str::FromStr as _;
+    use tauri::utils::acl::RemoteUrlPattern;
 
-    // Anything else, such as transaction bytes, is refused.
-    assert!(admin_wallet_sign(file.path(), "transfer 100 SOL".into()).is_err());
-    Ok(())
-  }
-
-  #[test]
-  fn wallet_rejects_files_that_are_not_keypairs() -> Result<(), Box<dyn std::error::Error>> {
-    assert!(admin_wallet_pubkey("C:/definitely/missing.json".into()).is_err());
-    assert!(admin_wallet_pubkey("keypair.txt".into()).is_err());
-    let path = std::env::temp_dir().join("xfchess-admin-wallet-test-bad.json");
-    std::fs::write(&path, "[1,2,3]")?;
-    let result = admin_wallet_pubkey(path.to_string_lossy().into_owned());
-    let _ = std::fs::remove_file(&path);
-    assert!(result.is_err());
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities");
+    for file in [
+      "default.json",
+      "admin-credentials.json",
+      "admin-http.json",
+      "admin-shell.json",
+      "admin-tunnel.json",
+    ] {
+      let capability: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join(file))?)?;
+      let patterns = capability["remote"]["urls"]
+        .as_array()
+        .ok_or(format!("{file} has no remote urls"))?
+        .iter()
+        .map(|url| RemoteUrlPattern::from_str(url.as_str().unwrap_or_default()))
+        .collect::<Result<Vec<_>, _>>()?;
+      // The bridge's nominal port, and the `just admin-dev` Vite port.
+      for origin in ["http://localhost:7454", "http://localhost:5176"] {
+        let origin = tauri::Url::parse(origin)?;
+        assert!(
+          patterns.iter().any(|pattern| pattern.test(&origin)),
+          "{file} does not allow IPC from {origin}"
+        );
+      }
+    }
     Ok(())
   }
 }

@@ -1888,6 +1888,7 @@ dependencies = [
  "bs58",
  "bytes",
  "chrono",
+ "console",
  "csv",
  "cu_benchmark",
  "dotenv",
@@ -24279,10 +24280,8 @@ version = "0.1.0"
 dependencies = [
  "axum 0.8.9",
  "base64 0.22.1",
- "bs58",
  "dirs 5.0.1",
  "dotenvy",
- "ed25519-dalek 2.2.0",
  "futures",
  "keyring",
  "open",

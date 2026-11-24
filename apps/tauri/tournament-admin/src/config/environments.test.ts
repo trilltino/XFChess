@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { envById, getOpsConfig, isInsecureRemoteUrl, opsConfigProblem, saveOpsConfig } from './environments';
+import { envById, getOpsConfig, isInsecureRemoteUrl, opsConfigProblem } from './environments';
 
 const store = new Map<string, string>();
 beforeEach(() => {
@@ -27,9 +27,12 @@ describe('envById', () => {
 });
 
 describe('ops config', () => {
-  it('saved values override the defaults', () => {
-    saveOpsConfig({ vpsHost: ' 10.0.0.9 ', sshKeyPath: 'C:/keys/ops' });
-    expect(getOpsConfig()).toEqual({ vpsHost: '10.0.0.9', sshKeyPath: 'C:/keys/ops' });
+  it('production needs no host or key from the operator', () => {
+    // An older build may have saved its own values; they no longer apply.
+    store.set('admin_ops_config', JSON.stringify({ vpsHost: '10.0.0.9', sshKeyPath: 'C:/keys/ops' }));
+    expect(getOpsConfig()).toEqual({ vpsHost: '178.104.55.19', sshKeyPath: '~/.ssh/xfchess_vps' });
+    expect(opsConfigProblem(getOpsConfig())).toBeNull();
+    expect(envById('production').tunnel).toMatchObject({ sshHost: '178.104.55.19', sshKey: '~/.ssh/xfchess_vps', sshUser: 'tunnel' });
   });
 
   it('flags hosts and key paths the shell scope would reject', () => {

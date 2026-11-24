@@ -28,7 +28,7 @@ const JWT_SECRET: &str = "test-secret-not-for-production";
 enum Class {
     /// Anyone may call it: read-only data, health, or unsigned-transaction builders.
     Public,
-    /// `X-API-Key` required (admin middleware).
+    /// `X-Admin-Session` required (admin middleware).
     Admin,
     /// Wallet JWT enforced by middleware or extractor; anonymous callers get 401.
     Wallet,
@@ -200,6 +200,8 @@ fn table() -> Vec<(String, String, Class)> {
         ("GET", "/friends/requests", Node),
         ("POST", "/friends/requests", Node),
         ("PUT", "/friends/requests/{id}", Node),
+        ("DELETE", "/friends/requests/{id}", Node),
+        ("DELETE", "/friends/invites/{id}", Node),
         ("PUT", "/presence", Node),
         ("GET", "/social/poll", Node),
         // Relay lobby: /p2p/message carries its own signature.
@@ -248,11 +250,8 @@ fn table() -> Vec<(String, String, Class)> {
 
 /// Anything under an admin prefix is `Admin`; everything else must be in `table`.
 fn classify(method: &str, path: &str, table: &[(String, String, Class)]) -> Option<Class> {
-    // How an admin obtains a credential: the wallet signature is verified inside the handler.
-    if matches!(
-        (method, path),
-        ("POST", "/admin/auth/challenge") | ("POST", "/admin/auth/login")
-    ) {
+    // How an admin obtains a session: the password is checked inside the handler.
+    if (method, path) == ("POST", "/admin/auth/login") {
         return Some(Handler);
     }
     if path.starts_with("/admin/") || path.contains("/admin/") {
@@ -359,7 +358,7 @@ async fn every_route_is_classified() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn admin_routes_require_the_admin_key() -> anyhow::Result<()> {
+async fn admin_routes_require_an_admin_session() -> anyhow::Result<()> {
     let app = common::spawn_app().await?;
     let table = table();
     let routes = runtime_routes(&app).await?;
@@ -370,13 +369,19 @@ async fn admin_routes_require_the_admin_key() -> anyhow::Result<()> {
         admin.len()
     );
     let wallet_token = app.state.jwt.issue(WALLET_A)?;
+    // Configures the test admin account, so a refusal below is about the credential sent.
+    let session = app.admin_token().await?;
     let mut failures = Vec::new();
     for (method, path) in &admin {
-        let attempts: [(&str, Vec<(&str, String)>); 4] = [
+        let attempts: [(&str, Vec<(&str, String)>); 5] = [
             ("no credentials", vec![]),
-            ("wrong key", vec![("x-api-key", "not-the-key".into())]),
-            ("empty key", vec![("x-api-key", String::new())]),
+            ("forged session", vec![("x-admin-session", "not-a-session".into())]),
+            ("empty session", vec![("x-admin-session", String::new())]),
             ("wallet JWT only", vec![bearer(&wallet_token)]),
+            (
+                "wallet JWT as a session",
+                vec![("x-admin-session", wallet_token.clone())],
+            ),
         ];
         for (label, headers) in attempts {
             let status = call(&app, method, path, &headers).await?;
@@ -385,13 +390,13 @@ async fn admin_routes_require_the_admin_key() -> anyhow::Result<()> {
             }
         }
     }
-    // Positive control on cheap read-only routes only: a valid key must get past the gate.
+    // Positive control on cheap read-only routes only: a valid session must get past the gate.
     // Mutating admin handlers are not run here (they reach for the chain).
     for path in ["/admin/audit-log", "/admin/db/stats", "/admin/tasks/status"] {
-        let status = call(&app, "GET", path, &[("x-api-key", "dev".into())]).await?;
+        let status = call(&app, "GET", path, &[("x-admin-session", session.clone())]).await?;
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
             failures.push(format!(
-                "GET {path}: the configured key was rejected ({status})"
+                "GET {path}: a valid admin session was rejected ({status})"
             ));
         }
     }
@@ -411,16 +416,21 @@ async fn wallet_routes_reject_bad_tokens_and_accept_a_good_one() -> anyhow::Resu
     );
     let wrong_secret = forged_token("some-other-secret", WALLET_A, 3600)?;
     let expired = forged_token(JWT_SECRET, WALLET_A, -3600)?;
+    let admin_session = app.admin_token().await?;
     let mut failures = Vec::new();
     for (index, (method, path)) in wallet_routes.iter().enumerate() {
-        let attempts: [(&str, Vec<(&str, String)>); 5] = [
+        let attempts: [(&str, Vec<(&str, String)>); 6] = [
             ("no credentials", vec![]),
             ("malformed bearer", vec![bearer("not-a-jwt")]),
             ("wrong signing secret", vec![bearer(&wrong_secret)]),
             ("expired token", vec![bearer(&expired)]),
             (
-                "api key instead of a token",
-                vec![("x-api-key", "dev".into())],
+                "admin session instead of a wallet token",
+                vec![("x-admin-session", admin_session.clone())],
+            ),
+            (
+                "admin session as a bearer token",
+                vec![bearer(&admin_session)],
             ),
         ];
         for (label, headers) in attempts {

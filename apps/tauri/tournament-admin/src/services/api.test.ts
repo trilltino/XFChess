@@ -11,39 +11,16 @@ it("rejects unsafe monetary values before making a request", async () => {
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-it("retains working credentials when a generated replacement is not installed", async () => {
-  apiClient.setCredentials("working", "http://127.0.0.1:8090");
-  fetchMock.mockResolvedValue(new Response("Unauthorized", { status: 401 }));
-  const save = vi.fn();
-  await expect(apiClient.activateAdminToken("candidate", save)).rejects.toThrow();
-  expect(save).not.toHaveBeenCalled();
-  expect(fetchMock.mock.calls[0][0]).toContain("/admin/audit-log");
-  expect(fetchMock.mock.calls[0][1].headers.get("X-API-Key")).toBe("candidate");
-  fetchMock.mockResolvedValue(new Response("{}", { headers: { "content-type": "application/json" } }));
-  await apiClient.getAuditLog(1);
-  expect(fetchMock.mock.lastCall?.[1].headers.get("X-API-Key")).toBe("working");
-});
-
-it("saves and activates a replacement only after protected verification", async () => {
-  apiClient.setCredentials("working", "http://127.0.0.1:8090");
+it("sends the admin session in X-Admin-Session and nothing once signed out", async () => {
   fetchMock.mockImplementation(async () => new Response("{}", { headers: { "content-type": "application/json" } }));
-  const save = vi.fn(async () => {});
-  await apiClient.activateAdminToken("candidate", save);
-  expect(save).toHaveBeenCalledOnce();
+  apiClient.setCredentials("session-token", "http://127.0.0.1:8090");
   await apiClient.getAuditLog(1);
-  expect(fetchMock.mock.lastCall?.[1].headers.get("X-API-Key")).toBe("candidate");
-});
-
-it("does not save or activate a candidate after changing environments", async () => {
-  let finish!: (response: Response) => void;
-  fetchMock.mockImplementation(() => new Promise<Response>(resolve => { finish = resolve; }));
-  apiClient.setCredentials("working", "http://127.0.0.1:8090");
-  const save = vi.fn();
-  const pending = apiClient.activateAdminToken("candidate", save);
-  apiClient.setCredentials("production", "http://127.0.0.1:8091");
-  finish(new Response("{}", { headers: { "content-type": "application/json" } }));
-  await expect(pending).rejects.toThrow("Connection changed");
-  expect(save).not.toHaveBeenCalled();
+  const headers = fetchMock.mock.lastCall?.[1].headers;
+  expect(headers.get("X-Admin-Session")).toBe("session-token");
+  expect(headers.get("X-API-Key")).toBeNull();
+  apiClient.clearCredentials();
+  await apiClient.getAuditLog(1);
+  expect(fetchMock.mock.lastCall?.[1].headers.get("X-Admin-Session")).toBeNull();
 });
 
 it("rejects a response from a previous environment", async () => {

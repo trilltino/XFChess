@@ -65,21 +65,18 @@ fn health_ok(url: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn api_key() -> anyhow::Result<String> {
-    env::var("ADMIN_API_KEY").context("ADMIN_API_KEY must be set")
-}
-
+/// A client that sends the admin session, signing in on first use.
 fn client() -> anyhow::Result<reqwest::blocking::Client> {
-    let key = api_key()?;
+    let token = admin_connection::session_token(&server_url()?)?;
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         "Content-Type",
         reqwest::header::HeaderValue::from_static("application/json"),
     );
     headers.insert(
-        "X-API-Key",
-        reqwest::header::HeaderValue::from_str(&key)
-            .context("ADMIN_API_KEY contains invalid HTTP header characters")?,
+        admin_connection::SESSION_HEADER,
+        reqwest::header::HeaderValue::from_str(&token)
+            .context("the session token is not a valid header value")?,
     );
     reqwest::blocking::Client::builder()
         .default_headers(headers)
@@ -984,17 +981,12 @@ fn print_header() -> anyhow::Result<()> {
     println!("\n╔═══════════════════════════════════════════════════════════════════╗");
     println!("║         XFChess Tournament Admin CLI                              ║");
     println!("╚═══════════════════════════════════════════════════════════════════╝");
-    // Require backend credentials per option; direct-RPC recovery works without the backend.
-    match env::var("ADMIN_API_KEY") {
-        Ok(key) => {
-            println!("  Server : {}", server_url()?);
-            println!("  API key: {}…\n", key.chars().take(8).collect::<String>());
-        }
-        Err(_) => {
-            println!("  [!] ADMIN_API_KEY not set — only option 11 (direct-RPC recovery,");
-            println!("      no backend needed) will work.\n");
-        }
-    }
+    // Backend options sign in on first use; option 11 (direct-RPC recovery) needs no backend.
+    let admin = env::var("ADMIN_USERNAME")
+        .ok()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "asked for".to_string());
+    println!("  Admin  : {admin} (signs in at the first backend option)\n");
     Ok(())
 }
 

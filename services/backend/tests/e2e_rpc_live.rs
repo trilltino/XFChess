@@ -1,3 +1,5 @@
+mod common;
+
 use anyhow::Context as _;
 use backend::signing::solana::rpc::{fallback_rpc_url, make_rpc, read_with_failover, redact_url};
 use solana_sdk::signature::Signer;
@@ -361,8 +363,8 @@ async fn admin_creates_tournament_and_game_client_can_see_it() -> anyhow::Result
     let rpc_url = std::env::var("SOLANA_RPC_URL").context("checked by skip_unless_configured")?;
     let router = spawn_live_app(&rpc_url).await?;
 
-    // Match the middleware’s debug API-key fallback while allowing environment overrides.
-    let api_key = std::env::var("ADMIN_API_KEY").unwrap_or_else(|_| "dev".to_string());
+    // Sign in as the test admin account, the same way the panel and the CLIs do.
+    let admin_session = common::admin_session(router.clone()).await?;
 
     // Unique per run so repeated manual runs never collide on "tournament_id
     // already in use".
@@ -384,7 +386,7 @@ async fn admin_creates_tournament_and_game_client_can_see_it() -> anyhow::Result
         .uri("/admin/tournament/create")
         .method("POST")
         .header("content-type", "application/json")
-        .header("X-API-Key", &api_key)
+        .header("X-Admin-Session", &admin_session)
         .body(axum::body::Body::from(
             serde_json::to_vec(&create_body).context("test setup failed")?,
         ))

@@ -155,14 +155,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       windows::tournament_admin::admin_token_save,
       #[cfg(feature = "tournament-admin")]
       windows::tournament_admin::admin_token_clear,
-      #[cfg(feature = "tournament-admin")]
-      windows::tournament_admin::admin_wallet_pubkey,
-      #[cfg(feature = "tournament-admin")]
-      windows::tournament_admin::admin_wallet_sign,
-      #[cfg(feature = "tournament-admin")]
-      windows::tournament_admin::admin_wallet_connect,
-      #[cfg(feature = "tournament-admin")]
-      windows::tournament_admin::admin_wallet_popup_sign,
     ])
     .build(tauri::generate_context!())?
     .run(|_app_handle, event| {

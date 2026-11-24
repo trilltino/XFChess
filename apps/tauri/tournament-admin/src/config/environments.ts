@@ -1,9 +1,9 @@
 // LOCAL uses the local backend. PRODUCTION reaches the private admin API
 // through an SSH forward to backend loopback; nginx blocks public admin routes.
 //
-// Nothing machine- or deployment-specific is compiled in: the VPS host and SSH key
-// come from VITE_XFCHESS_VPS_HOST / VITE_XFCHESS_SSH_KEY (see .env.example) and can
-// be overridden per operator on the login screen or in Settings.
+// The production VPS host and SSH key are built in, so nobody types them to sign in.
+// A build can point elsewhere with VITE_XFCHESS_VPS_HOST / VITE_XFCHESS_SSH_KEY
+// (see .env.example); there is no per-operator override at runtime.
 
 export type EnvId = "local" | "production";
 
@@ -40,10 +40,8 @@ export interface OpsConfig {
   sshKeyPath: string;
 }
 
-const OPS_CONFIG_KEY = "admin_ops_config";
-
 export const DEFAULT_OPS_CONFIG: OpsConfig = {
-  vpsHost: (import.meta.env.VITE_XFCHESS_VPS_HOST as string | undefined)?.trim() ?? "",
+  vpsHost: (import.meta.env.VITE_XFCHESS_VPS_HOST as string | undefined)?.trim() || "178.104.55.19",
   sshKeyPath: (import.meta.env.VITE_XFCHESS_SSH_KEY as string | undefined)?.trim() || "~/.ssh/xfchess_vps",
 };
 
@@ -58,23 +56,9 @@ export function opsConfigProblem(config: OpsConfig): string | null {
   return null;
 }
 
+/** The built-in VPS host and SSH key. Values older builds saved in localStorage are ignored. */
 export function getOpsConfig(): OpsConfig {
-  try {
-    const saved = JSON.parse(localStorage.getItem(OPS_CONFIG_KEY) ?? "{}");
-    return {
-      vpsHost: typeof saved.vpsHost === "string" && saved.vpsHost ? saved.vpsHost : DEFAULT_OPS_CONFIG.vpsHost,
-      sshKeyPath: typeof saved.sshKeyPath === "string" && saved.sshKeyPath ? saved.sshKeyPath : DEFAULT_OPS_CONFIG.sshKeyPath,
-    };
-  } catch {
-    return { ...DEFAULT_OPS_CONFIG };
-  }
-}
-
-export function saveOpsConfig(config: OpsConfig): void {
-  localStorage.setItem(OPS_CONFIG_KEY, JSON.stringify({
-    vpsHost: config.vpsHost.trim(),
-    sshKeyPath: config.sshKeyPath.trim(),
-  }));
+  return { ...DEFAULT_OPS_CONFIG };
 }
 
 export function envById(id: EnvId, ops: OpsConfig = getOpsConfig()): EnvConfig {

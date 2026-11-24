@@ -19,7 +19,6 @@ pub(crate) use http::http_server;
 pub(crate) use lifecycle::attach_game;
 pub(crate) use lifecycle::shutdown;
 pub(crate) use popup::{open_wallet_popup, spawn_wallet_popup_idle_reaper};
-pub(crate) use requests::{connected_wallet, sign_message_in_popup};
 pub(crate) use tcp::start_tcp_bridge;
 #[derive(Default, Clone)]
 pub(super) struct WalletPubkey(pub(super) Arc<Mutex<Option<String>>>);

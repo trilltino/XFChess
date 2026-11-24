@@ -1,5 +1,5 @@
 use crate::infrastructure::auth_middleware::{
-    persist_admin_request, require_api_key, require_relay_or_jwt,
+    persist_admin_request, require_admin, require_relay_or_jwt,
 };
 use crate::signing::routes::admin::admin_routes;
 use crate::signing::routes::archive::archive_routes;
@@ -73,7 +73,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                     signing_state.clone(),
                     persist_admin_request,
                 ))
-                .layer(middleware::from_fn(require_api_key)),
+                .layer(middleware::from_fn(require_admin)),
         )
         .nest(
             "/admin/tournament",
@@ -82,7 +82,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                     signing_state.clone(),
                     persist_admin_request,
                 ))
-                .layer(middleware::from_fn(require_api_key)),
+                .layer(middleware::from_fn(require_admin)),
         );
 
     let matchmaking_router = base.clone().nest("/matchmaking", matchmaking_routes());
@@ -109,7 +109,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                     signing_state.clone(),
                     persist_admin_request,
                 ))
-                .layer(middleware::from_fn(require_api_key)),
+                .layer(middleware::from_fn(require_admin)),
         );
 
     let dispute_router = base
@@ -129,7 +129,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                     signing_state.clone(),
                     persist_admin_request,
                 ))
-                .layer(middleware::from_fn(require_api_key)),
+                .layer(middleware::from_fn(require_admin)),
         );
 
     let metrics_router = base.route(
@@ -196,7 +196,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                     signing_state.clone(),
                     persist_admin_request,
                 ))
-                .layer(middleware::from_fn(require_api_key)),
+                .layer(middleware::from_fn(require_admin)),
         )
         .merge(
             admin_routes()
@@ -205,7 +205,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                     signing_state.clone(),
                     persist_admin_request,
                 ))
-                .layer(middleware::from_fn(require_api_key)),
+                .layer(middleware::from_fn(require_admin)),
         )
         .nest(
             "/api/actions",
@@ -215,7 +215,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                     signing_state.clone(),
                     persist_admin_request,
                 ))
-                .layer(middleware::from_fn(require_api_key)),
+                .layer(middleware::from_fn(require_admin)),
         )
         .merge(
             puzzle_admin_routes()
@@ -224,7 +224,7 @@ pub fn build_app_router(signing_state: AppState) -> Router<AppState> {
                     signing_state.clone(),
                     persist_admin_request,
                 ))
-                .layer(middleware::from_fn(require_api_key)),
+                .layer(middleware::from_fn(require_admin)),
         )
         .merge(game_log_routes().with_state(signing_state.clone()))
         .merge(spectate_routes().with_state(signing_state.clone()))
@@ -293,8 +293,8 @@ fn cors_layer(allowed_origins: &[String]) -> tower_http::cors::CorsLayer {
         .allow_headers([
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
-            // Admin panel (tournament-admin webview) authenticates with X-API-Key.
-            header::HeaderName::from_static("x-api-key"),
+            // Admin panel (tournament-admin webview) sends its session in X-Admin-Session.
+            header::HeaderName::from_static(crate::infrastructure::admin_session::SESSION_HEADER),
         ]);
 
     if origins.is_empty() {

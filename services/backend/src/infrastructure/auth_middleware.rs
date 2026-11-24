@@ -19,87 +19,19 @@ pub fn current_admin_actor() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
-fn resolve_admin_actor(provided_key: &str) -> Result<String, StatusCode> {
-    // A missing header reads as "". An empty configured key would otherwise
-    // match it and open every admin route.
-    if provided_key.is_empty() {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    // A wallet sign-in session (see `admin_session`) travels in the same header as an API key.
-    if provided_key.starts_with(super::admin_session::SESSION_PREFIX) {
-        return super::admin_session::actor_for_session(provided_key);
-    }
-    if let Ok(named) = env::var("ADMIN_API_KEYS") {
-        let mut any_configured = false;
-        for pair in named.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            let Some((name, key)) = pair.split_once(':') else {
-                continue;
-            };
-            if key.is_empty() {
-                continue;
-            }
-            any_configured = true;
-            if constant_time_eq(provided_key, key) {
-                return Ok(name.to_string());
-            }
-        }
-        if any_configured {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-        // ADMIN_API_KEYS set but empty/unparseable — fall through to legacy.
-    }
-
-    let expected_key = match env::var("ADMIN_API_KEY") {
-        Ok(key) => key,
-        Err(env::VarError::NotPresent) => {
-            #[cfg(debug_assertions)]
-            {
-                tracing::warn!("[auth] ADMIN_API_KEY not set — defaulting to 'dev' in debug build");
-                if constant_time_eq(provided_key, "dev") {
-                    return Ok("dev-default".to_string());
-                }
-                return Err(StatusCode::UNAUTHORIZED);
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                tracing::error!("[auth] ADMIN_API_KEY not configured in production build");
-                return Err(StatusCode::SERVICE_UNAVAILABLE);
-            }
-        }
-        Err(env::VarError::NotUnicode(_)) => {
-            tracing::error!("[auth] ADMIN_API_KEY contains invalid UTF-8");
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
-        }
+/// Admits a request that carries a valid admin session (see `admin_session`) and records the
+/// signed-in admin as the actor for the audit log.
+pub async fn require_admin(request: Request, next: Next) -> Result<Response, StatusCode> {
+    let actor = {
+        let token = request
+            .headers()
+            .get(super::admin_session::SESSION_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        super::admin_session::actor_for_session(token).inspect_err(|_| {
+            tracing::debug!("[auth] admin request without a valid session");
+        })?
     };
-
-    if expected_key.is_empty() {
-        tracing::error!("[auth] ADMIN_API_KEY is set but empty");
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
-    }
-    if constant_time_eq(provided_key, &expected_key) {
-        Ok("legacy".to_string())
-    } else {
-        Err(StatusCode::UNAUTHORIZED)
-    }
-}
-
-pub async fn require_api_key(request: Request, next: Next) -> Result<Response, StatusCode> {
-    let provided_key = request
-        .headers()
-        .get("X-API-Key")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-        .unwrap_or_default();
-
-    let actor = match resolve_admin_actor(&provided_key) {
-        Ok(actor) => actor,
-        Err(status) => {
-            tracing::debug!("[auth] Invalid API key provided");
-            return Err(status);
-        }
-    };
-
-    tracing::debug!("[auth] API key validated successfully (actor={actor})");
     Ok(ADMIN_ACTOR.scope(actor, next.run(request)).await)
 }
 
@@ -273,153 +205,66 @@ mod tests {
         assert!(!constant_time_eq("123", "456"));
     }
 
-    /// Debug builds fall back to the `dev` key when none is configured, so a request
-    /// without that key is refused (release builds refuse every request with 503).
-    #[tokio::test]
-    async fn test_require_api_key_missing_env_var() -> anyhow::Result<()> {
-        let _env = crate::test_env::lock().await;
-        std::env::remove_var("ADMIN_API_KEY");
-        std::env::remove_var("ADMIN_API_KEYS");
-
-        let app = Router::new()
-            .route("/test", get(|| async { "protected" }))
-            .layer(axum::middleware::from_fn(require_api_key));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/test")
-                    .body(Body::empty())
-                    .context("test setup failed")?,
+    fn guarded() -> Router {
+        Router::new()
+            .route("/test", get(|| async { current_admin_actor() }))
+            .layer(axum::middleware::from_fn(require_admin))
+            .nest(
+                "/admin/auth",
+                crate::infrastructure::admin_session::routes(),
             )
-            .await
-            .context("test setup failed")?;
-
-        let expected = if cfg!(debug_assertions) {
-            StatusCode::UNAUTHORIZED
-        } else {
-            StatusCode::SERVICE_UNAVAILABLE
-        };
-        assert_eq!(response.status(), expected);
-        Ok(())
     }
 
-    #[tokio::test]
-    async fn empty_configured_keys_never_authorize_a_missing_header() {
-        let _env = crate::test_env::lock().await;
-
-        std::env::remove_var("ADMIN_API_KEYS");
-        std::env::set_var("ADMIN_API_KEY", "");
-        assert!(resolve_admin_actor("").is_err());
-
-        std::env::set_var("ADMIN_API_KEYS", "ops:");
-        assert!(resolve_admin_actor("").is_err());
-
-        // An empty named key is ignored rather than treated as configured.
-        std::env::set_var("ADMIN_API_KEYS", "ops:,deploy:real-key");
-        assert!(resolve_admin_actor("").is_err());
-        assert_eq!(resolve_admin_actor("real-key"), Ok("deploy".to_string()));
-
-        std::env::remove_var("ADMIN_API_KEYS");
-        std::env::remove_var("ADMIN_API_KEY");
+    fn admin_get(token: Option<&str>) -> anyhow::Result<Request<Body>> {
+        let mut builder = Request::builder().uri("/test");
+        if let Some(token) = token {
+            builder = builder.header("X-Admin-Session", token);
+        }
+        builder.body(Body::empty()).context("test request")
     }
 
+    async fn body_text(response: Response) -> anyhow::Result<String> {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// Only a session from `/admin/auth/login` opens an admin route, and the route sees who
+    /// signed in. Removing the account ends the session.
     #[tokio::test]
-    async fn test_require_api_key_valid() -> anyhow::Result<()> {
+    async fn admin_routes_need_a_session_from_the_login() -> anyhow::Result<()> {
         let _env = crate::test_env::lock().await;
-        std::env::remove_var("ADMIN_API_KEYS");
-        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+        let hash = crate::infrastructure::admin_session::hash_password("correct horse")
+            .map_err(anyhow::Error::msg)?;
+        std::env::set_var("JWT_SECRET", "test-secret-not-for-production");
+        std::env::set_var("ADMIN_USERS", format!("tino:{hash}"));
+        let app = guarded();
 
-        let app = Router::new()
-            .route("/test", get(|| async { "protected" }))
-            .layer(axum::middleware::from_fn(require_api_key));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/test")
-                    .header("X-API-Key", "test-secret-key")
-                    .body(Body::empty())
-                    .context("Failed to build test request")?,
-            )
-            .await
-            .context("Failed to execute test request")?;
-
+        let login = Request::builder()
+            .uri("/admin/auth/login")
+            .method("POST")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"username":"tino","password":"correct horse"}"#,
+            ))
+            .context("test request")?;
+        let response = app.clone().oneshot(login).await?;
         assert_eq!(response.status(), StatusCode::OK);
-        Ok(())
-    }
+        let session: serde_json::Value = serde_json::from_str(&body_text(response).await?)?;
+        let token = session["token"].as_str().context("token")?.to_string();
 
-    #[tokio::test]
-    async fn test_require_api_key_invalid() -> anyhow::Result<()> {
-        let _env = crate::test_env::lock().await;
-        std::env::remove_var("ADMIN_API_KEYS");
-        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
+        let response = app.clone().oneshot(admin_get(Some(&token))?).await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_text(response).await?, "tino");
 
-        let app = Router::new()
-            .route("/test", get(|| async { "protected" }))
-            .layer(axum::middleware::from_fn(require_api_key));
+        for refused in [None, Some(""), Some("not-a-session")] {
+            let status = app.clone().oneshot(admin_get(refused)?).await?.status();
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{refused:?}");
+        }
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/test")
-                    .header("X-API-Key", "wrong-key")
-                    .body(Body::empty())
-                    .context("Failed to build test request")?,
-            )
-            .await
-            .context("Failed to execute test request")?;
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_require_api_key_missing_header() -> anyhow::Result<()> {
-        let _env = crate::test_env::lock().await;
-        std::env::remove_var("ADMIN_API_KEYS");
-        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
-
-        let app = Router::new()
-            .route("/test", get(|| async { "protected" }))
-            .layer(axum::middleware::from_fn(require_api_key));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/test")
-                    .body(Body::empty())
-                    .context("test setup failed")?,
-            )
-            .await
-            .context("test setup failed")?;
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_require_api_key_empty_header() -> anyhow::Result<()> {
-        let _env = crate::test_env::lock().await;
-        std::env::remove_var("ADMIN_API_KEYS");
-        std::env::set_var("ADMIN_API_KEY", "test-secret-key");
-
-        let app = Router::new()
-            .route("/test", get(|| async { "protected" }))
-            .layer(axum::middleware::from_fn(require_api_key));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/test")
-                    .header("X-API-Key", "")
-                    .body(Body::empty())
-                    .context("Failed to build test request")?,
-            )
-            .await
-            .context("Failed to execute test request")?;
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        std::env::remove_var("ADMIN_USERS");
+        let status = app.clone().oneshot(admin_get(Some(&token))?).await?.status();
+        std::env::remove_var("JWT_SECRET");
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "account removed");
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
 #[cfg(feature = "coverage")]
-#[path = "../../scripts/coverage/router_inventory.rs"]
+#[path = "../../../scripts/coverage/router_inventory.rs"]
 pub mod coverage;
 pub mod db;
 pub mod error;

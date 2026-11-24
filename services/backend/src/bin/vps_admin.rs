@@ -64,29 +64,20 @@ fn health_ok(url: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn get_api_key() -> anyhow::Result<String> {
-    env::var("ADMIN_API_KEY").context("ADMIN_API_KEY environment variable must be set")
-}
-
+/// A client that sends the admin session, signing in on first use.
 fn client() -> anyhow::Result<reqwest::blocking::Client> {
-    let api_key = get_api_key()?;
+    let token = admin_connection::session_token(&vps_base()?)?;
 
     let mut h = reqwest::header::HeaderMap::new();
     h.insert(
         "Content-Type",
         reqwest::header::HeaderValue::from_static("application/json"),
     );
-
-    match reqwest::header::HeaderValue::from_str(&api_key) {
-        Ok(val) => h.insert("X-API-Key", val),
-        Err(e) => {
-            eprintln!(
-                "Invalid API key format: {:?}. API key must be valid HTTP header value.",
-                e
-            );
-            anyhow::bail!("Cannot create client with invalid API key");
-        }
-    };
+    h.insert(
+        admin_connection::SESSION_HEADER,
+        reqwest::header::HeaderValue::from_str(&token)
+            .context("the session token is not a valid header value")?,
+    );
     reqwest::blocking::Client::builder()
         .default_headers(h)
         .timeout(std::time::Duration::from_secs(120))

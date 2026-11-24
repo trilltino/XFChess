@@ -1,63 +1,32 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
-import { ENV_IDS, envById, getOpsConfig, opsConfigProblem, saveOpsConfig, type EnvId, type OpsConfig } from "../config/environments";
-import { clearAdminToken, loadAdminToken } from "../services/credentials";
-import { savedKeypairPath } from "../services/walletLogin";
-
-type Mode = "wallet" | "file" | "key";
+import { ENV_IDS, envById, type EnvId } from "../config/environments";
+import { savedUsername } from "../services/adminLogin";
 
 export default function TokenAuth() {
-  const { login, loginWithWallet, lastError } = useAuth();
+  const { login, lastError } = useAuth();
   const [env, setEnv] = useState<EnvId>(() => localStorage.getItem("admin_last_env") === "production" ? "production" : "local");
-  const [token, setToken] = useState("");
-  // The connected wallet (through the wallet window, as in the game) is the default. A keypair
-  // file signs silently; an API key is the fallback for scripts and recovery.
-  const [mode, setMode] = useState<Mode>("wallet");
-  const useKey = mode === "key";
-  const [keypairPath, setKeypairPath] = useState(savedKeypairPath);
-  const [hasSavedToken, setHasSavedToken] = useState(false);
-  const [ops, setOps] = useState<OpsConfig>(getOpsConfig);
+  const [username, setUsername] = useState(savedUsername);
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // The sign-in failed: show the reason useAuth recorded (wrong password, tunnel, setup).
+  const [failed, setFailed] = useState(false);
 
-  const cfg = envById(env, ops);
-
-  // Prefill the key saved for the selected environment (OS credential store).
-  useEffect(() => {
-    let cancelled = false;
-    setError("");
-    loadAdminToken(env)
-      .then(saved => { if (!cancelled) { setToken(saved ?? ""); setHasSavedToken(Boolean(saved)); } })
-      .catch(() => { if (!cancelled) { setToken(""); setHasSavedToken(false); } });
-    return () => { cancelled = true; };
-  }, [env]);
-
-  const forgetSavedKey = async () => {
-    await clearAdminToken(env).catch(() => {});
-    setToken("");
-    setHasSavedToken(false);
-  };
+  const cfg = envById(env);
+  const fallback = cfg.isProduction
+    ? "Could not sign in. Is the tunnel up? Check the 'tunnel' SSH user and key."
+    : "Could not sign in. Is the backend running on 127.0.0.1:8090?";
+  const message = failed ? lastError || fallback : error;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cfg.isProduction) {
-      const problem = opsConfigProblem(ops);
-      if (problem) { setError(problem); return; }
-      saveOpsConfig(ops);
-    }
-    setLoading(true);
+    setFailed(false);
     setError("");
+    setLoading(true);
     try {
-      const ok = useKey ? await login(token, env) : await loginWithWallet(mode === "file" ? keypairPath : null, env);
-      if (!ok) {
-        const fallback = cfg.isProduction
-          ? "Could not authenticate. Tunnel down, or bad credentials — check the 'tunnel' SSH user and key."
-          : useKey
-            ? "Invalid admin key, or no local backend on 127.0.0.1:8090."
-            : "Could not sign in. Is the backend running on 127.0.0.1:8090?";
-        // Show the actual auth error so key, tunnel, and permission failures remain distinct.
-        setError(lastError ? `${fallback}\n\nDetail: ${lastError}` : fallback);
-      }
+      if (await login(username, password, env)) setPassword("");
+      else setFailed(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connection failed");
     } finally {
@@ -84,7 +53,7 @@ export default function TokenAuth() {
               <button
                 key={id}
                 type="button"
-                onClick={() => setEnv(id)}
+                onClick={() => { setEnv(id); setError(""); setFailed(false); }}
                 style={{
                   flex: 1,
                   padding: "0.9rem",
@@ -99,77 +68,45 @@ export default function TokenAuth() {
                   color: active ? (prod ? "#ef4444" : "#4ade80") : "var(--text-dim)",
                 }}
               >
-                {envById(id, ops).label}
+                {envById(id).label}
               </button>
             );
           })}
         </div>
 
         <form onSubmit={handleSubmit} style={{ textAlign: "left" }}>
-          {cfg.isProduction && (
-            <div style={{ display: "grid", gap: "10px", marginBottom: "1rem" }}>
-              <input
-                value={ops.vpsHost}
-                onChange={(ev) => setOps(o => ({ ...o, vpsHost: ev.target.value }))}
-                style={inputStyle}
-                placeholder="Production VPS host (IPv4)"
-                aria-label="Production VPS host"
-              />
-              <input
-                value={ops.sshKeyPath}
-                onChange={(ev) => setOps(o => ({ ...o, sshKeyPath: ev.target.value }))}
-                style={inputStyle}
-                placeholder="SSH key path, e.g. ~/.ssh/xfchess_vps"
-                aria-label="SSH key path"
-              />
-            </div>
-          )}
-          {useKey ? (
-            <div style={{ marginBottom: "1.75rem" }}>
-              <input
-                type="password"
-                value={token}
-                onChange={(ev) => setToken(ev.target.value)}
-                style={inputStyle}
-                placeholder="Admin API key"
-                aria-label="Admin API key"
-                required
-              />
-              {hasSavedToken && (
-                <button type="button" onClick={forgetSavedKey}
-                  style={{ marginTop: "8px", background: "none", border: "none", color: "var(--text-dim)", fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}>
-                  Using the key saved in your OS credential store — forget it
-                </button>
-              )}
-            </div>
-          ) : mode === "wallet" ? (
-            <p style={{ marginBottom: "1.75rem", color: "var(--text-dim)", fontSize: "12px", lineHeight: 1.6, textAlign: "center" }}>
-              Signs in with the wallet connected in the wallet window, the same one the game uses. The wallet window opens so you can approve a one-time request. Nothing is sent but a signature.
-            </p>
-          ) : (
-            <div style={{ marginBottom: "1.75rem" }}>
-              <input
-                value={keypairPath}
-                onChange={(ev) => setKeypairPath(ev.target.value)}
-                style={inputStyle}
-                placeholder="Admin wallet keypair file, e.g. keys/treasury_authority.json"
-                aria-label="Admin wallet keypair file"
-                spellCheck={false}
-                required
-              />
-              <p style={{ marginTop: "10px", color: "var(--text-dim)", fontSize: "11px", lineHeight: 1.5 }}>
-                The file stays on this computer and signs a one-time challenge. It is remembered, so next time you are signed in automatically.
-              </p>
-            </div>
-          )}
+          <div style={{ display: "grid", gap: "10px", marginBottom: "1.75rem" }}>
+            <input
+              value={username}
+              onChange={(ev) => setUsername(ev.target.value)}
+              style={inputStyle}
+              placeholder="Username"
+              aria-label="Username"
+              autoComplete="username"
+              spellCheck={false}
+              autoFocus={!username}
+              required
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(ev) => setPassword(ev.target.value)}
+              style={inputStyle}
+              placeholder="Password"
+              aria-label="Password"
+              autoComplete="current-password"
+              autoFocus={Boolean(username)}
+              required
+            />
+          </div>
 
-          {error && (
-            <div style={errorBoxStyle}>{error}</div>
+          {message && (
+            <div style={errorBoxStyle}>{message}</div>
           )}
 
           <button
             type="submit"
-            disabled={loading || (useKey ? !token.trim() : mode === "file" && !keypairPath.trim())}
+            disabled={loading || !username.trim() || !password}
             className="primary"
             style={{
               width: "100%",
@@ -182,23 +119,9 @@ export default function TokenAuth() {
             {loading
               ? cfg.isProduction
                 ? "ESTABLISHING TUNNEL…"
-                : "CONNECTING…"
-              : useKey
-                ? "LOG ON"
-                : "SIGN IN WITH WALLET"}
+                : "SIGNING IN…"
+              : "SIGN IN"}
           </button>
-          <div style={{ marginTop: "14px", display: "flex", justifyContent: "center", gap: "18px" }}>
-            {(["wallet", "file", "key"] as Mode[]).filter(m => m !== mode).map(m => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => { setMode(m); setError(""); }}
-                style={{ background: "none", border: "none", color: "var(--text-dim)", fontSize: "12px", cursor: "pointer", textDecoration: "underline" }}
-              >
-                {m === "wallet" ? "Use the connected wallet" : m === "file" ? "Use a keypair file" : "Use an admin API key"}
-              </button>
-            ))}
-          </div>
         </form>
       </div>
     </div>

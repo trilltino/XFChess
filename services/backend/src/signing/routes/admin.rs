@@ -401,9 +401,6 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/admin/metrics/summary", get(metrics_summary))
         .route("/admin/db/stats", get(db_stats))
         .route("/admin/tls/expiry", get(tls_expiry))
-        // Token rotation (authority-key rotation is a runbook, not an endpoint —
-        // see infra/ops/SECRETS_ROTATION.md; a "rotate" button that only logs is a footgun)
-        .route("/admin/auth/rotate-token", post(rotate_token))
         .route("/admin/moderation/ip-ban", post(ip_ban))
         .route("/admin/moderation/ip-bans", get(list_ip_bans))
         .route("/admin/disputes/{game_id}/assign", post(assign_dispute))
@@ -1684,18 +1681,6 @@ fn parse_cert_not_after_unix(pem_bytes: &[u8]) -> Option<i64> {
     let (_, pem) = x509_parser::pem::parse_x509_pem(pem_bytes).ok()?;
     let cert = pem.parse_x509().ok()?;
     Some(cert.validity().not_after.timestamp())
-}
-
-async fn rotate_token() -> Result<Json<serde_json::Value>, StatusCode> {
-    use rand::Rng;
-    let mut bytes = [0u8; 24];
-    rand::rng().fill_bytes(&mut bytes);
-    let new_token = format!("xf_admin_{}", hex::encode(bytes));
-    add_audit(None, "rotate_token", "admin_token", "rotated").await;
-    info!("[admin] Admin token rotated");
-    Ok(Json(
-        json!({ "ok": true, "new_token": new_token, "note": "Update ADMIN_API_KEY in .env and restart the backend." }),
-    ))
 }
 
 async fn ip_ban(Json(req): Json<IpBanReq>) -> Result<Json<serde_json::Value>, StatusCode> {

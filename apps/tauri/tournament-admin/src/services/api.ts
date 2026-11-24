@@ -6,6 +6,9 @@ import type { SwissResultRequest, CancellationResponse, TournamentOperation } fr
 import { normalizeTournamentDetail, type TournamentDetail } from "./tournamentDetail";
 import type { HostResources } from "./operations";
 
+/** The header that carries the admin session (see services/adminLogin.ts). */
+export const SESSION_HEADER = "X-Admin-Session";
+
 export type { TournamentDetail };
 
 export interface ApiError {
@@ -33,7 +36,7 @@ class ApiClient {
   private token: string | null = null;
   private generation = 0;
 
-  // Credentials are held in memory only; useAuth persists the key in the OS
+  // The admin session is held in memory here; useAuth persists it in the OS
   // credential store (services/credentials.ts).
   constructor(baseUrl: string = "http://127.0.0.1:8090") {
     this.baseUrl = baseUrl;
@@ -48,20 +51,6 @@ class ApiClient {
   clearCredentials() {
     this.generation++;
     this.token = null;
-  }
-
-  async activateAdminToken(candidate: string, save: () => Promise<void>): Promise<void> {
-    if (!candidate.trim()) throw new Error("Enter a replacement admin key.");
-    const generation = this.generation;
-    const probe = new ApiClient(this.baseUrl);
-    probe.setCredentials(candidate, this.baseUrl);
-    // /health is public and cannot establish that the candidate authenticates.
-    const result = await probe.getAuditLog(1);
-    if (generation !== this.generation) throw new Error("Connection changed during verification.");
-    if (!result.ok) throw new Error(result.error?.message || "The backend rejected this key.");
-    await save();
-    if (generation !== this.generation) throw new Error("Connection changed before activation.");
-    this.setCredentials(candidate, this.baseUrl);
   }
 
   private async request<T>(
@@ -94,7 +83,7 @@ class ApiClient {
     }
 
     if (this.token) {
-      headers.set("X-API-Key", this.token);
+      headers.set(SESSION_HEADER, this.token);
     }
 
     try {
@@ -482,7 +471,6 @@ class ApiClient {
   async getTasksStatus() { return this.request<any>("/admin/tasks/status"); }
   async getDbStats() { return this.request<any>("/admin/db/stats"); }
   async getTlsExpiry() { return this.request<any>("/admin/tls/expiry"); }
-  async rotateToken() { return this.request<any>("/admin/auth/rotate-token", { method: "POST", body: JSON.stringify({}) }); }
 
   // Real KPI numbers (presence, confirmed txs, ER staleness/subscription,
   // fee payer balance) in one call — replaces regexing raw /metrics text.
@@ -514,7 +502,7 @@ class ApiClient {
     return this.request<any>(`/admin/disputes/${gameId}/assign`, { method: "POST", body: JSON.stringify({ reviewer }) });
   }
 
-  // Resolve disputes on chain. admin_token is a second factor distinct from X-API-Key.
+  // Resolve disputes on chain. admin_token is a second factor distinct from the admin session.
   async resolveDispute(
     gameId: number,
     decision: "WHITE_WINS" | "BLACK_WINS" | "DRAW" | "DISMISS",
@@ -556,10 +544,10 @@ class ApiClient {
     return this.request<any>("/admin/archive/stats");
   }
  
-  // Authenticate downloads through the X-API-Key header; never place the token in a URL.
+  // Authenticate downloads through the session header; never place the token in a URL.
   async downloadArchive(type: "games" | "wallets"): Promise<void> {
     const res = await fetch(`${this.baseUrl}/admin/archive/download/${type}`, {
-      headers: this.token ? { "X-API-Key": this.token } : {},
+      headers: this.token ? { [SESSION_HEADER]: this.token } : {},
     });
     if (!res.ok) {
       throw new Error(`Archive download failed: HTTP ${res.status}`);

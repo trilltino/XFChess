@@ -46,6 +46,58 @@ pub fn test_config() -> SigningConfig {
     }
 }
 
+pub const ADMIN_NAME: &str = "test-admin";
+pub const ADMIN_PASSWORD: &str = "test admin password";
+
+/// Sets up the test admin account in the process environment, once per test binary. Admin
+/// sessions are signed with a key derived from `JWT_SECRET` and accounts come from `ADMIN_USERS`.
+pub fn configure_admin_account() -> anyhow::Result<()> {
+    static CONFIGURED: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    CONFIGURED
+        .get_or_init(|| {
+            let hash = backend::infrastructure::admin_session::hash_password(ADMIN_PASSWORD)?;
+            std::env::set_var("JWT_SECRET", test_config().jwt_secret);
+            std::env::set_var("ADMIN_USERS", format!("{ADMIN_NAME}:{hash}"));
+            Ok(())
+        })
+        .clone()
+        .map_err(anyhow::Error::msg)
+}
+
+/// A session for the test admin, signed in through `router`'s `/admin/auth/login` once per test
+/// binary. It goes in the `X-Admin-Session` header.
+pub async fn admin_session(router: Router) -> anyhow::Result<String> {
+    static TOKEN: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    configure_admin_account()?;
+    TOKEN
+        .get_or_try_init(|| async move {
+            let body = serde_json::json!({ "username": ADMIN_NAME, "password": ADMIN_PASSWORD });
+            let request = Request::builder()
+                .uri("/admin/auth/login")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body)?))
+                .context("test setup failed")?;
+            let response = router.oneshot(request).await.context("test setup failed")?;
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .context("test setup failed")?;
+            anyhow::ensure!(
+                status == StatusCode::OK,
+                "test admin sign-in failed: {status} {}",
+                String::from_utf8_lossy(&bytes)
+            );
+            let reply: Value = serde_json::from_slice(&bytes)?;
+            Ok(reply["token"]
+                .as_str()
+                .context("the sign-in reply has no token")?
+                .to_string())
+        })
+        .await
+        .cloned()
+}
+
 pub struct TestApp {
     pub state: AppState,
 }
@@ -53,6 +105,11 @@ pub struct TestApp {
 impl TestApp {
     pub fn router(&self) -> Router {
         build_app_router(self.state.clone()).with_state(self.state.clone())
+    }
+
+    /// A session for the test admin (see [`admin_session`]).
+    pub async fn admin_token(&self) -> anyhow::Result<String> {
+        admin_session(self.router()).await
     }
 
     pub async fn get(&self, uri: &str) -> anyhow::Result<(StatusCode, Value)> {
@@ -90,7 +147,7 @@ impl TestApp {
             let mut builder = Request::builder()
                 .uri(uri)
                 .method(method)
-                .header("X-API-Key", "dev");
+                .header("X-Admin-Session", self.admin_token().await?);
             let body = match body {
                 Some(b) => {
                     builder = builder.header("content-type", "application/json");

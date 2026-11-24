@@ -43,7 +43,7 @@ async fn cu_benchmark_runs_100_games_through_backend() -> anyhow::Result<()> {
     let router = app.router();
     let server = tokio::spawn(async move { axum::serve(listener, router).await });
     let mut config: Value = serde_json::from_str(include_str!(
-        "../../tools/cu_benchmark/scenarios/backend.json"
+        "../../../tools/cu_benchmark/scenarios/backend.json"
     ))
     .context("test setup failed")?;
     config["backend_url"] = json!(base);
@@ -1099,9 +1099,9 @@ async fn dual_accept_auth_guards_signing_endpoints() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn admin_route_requires_api_key() -> anyhow::Result<()> {
+async fn admin_route_requires_a_session() -> anyhow::Result<()> {
     let app = spawn_app().await?;
-    // No X-API-Key header → the require_api_key middleware rejects before the
+    // No X-Admin-Session header → the require_admin middleware rejects before the
     // handler runs (so no on-chain path is reached).
     let (status, _) = app
         .post_json(
@@ -1130,7 +1130,7 @@ async fn treasury_refund_never_signs_in_process() -> anyhow::Result<()> {
         .uri("/admin/treasury/refund")
         .method("POST")
         .header("content-type", "application/json")
-        .header("X-API-Key", "dev")
+        .header("X-Admin-Session", app.admin_token().await?)
         .body(Body::from(
             serde_json::to_vec(&json!({
                 "wallet": wallet,
