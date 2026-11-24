@@ -1192,7 +1192,7 @@ async fn tournament_template_round_trip_persists_and_is_audited() -> anyhow::Res
     assert!(
         entries.iter().any(|e| e["action"] == "save_template"
             && e["target"] == "weekly-blitz"
-            && e["actor"] == "dev-default"),
+            && e["actor"] == common::ADMIN_NAME),
         "expected a persisted save_template audit entry: {entries:?}"
     );
 
