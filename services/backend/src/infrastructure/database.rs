@@ -141,15 +141,16 @@ async fn rename_legacy_accounts(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
     let has_v2 = table_exists(&mut tx, "users_v2").await?;
     let has_users = table_exists(&mut tx, "users").await?;
-    // The pre-wallet table has no `wallet` column.
-    let users_is_legacy = has_users && {
+    // Next to `users_v2`, `users` is always the old login table: deployed databases have one
+    // with a nullable `wallet` column. Without `users_v2`, only a table lacking `wallet` is old.
+    let users_is_legacy = has_users && (has_v2 || {
         let wallet_columns: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'wallet'",
         )
         .fetch_one(&mut *tx)
         .await?;
         wallet_columns == 0
-    };
+    });
     if users_is_legacy {
         if table_exists(&mut tx, "legacy_users").await? {
             // Never overwrite an earlier copy.
@@ -377,6 +378,62 @@ mod tests {
             .await
             .context("legacy table")?;
         assert_eq!(legacy, [("old".to_string(),)]);
+        let leftover = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM sqlite_master WHERE name IN ('users_v2', 'idx_users_v2_username')",
+        )
+        .fetch_optional(&pool)
+        .await
+        .context("leftovers")?;
+        assert_eq!(leftover, None, "nothing named v2 survives");
+        Ok(())
+    }
+
+    /// The shape production and the dev databases actually have: the old `users` table has a
+    /// nullable `wallet` column (and no rows), next to `users_v2` holding the accounts.
+    #[tokio::test]
+    async fn an_old_users_table_with_a_wallet_column_is_kept_aside_too() -> anyhow::Result<()> {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .context("test setup failed")?;
+        sqlx::raw_sql(
+            "CREATE TABLE users (email TEXT UNIQUE, password_hash TEXT, username TEXT UNIQUE, \
+             wallet TEXT, created_at INTEGER, deleted_at INTEGER, kyc_status TEXT);
+             CREATE TABLE users_v2 (wallet TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, \
+             email TEXT, kyc_status TEXT NOT NULL DEFAULT 'none', created_at INTEGER NOT NULL \
+             DEFAULT 0, deleted_at INTEGER, password_hash TEXT, profile_sponsored_at INTEGER);
+             INSERT INTO users_v2 (wallet, username) VALUES ('w1', 'Tino'), ('w2', 'Ada');
+             CREATE UNIQUE INDEX idx_users_v2_username ON users_v2 (LOWER(username));",
+        )
+        .execute(&pool)
+        .await
+        .context("test setup failed")?;
+
+        // Every restart runs the migration again; the second run must be a no-op.
+        for _ in 0..2 {
+            migrate_session_db(&pool)
+                .await
+                .context("migration failed")?;
+        }
+
+        let accounts: Vec<(String, String)> =
+            sqlx::query_as("SELECT wallet, username FROM users ORDER BY wallet")
+                .fetch_all(&pool)
+                .await
+                .context("accounts table")?;
+        assert_eq!(
+            accounts,
+            [
+                ("w1".to_string(), "Tino".to_string()),
+                ("w2".to_string(), "Ada".to_string())
+            ]
+        );
+        let legacy_columns: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('legacy_users') WHERE name = 'password_hash'",
+        )
+        .fetch_one(&pool)
+        .await
+        .context("legacy table")?;
+        assert_eq!(legacy_columns, 1, "the old table is kept as legacy_users");
         let leftover = sqlx::query_scalar::<_, String>(
             "SELECT name FROM sqlite_master WHERE name IN ('users_v2', 'idx_users_v2_username')",
         )
