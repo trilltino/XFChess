@@ -1,22 +1,33 @@
 ﻿#!/usr/bin/env pwsh
 #requires -Version 7.0
 # RPC load test. Usage: just test-triton -BaseUrl URL -Tournaments N -Players N
-# Supply ADMIN_API_KEY through the environment or -AdminKey.
+# Signs in as an admin: -AdminUser or ADMIN_USERNAME, and ADMIN_PASSWORD (asked for when unset).
 
 param(
     [string]$BaseUrl     = "http://localhost:3000",
-    [string]$AdminKey    = $env:ADMIN_API_KEY,
+    [string]$AdminUser   = $env:ADMIN_USERNAME,
     [int]   $Tournaments = 3,    # How many tournaments to spin up
     [int]   $Players     = 16,   # Bot count per tournament (8/16/32/64)
     [int]   $Concurrency = 8     # Parallel requests per burst
 )
 
-if (-not $AdminKey) {
-    Write-Error "Set -AdminKey or export ADMIN_API_KEY"
+if (-not $AdminUser) { $AdminUser = Read-Host "Admin username" }
+$password = $env:ADMIN_PASSWORD
+if (-not $password) {
+    $password = [System.Net.NetworkCredential]::new("", (Read-Host "Admin password" -AsSecureString)).Password
+}
+try {
+    $body = @{ username = $AdminUser; password = $password } | ConvertTo-Json -Compress
+    $login = Invoke-RestMethod -Method Post -Uri "$BaseUrl/admin/auth/login" -ContentType "application/json" -Body $body -ErrorAction Stop
+} catch {
+    Write-Error "Admin sign-in failed: $($_.Exception.Message)"
     exit 1
+} finally {
+    $password = $null
+    $body = $null
 }
 
-$headers = @{ "X-Admin-Key" = $AdminKey; "Content-Type" = "application/json" }
+$headers = @{ "X-Admin-Session" = $login.token; "Content-Type" = "application/json" }
 
 function Invoke-Api($method, $path, $body = $null) {
     $uri = "$BaseUrl$path"

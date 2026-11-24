@@ -7,7 +7,7 @@ Store a recoverable copy in an encrypted offline store, with restricted access.
 
 | Secret | Rotation constraint |
 | --- | --- |
-| `ADMIN_API_KEY` | Update the server and the panel's saved OS credential; restart the backend. |
+| `ADMIN_USERS` | Generate a new line with `just admin-password <name>`, replace it in `.env` and restart the backend. A changed password ends that account's sessions; the panel asks for the new one. |
 | `JWT_SECRET` | Existing login tokens become invalid; users must sign in again. |
 | `RELAY_SHARED_SECRET` | Coordinate backend and trusted game clients. |
 | `FEE_PAYER_KEYS` | Fund/verify new fee payers on the selected cluster before removing old ones. |
